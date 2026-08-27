@@ -77,6 +77,7 @@ type fakeGitHub struct {
 	acceptedToken            string
 	owner                    github.Owner
 	organizations            []github.Owner
+	organizationsError       error
 	repositoriesByOwnerLogin map[string][]github.Repository
 
 	// cloneFailureByRepositoryName 은 특정 레포의 클론을 실패시킬 때 채운다.
@@ -111,6 +112,9 @@ func (access *fakeRepositoryAccess) AuthenticatedOwner() (github.Owner, error) {
 func (access *fakeRepositoryAccess) Organizations() ([]github.Owner, error) {
 	if access.token != access.gitHub.acceptedToken {
 		return nil, fmt.Errorf("%w (Bad credentials)", github.ErrInvalidToken)
+	}
+	if access.gitHub.organizationsError != nil {
+		return nil, access.gitHub.organizationsError
 	}
 	return access.gitHub.organizations, nil
 }
