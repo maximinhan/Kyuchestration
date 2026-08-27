@@ -31,6 +31,11 @@ jobs:
       - name: tmux 설치 확인
         run: tmux -V
 
+      # 상태 추론 테스트도 git 이 없으면 t.Skip 으로 넘어간다. 게다가 판정이 git 의 종료 코드에
+      # 기대고 있으므로(업스트림 없음 1, 레포 손상 128), 어느 버전으로 검증했는지 로그에 남긴다.
+      - name: git 설치 확인
+        run: git --version
+
       - name: go vet
         run: go vet ./...
 

@@ -1,5 +1,7 @@
 # Kyuchestration
 
+**뀨케스트레이션** — "뀨" + 오케스트레이션.
+
 여러 레포가 하나의 목표로 묶여 움직일 때, 각 레포의 독립성을 유지한 채 조율하는 CLI 도구 `wd`.
 
 - 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md)
