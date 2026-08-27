@@ -273,3 +273,58 @@ func TestKyuWithAnOptionRoutesToTheEntryFlowInsteadOfFailingAsAnUnknownCommand(t
 		t.Errorf("stderr = %q, 진입 플로우의 명시적 초기화 안내를 기대", stderr.String())
 	}
 }
+
+func TestCloneRefusesArgumentsWithItsOwnUsageAndExitsWithCodeOne(t *testing.T) {
+	// 라우팅이 실제로 이어졌는지는 "명령이 자기 사용법으로 거절하는가" 로 드러난다.
+	// 인자를 붙여 부르면 GitHub 에 붙기 전에 끝나므로, 이 테스트는 네트워크도 토큰도 쓰지 않는다.
+	//
+	// 진입점이 세션 백엔드를 먼저 조립하므로 tmux 가 없으면 인자를 보기도 전에 그쪽으로 끝난다.
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux 가 PATH 에 없어 라우팅 테스트를 건너뜁니다")
+	}
+
+	command := exec.Command(buildKyuBinary(t), "clone", "maximinhan")
+	command.Dir = t.TempDir()
+	// 저장소를 뒤지더라도 사용자의 실제 설정 디렉토리를 건드리지 않게 홈을 옮긴다.
+	command.Env = append(os.Environ(), "HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("kyu clone 실행 결과 = %v, 종료 코드로 끝나기를 기대", err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), "사용법: kyu clone") {
+		t.Errorf("stderr = %q, clone 의 사용법 안내를 기대", stderr.String())
+	}
+}
+
+func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
+	// auth 는 저장해둔 토큰을 보고 지우는 일이라 tmux 와 무관하다. 라우팅이 다른 명령과 같은 길로
+	// 지나가면 tmux 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
+	configDirectoryPath := t.TempDir()
+
+	command := exec.Command(buildKyuBinary(t), "auth", "list")
+	command.Dir = t.TempDir()
+	// PATH 를 비워 tmux 도 security 도 secret-tool 도 찾을 수 없게 만든다.
+	command.Env = append(os.Environ(), "PATH=", "HOME="+configDirectoryPath, "XDG_CONFIG_HOME="+configDirectoryPath)
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		t.Fatalf("kyu auth list 실행 실패: %v (%s)", err, stderr.String())
+	}
+
+	if !strings.Contains(stdout.String(), "kyu clone") {
+		t.Errorf("stdout = %q, 등록이 일어나는 자리를 알리기를 기대", stdout.String())
+	}
+}

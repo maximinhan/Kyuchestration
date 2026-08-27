@@ -3,8 +3,8 @@
 // 이 파일은 얇게 유지한다 — 인자를 명령으로 가르고, 세션 백엔드를 조립하고, 종료 코드를 정하는 것까지다.
 // 명령이 실제로 하는 일은 internal/cli 에 있다(설계 문서 9.1).
 //
-// 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 여섯 개뿐이라 switch 한 번이면 끝나고,
-// 의존을 0 으로 두면 새 머신에서 바이너리 하나 복사로 끝난다는 Go 선택의 이유(설계 문서 8.1)가 유지된다.
+// 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 여덟 개뿐이라 switch 한 번이면 끝나고,
+// 파싱 프레임워크를 들이지 않는 한 릴리스는 새 머신에서 바이너리 하나 복사로 끝난다(설계 문서 8.1).
 package main
 
 import (
@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/maximinhan/Kyuchestration/internal/cli"
+	"github.com/maximinhan/Kyuchestration/internal/github"
+	"github.com/maximinhan/Kyuchestration/internal/secretstore"
 	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
@@ -26,10 +28,12 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
+  kyu clone              GitHub 레포 목록에서 골라 이 디렉토리에 클론
   kyu list [path]        레포 목록 + 상태
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
+  kyu auth <list|remove> 저장한 GitHub 토큰 프로필 관리
   kyu version            이 바이너리의 버전
 
 옵션 (kyu, kyu start):
@@ -37,7 +41,7 @@ const usageText = `사용법: kyu [명령] [인자]
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)`
 
 func main() {
-	if err := runCommand(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		// 실패 안내는 stderr 로 보낸다. stdout 은 목록처럼 다른 명령의 입력으로 넘길 수 있는 것만 쓴다.
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -46,9 +50,12 @@ func main() {
 
 // runCommand 는 인자를 명령으로 갈라 실행한다. 에러를 반환하면 그것이 곧 종료 코드 1 이다.
 //
-// 두 스트림을 모두 받는다. 명령이 내는 말에는 다른 명령의 입력으로 넘길 수 있는 것(out)과
+// 두 출력 스트림을 모두 받는다. 명령이 내는 말에는 다른 명령의 입력으로 넘길 수 있는 것(out)과
 // 사람에게만 하는 말(errOut)이 섞여 있고, 그 구분은 명령마다 다르다.
-func runCommand(args []string, out, errOut io.Writer) error {
+//
+// 입력도 받는다. kyu clone 은 처음부터 끝까지 대화라, 어디서 답을 읽을지가 진입점의 결정이어야
+// 표시 계층이 os.Stdin 을 직접 붙들지 않는다.
+func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// 인자 없는 kyu 는 서브커맨드의 기본값이 아니라 그 자체로 하나의 명령이다 — 이 도구를 여는 문이다.
 	// 목록을 기본으로 두던 때(설계 문서 9.3)와 달라진 자리이고, 그 결정의 근거는 사용자가 이 도구
 	// 앞에서 실제로 하는 일이 "상태를 본다" 가 아니라 "여기서 작업을 시작한다" 였다는 것이다.
@@ -82,6 +89,23 @@ func runCommand(args []string, out, errOut io.Writer) error {
 			return cli.KillSessions(out, commandArgs, backend)
 		})
 
+	// clone 은 세션 백엔드를 거친다. 클론이 끝난 뒤 "떠 있는 메인 세션은 새 레포를 보지 못한다" 를
+	// 알리려면 세션 생존을 물어야 하기 때문이다. tmux 가 없으면 애초에 그 세션도 없지만, 그 사실을
+	// 알기 위해 빈 백엔드 구현을 하나 더 두는 것은 이 안내 한 줄에 비해 큰 장치다.
+	case "clone":
+		return withSessionBackend(func(backend session.SessionBackend) error {
+			return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+				return cli.CloneRepos(in, out, errOut, commandArgs, newGitHubAccess, tokenStore, backend)
+			})
+		})
+
+	// auth 는 세션 백엔드를 거치지 않는다. 저장해둔 토큰을 보고 지우는 일이라 tmux 와 무관하고,
+	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
+	case "auth":
+		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+			return cli.ManageTokenProfiles(out, commandArgs, tokenStore)
+		})
+
 	// init 과 version 은 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이고 버전은
 	// 이 바이너리 자신에 대한 질문이라 둘 다 tmux 가 필요 없는데, 백엔드를 먼저 조립하면
 	// tmux 가 없는 머신에서 워크디렉토리를 만들지도, 무엇을 받았는지 확인하지도 못하게 된다.
@@ -113,4 +137,24 @@ func withSessionBackend(command func(session.SessionBackend) error) error {
 		return err
 	}
 	return command(backend)
+}
+
+// withTokenStore 는 명령에 토큰 저장소를 조립해 넘긴다.
+//
+// 세션 백엔드와 같은 이유로 여기서 만든다 — 키체인을 쓸지 파일에 쓸지는 이 머신을 보고 정하는
+// 진입점의 결정이고, 표시 계층이 그것을 알면 저장 방식이 늘어날 때마다 함께 바뀐다.
+func withTokenStore(command func(secretstore.TokenStore) error) error {
+	tokenStore, err := secretstore.NewTokenStore()
+	if err != nil {
+		return err
+	}
+	return command(tokenStore)
+}
+
+// newGitHubAccess 는 토큰 하나를 GitHub 접근 경로로 바꾼다.
+//
+// 이 함수가 있어야 표시 계층이 github.TokenAccess 라는 구현을 모른 채로 남는다. 어느 구현을
+// 쓸지는 세션 백엔드와 마찬가지로 진입점의 결정이다.
+func newGitHubAccess(token string) github.RepositoryAccess {
+	return github.NewTokenAccess(token)
 }
