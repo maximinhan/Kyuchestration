@@ -1,0 +1,4 @@
+# 이 저장소의 모든 텍스트 파일은 LF 로 체크아웃한다.
+# core.autocrlf=true 인 머신에서 Go 소스가 CRLF 로 변환되면
+# gofmt 결과와 저장소 내용이 어긋나 매 커밋마다 전체 diff 가 발생한다.
+* text=auto eol=lf
