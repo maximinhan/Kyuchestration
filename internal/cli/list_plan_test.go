@@ -77,7 +77,7 @@ tasks:
   ○  zeta-service   IDLE   [consume] blocked ← needs publish
   ○  main           IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }
 
@@ -305,6 +305,6 @@ tasks:
   ○  alpha-commons  IDLE
   ○  main           IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }

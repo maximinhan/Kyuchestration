@@ -23,7 +23,7 @@ func newIsolatedTmuxBackend(t *testing.T) *TmuxBackend {
 		t.Skip("tmux 가 PATH 에 없어 통합 테스트를 건너뜁니다")
 	}
 
-	socketDir, err := os.MkdirTemp("", "wd-tmux-test")
+	socketDir, err := os.MkdirTemp("", "kyu-tmux-test")
 	if err != nil {
 		t.Fatalf("테스트용 tmux 소켓 디렉토리 생성 실패: %v", err)
 	}
@@ -53,7 +53,7 @@ func newIsolatedTmuxBackend(t *testing.T) *TmuxBackend {
 
 func TestTmuxBackendCreateMakesSessionAliveAndKillEndsIt(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
-	const sessionName = "wd-test-lifecycle"
+	const sessionName = "kyu-test-lifecycle"
 
 	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
 		t.Fatalf("Create() 실패: %v", err)
@@ -82,7 +82,7 @@ func TestTmuxBackendCreateMakesSessionAliveAndKillEndsIt(t *testing.T) {
 
 func TestTmuxBackendCreateRejectsDuplicateName(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
-	const sessionName = "wd-test-duplicate"
+	const sessionName = "kyu-test-duplicate"
 
 	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
 		t.Fatalf("첫 Create() 실패: %v", err)
@@ -96,7 +96,7 @@ func TestTmuxBackendCreateRejectsDuplicateName(t *testing.T) {
 
 func TestTmuxBackendCreateRunsCommandInGivenDirectory(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
-	const sessionName = "wd-test-cwd"
+	const sessionName = "kyu-test-cwd"
 
 	workingDirectory := t.TempDir()
 
@@ -119,12 +119,12 @@ func TestTmuxBackendCreateRunsCommandInGivenDirectory(t *testing.T) {
 
 func TestTmuxBackendCreatePreservesCommandArgumentBoundaries(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
-	const sessionName = "wd-test-argv"
+	const sessionName = "kyu-test-argv"
 
 	workingDirectory := t.TempDir()
 
 	// cmd 를 공백으로 이어 붙여 넘기면 공백 든 경로가 두 인자로 쪼개지고 `;` 는 셸 구분자가 된다.
-	// `wd start` 가 `claude --add-dir <공백 든 경로>` 를 넘기게 되므로 실제로 걸리는 문제다.
+	// `kyu start` 가 `claude --add-dir <공백 든 경로>` 를 넘기게 되므로 실제로 걸리는 문제다.
 	if err := backend.Create(sessionName, workingDirectory, []string{
 		"sh", "-c", `printf "[%s]" "$@" > argv.txt; sleep 60`, "_", "a b", "c;d",
 	}); err != nil {
@@ -141,18 +141,18 @@ func TestTmuxBackendCreatePreservesCommandArgumentBoundaries(t *testing.T) {
 func TestTmuxBackendIsAliveRequiresExactName(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
 
-	// tmux 의 -t 는 기본이 접두사 매칭이라 `-t wd-test-exact` 가
-	// `wd-test-exact-suffix` 에 걸린다. 막지 않으면 Kill 이 엉뚱한 세션을 죽인다.
-	if err := backend.Create("wd-test-exact-suffix", t.TempDir(), []string{"sleep", "60"}); err != nil {
+	// tmux 의 -t 는 기본이 접두사 매칭이라 `-t kyu-test-exact` 가
+	// `kyu-test-exact-suffix` 에 걸린다. 막지 않으면 Kill 이 엉뚱한 세션을 죽인다.
+	if err := backend.Create("kyu-test-exact-suffix", t.TempDir(), []string{"sleep", "60"}); err != nil {
 		t.Fatalf("Create() 실패: %v", err)
 	}
 
-	alive, err := backend.IsAlive("wd-test-exact")
+	alive, err := backend.IsAlive("kyu-test-exact")
 	if err != nil {
 		t.Fatalf("IsAlive() 실패: %v", err)
 	}
 	if alive {
-		t.Errorf(`IsAlive("wd-test-exact") = true, 접두사가 일치할 뿐인 세션에 걸리면 안 된다`)
+		t.Errorf(`IsAlive("kyu-test-exact") = true, 접두사가 일치할 뿐인 세션에 걸리면 안 된다`)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestTmuxBackendIsAliveIsFalseWhenServerIsNotRunning(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
 
 	// 세션을 한 번도 만들지 않았으므로 이 테스트 전용 tmux 서버 자체가 떠 있지 않다.
-	alive, err := backend.IsAlive("wd-test-absent")
+	alive, err := backend.IsAlive("kyu-test-absent")
 	if err != nil {
 		t.Fatalf("서버가 없을 때 IsAlive() 가 에러를 반환했다: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestTmuxBackendIsAliveIsFalseWhenServerIsNotRunning(t *testing.T) {
 
 func TestTmuxBackendKillIsIdempotent(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
-	const sessionName = "wd-test-idempotent-kill"
+	const sessionName = "kyu-test-idempotent-kill"
 
 	if err := backend.Kill(sessionName); err != nil {
 		t.Errorf("서버도 세션도 없을 때 Kill() = %v, nil 이어야 한다", err)
@@ -204,7 +204,7 @@ func TestTmuxBackendListIsEmptyWhenServerIsNotRunning(t *testing.T) {
 
 func TestTmuxBackendListReturnsCreatedSessionNames(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
-	want := []string{"wd-test-list-a", "wd-test-list-b"}
+	want := []string{"kyu-test-list-a", "kyu-test-list-b"}
 
 	for _, name := range want {
 		if err := backend.Create(name, t.TempDir(), []string{"sleep", "60"}); err != nil {
@@ -233,7 +233,7 @@ func TestTmuxBackendListReturnsCreatedSessionNames(t *testing.T) {
 // 검증 대상이 결국 tmux 자체의 동작이라 테스트가 감당할 복잡도에 비해 얻는 것이 없다.
 //
 // Attach 는 명령 한 줄에 stdin/stdout/stderr 를 그대로 연결하는 것이 전부이며,
-// 설계 문서 9.2 의 5단계(`wd attach`)에서 손으로 확인한다.
+// 설계 문서 9.2 의 5단계(`kyu attach`)에서 손으로 확인한다.
 
 // waitForFileContent 는 세션 안에서 실행된 명령이 파일을 남길 때까지 기다린다.
 // `tmux new-session -d` 는 명령의 완료를 기다리지 않고 곧바로 반환하므로 폴링이 필요하다.
@@ -260,7 +260,7 @@ func TestTmuxBackendAttachRefusesToNestInsideAnotherSession(t *testing.T) {
 	// 사용자가 attach 에서 가장 자주 부딪히는 실패이기도 하다.
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
 
-	err := backend.Attach("wd-test-nested")
+	err := backend.Attach("kyu-test-nested")
 
 	if !errors.Is(err, ErrNestedSession) {
 		t.Errorf("Attach() 에러 = %v, ErrNestedSession 으로 풀리기를 기대", err)

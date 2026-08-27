@@ -17,14 +17,14 @@ func TestAttachSessionEntersTheRunningSessionAfterTellingHowToLeave(t *testing.T
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-alpha-commons")
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-alpha-commons")
 
 	var out bytes.Buffer
 	if err := AttachSession(&out, []string{"alpha-commons"}, backend); err != nil {
 		t.Fatalf("AttachSession() 실패: %v", err)
 	}
 
-	if want := []string{"wd-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.attachedSessionNames, want) {
+	if want := []string{"kyu-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.attachedSessionNames, want) {
 		t.Errorf("진입한 세션 = %q, want %q", backend.attachedSessionNames, want)
 	}
 	if !strings.Contains(out.String(), "Ctrl-b d") {
@@ -33,25 +33,25 @@ func TestAttachSessionEntersTheRunningSessionAfterTellingHowToLeave(t *testing.T
 }
 
 func TestAttachSessionAcceptsMainAsTarget(t *testing.T) {
-	// 설계 문서 9.3 의 "wd attach <repo> — main 도 가능".
+	// 설계 문서 9.3 의 "kyu attach <repo> — main 도 가능".
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-main")
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
 
 	var out bytes.Buffer
 	if err := AttachSession(&out, []string{"main"}, backend); err != nil {
 		t.Fatalf("AttachSession() 실패: %v", err)
 	}
 
-	if want := []string{"wd-WorkDir-featureX-main"}; !slices.Equal(backend.attachedSessionNames, want) {
+	if want := []string{"kyu-WorkDir-featureX-main"}; !slices.Equal(backend.attachedSessionNames, want) {
 		t.Errorf("진입한 세션 = %q, want %q", backend.attachedSessionNames, want)
 	}
 }
 
 func TestAttachSessionGuidesToStartWhenTheSessionIsNotRunning(t *testing.T) {
 	// 없는 세션에 붙으려 하면 백엔드가 알아서 실패하지만, 그 실패는 "무엇을 해야 하는지" 를
-	// 알려주지 않는다. 다음 한 걸음이 wd start 라는 것을 여기서 말해준다.
+	// 알려주지 않는다. 다음 한 걸음이 kyu start 라는 것을 여기서 말해준다.
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
@@ -64,7 +64,7 @@ func TestAttachSessionGuidesToStartWhenTheSessionIsNotRunning(t *testing.T) {
 	if err == nil {
 		t.Fatalf("AttachSession() 가 에러를 반환하지 않음, 세션 부재 에러를 기대")
 	}
-	if !strings.Contains(err.Error(), "wd start alpha-commons") {
+	if !strings.Contains(err.Error(), "kyu start alpha-commons") {
 		t.Errorf("에러 = %v, 세션을 시작하는 방법 안내를 포함하기를 기대", err)
 	}
 	if len(backend.attachedSessionNames) != 0 {
@@ -78,8 +78,8 @@ func TestAttachSessionTranslatesNestedSessionRefusalIntoGuidance(t *testing.T) {
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-alpha-commons")
-	backend.attachError = fmt.Errorf("%w: wd-WorkDir-featureX-alpha-commons", session.ErrNestedSession)
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-alpha-commons")
+	backend.attachError = fmt.Errorf("%w: kyu-WorkDir-featureX-alpha-commons", session.ErrNestedSession)
 
 	var out bytes.Buffer
 	err := AttachSession(&out, []string{"alpha-commons"}, backend)

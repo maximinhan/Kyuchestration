@@ -13,34 +13,34 @@ func TestRepoSessionName(t *testing.T) {
 		want     string
 	}{
 		{
-			scenario: "평범한 이름은 wd-<workdir>-<repo> 로 조립된다",
+			scenario: "평범한 이름은 kyu-<workdir>-<repo> 로 조립된다",
 			workdir:  "WorkDir-featureX",
 			repo:     "proj-a",
-			want:     "wd-WorkDir-featureX-proj-a",
+			want:     "kyu-WorkDir-featureX-proj-a",
 		},
 		{
 			scenario: "레포 이름의 점은 pane 지정자로 해석되므로 하이픈으로 치환한다",
 			workdir:  "featureX",
 			repo:     "proj.a",
-			want:     "wd-featureX-proj-a",
+			want:     "kyu-featureX-proj-a",
 		},
 		{
 			scenario: "레포 이름의 콜론은 window 지정자로 해석되므로 하이픈으로 치환한다",
 			workdir:  "featureX",
 			repo:     "proj:a",
-			want:     "wd-featureX-proj-a",
+			want:     "kyu-featureX-proj-a",
 		},
 		{
 			scenario: "워크디렉토리 이름에 있는 점과 콜론도 똑같이 치환한다",
 			workdir:  "v1.2:rc",
 			repo:     "proj-a",
-			want:     "wd-v1-2-rc-proj-a",
+			want:     "kyu-v1-2-rc-proj-a",
 		},
 		{
 			scenario: "치환 대상이 연달아 나와도 각각 하이픈이 된다",
 			workdir:  "featureX",
 			repo:     "a.:b",
-			want:     "wd-featureX-a--b",
+			want:     "kyu-featureX-a--b",
 		},
 	}
 
@@ -63,12 +63,12 @@ func TestMainSessionName(t *testing.T) {
 		{
 			scenario: "메인 세션은 레포 자리에 main 이 들어간다",
 			workdir:  "WorkDir-featureX",
-			want:     "wd-WorkDir-featureX-main",
+			want:     "kyu-WorkDir-featureX-main",
 		},
 		{
 			scenario: "워크디렉토리 이름의 점과 콜론은 하이픈으로 치환한다",
 			workdir:  "v1.2:rc",
-			want:     "wd-v1-2-rc-main",
+			want:     "kyu-v1-2-rc-main",
 		},
 	}
 
@@ -89,14 +89,14 @@ func TestWorkDirSessionPrefix(t *testing.T) {
 		want     string
 	}{
 		{
-			scenario: "한 워크디렉토리의 세션은 wd-<workdir>- 를 공유한다",
+			scenario: "한 워크디렉토리의 세션은 kyu-<workdir>- 를 공유한다",
 			workdir:  "WorkDir-featureX",
-			want:     "wd-WorkDir-featureX-",
+			want:     "kyu-WorkDir-featureX-",
 		},
 		{
 			scenario: "이름 규칙과 같은 치환을 거친다 — 그러지 않으면 실제 세션 이름과 어긋나 아무것도 걸러내지 못한다",
 			workdir:  "v1.2:rc",
-			want:     "wd-v1-2-rc-",
+			want:     "kyu-v1-2-rc-",
 		},
 	}
 

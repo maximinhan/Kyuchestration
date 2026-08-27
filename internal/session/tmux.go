@@ -153,8 +153,8 @@ func (b *TmuxBackend) IsAlive(name string) (bool, error) {
 
 // exactTarget 은 tmux 타깃을 정확 일치로 못박는다.
 //
-// tmux 의 `-t <name>` 은 기본이 접두사 매칭이라 `-t wd-x-proj` 가 `wd-x-proj-a` 에 걸린다.
-// 세션 이름이 `wd-<workdir>-<repo>` 로 서로 접두사 관계가 되기 쉬운 구조라,
+// tmux 의 `-t <name>` 은 기본이 접두사 매칭이라 `-t kyu-x-proj` 가 `kyu-x-proj-a` 에 걸린다.
+// 세션 이름이 `kyu-<workdir>-<repo>` 로 서로 접두사 관계가 되기 쉬운 구조라,
 // 이것을 막지 않으면 Kill 이 의도하지 않은 레포의 세션을 죽인다.
 func exactTarget(name string) string {
 	return "=" + name

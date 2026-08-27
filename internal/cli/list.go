@@ -20,17 +20,17 @@ import (
 // mainRowLabel 은 메인 세션 행에 찍히는 이름이다.
 //
 // 세션 이름 규칙에서 레포 자리에 들어가는 main 과 같은 낱말이지만, 이쪽은 화면에 보이는 표시다.
-// 사용자가 `wd attach main` 이라고 부를 때의 이름이 세션 이름 규칙과 함께 움직여야 할 이유가 없어
+// 사용자가 `kyu attach main` 이라고 부를 때의 이름이 세션 이름 규칙과 함께 움직여야 할 이유가 없어
 // session 패키지의 상수를 끌어오지 않는다.
 const mainRowLabel = "main"
 
-// ListWorkDir 는 wd list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
+// ListWorkDir 는 kyu list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
 //
 // 계획에 대한 경고는 out 이 아니라 errOut 으로 나간다. 목록은 다른 명령의 입력으로 넘길 수 있어야
 // 하는데 경고가 섞이면 그 쓰임이 깨지고, 계획이 깨져도 목록 자체는 그대로 성립하기 때문이다
 // (설계 문서 6.1 의 "계획 파싱 실패가 도구 전체를 막지 않는다").
 //
-// backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/wd)의 결정이고,
+// backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/kyu)의 결정이고,
 // 표시 계층이 tmux 를 직접 만들면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
 func ListWorkDir(out, errOut io.Writer, args []string, backend session.SessionBackend) error {
 	workDirPath, err := workDirPathFromListArgs(args)
@@ -138,7 +138,7 @@ func (listing workDirListing) liveSessionCount() int {
 
 // inspectWorkDir 는 워크디렉토리를 훑어 레포별 상태와 메인 세션 상태를 모은다.
 func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDirListing, error) {
-	// 세션 이름에 워크디렉토리 이름이 들어가므로(wd-<workdir>-<repo>) 이름을 먼저 확정해야 한다.
+	// 세션 이름에 워크디렉토리 이름이 들어가므로(kyu-<workdir>-<repo>) 이름을 먼저 확정해야 한다.
 	// 인자로 흔히 들어오는 "." 이나 ".." 는 그 자체로는 이름이 아니라서, 절대경로로 편 뒤 마지막 요소를 쓴다.
 	absoluteWorkDirPath, err := filepath.Abs(workDirPath)
 	if err != nil {
@@ -228,7 +228,7 @@ const tableColumnPadding = 2
 
 const emptyWorkDirGuidance = "레포 없음 — 이 디렉토리 아래에 git 레포를 클론하세요"
 
-const attachGuidance = "wd attach <repo> 로 진입"
+const attachGuidance = "kyu attach <repo> 로 진입"
 
 // writeWorkDirListing 은 관찰 결과를 한 화면으로 옮긴다.
 func writeWorkDirListing(out io.Writer, listing workDirListing) error {

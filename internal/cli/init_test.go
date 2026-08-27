@@ -111,7 +111,7 @@ func TestInitWorkDirRejectsMoreThanOneName(t *testing.T) {
 
 func TestInitWorkDirTemplateIsReadAsNoPlan(t *testing.T) {
 	// 템플릿의 예시는 전부 주석이므로 계획이 아니다. 이것이 깨지면 갓 초기화한 워크디렉토리에서
-	// wd list 가 있지도 않은 작업을 보여주거나 경고를 뿜는다.
+	// kyu list 가 있지도 않은 작업을 보여주거나 경고를 뿜는다.
 	workDirPath := t.TempDir()
 	t.Chdir(workDirPath)
 
