@@ -71,11 +71,19 @@ func EnterWorkDir(out, errOut io.Writer, args []string, backend session.SessionB
 		return fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
 	}
 
-	if !isMainSessionAlive {
+	if isMainSessionAlive {
+		// 진입을 막지는 않는다. 사용자가 원한 것은 이 워크디렉토리에서 작업을 시작하는 것이고,
+		// 떠 있는 세션이 그 요구를 이미 채운다 — 다만 이번에 켠 옵션이 그 세션에는 닿지 않는다.
+		if request.bypassPermissions {
+			if err := warnRunningSessionKeepsTheCommandItWasCreatedWith(errOut, mainRowLabel); err != nil {
+				return err
+			}
+		}
+	} else {
 		if err := warnWhenWorkDirHasNoRepo(errOut, location.absolutePath); err != nil {
 			return err
 		}
-		if err := StartSession(out, request.startArgs(), backend); err != nil {
+		if err := StartSession(out, errOut, request.startArgs(), backend); err != nil {
 			return err
 		}
 	}

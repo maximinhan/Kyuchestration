@@ -285,3 +285,30 @@ func TestEnterWorkDirRejectsUnknownOptionWithoutTouchingTheWorkDir(t *testing.T)
 		t.Errorf("Create 호출 = %+v, 거절했으면 세션도 만들지 않기를 기대", backend.createdSessions)
 	}
 }
+
+func TestEnterWorkDirWarnsThatBypassPermissionsDoesNotReachTheRunningMainSessionAndEntersAnyway(t *testing.T) {
+	// 진입은 막지 않는다 — 사용자가 원한 것은 이 워크디렉토리에서 작업을 시작하는 것이고,
+	// 떠 있는 세션은 그 요구를 이미 채운다. 다만 이번에 켠 옵션이 그 세션에는 닿지 않는다는
+	// 사실은 진입 전에 말해야 한다. 세션 안으로 들어간 뒤에는 이 도구가 말을 걸 수 없다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
+
+	var out, errOut bytes.Buffer
+	if err := EnterWorkDir(&out, &errOut, []string{"--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("EnterWorkDir() 실패: %v", err)
+	}
+
+	for _, wantInWarning := range []string{"--bypass-permissions", "적용되지 않습니다", "kyu kill main"} {
+		if !strings.Contains(errOut.String(), wantInWarning) {
+			t.Errorf("stderr = %q, %q 를 포함하기를 기대", errOut.String(), wantInWarning)
+		}
+	}
+
+	if len(backend.createdSessions) != 0 {
+		t.Errorf("Create 호출 = %+v, 이미 떠 있으면 만들지 않기를 기대", backend.createdSessions)
+	}
+	assertOnlyAttachedSession(t, backend, "kyu-WorkDir-featureX-main")
+}

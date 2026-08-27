@@ -67,7 +67,7 @@ func runCommand(args []string, out, errOut io.Writer) error {
 		})
 	case "start":
 		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.StartSession(out, commandArgs, backend)
+			return cli.StartSession(out, errOut, commandArgs, backend)
 		})
 	case "attach":
 		return withSessionBackend(func(backend session.SessionBackend) error {
@@ -101,8 +101,8 @@ func runCommand(args []string, out, errOut io.Writer) error {
 // 조립을 명령마다 되풀이하지 않고 한 곳으로 모은다. tmux 미설치 안내처럼 모든 명령이 똑같이
 // 해야 하는 일이 여기 있으므로, 새 명령이 그것을 빠뜨릴 자리 자체가 없다.
 //
-// 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. list 는 stderr 까지 쓰지만 나머지는
-// 그렇지 않은데, 공통 시그니처를 강요하면 세 명령이 쓰지도 않는 인자를 받게 된다.
+// 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. 진입·list·start 는 stderr 까지 쓰지만
+// attach·kill 은 그렇지 않은데, 공통 시그니처를 강요하면 두 명령이 쓰지도 않는 인자를 받게 된다.
 func withSessionBackend(command func(session.SessionBackend) error) error {
 	backend, err := session.NewTmuxBackend()
 	if err != nil {
