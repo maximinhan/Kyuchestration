@@ -92,22 +92,34 @@ func InitWorkDir(out io.Writer, args []string) error {
 		return fmt.Errorf("워크디렉토리 절대경로 변환 실패 (%s): %w", workDirPath, err)
 	}
 
-	planFilePath := workdir.PlanFilePath(absoluteWorkDirPath)
-
-	// MkdirAll 이 워크디렉토리와 .coord 를 한 번에 만든다. 이미 있으면 그대로 두므로,
-	// 레포를 먼저 클론해두고 나중에 초기화하는 순서에서도 있던 것이 지워지지 않는다.
-	coordDirectoryPath := filepath.Dir(planFilePath)
-	if err := os.MkdirAll(coordDirectoryPath, coordDirectoryPermission); err != nil {
-		return fmt.Errorf("조율 디렉토리 생성 실패 (%s): %w", coordDirectoryPath, err)
-	}
-
-	if err := createPlanFileFromTemplate(planFilePath); err != nil {
+	planFilePath, err := createWorkDirPlanFile(absoluteWorkDirPath)
+	if err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "워크디렉토리를 초기화했습니다: %s\n계획 파일: %s\n\n다음: 이 디렉토리 아래에 레포를 클론한 뒤 kyu list\n",
 		absoluteWorkDirPath, planFilePath)
 	return nil
+}
+
+// createWorkDirPlanFile 은 워크디렉토리에 .coord/plan.md 템플릿을 만들고 그 경로를 돌려준다.
+//
+// kyu init 과 인자 없는 kyu 의 자동 초기화가 같은 자리에 같은 것을 만들어야 해서 한 곳에 둔다.
+// 두 곳이 각자 만들면 템플릿이나 디렉토리 권한이 갈라져도 아무도 알아채지 못한다.
+func createWorkDirPlanFile(absoluteWorkDirPath string) (string, error) {
+	planFilePath := workdir.PlanFilePath(absoluteWorkDirPath)
+
+	// MkdirAll 이 워크디렉토리와 .coord 를 한 번에 만든다. 이미 있으면 그대로 두므로,
+	// 레포를 먼저 클론해두고 나중에 초기화하는 순서에서도 있던 것이 지워지지 않는다.
+	coordDirectoryPath := filepath.Dir(planFilePath)
+	if err := os.MkdirAll(coordDirectoryPath, coordDirectoryPermission); err != nil {
+		return "", fmt.Errorf("조율 디렉토리 생성 실패 (%s): %w", coordDirectoryPath, err)
+	}
+
+	if err := createPlanFileFromTemplate(planFilePath); err != nil {
+		return "", err
+	}
+	return planFilePath, nil
 }
 
 // workDirPathFromInitArgs 는 초기화할 자리를 정한다. 인자가 없으면 현재 디렉토리다.
