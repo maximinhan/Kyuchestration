@@ -227,3 +227,101 @@ func TestInferRepoStatePropagatesGitFailure(t *testing.T) {
 		t.Errorf("InferRepoState() = %q, 판정 실패 시 빈 값을 기대", got)
 	}
 }
+
+// newGitRepoWithUpstream 은 로컬 bare 레포를 원격 삼아 업스트림이 설정된 레포를 만든다.
+//
+// 네트워크가 필요 없고, git 이 실제로 refs/remotes/origin/main 을 만들어 준다.
+// 업스트림을 config 에 손으로 써넣는 방법도 있지만 그건 우리가 아는 config 키를 검증할 뿐이라,
+// git 이 실제로 어떤 상태를 만드는지는 알려주지 않는다.
+func newGitRepoWithUpstream(t *testing.T) Repo {
+	t.Helper()
+
+	repo := newCleanGitRepo(t)
+
+	bareRemotePath := t.TempDir()
+	runGitForTest(t, bareRemotePath, "init", "--quiet", "--bare")
+
+	runGitForTest(t, repo.AbsolutePath, "remote", "add", "origin", bareRemotePath)
+	runGitForTest(t, repo.AbsolutePath, "push", "--quiet", "--set-upstream", "origin", "main")
+
+	return repo
+}
+
+// commitInRepo 는 레포에 커밋 하나를 더 쌓는다. 푸시하지 않으므로 업스트림보다 앞서게 된다.
+func commitInRepo(t *testing.T, repo Repo, fileName, content, message string) {
+	t.Helper()
+
+	writeFileInRepo(t, repo.AbsolutePath, fileName, content)
+	runGitForTest(t, repo.AbsolutePath, "add", fileName)
+	runGitForTest(t, repo.AbsolutePath, "commit", "--quiet", "-m", message)
+}
+
+func TestInferRepoStateReturnsAheadWhenLocalCommitsAreNotPushed(t *testing.T) {
+	repo := newGitRepoWithUpstream(t)
+	commitInRepo(t, repo, "기능.txt", "구현 완료\n", "기능 구현")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateAhead {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateAhead)
+	}
+}
+
+func TestInferRepoStateReturnsIdleWhenBranchMatchesUpstream(t *testing.T) {
+	repo := newGitRepoWithUpstream(t)
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateIdle {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateIdle)
+	}
+}
+
+func TestInferRepoStateReturnsIdleWhenBranchHasNoUpstreamEvenWithUnpushedCommits(t *testing.T) {
+	// 작업 브랜치에 업스트림을 두지 않는 운용도 있다. 없는 것을 이상 상태로 취급하지 않는다(설계 문서 5.3).
+	repo := newCleanGitRepo(t)
+	commitInRepo(t, repo, "기능.txt", "구현 완료\n", "기능 구현")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateIdle {
+		t.Errorf("InferRepoState() = %q, 업스트림이 없으면 %q 를 기대", got, RepoStateIdle)
+	}
+}
+
+func TestInferRepoStateReturnsIdleWhenUpstreamRefIsGone(t *testing.T) {
+	// 머지된 브랜치가 원격에서 지워진 뒤 fetch --prune 을 하면 업스트림 설정만 남고
+	// 가리키는 ref 는 사라진다. 흔한 상황이므로 에러로 올리지 않는다.
+	repo := newGitRepoWithUpstream(t)
+	runGitForTest(t, repo.AbsolutePath, "update-ref", "-d", "refs/remotes/origin/main")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateIdle {
+		t.Errorf("InferRepoState() = %q, 업스트림 ref 가 사라졌으면 %q 를 기대", got, RepoStateIdle)
+	}
+}
+
+func TestInferRepoStateReturnsDirtyWhenBranchIsAheadAndWorkingTreeIsDirty(t *testing.T) {
+	// 둘 다 해당할 때 먼저 알려야 하는 것은 커밋되지 않은 변경이다. 푸시는 커밋 뒤에 오고,
+	// 워킹 트리에 남은 변경은 워크디렉토리를 버리는 순간 함께 사라진다.
+	repo := newGitRepoWithUpstream(t)
+	commitInRepo(t, repo, "기능.txt", "구현 완료\n", "기능 구현")
+	writeFileInRepo(t, repo.AbsolutePath, "README.md", "아직 커밋하지 않은 수정\n")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateDirty {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateDirty)
+	}
+}

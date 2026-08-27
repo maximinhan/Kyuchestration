@@ -2,8 +2,10 @@ package workdir
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/maximinhan/Kyuchestration/internal/session"
@@ -78,7 +80,57 @@ func inferStateFromGit(repoAbsolutePath string) (RepoState, error) {
 		return RepoStateDirty, nil
 	}
 
+	hasUpstream, err := hasResolvableUpstream(repoAbsolutePath)
+	if err != nil {
+		return "", err
+	}
+	if !hasUpstream {
+		// 작업 브랜치에 업스트림을 두지 않는 운용도 있으므로, 없는 것을 이상 상태로 취급하지
+		// 않는다(설계 문서 5.3). 비교 대상이 없으면 "앞섰다" 는 말 자체가 성립하지 않는다.
+		return RepoStateIdle, nil
+	}
+
+	aheadCountOutput, err := runGitCommand(repoAbsolutePath, "rev-list", "--count", "@{u}..HEAD")
+	if err != nil {
+		return "", err
+	}
+
+	aheadCount, err := strconv.Atoi(strings.TrimSpace(aheadCountOutput))
+	if err != nil {
+		return "", fmt.Errorf("앞선 커밋 수 해석 실패 (%s, git 출력 %q): %w", repoAbsolutePath, aheadCountOutput, err)
+	}
+	if aheadCount > 0 {
+		return RepoStateAhead, nil
+	}
+
 	return RepoStateIdle, nil
+}
+
+// gitExitCodeRefNotFound 는 `git rev-parse --verify --quiet` 가 "가리키는 대상이 없다" 를
+// 알릴 때 쓰는 종료 코드다. 레포가 아니거나 손상된 경우는 128 로 끝나므로 이 값과 구분된다.
+const gitExitCodeRefNotFound = 1
+
+// hasResolvableUpstream 은 현재 브랜치에 업스트림이 있고 그 ref 가 실제로 존재하는지 본다.
+//
+// `git rev-list --count @{u}..HEAD` 는 업스트림이 없을 때도, 레포가 손상됐을 때도 128 로 끝나
+// 종료 코드만으로는 갈라낼 수 없다. stderr 의 "no upstream configured" 를 문자열로 맞춰보는
+// 방법은 git 의 메시지 문구나 로케일이 바뀌는 순간 조용히 깨지므로 쓰지 않는다.
+// 대신 종료 코드만으로 갈라지는 rev-parse 에게 먼저 물어, 앞의 것만 IDLE 로 흡수한다.
+//
+// `--verify --quiet` 는 대상이 없다는 사실을 메시지 없이 종료 코드 1 로만 알린다.
+// 실측(git 2.43) — 업스트림 미설정 / 원격 추적 ref 삭제됨 / 분리된 HEAD / 커밋 0개 모두 1,
+// git 레포가 아니거나 손상된 경우는 128.
+//
+// 이 확인을 통과했다면 뒤따르는 rev-list 의 실패는 진짜 실패다. 그때는 감추지 않고 전파한다.
+func hasResolvableUpstream(repoAbsolutePath string) (bool, error) {
+	if _, err := runGitCommand(repoAbsolutePath, "rev-parse", "--verify", "--quiet", "@{u}"); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == gitExitCodeRefNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // runGitCommand 는 레포 디렉토리에서 git 을 실행하고 표준 출력을 돌려준다.
