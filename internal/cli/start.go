@@ -24,6 +24,15 @@ const addDirFlagName = "--add-dir"
 // repoClaudeMdOptionName 은 메인 세션이 각 레포의 지침 파일까지 읽게 하는 옵션이다.
 const repoClaudeMdOptionName = "--repo-claude-md"
 
+// bypassPermissionsOptionName 은 세션의 claude 를 권한 확인 없이 띄우는 옵션이다.
+//
+// claude 의 원래 플래그 이름을 그대로 노출하지 않는다. 이 도구의 사용자가 정하는 것은
+// "이 세션에서 권한 확인을 생략한다" 이고, 그것을 claude 의 어느 플래그로 옮길지는 이 도구의 사정이다.
+const bypassPermissionsOptionName = "--bypass-permissions"
+
+// skipPermissionsFlagName 은 위 옵션이 claude 에게 전달되는 플래그다.
+const skipPermissionsFlagName = "--dangerously-skip-permissions"
+
 // repoClaudeMdEnvAssignment 는 추가 디렉토리의 CLAUDE.md 와 .claude/rules/ 를 로드시키는 환경변수다.
 //
 // 기본으로 켜지 않는다. 붙인 레포 수만큼 컨텍스트가 늘어나므로, 계획이 레포 컨벤션과 어긋나는
@@ -37,11 +46,14 @@ const repoClaudeMdEnvAssignment = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=
 // 할 것이 늘어난다(설계 문서 5.2 의 "플랫폼 의존부는 5개 함수가 전부다").
 const envCommandName = "env"
 
-const startUsageText = `사용법: kyu start [repo] [--repo-claude-md]
+const startUsageText = `사용법: kyu start [repo] [옵션]
 
-  kyu start                     워크디렉토리 최상위에서 메인 세션을 띄운다
-  kyu start <repo>              해당 레포 디렉토리에서 세션을 띄운다
-  kyu start --repo-claude-md    메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다`
+  kyu start                워크디렉토리 최상위에서 메인 세션을 띄운다
+  kyu start <repo>         해당 레포 디렉토리에서 세션을 띄운다
+
+옵션:
+  --repo-claude-md         메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
+  --bypass-permissions     claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만`
 
 // StartSession 은 kyu start 를 실행한다. 인자가 없으면 메인 세션을, 레포 이름이 있으면 그 레포의 세션을 띄운다.
 //
@@ -66,9 +78,9 @@ func StartSession(out io.Writer, args []string, backend session.SessionBackend) 
 	}
 
 	if request.repoName == "" {
-		return startMainSession(out, location, repos, request.loadRepoClaudeMd, backend)
+		return startMainSession(out, location, repos, request, backend)
 	}
-	return startRepoSession(out, location, repos, request.repoName, backend)
+	return startRepoSession(out, location, repos, request, backend)
 }
 
 // startRequest 는 파싱이 끝난 kyu start 요청이다.
@@ -78,6 +90,9 @@ type startRequest struct {
 
 	// loadRepoClaudeMd 는 메인 세션이 추가 디렉토리의 지침 파일까지 읽을지다.
 	loadRepoClaudeMd bool
+
+	// bypassPermissions 는 세션의 claude 가 권한 확인을 건너뛸지다.
+	bypassPermissions bool
 }
 
 func parseStartArgs(args []string) (startRequest, error) {
@@ -87,6 +102,9 @@ func parseStartArgs(args []string) (startRequest, error) {
 		switch {
 		case arg == repoClaudeMdOptionName:
 			request.loadRepoClaudeMd = true
+
+		case arg == bypassPermissionsOptionName:
+			request.bypassPermissions = true
 
 		// 모르는 옵션을 레포 이름으로 흘려보내면 "없는 레포입니다: --typo" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
@@ -110,10 +128,10 @@ func parseStartArgs(args []string) (startRequest, error) {
 }
 
 // startMainSession 은 워크디렉토리 최상위에서 조율용 세션을 띄운다(설계 문서 5.4).
-func startMainSession(out io.Writer, location workDirLocation, repos []workdir.Repo, loadRepoClaudeMd bool, backend session.SessionBackend) error {
+func startMainSession(out io.Writer, location workDirLocation, repos []workdir.Repo, request startRequest, backend session.SessionBackend) error {
 	return createSession(out, backend,
 		session.MainSessionName(location.name), mainRowLabel,
-		location.absolutePath, mainSessionCommand(repos, loadRepoClaudeMd))
+		location.absolutePath, mainSessionCommand(repos, request))
 }
 
 // mainSessionCommand 는 메인 세션이 실행할 명령을 조립한다: claude --add-dir <레포 절대경로>...
@@ -123,23 +141,34 @@ func startMainSession(out io.Writer, location workDirLocation, repos []workdir.R
 //
 // 절대경로로 넘기는 이유: 세션의 cwd 가 워크디렉토리라 상대경로도 당장은 맞지만, 서로 다른
 // 워크디렉토리에 같은 이름의 레포가 있을 수 있어 이름과 상대경로는 레포를 특정하지 못한다(설계 문서 11절 4번).
-func mainSessionCommand(repos []workdir.Repo, loadRepoClaudeMd bool) []string {
-	command := make([]string, 0, 3+2*len(repos))
-	if loadRepoClaudeMd {
+func mainSessionCommand(repos []workdir.Repo, request startRequest) []string {
+	command := make([]string, 0, 4+2*len(repos))
+	if request.loadRepoClaudeMd {
 		command = append(command, envCommandName, repoClaudeMdEnvAssignment)
 	}
-	command = append(command, sessionCommandName)
+	command = append(command, claudeCommand(request.bypassPermissions)...)
 	for _, repo := range repos {
 		command = append(command, addDirFlagName, repo.AbsolutePath)
 	}
 	return command
 }
 
+// claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 켜져 있다면 권한 확인 생략 플래그.
+//
+// 메인 세션은 뒤에 --add-dir 을 잇고 레포 세션은 여기서 끝난다. 공통부를 한 곳에 두는 이유는
+// 두 세션이 같은 옵션에 다르게 반응하면 사용자가 그 차이를 세션 안에서야 발견하기 때문이다.
+func claudeCommand(bypassPermissions bool) []string {
+	if bypassPermissions {
+		return []string{sessionCommandName, skipPermissionsFlagName}
+	}
+	return []string{sessionCommandName}
+}
+
 // startRepoSession 은 레포 디렉토리에서 작업용 세션을 띄운다.
-func startRepoSession(out io.Writer, location workDirLocation, repos []workdir.Repo, repoName string, backend session.SessionBackend) error {
-	repoIndex := slices.IndexFunc(repos, func(repo workdir.Repo) bool { return repo.Name == repoName })
+func startRepoSession(out io.Writer, location workDirLocation, repos []workdir.Repo, request startRequest, backend session.SessionBackend) error {
+	repoIndex := slices.IndexFunc(repos, func(repo workdir.Repo) bool { return repo.Name == request.repoName })
 	if repoIndex < 0 {
-		return unknownRepoError(repoName, repos)
+		return unknownRepoError(request.repoName, repos)
 	}
 	repo := repos[repoIndex]
 
@@ -148,7 +177,7 @@ func startRepoSession(out io.Writer, location workDirLocation, repos []workdir.R
 	// 같은 레포를 --add-dir 로 붙이면 파일만 보이고 설정은 죽는다 — 그 차이가 이 도구의 존재 이유다.
 	return createSession(out, backend,
 		session.RepoSessionName(location.name, repo.Name), repo.Name,
-		repo.AbsolutePath, []string{sessionCommandName})
+		repo.AbsolutePath, claudeCommand(request.bypassPermissions))
 }
 
 // createSession 은 세션을 만들고 그 결과를 사람이 읽을 안내로 옮긴다.

@@ -252,3 +252,99 @@ func TestStartSessionRejectsRepoClaudeMdOptionForARepoSession(t *testing.T) {
 		t.Errorf("Create 호출 = %+v, 옵션이 잘못됐으면 아무것도 만들지 않기를 기대", backend.createdSessions)
 	}
 }
+
+func TestStartSessionWithBypassPermissionsPutsTheSkipFlagOnTheMainSessionCommand(t *testing.T) {
+	// 이 옵션의 값어치는 세션 안에서 claude 가 어떤 인자로 뜨는가 하나로 결정된다.
+	// 플래그 이름을 상수가 아닌 문자열로 적는다 — 상수를 잘못 고쳐도 테스트가 함께 따라 바뀌면
+	// claude 에게 실제로 무엇이 전달되는지는 아무도 지키지 않게 된다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out bytes.Buffer
+	if err := StartSession(&out, []string{"--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name: "kyu-WorkDir-featureX-main",
+		cwd:  workDirPath,
+		command: []string{
+			"claude", "--dangerously-skip-permissions",
+			"--add-dir", filepath.Join(workDirPath, "alpha-commons"),
+		},
+	})
+}
+
+func TestStartSessionWithBypassPermissionsPutsTheSkipFlagOnTheRepoSessionCommand(t *testing.T) {
+	// --repo-claude-md 와 달리 이 옵션은 레포 세션에도 뜻이 있다. 권한 확인은 세션이 어느
+	// 디렉토리에서 떴는지와 무관하게 매번 묻는 것이라, 메인 전용으로 막을 근거가 없다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out bytes.Buffer
+	if err := StartSession(&out, []string{"alpha-commons", "--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name:    "kyu-WorkDir-featureX-alpha-commons",
+		cwd:     filepath.Join(workDirPath, "alpha-commons"),
+		command: []string{"claude", "--dangerously-skip-permissions"},
+	})
+}
+
+func TestStartSessionCombinesBypassPermissionsWithRepoClaudeMd(t *testing.T) {
+	// 두 옵션은 서로 다른 자리를 건드린다 — 하나는 명령을 env 로 감싸고 하나는 claude 의 인자다.
+	// 조립 순서가 어긋나면 env 가 claude 대신 플래그를 실행하려 들거나 플래그가 env 의 인자로 먹힌다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out bytes.Buffer
+	if err := StartSession(&out, []string{"--repo-claude-md", "--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name: "kyu-WorkDir-featureX-main",
+		cwd:  workDirPath,
+		command: []string{
+			"env", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1",
+			"claude", "--dangerously-skip-permissions",
+			"--add-dir", filepath.Join(workDirPath, "alpha-commons"),
+		},
+	})
+}
+
+func TestStartSessionWithoutBypassPermissionsNeverPassesTheSkipFlag(t *testing.T) {
+	// 권한 확인을 건너뛰는 것은 호출마다 의식적으로 켜는 위험 모드라, 기본값으로 새어 들어갈
+	// 자리가 없어야 한다. 위의 조립 테스트들은 조립 방식이 바뀌면 함께 고쳐지지만, 이 테스트는
+	// 무엇을 어떻게 조립하든 이 플래그만은 들어가지 않는다는 것 하나만 본다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out bytes.Buffer
+	for _, args := range [][]string{nil, {"alpha-commons"}, {"--repo-claude-md"}} {
+		if err := StartSession(&out, args, backend); err != nil {
+			t.Fatalf("StartSession(%q) 실패: %v", args, err)
+		}
+	}
+
+	for _, created := range backend.createdSessions {
+		if slices.Contains(created.command, "--dangerously-skip-permissions") {
+			t.Errorf("%s 세션 명령 = %q, 옵션을 주지 않으면 권한 확인 생략 플래그가 없기를 기대",
+				created.name, created.command)
+		}
+	}
+}
