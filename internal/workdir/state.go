@@ -1,5 +1,11 @@
 package workdir
 
+import (
+	"fmt"
+
+	"github.com/maximinhan/Kyuchestration/internal/session"
+)
+
 // RepoState 는 도구가 관찰해서 얻은 레포의 현재 상태다(설계 문서 5.3).
 //
 // 세션이 자기 상태를 보고하도록 요구하지 않는다. 관찰 가능한 것 — 세션의 생존과 git 의 답 — 에서만
@@ -30,3 +36,28 @@ const (
 	// RepoStateIdle 은 세션도 없고 넘길 것도 남지 않은 상태다.
 	RepoStateIdle RepoState = "IDLE"
 )
+
+// InferRepoState 는 레포 하나의 현재 상태를 관찰해 판정한다.
+//
+// 세션 이름을 계산하지 않고 받는다. 이름 규칙(wd-<workdir>-<repo>)은 워크디렉토리 이름까지
+// 알아야 만들 수 있는데 Repo 는 그것을 모르고, 이름을 만드는 책임을 session 패키지 한 곳에
+// 남겨두면 규칙이 바뀌어도 이 함수는 그대로다.
+//
+// backend 는 SessionBackend 인터페이스로만 받는다. 조율 계층이 tmux 를 알게 되는 순간
+// 플랫폼 무관이라는 이 계층의 존재 이유가 사라진다(설계 원칙 4).
+//
+// 판정에 실패하면 영 값과 에러를 반환한다. 관찰하지 못한 것을 IDLE 처럼 그럴듯한 값으로
+// 메우면 사용자가 그것을 "문제 없음" 으로 읽는다.
+func InferRepoState(repo Repo, sessionName string, backend session.SessionBackend) (RepoState, error) {
+	// 세션 생존을 가장 먼저 본다. 세션이 떠 있다면 그 안에서 파일이 계속 바뀌는 중이라
+	// 그 순간의 git 상태는 결론이 아니라 스쳐 지나가는 스냅숏이다.
+	isSessionAlive, err := backend.IsAlive(sessionName)
+	if err != nil {
+		return "", fmt.Errorf("세션 생존 확인 실패 (%s): %w", sessionName, err)
+	}
+	if isSessionAlive {
+		return RepoStateRunning, nil
+	}
+
+	return RepoStateIdle, nil
+}

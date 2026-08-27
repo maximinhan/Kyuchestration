@@ -1,0 +1,146 @@
+package workdir
+
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/maximinhan/Kyuchestration/internal/session"
+)
+
+// testSessionName 은 상태 추론에 넘기는 세션 이름이다.
+// 실제 규칙(wd-<workdir>-<repo>)을 따르지만, 이 패키지는 이름을 해석하지 않고 그대로 전달만 한다.
+const testSessionName = "wd-test-workdir-proj-a"
+
+// stubSessionBackend 는 세션 생존 여부만 지정해 넣는 테스트용 SessionBackend 다.
+//
+// 상태 추론이 세션 계층에 묻는 것은 IsAlive 하나뿐이라, tmux 를 실제로 띄우지 않고도
+// RUNNING 판정을 검증할 수 있다. 인터페이스를 둔 값이 여기서 회수된다.
+//
+// SessionBackend 를 nil 인 채로 묻어두고(embed) IsAlive 만 덮어쓴다. 상태 추론이 IsAlive
+// 외의 메서드를 부르는 순간 nil 인터페이스 역참조로 그 자리에서 패닉이 나므로,
+// "도구는 세션 내부에 개입하지 않는다"(설계 원칙 3)가 테스트로 고정된다.
+type stubSessionBackend struct {
+	session.SessionBackend
+	reportIsAlive func(sessionName string) (bool, error)
+}
+
+func (b stubSessionBackend) IsAlive(sessionName string) (bool, error) {
+	return b.reportIsAlive(sessionName)
+}
+
+func newStubSessionBackend(alive bool) stubSessionBackend {
+	return stubSessionBackend{
+		reportIsAlive: func(string) (bool, error) { return alive, nil },
+	}
+}
+
+// isolateGitFromUserConfig 는 테스트가 실행 머신의 git 설정에 좌우되지 않게 한다.
+//
+// 실측: core.autocrlf=true 인 머신(WSL 기본값)에서는 LF 로 쓴 파일이 커밋 직후에도 수정된
+// 것으로 잡혀, 깨끗해야 할 레포가 DIRTY 로 판정된다. commit.gpgsign 이 켜져 있으면 커밋
+// 자체가 실패한다. 전역·시스템 설정 파일을 /dev/null 로 돌려 아예 읽히지 않게 한다.
+func isolateGitFromUserConfig(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git 이 PATH 에 없어 상태 추론 테스트를 건너뜁니다")
+	}
+
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+}
+
+// runGitForTest 는 테스트용 레포를 준비하기 위해 git 명령을 실행한다.
+//
+// 커밋에 필요한 신원은 -c 로 그 호출에만 넘긴다. 사용자의 전역 설정을 건드리지 않으면서,
+// isolateGitFromUserConfig 로 전역 설정을 끊어놓은 상태에서도 커밋이 되게 하는 유일한 방법이다.
+func runGitForTest(t *testing.T, repoPath string, args ...string) {
+	t.Helper()
+
+	command := exec.Command("git", append([]string{"-c", "user.name=test", "-c", "user.email=test@test"}, args...)...)
+	command.Dir = repoPath
+
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("테스트 준비용 git %v 실패: %v (%s)", args, err, output)
+	}
+}
+
+func writeFileInRepo(t *testing.T, repoPath, fileName, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(filepath.Join(repoPath, fileName), []byte(content), 0o644); err != nil {
+		t.Fatalf("테스트용 파일 쓰기 실패 (%s): %v", fileName, err)
+	}
+}
+
+// newCleanGitRepo 는 커밋 하나가 들어있고 워킹 트리가 깨끗하며 업스트림이 없는 레포를 만든다.
+//
+// git 을 흉내 내지 않고 실제로 돌린다. 상태 추론이 알고 싶은 것은 "git 이 이 디렉토리를 어떻게
+// 보는가" 인데, 가짜 출력으로 대신하면 검증되는 것은 우리가 상상한 git 의 답일 뿐이다.
+func newCleanGitRepo(t *testing.T) Repo {
+	t.Helper()
+	isolateGitFromUserConfig(t)
+
+	repoPath := t.TempDir()
+	runGitForTest(t, repoPath, "init", "--quiet", "--initial-branch=main")
+	writeFileInRepo(t, repoPath, "README.md", "최초 내용\n")
+	runGitForTest(t, repoPath, "add", "README.md")
+	runGitForTest(t, repoPath, "commit", "--quiet", "-m", "최초 커밋")
+
+	return Repo{Name: filepath.Base(repoPath), AbsolutePath: repoPath}
+}
+
+func TestInferRepoStateReturnsRunningWhenSessionIsAlive(t *testing.T) {
+	repo := newCleanGitRepo(t)
+
+	backend := stubSessionBackend{
+		reportIsAlive: func(sessionName string) (bool, error) {
+			if sessionName != testSessionName {
+				t.Errorf("IsAlive 에 넘어온 세션 이름 = %q, want %q", sessionName, testSessionName)
+			}
+			return true, nil
+		},
+	}
+
+	got, err := InferRepoState(repo, testSessionName, backend)
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateRunning {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateRunning)
+	}
+}
+
+func TestInferRepoStatePropagatesSessionLivenessFailure(t *testing.T) {
+	repo := newCleanGitRepo(t)
+
+	livenessFailure := errors.New("tmux 를 실행할 수 없음")
+	backend := stubSessionBackend{
+		reportIsAlive: func(string) (bool, error) { return false, livenessFailure },
+	}
+
+	got, err := InferRepoState(repo, testSessionName, backend)
+	// %w 로 감싸 전파하는지 확인한다. %v 로 문자열화하면 호출부가 원인을 판별할 수 없다.
+	if !errors.Is(err, livenessFailure) {
+		t.Fatalf("InferRepoState() 에러 = %v, 원인이 %v 로 풀리기를 기대", err, livenessFailure)
+	}
+	// 판정하지 못했으면 그럴듯한 상태를 지어내지 않는다. 어느 상태도 아닌 영 값이어야 한다.
+	if got != "" {
+		t.Errorf("InferRepoState() = %q, 판정 실패 시 빈 값을 기대", got)
+	}
+}
+
+func TestInferRepoStateReturnsIdleWhenSessionIsGoneAndNothingIsLeftBehind(t *testing.T) {
+	repo := newCleanGitRepo(t)
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateIdle {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateIdle)
+	}
+}
