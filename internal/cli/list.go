@@ -6,8 +6,11 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"path/filepath"
+	"text/tabwriter"
 
 	"github.com/maximinhan/Kyuchestration/internal/session"
 	"github.com/maximinhan/Kyuchestration/internal/workdir"
@@ -19,6 +22,39 @@ import (
 // 사용자가 `wd attach main` 이라고 부를 때의 이름이 세션 이름 규칙과 함께 움직여야 할 이유가 없어
 // session 패키지의 상수를 끌어오지 않는다.
 const mainRowLabel = "main"
+
+// ListWorkDir 는 wd list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
+//
+// backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/wd)의 결정이고,
+// 표시 계층이 tmux 를 직접 만들면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
+func ListWorkDir(out io.Writer, args []string, backend session.SessionBackend) error {
+	workDirPath, err := workDirPathFromListArgs(args)
+	if err != nil {
+		return err
+	}
+
+	listing, err := inspectWorkDir(workDirPath, backend)
+	if err != nil {
+		return err
+	}
+
+	return writeWorkDirListing(out, listing)
+}
+
+// workDirPathFromListArgs 는 목록을 보여줄 워크디렉토리를 정한다. 인자가 없으면 현재 디렉토리다.
+//
+// 경로를 두 개 이상 받으면 거절한다. 하나를 골라 나머지를 조용히 버리면 사용자는 자기가 지정한
+// 워크디렉토리를 보고 있다고 착각한다.
+func workDirPathFromListArgs(args []string) (string, error) {
+	switch len(args) {
+	case 0:
+		return ".", nil
+	case 1:
+		return args[0], nil
+	default:
+		return "", fmt.Errorf("list 는 워크디렉토리 경로 하나만 받습니다 (인자 %d 개를 받음)", len(args))
+	}
+}
 
 // listRow 는 목록의 한 줄이다. 레포 하나 또는 메인 세션에 대응한다.
 type listRow struct {
@@ -65,9 +101,6 @@ func (listing workDirListing) liveSessionCount() int {
 }
 
 // inspectWorkDir 는 워크디렉토리를 훑어 레포별 상태와 메인 세션 상태를 모은다.
-//
-// backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/wd)의 결정이고,
-// 표시 계층이 tmux 를 직접 만들면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
 func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDirListing, error) {
 	// 세션 이름에 워크디렉토리 이름이 들어가므로(wd-<workdir>-<repo>) 이름을 먼저 확정해야 한다.
 	// 인자로 흔히 들어오는 "." 이나 ".." 는 그 자체로는 이름이 아니라서, 절대경로로 편 뒤 마지막 요소를 쓴다.
@@ -121,4 +154,79 @@ func inspectMainSession(workDirName string, backend session.SessionBackend) (lis
 		return listRow{label: mainRowLabel, state: workdir.RepoStateRunning}, nil
 	}
 	return listRow{label: mainRowLabel, state: workdir.RepoStateIdle}, nil
+}
+
+const (
+	// runningSessionMarker 는 세션이 살아있는 행에 붙는 채운 동그라미다.
+	//
+	// 상태 낱말(RUNNING/DIRTY/...)은 오른쪽 열에 있어 한 줄씩 읽어야 눈에 들어오는데,
+	// "지금 누가 어디에 붙어 있는가" 는 목록에서 가장 먼저 알고 싶은 것이라 왼쪽 끝에 그림으로 둔다.
+	// 색을 쓰지 않는 이유는 파이프로 넘기거나 로그에 붙일 때 이스케이프 문자가 섞이기 때문이다.
+	runningSessionMarker = "●"
+
+	// noSessionMarker 는 세션이 없는 행에 붙는 빈 동그라미다. DIRTY·AHEAD·IDLE 이 모두 여기에 해당한다.
+	noSessionMarker = "○"
+)
+
+// rowIndent 는 목록 행을 헤더보다 안쪽으로 들여쓴다. 헤더·안내문과 행 묶음을 눈으로 가르는 장치다.
+const rowIndent = "  "
+
+// tableColumnPadding 은 열 사이 최소 간격이다. tabwriter 가 열에서 가장 긴 칸에 이 값을 더해 너비를 잡는다.
+const tableColumnPadding = 2
+
+const emptyWorkDirGuidance = "레포 없음 — 이 디렉토리 아래에 git 레포를 클론하세요"
+
+const attachGuidance = "wd attach <repo> 로 진입"
+
+// writeWorkDirListing 은 관찰 결과를 한 화면으로 옮긴다.
+func writeWorkDirListing(out io.Writer, listing workDirListing) error {
+	// 한 번에 조립해 한 번에 내보낸다. 중간중간 out 에 쓰면 쓰기 실패를 매 호출마다 확인해야 하고,
+	// 확인을 빠뜨린 자리가 조용히 생긴다. 출력은 한 화면 분량이라 통째로 담아도 부담이 없다.
+	var rendered bytes.Buffer
+
+	fmt.Fprintf(&rendered, "WorkDir: %s   (%s, %s)\n\n",
+		listing.workDirName,
+		countWithEnglishPlural(len(listing.repoRows), "repo"),
+		countWithEnglishPlural(listing.liveSessionCount(), "session"))
+
+	if len(listing.repoRows) == 0 {
+		// 빈 목록만 보여주면 사용자는 도구가 레포를 못 찾은 것인지 아직 아무것도 없는 것인지 모른다.
+		// 메인 행은 그대로 이어 붙인다 — 레포가 하나도 없어도 메인 세션은 떠 있을 수 있다.
+		fmt.Fprintf(&rendered, "%s%s\n\n", rowIndent, emptyWorkDirGuidance)
+	}
+
+	// 열 너비를 손으로 계산하지 않고 tabwriter 에 맡긴다. 레포 이름 길이는 워크디렉토리마다 다른데,
+	// 고정 너비로 잡으면 긴 이름에서 열이 밀리고 짧은 이름만 있을 때는 빈칸이 남는다.
+	table := tabwriter.NewWriter(&rendered, 0, 0, tableColumnPadding, ' ', 0)
+	for _, row := range listing.displayRows() {
+		fmt.Fprintf(table, "%s%s\t%s\t%s\n", rowIndent, sessionMarker(row.state), row.label, row.state)
+	}
+	if err := table.Flush(); err != nil {
+		return fmt.Errorf("목록 표 정렬 실패: %w", err)
+	}
+
+	fmt.Fprintf(&rendered, "\n%s\n", attachGuidance)
+
+	if _, err := out.Write(rendered.Bytes()); err != nil {
+		return fmt.Errorf("목록 출력 실패: %w", err)
+	}
+	return nil
+}
+
+func sessionMarker(state workdir.RepoState) string {
+	if state == workdir.RepoStateRunning {
+		return runningSessionMarker
+	}
+	return noSessionMarker
+}
+
+// countWithEnglishPlural 은 "3 repos" / "1 repo" 를 만든다.
+//
+// 헤더 문구는 설계 문서 9.3 의 예시를 그대로 따르는데, 개수와 무관하게 s 를 붙이면 "1 repos" 가 찍힌다.
+// 목록을 열 때마다 보는 한 줄이라 그 어긋남을 남겨두지 않는다.
+func countWithEnglishPlural(count int, singularNoun string) string {
+	if count == 1 {
+		return fmt.Sprintf("%d %s", count, singularNoun)
+	}
+	return fmt.Sprintf("%d %ss", count, singularNoun)
 }
