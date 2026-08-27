@@ -261,7 +261,7 @@ func TestInspectWorkDirNamesTheRepoWhoseStateCouldNotBeJudged(t *testing.T) {
 	}
 }
 
-// wantListOutput 은 기대 출력을 그대로 적기 위한 것이다.
+// assertListOutput 은 기대 출력을 그대로 적어두고 통째로 비교한다.
 //
 // 열 너비나 공백 개수를 계산해서 비교하지 않는다. 목록의 값어치는 "한 화면에 읽히는가" 이고
 // 그것은 최종 문자열에만 드러난다. 기대값을 눈에 보이는 그대로 적어두면, 정렬이 어긋나는 변경이
