@@ -24,6 +24,15 @@ const addDirFlagName = "--add-dir"
 // repoClaudeMdOptionName 은 메인 세션이 각 레포의 지침 파일까지 읽게 하는 옵션이다.
 const repoClaudeMdOptionName = "--repo-claude-md"
 
+// bypassPermissionsOptionName 은 세션의 claude 를 권한 확인 없이 띄우는 옵션이다.
+//
+// claude 의 원래 플래그 이름을 그대로 노출하지 않는다. 이 도구의 사용자가 정하는 것은
+// "이 세션에서 권한 확인을 생략한다" 이고, 그것을 claude 의 어느 플래그로 옮길지는 이 도구의 사정이다.
+const bypassPermissionsOptionName = "--bypass-permissions"
+
+// skipPermissionsFlagName 은 위 옵션이 claude 에게 전달되는 플래그다.
+const skipPermissionsFlagName = "--dangerously-skip-permissions"
+
 // repoClaudeMdEnvAssignment 는 추가 디렉토리의 CLAUDE.md 와 .claude/rules/ 를 로드시키는 환경변수다.
 //
 // 기본으로 켜지 않는다. 붙인 레포 수만큼 컨텍스트가 늘어나므로, 계획이 레포 컨벤션과 어긋나는
@@ -37,17 +46,23 @@ const repoClaudeMdEnvAssignment = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=
 // 할 것이 늘어난다(설계 문서 5.2 의 "플랫폼 의존부는 5개 함수가 전부다").
 const envCommandName = "env"
 
-const startUsageText = `사용법: kyu start [repo] [--repo-claude-md]
+const startUsageText = `사용법: kyu start [repo] [옵션]
 
-  kyu start                     워크디렉토리 최상위에서 메인 세션을 띄운다
-  kyu start <repo>              해당 레포 디렉토리에서 세션을 띄운다
-  kyu start --repo-claude-md    메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다`
+  kyu start                워크디렉토리 최상위에서 메인 세션을 띄운다
+  kyu start <repo>         해당 레포 디렉토리에서 세션을 띄운다
+
+옵션:
+  --bypass-permissions     claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
+  --repo-claude-md         메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)`
 
 // StartSession 은 kyu start 를 실행한다. 인자가 없으면 메인 세션을, 레포 이름이 있으면 그 레포의 세션을 띄운다.
 //
 // 대상 워크디렉토리는 명령을 실행한 디렉토리다. list 처럼 경로 인자를 받지 않는 이유는,
 // 세션을 띄우는 일은 그 워크디렉토리에서 작업을 시작하겠다는 뜻이라 다른 디렉토리를 가리킬 일이 없어서다.
-func StartSession(out io.Writer, args []string, backend session.SessionBackend) error {
+//
+// errOut 은 이번 실행이 요구한 것이 세션에 닿지 않았을 때만 쓴다. 그 말은 사용자에게만 하는
+// 말이라, 다음 명령으로 넘길 수 있는 안내(out)와 섞이면 안 된다.
+func StartSession(out, errOut io.Writer, args []string, backend session.SessionBackend) error {
 	request, err := parseStartArgs(args)
 	if err != nil {
 		return err
@@ -66,9 +81,9 @@ func StartSession(out io.Writer, args []string, backend session.SessionBackend) 
 	}
 
 	if request.repoName == "" {
-		return startMainSession(out, location, repos, request.loadRepoClaudeMd, backend)
+		return startMainSession(out, errOut, location, repos, request, backend)
 	}
-	return startRepoSession(out, location, repos, request.repoName, backend)
+	return startRepoSession(out, errOut, location, repos, request, backend)
 }
 
 // startRequest 는 파싱이 끝난 kyu start 요청이다.
@@ -78,6 +93,9 @@ type startRequest struct {
 
 	// loadRepoClaudeMd 는 메인 세션이 추가 디렉토리의 지침 파일까지 읽을지다.
 	loadRepoClaudeMd bool
+
+	// bypassPermissions 는 세션의 claude 가 권한 확인을 건너뛸지다.
+	bypassPermissions bool
 }
 
 func parseStartArgs(args []string) (startRequest, error) {
@@ -87,6 +105,9 @@ func parseStartArgs(args []string) (startRequest, error) {
 		switch {
 		case arg == repoClaudeMdOptionName:
 			request.loadRepoClaudeMd = true
+
+		case arg == bypassPermissionsOptionName:
+			request.bypassPermissions = true
 
 		// 모르는 옵션을 레포 이름으로 흘려보내면 "없는 레포입니다: --typo" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
@@ -110,10 +131,10 @@ func parseStartArgs(args []string) (startRequest, error) {
 }
 
 // startMainSession 은 워크디렉토리 최상위에서 조율용 세션을 띄운다(설계 문서 5.4).
-func startMainSession(out io.Writer, location workDirLocation, repos []workdir.Repo, loadRepoClaudeMd bool, backend session.SessionBackend) error {
-	return createSession(out, backend,
+func startMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request startRequest, backend session.SessionBackend) error {
+	return createSession(out, errOut, backend,
 		session.MainSessionName(location.name), mainRowLabel,
-		location.absolutePath, mainSessionCommand(repos, loadRepoClaudeMd))
+		location.absolutePath, mainSessionCommand(repos, request), request.bypassPermissions)
 }
 
 // mainSessionCommand 는 메인 세션이 실행할 명령을 조립한다: claude --add-dir <레포 절대경로>...
@@ -123,44 +144,64 @@ func startMainSession(out io.Writer, location workDirLocation, repos []workdir.R
 //
 // 절대경로로 넘기는 이유: 세션의 cwd 가 워크디렉토리라 상대경로도 당장은 맞지만, 서로 다른
 // 워크디렉토리에 같은 이름의 레포가 있을 수 있어 이름과 상대경로는 레포를 특정하지 못한다(설계 문서 11절 4번).
-func mainSessionCommand(repos []workdir.Repo, loadRepoClaudeMd bool) []string {
-	command := make([]string, 0, 3+2*len(repos))
-	if loadRepoClaudeMd {
+func mainSessionCommand(repos []workdir.Repo, request startRequest) []string {
+	command := make([]string, 0, 4+2*len(repos))
+	if request.loadRepoClaudeMd {
 		command = append(command, envCommandName, repoClaudeMdEnvAssignment)
 	}
-	command = append(command, sessionCommandName)
+	command = append(command, claudeCommand(request.bypassPermissions)...)
 	for _, repo := range repos {
 		command = append(command, addDirFlagName, repo.AbsolutePath)
 	}
 	return command
 }
 
+// claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 켜져 있다면 권한 확인 생략 플래그.
+//
+// 메인 세션은 뒤에 --add-dir 을 잇고 레포 세션은 여기서 끝난다. 공통부를 한 곳에 두는 이유는
+// 두 세션이 같은 옵션에 다르게 반응하면 사용자가 그 차이를 세션 안에서야 발견하기 때문이다.
+func claudeCommand(bypassPermissions bool) []string {
+	if bypassPermissions {
+		return []string{sessionCommandName, skipPermissionsFlagName}
+	}
+	return []string{sessionCommandName}
+}
+
 // startRepoSession 은 레포 디렉토리에서 작업용 세션을 띄운다.
-func startRepoSession(out io.Writer, location workDirLocation, repos []workdir.Repo, repoName string, backend session.SessionBackend) error {
-	repoIndex := slices.IndexFunc(repos, func(repo workdir.Repo) bool { return repo.Name == repoName })
+func startRepoSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request startRequest, backend session.SessionBackend) error {
+	repoIndex := slices.IndexFunc(repos, func(repo workdir.Repo) bool { return repo.Name == request.repoName })
 	if repoIndex < 0 {
-		return unknownRepoError(repoName, repos)
+		return unknownRepoError(request.repoName, repos)
 	}
 	repo := repos[repoIndex]
 
 	// cwd 를 레포 디렉토리로 주는 이 한 줄이 그 레포의 MCP 설정·지침·에이전트를 살린다.
 	// 설정은 오직 세션을 시작한 디렉토리에서만 오기 때문이다(설계 문서 1.3).
 	// 같은 레포를 --add-dir 로 붙이면 파일만 보이고 설정은 죽는다 — 그 차이가 이 도구의 존재 이유다.
-	return createSession(out, backend,
+	return createSession(out, errOut, backend,
 		session.RepoSessionName(location.name, repo.Name), repo.Name,
-		repo.AbsolutePath, []string{sessionCommandName})
+		repo.AbsolutePath, claudeCommand(request.bypassPermissions), request.bypassPermissions)
 }
 
 // createSession 은 세션을 만들고 그 결과를 사람이 읽을 안내로 옮긴다.
 //
 // label 은 사용자가 부르는 이름(레포 이름 또는 main)이다. 세션 이름(kyu-...)을 안내에 그대로 쓰면
 // 사용자가 그것을 다음 명령의 인자로 되돌려 주게 되는데, 이 도구의 명령은 레포 이름을 받는다.
-func createSession(out io.Writer, backend session.SessionBackend, sessionName, label, cwd string, command []string) error {
+//
+// bypassPermissions 를 받는 이유는 마지막 인자 하나 때문이 아니라, 세션이 이미 떠 있었다는
+// 사실을 아는 자리가 여기뿐이어서다. 그 사실과 "이번 실행이 무엇을 요구했는가" 가 만나야
+// 경고할지가 정해진다.
+func createSession(out, errOut io.Writer, backend session.SessionBackend, sessionName, label, cwd string, command []string, bypassPermissions bool) error {
 	err := backend.Create(sessionName, cwd, command)
 
 	// 이미 떠 있는 것은 사용자가 원한 상태와 다르지 않다 — 그 세션에서 작업하면 된다.
 	// 실패로 끝내면 kyu start 를 앞에 둔 스크립트가 두 번째 실행부터 깨지므로 안내만 하고 성공으로 끝낸다.
 	if errors.Is(err, session.ErrSessionExists) {
+		if bypassPermissions {
+			if err := warnRunningSessionKeepsTheCommandItWasCreatedWith(errOut, label); err != nil {
+				return err
+			}
+		}
 		fmt.Fprintf(out, "%s 세션이 이미 실행 중입니다.\n진입: kyu attach %s\n", label, label)
 		return nil
 	}
@@ -169,6 +210,26 @@ func createSession(out io.Writer, backend session.SessionBackend, sessionName, l
 	}
 
 	fmt.Fprintf(out, "%s 세션을 시작했습니다.\n진입: kyu attach %s\n", label, label)
+	return nil
+}
+
+// warnRunningSessionKeepsTheCommandItWasCreatedWith 는 이번에 켠 옵션이 이미 떠 있는 세션에는
+// 닿지 않는다는 사실을 알린다.
+//
+// 세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다 — tmux 에게 다시
+// 물어봐도 이미 떠 있는 claude 의 인자를 바꿀 방법은 없다. 조용히 넘어가면 사용자는 권한
+// 확인 없이 도는 세션이라고 믿은 채 작업하게 되고, 그 믿음은 첫 확인 프롬프트에서야 깨진다.
+//
+// 그래도 실패로 끝내지는 않는다. 사용자가 원한 것은 그 세션에서 작업하는 것이고, 떠 있는
+// 세션은 그 요구를 이미 채우고 있다.
+func warnRunningSessionKeepsTheCommandItWasCreatedWith(errOut io.Writer, label string) error {
+	_, err := fmt.Fprintf(errOut,
+		"%s 는 이미 실행 중인 %s 세션에는 적용되지 않습니다 — 세션이 실행할 명령은 만들 때 정해집니다.\n"+
+			"이 옵션으로 다시 띄우려면 kyu kill %s 뒤에 다시 실행하세요.\n",
+		bypassPermissionsOptionName, label, label)
+	if err != nil {
+		return fmt.Errorf("실행 중인 세션 경고 출력 실패: %w", err)
+	}
 	return nil
 }
 

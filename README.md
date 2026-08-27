@@ -301,12 +301,20 @@ kyu start [repo]       세션 시작. 인자 없으면 main
 kyu attach <repo>      세션 진입. main 도 가능
 kyu kill [repo|--all]  세션 종료
 kyu version            이 바이너리의 버전
+
+옵션 (kyu, kyu start):
+  --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
+  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
 ```
 
 ### `kyu`
 
 인자 없이 실행하면 초기화 → 메인 세션 생성 → 진입을 한 번에 한다. 각 걸음은 이미 있는 것이면
 건너뛴다 — 계획 파일이 있으면 만들지 않고, 세션이 떠 있으면 만들지 않고 붙기만 한다.
+
+`kyu --bypass-permissions` 는 메인 세션의 claude 를 권한 확인 없이 띄운다
+([아래](#--bypass-permissions)). 이미 세션이 떠 있으면 그 세션에는 적용되지 않는다 —
+세션이 실행할 명령은 만드는 순간 정해지기 때문이다.
 
 이미 세션 안에서 실행하면 거절한다. `Ctrl-b d` 로 빠져나온 뒤 다시 실행한다.
 
@@ -361,9 +369,10 @@ kyu attach <repo> 로 진입
 ### `kyu start [repo]`
 
 ```sh
-kyu start proj-a            # proj-a 디렉토리에서 세션을 띄운다
-kyu start                   # 워크디렉토리 최상위에서 메인 세션을 띄운다
-kyu start --repo-claude-md  # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
+kyu start proj-a                       # proj-a 디렉토리에서 세션을 띄운다
+kyu start                              # 워크디렉토리 최상위에서 메인 세션을 띄운다
+kyu start --repo-claude-md             # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
+kyu start proj-a --bypass-permissions  # 권한 확인 없이 띄운다 (아래 경고를 먼저 읽을 것)
 ```
 
 **레포 세션**은 그 레포 디렉토리에서 뜬다. 설정은 오직 세션을 시작한 디렉토리에서만 오기 때문에,
@@ -386,6 +395,39 @@ claude --add-dir /abs/path/WorkDir-featureX/proj-a --add-dir /abs/path/WorkDir-f
 레포 세션은 자기 디렉토리의 `CLAUDE.md` 를 이미 읽으므로 이 옵션을 함께 줄 수 없다.
 
 이미 떠 있는 세션에 `kyu start` 를 다시 실행해도 실패하지 않는다. 안내만 하고 끝난다.
+
+### `--bypass-permissions`
+
+```sh
+kyu --bypass-permissions               # 메인 세션을 권한 확인 없이 띄우고 진입한다
+kyu start --bypass-permissions         # 메인 세션만 띄운다
+kyu start proj-a --bypass-permissions  # 그 레포의 세션을 띄운다
+```
+
+세션의 `claude` 를 `--dangerously-skip-permissions` 와 함께 실행한다. 메인 세션과 레포 세션
+모두에서 쓸 수 있다 — 권한 확인은 세션이 어느 디렉토리에서 떴는지와 무관하기 때문이다.
+
+```sh
+claude --dangerously-skip-permissions --add-dir /abs/path/WorkDir-featureX/proj-a
+```
+
+> **경고.** 이 옵션으로 띄운 세션은 **확인 프롬프트 없이 파일을 고치고 명령을 실행한다.**
+> 레포 세션이면 그 레포 전체가, 메인 세션이면 `--add-dir` 로 붙은 모든 레포가 그 대상이다.
+> 내용을 신뢰하는 워크디렉토리에서만 쓴다.
+
+기본값으로 저장하는 길은 두지 않았다. 위험한 모드는 실행할 때마다 손으로 켜는 것이라,
+설정 파일에 한 번 적어두고 잊는 자리를 만들지 않는다.
+
+세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다. 이미 떠 있는 세션에
+이 옵션을 다시 줘도 아무것도 바뀌지 않으므로, 그 사실을 stderr 로 알린다.
+
+```
+--bypass-permissions 는 이미 실행 중인 main 세션에는 적용되지 않습니다 — 세션이 실행할 명령은 만들 때 정해집니다.
+이 옵션으로 다시 띄우려면 kyu kill main 뒤에 다시 실행하세요.
+```
+
+`kyu` 는 그 경고를 내고도 진입까지 이어간다. 사용자가 원한 것은 그 워크디렉토리에서 작업을
+시작하는 것이고, 떠 있는 세션이 그 요구를 이미 채우고 있다.
 
 ### `kyu attach <repo>`
 

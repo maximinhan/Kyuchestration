@@ -20,6 +20,11 @@ import (
 // 갖기 시작하면 kyu 와 kyu start 가 서로 다른 세션을 띄우게 되고, 그 어긋남은 사용자가
 // 세션 안에서 --add-dir 이 빠진 것을 발견할 때에야 드러난다.
 
+const enterUsageText = `사용법: kyu [--bypass-permissions]
+
+  kyu                       이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
+  kyu --bypass-permissions  메인 세션의 claude 를 권한 확인 없이 띄운다`
+
 // entryGuidanceForExplicitInit 은 자동 초기화를 거절할 때 함께 내보내는 다음 걸음이다.
 //
 // 길을 막는 것이 아니라 한 번 더 말하게 하는 장치라, 그 방법을 같은 자리에서 알린다.
@@ -42,7 +47,12 @@ const entryWarningForEmptyWorkDir = "레포 없음 — 메인 세션에는 지�
 //
 // 경고는 errOut 으로 나간다. 진입 안내와 섞이면 세션에 들어가기 직전 화면에서 두 종류의 말이
 // 구분 없이 흘러간다.
-func EnterWorkDir(out, errOut io.Writer, backend session.SessionBackend) error {
+func EnterWorkDir(out, errOut io.Writer, args []string, backend session.SessionBackend) error {
+	request, err := parseEnterArgs(args)
+	if err != nil {
+		return err
+	}
+
 	location, err := currentWorkDir()
 	if err != nil {
 		return err
@@ -61,16 +71,59 @@ func EnterWorkDir(out, errOut io.Writer, backend session.SessionBackend) error {
 		return fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
 	}
 
-	if !isMainSessionAlive {
+	if isMainSessionAlive {
+		// 진입을 막지는 않는다. 사용자가 원한 것은 이 워크디렉토리에서 작업을 시작하는 것이고,
+		// 떠 있는 세션이 그 요구를 이미 채운다 — 다만 이번에 켠 옵션이 그 세션에는 닿지 않는다.
+		if request.bypassPermissions {
+			if err := warnRunningSessionKeepsTheCommandItWasCreatedWith(errOut, mainRowLabel); err != nil {
+				return err
+			}
+		}
+	} else {
 		if err := warnWhenWorkDirHasNoRepo(errOut, location.absolutePath); err != nil {
 			return err
 		}
-		if err := StartSession(out, nil, backend); err != nil {
+		if err := StartSession(out, errOut, request.startArgs(), backend); err != nil {
 			return err
 		}
 	}
 
 	return AttachSession(out, []string{mainRowLabel}, backend)
+}
+
+// enterRequest 는 파싱이 끝난 kyu 요청이다.
+type enterRequest struct {
+	// bypassPermissions 는 메인 세션의 claude 가 권한 확인을 건너뛸지다.
+	bypassPermissions bool
+}
+
+// parseEnterArgs 는 인자 없는 kyu 가 받는 옵션을 고른다.
+//
+// 레포 이름은 받지 않는다. 이 명령이 만드는 것은 메인 세션 하나이고, 레포 세션을 띄우는 길은
+// kyu start <repo> 로 이미 있다.
+func parseEnterArgs(args []string) (enterRequest, error) {
+	var request enterRequest
+
+	for _, arg := range args {
+		if arg != bypassPermissionsOptionName {
+			return enterRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, enterUsageText)
+		}
+		request.bypassPermissions = true
+	}
+
+	return request, nil
+}
+
+// startArgs 는 이 요청을 kyu start 의 인자로 옮긴다.
+//
+// 파싱한 구조체를 넘기지 않고 인자 문자열로 되돌린다. 진입 플로우가 start 의 내부 표현을
+// 직접 건드리기 시작하면 같은 옵션을 두 곳에서 해석하게 되고, 그 어긋남은 사용자가 세션
+// 안에서야 발견한다 — 옵션의 해석자는 start 의 파서 하나로 남긴다.
+func (request enterRequest) startArgs() []string {
+	if request.bypassPermissions {
+		return []string{bypassPermissionsOptionName}
+	}
+	return nil
 }
 
 // initializeWorkDirForEntry 는 계획 파일이 아직 없으면 kyu init 과 같은 것을 만든다.

@@ -40,8 +40,8 @@ func TestStartSessionWithoutRepoCreatesMainSessionWithAddDirForEveryRepo(t *test
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	if err := StartSession(&out, nil, backend); err != nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("StartSession() 실패: %v", err)
 	}
 
@@ -68,8 +68,8 @@ func TestStartSessionWithoutRepoInEmptyWorkDirCreatesMainSessionWithoutAddDir(t 
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	if err := StartSession(&out, nil, backend); err != nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("StartSession() 실패: %v", err)
 	}
 
@@ -90,8 +90,8 @@ func TestStartSessionWithRepoCreatesSessionInThatRepoDirectory(t *testing.T) {
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	if err := StartSession(&out, []string{"beta-gateway"}, backend); err != nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"beta-gateway"}, backend); err != nil {
 		t.Fatalf("StartSession() 실패: %v", err)
 	}
 
@@ -116,8 +116,8 @@ func TestStartSessionOnUnknownRepoListsTheReposItFoundAndCreatesNothing(t *testi
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	err := StartSession(&out, []string{"gamma-worker"}, backend)
+	var out, errOut bytes.Buffer
+	err := StartSession(&out, &errOut, []string{"gamma-worker"}, backend)
 
 	if err == nil {
 		t.Fatalf("StartSession() 가 에러를 반환하지 않음, 없는 레포 에러를 기대")
@@ -142,8 +142,8 @@ func TestStartSessionGuidesToAttachWhenTheSessionIsAlreadyRunning(t *testing.T) 
 	backend := newRecordingSessionBackend()
 	backend.createError = fmt.Errorf("%w: kyu-WorkDir-featureX-alpha-commons", session.ErrSessionExists)
 
-	var out bytes.Buffer
-	if err := StartSession(&out, []string{"alpha-commons"}, backend); err != nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"alpha-commons"}, backend); err != nil {
 		t.Fatalf("StartSession() = %v, 이미 실행 중인 세션은 성공으로 끝나기를 기대", err)
 	}
 
@@ -152,6 +152,10 @@ func TestStartSessionGuidesToAttachWhenTheSessionIsAlreadyRunning(t *testing.T) 
 	}
 	if !strings.Contains(out.String(), "kyu attach alpha-commons") {
 		t.Errorf("출력 = %q, 진입 방법 안내를 포함하기를 기대", out.String())
+	}
+	// 이번 실행에 새로 요구한 것이 없으면 경고할 것도 없다. 매번 되풀이하면 읽히지 않는 경고가 된다.
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, 옵션 없는 실행에서는 경고하지 않기를 기대", errOut.String())
 	}
 }
 
@@ -164,8 +168,8 @@ func TestStartSessionPropagatesCreateFailureOtherThanSessionExists(t *testing.T)
 	backend := newRecordingSessionBackend()
 	backend.createError = errors.New("tmux 서버를 띄우지 못했습니다")
 
-	var out bytes.Buffer
-	if err := StartSession(&out, nil, backend); err == nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, nil, backend); err == nil {
 		t.Fatalf("StartSession() 가 에러를 반환하지 않음, 세션 생성 실패 전파를 기대")
 	}
 }
@@ -177,8 +181,8 @@ func TestStartSessionRejectsMoreThanOneRepo(t *testing.T) {
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	if err := StartSession(&out, []string{"alpha-commons", "beta-gateway"}, backend); err == nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"alpha-commons", "beta-gateway"}, backend); err == nil {
 		t.Fatalf("StartSession() 가 에러를 반환하지 않음, 인자 개수 에러를 기대")
 	}
 	if len(backend.createdSessions) != 0 {
@@ -193,8 +197,8 @@ func TestStartSessionRejectsUnknownOption(t *testing.T) {
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	err := StartSession(&out, []string{"--없는옵션"}, backend)
+	var out, errOut bytes.Buffer
+	err := StartSession(&out, &errOut, []string{"--없는옵션"}, backend)
 
 	if err == nil {
 		t.Fatalf("StartSession() 가 에러를 반환하지 않음, 알 수 없는 옵션 에러를 기대")
@@ -214,8 +218,8 @@ func TestStartSessionWithRepoClaudeMdOptionWrapsTheCommandInEnvAssignment(t *tes
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	if err := StartSession(&out, []string{"--repo-claude-md"}, backend); err != nil {
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"--repo-claude-md"}, backend); err != nil {
 		t.Fatalf("StartSession() 실패: %v", err)
 	}
 
@@ -239,8 +243,8 @@ func TestStartSessionRejectsRepoClaudeMdOptionForARepoSession(t *testing.T) {
 
 	backend := newRecordingSessionBackend()
 
-	var out bytes.Buffer
-	err := StartSession(&out, []string{"alpha-commons", "--repo-claude-md"}, backend)
+	var out, errOut bytes.Buffer
+	err := StartSession(&out, &errOut, []string{"alpha-commons", "--repo-claude-md"}, backend)
 
 	if err == nil {
 		t.Fatalf("StartSession() 가 에러를 반환하지 않음, 메인 세션 전용 옵션 에러를 기대")
@@ -250,5 +254,132 @@ func TestStartSessionRejectsRepoClaudeMdOptionForARepoSession(t *testing.T) {
 	}
 	if len(backend.createdSessions) != 0 {
 		t.Errorf("Create 호출 = %+v, 옵션이 잘못됐으면 아무것도 만들지 않기를 기대", backend.createdSessions)
+	}
+}
+
+func TestStartSessionWithBypassPermissionsPutsTheSkipFlagOnTheMainSessionCommand(t *testing.T) {
+	// 이 옵션의 값어치는 세션 안에서 claude 가 어떤 인자로 뜨는가 하나로 결정된다.
+	// 플래그 이름을 상수가 아닌 문자열로 적는다 — 상수를 잘못 고쳐도 테스트가 함께 따라 바뀌면
+	// claude 에게 실제로 무엇이 전달되는지는 아무도 지키지 않게 된다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name: "kyu-WorkDir-featureX-main",
+		cwd:  workDirPath,
+		command: []string{
+			"claude", "--dangerously-skip-permissions",
+			"--add-dir", filepath.Join(workDirPath, "alpha-commons"),
+		},
+	})
+}
+
+func TestStartSessionWithBypassPermissionsPutsTheSkipFlagOnTheRepoSessionCommand(t *testing.T) {
+	// --repo-claude-md 와 달리 이 옵션은 레포 세션에도 뜻이 있다. 권한 확인은 세션이 어느
+	// 디렉토리에서 떴는지와 무관하게 매번 묻는 것이라, 메인 전용으로 막을 근거가 없다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"alpha-commons", "--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name:    "kyu-WorkDir-featureX-alpha-commons",
+		cwd:     filepath.Join(workDirPath, "alpha-commons"),
+		command: []string{"claude", "--dangerously-skip-permissions"},
+	})
+}
+
+func TestStartSessionCombinesBypassPermissionsWithRepoClaudeMd(t *testing.T) {
+	// 두 옵션은 서로 다른 자리를 건드린다 — 하나는 명령을 env 로 감싸고 하나는 claude 의 인자다.
+	// 조립 순서가 어긋나면 env 가 claude 대신 플래그를 실행하려 들거나 플래그가 env 의 인자로 먹힌다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"--repo-claude-md", "--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name: "kyu-WorkDir-featureX-main",
+		cwd:  workDirPath,
+		command: []string{
+			"env", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1",
+			"claude", "--dangerously-skip-permissions",
+			"--add-dir", filepath.Join(workDirPath, "alpha-commons"),
+		},
+	})
+}
+
+func TestStartSessionWithoutBypassPermissionsNeverPassesTheSkipFlag(t *testing.T) {
+	// 권한 확인을 건너뛰는 것은 호출마다 의식적으로 켜는 위험 모드라, 기본값으로 새어 들어갈
+	// 자리가 없어야 한다. 위의 조립 테스트들은 조립 방식이 바뀌면 함께 고쳐지지만, 이 테스트는
+	// 무엇을 어떻게 조립하든 이 플래그만은 들어가지 않는다는 것 하나만 본다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out, errOut bytes.Buffer
+	for _, args := range [][]string{nil, {"alpha-commons"}, {"--repo-claude-md"}} {
+		if err := StartSession(&out, &errOut, args, backend); err != nil {
+			t.Fatalf("StartSession(%q) 실패: %v", args, err)
+		}
+	}
+
+	for _, created := range backend.createdSessions {
+		if slices.Contains(created.command, "--dangerously-skip-permissions") {
+			t.Errorf("%s 세션 명령 = %q, 옵션을 주지 않으면 권한 확인 생략 플래그가 없기를 기대",
+				created.name, created.command)
+		}
+	}
+}
+
+func TestStartSessionWarnsThatBypassPermissionsDoesNotReachTheRunningSession(t *testing.T) {
+	// 세션이 실행할 명령은 세션을 만드는 순간 굳는다. 이미 떠 있는 세션에 이 옵션을 다시 줘도
+	// 아무 일도 일어나지 않는데, 조용히 넘어가면 사용자는 켜졌다고 믿은 채 그 세션에서 계속 작업한다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+	backend.createError = fmt.Errorf("%w: kyu-WorkDir-featureX-alpha-commons", session.ErrSessionExists)
+
+	var out, errOut bytes.Buffer
+	if err := StartSession(&out, &errOut, []string{"alpha-commons", "--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("StartSession() = %v, 이미 실행 중인 세션은 성공으로 끝나기를 기대", err)
+	}
+
+	for _, wantInWarning := range []string{"--bypass-permissions", "적용되지 않습니다", "kyu kill alpha-commons"} {
+		if !strings.Contains(errOut.String(), wantInWarning) {
+			t.Errorf("stderr = %q, %q 를 포함하기를 기대", errOut.String(), wantInWarning)
+		}
+	}
+
+	// 경고가 기존 안내를 밀어내지 않는다 — 사용자는 그 세션으로 그대로 진입할 수도 있다.
+	if !strings.Contains(out.String(), "kyu attach alpha-commons") {
+		t.Errorf("출력 = %q, 진입 방법 안내를 포함하기를 기대", out.String())
+	}
+	// 경고는 stdout 을 오염시키지 않는다.
+	if strings.Contains(out.String(), "적용되지 않습니다") {
+		t.Errorf("stdout = %q, 경고는 stderr 로만 나가기를 기대", out.String())
 	}
 }

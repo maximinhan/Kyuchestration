@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/maximinhan/Kyuchestration/internal/cli"
 	"github.com/maximinhan/Kyuchestration/internal/session"
@@ -29,7 +30,11 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
-  kyu version            이 바이너리의 버전`
+  kyu version            이 바이너리의 버전
+
+옵션 (kyu, kyu start):
+  --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
+  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -47,9 +52,13 @@ func runCommand(args []string, out, errOut io.Writer) error {
 	// 인자 없는 kyu 는 서브커맨드의 기본값이 아니라 그 자체로 하나의 명령이다 — 이 도구를 여는 문이다.
 	// 목록을 기본으로 두던 때(설계 문서 9.3)와 달라진 자리이고, 그 결정의 근거는 사용자가 이 도구
 	// 앞에서 실제로 하는 일이 "상태를 본다" 가 아니라 "여기서 작업을 시작한다" 였다는 것이다.
-	if len(args) == 0 {
+	//
+	// 옵션으로 시작하는 인자도 이 문으로 보낸다. 진입 명령이 옵션을 받게 된 뒤로는 첫 인자가
+	// - 로 시작하는 실행이 "알 수 없는 명령: --bypass-permissions" 로 끝나서는 안 된다.
+	// 서브커맨드 이름은 - 로 시작하지 않으므로 이 갈림에 걸릴 명령은 없다.
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.EnterWorkDir(out, errOut, backend)
+			return cli.EnterWorkDir(out, errOut, args, backend)
 		})
 	}
 
@@ -62,7 +71,7 @@ func runCommand(args []string, out, errOut io.Writer) error {
 		})
 	case "start":
 		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.StartSession(out, commandArgs, backend)
+			return cli.StartSession(out, errOut, commandArgs, backend)
 		})
 	case "attach":
 		return withSessionBackend(func(backend session.SessionBackend) error {
@@ -96,8 +105,8 @@ func runCommand(args []string, out, errOut io.Writer) error {
 // 조립을 명령마다 되풀이하지 않고 한 곳으로 모은다. tmux 미설치 안내처럼 모든 명령이 똑같이
 // 해야 하는 일이 여기 있으므로, 새 명령이 그것을 빠뜨릴 자리 자체가 없다.
 //
-// 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. list 는 stderr 까지 쓰지만 나머지는
-// 그렇지 않은데, 공통 시그니처를 강요하면 세 명령이 쓰지도 않는 인자를 받게 된다.
+// 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. 진입·list·start 는 stderr 까지 쓰지만
+// attach·kill 은 그렇지 않은데, 공통 시그니처를 강요하면 두 명령이 쓰지도 않는 인자를 받게 된다.
 func withSessionBackend(command func(session.SessionBackend) error) error {
 	backend, err := session.NewTmuxBackend()
 	if err != nil {

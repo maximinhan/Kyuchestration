@@ -239,3 +239,37 @@ func TestInitCreatesThePlanFileWithoutNeedingTmux(t *testing.T) {
 		t.Errorf("stdout = %q, 초기화 안내를 기대", stdout.String())
 	}
 }
+
+func TestKyuWithAnOptionRoutesToTheEntryFlowInsteadOfFailingAsAnUnknownCommand(t *testing.T) {
+	// 진입 명령이 옵션을 받게 된 뒤로, 첫 인자가 - 로 시작하는 실행은 서브커맨드 이름을 찾는
+	// 갈림에 걸리면 안 된다. 걸리면 kyu --bypass-permissions 가 "알 수 없는 명령" 으로 끝난다.
+	//
+	// 관측점은 인자 없는 kyu 와 같은 홈 디렉토리 자동 초기화 거절이다. 진입 플로우에만 있는
+	// 반응이고, 세션을 만들기 전에 끝나므로 tmux 세션도 claude 프로세스도 남기지 않는다.
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux 가 PATH 에 없어 진입 라우팅 테스트를 건너뜁니다")
+	}
+
+	homeDirectoryPath := t.TempDir()
+
+	command := exec.Command(buildKyuBinary(t), "--bypass-permissions")
+	command.Dir = homeDirectoryPath
+	command.Env = append(os.Environ(), "HOME="+homeDirectoryPath)
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("kyu --bypass-permissions 실행 결과 = %v, 종료 코드로 끝나기를 기대", err)
+	}
+	if strings.Contains(stderr.String(), "알 수 없는 명령") {
+		t.Errorf("stderr = %q, 옵션을 명령으로 읽지 않기를 기대", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "kyu init") {
+		t.Errorf("stderr = %q, 진입 플로우의 명시적 초기화 안내를 기대", stderr.String())
+	}
+}

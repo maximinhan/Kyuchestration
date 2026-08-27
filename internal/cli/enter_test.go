@@ -37,7 +37,7 @@ func TestEnterWorkDirCreatesTheMainSessionWithAddDirAndThenEntersIt(t *testing.T
 	backend := newRecordingSessionBackend()
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestEnterWorkDirEntersTheRunningMainSessionWithoutCreatingItAgain(t *testin
 	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestEnterWorkDirInitializesTheWorkDirWhenThePlanFileIsMissing(t *testing.T)
 	backend := newRecordingSessionBackend()
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestEnterWorkDirKeepsThePlanFileThatIsAlreadyThere(t *testing.T) {
 	backend := newRecordingSessionBackend()
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
@@ -137,7 +137,7 @@ func TestEnterWorkDirTranslatesNestedSessionRefusalIntoGuidance(t *testing.T) {
 	backend.attachError = fmt.Errorf("%w: kyu-WorkDir-featureX-main", session.ErrNestedSession)
 
 	var out, errOut bytes.Buffer
-	err := EnterWorkDir(&out, &errOut, backend)
+	err := EnterWorkDir(&out, &errOut, nil, backend)
 
 	if err == nil {
 		t.Fatalf("EnterWorkDir() 가 에러를 반환하지 않음, 중첩 거절을 기대")
@@ -157,7 +157,7 @@ func TestEnterWorkDirRefusesToTurnTheHomeDirectoryIntoAWorkDir(t *testing.T) {
 	backend := newRecordingSessionBackend()
 
 	var out, errOut bytes.Buffer
-	err := EnterWorkDir(&out, &errOut, backend)
+	err := EnterWorkDir(&out, &errOut, nil, backend)
 
 	if err == nil {
 		t.Fatalf("EnterWorkDir() 가 에러를 반환하지 않음, 홈 디렉토리 거절을 기대")
@@ -186,7 +186,7 @@ func TestEnterWorkDirEntersTheHomeDirectoryThatWasInitializedByHand(t *testing.T
 	backend := newRecordingSessionBackend()
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
@@ -202,7 +202,7 @@ func TestEnterWorkDirWarnsThatReposClonedInsideTheSessionNeedARestart(t *testing
 	backend := newRecordingSessionBackend()
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
@@ -225,11 +225,90 @@ func TestEnterWorkDirDoesNotWarnAboutMissingReposWhenTheSessionIsAlreadyRunning(
 	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
 
 	var out, errOut bytes.Buffer
-	if err := EnterWorkDir(&out, &errOut, backend); err != nil {
+	if err := EnterWorkDir(&out, &errOut, nil, backend); err != nil {
 		t.Fatalf("EnterWorkDir() 실패: %v", err)
 	}
 
 	if errOut.Len() != 0 {
 		t.Errorf("stderr = %q, 세션을 만들지 않는 실행에서는 경고하지 않기를 기대", errOut.String())
 	}
+}
+
+func TestEnterWorkDirWithBypassPermissionsCreatesTheMainSessionWithTheSkipFlag(t *testing.T) {
+	// 진입 플로우는 자기만의 조립을 갖지 않고 kyu start 를 그대로 부른다. 그 약속이 지켜지는지가
+	// 이 테스트의 관측점이다 — 두 경로가 갈라지면 같은 옵션이 kyu 와 kyu start 에서 다르게 먹힌다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out, errOut bytes.Buffer
+	if err := EnterWorkDir(&out, &errOut, []string{"--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("EnterWorkDir() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name: "kyu-WorkDir-featureX-main",
+		cwd:  workDirPath,
+		command: []string{
+			"claude", "--dangerously-skip-permissions",
+			"--add-dir", filepath.Join(workDirPath, "alpha-commons"),
+		},
+	})
+	assertOnlyAttachedSession(t, backend, "kyu-WorkDir-featureX-main")
+}
+
+func TestEnterWorkDirRejectsUnknownOptionWithoutTouchingTheWorkDir(t *testing.T) {
+	// 인자 없는 kyu 가 옵션을 받기 시작하면 오타도 함께 들어온다. 모르는 옵션을 조용히 흘리면
+	// 사용자는 켰다고 믿은 채 세션 안으로 들어가고, 그 세션은 이번 실행 내내 그대로 남는다.
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out, errOut bytes.Buffer
+	err := EnterWorkDir(&out, &errOut, []string{"--없는옵션"}, backend)
+
+	if err == nil {
+		t.Fatalf("EnterWorkDir() 가 에러를 반환하지 않음, 알 수 없는 옵션 에러를 기대")
+	}
+	if !strings.Contains(err.Error(), "--없는옵션") {
+		t.Errorf("에러 = %v, 문제의 옵션을 그대로 되짚어 주기를 기대", err)
+	}
+
+	// 인자를 보기 전에 초기화부터 하면, 거절당한 실행이 워크디렉토리를 바꿔놓고 끝난다.
+	if _, statErr := os.Stat(workdir.PlanFilePath(workDirPath)); statErr == nil {
+		t.Errorf("계획 파일이 만들어졌습니다: %s", workdir.PlanFilePath(workDirPath))
+	}
+	if len(backend.createdSessions) != 0 {
+		t.Errorf("Create 호출 = %+v, 거절했으면 세션도 만들지 않기를 기대", backend.createdSessions)
+	}
+}
+
+func TestEnterWorkDirWarnsThatBypassPermissionsDoesNotReachTheRunningMainSessionAndEntersAnyway(t *testing.T) {
+	// 진입은 막지 않는다 — 사용자가 원한 것은 이 워크디렉토리에서 작업을 시작하는 것이고,
+	// 떠 있는 세션은 그 요구를 이미 채운다. 다만 이번에 켠 옵션이 그 세션에는 닿지 않는다는
+	// 사실은 진입 전에 말해야 한다. 세션 안으로 들어간 뒤에는 이 도구가 말을 걸 수 없다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
+
+	var out, errOut bytes.Buffer
+	if err := EnterWorkDir(&out, &errOut, []string{"--bypass-permissions"}, backend); err != nil {
+		t.Fatalf("EnterWorkDir() 실패: %v", err)
+	}
+
+	for _, wantInWarning := range []string{"--bypass-permissions", "적용되지 않습니다", "kyu kill main"} {
+		if !strings.Contains(errOut.String(), wantInWarning) {
+			t.Errorf("stderr = %q, %q 를 포함하기를 기대", errOut.String(), wantInWarning)
+		}
+	}
+
+	if len(backend.createdSessions) != 0 {
+		t.Errorf("Create 호출 = %+v, 이미 떠 있으면 만들지 않기를 기대", backend.createdSessions)
+	}
+	assertOnlyAttachedSession(t, backend, "kyu-WorkDir-featureX-main")
 }
