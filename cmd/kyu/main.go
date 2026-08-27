@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/maximinhan/Kyuchestration/internal/cli"
 	"github.com/maximinhan/Kyuchestration/internal/session"
@@ -47,9 +48,13 @@ func runCommand(args []string, out, errOut io.Writer) error {
 	// 인자 없는 kyu 는 서브커맨드의 기본값이 아니라 그 자체로 하나의 명령이다 — 이 도구를 여는 문이다.
 	// 목록을 기본으로 두던 때(설계 문서 9.3)와 달라진 자리이고, 그 결정의 근거는 사용자가 이 도구
 	// 앞에서 실제로 하는 일이 "상태를 본다" 가 아니라 "여기서 작업을 시작한다" 였다는 것이다.
-	if len(args) == 0 {
+	//
+	// 옵션으로 시작하는 인자도 이 문으로 보낸다. 진입 명령이 옵션을 받게 된 뒤로는 첫 인자가
+	// - 로 시작하는 실행이 "알 수 없는 명령: --bypass-permissions" 로 끝나서는 안 된다.
+	// 서브커맨드 이름은 - 로 시작하지 않으므로 이 갈림에 걸릴 명령은 없다.
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.EnterWorkDir(out, errOut, backend)
+			return cli.EnterWorkDir(out, errOut, args, backend)
 		})
 	}
 
