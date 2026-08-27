@@ -90,7 +90,7 @@ const (
 
 // PlanFilePath 는 워크디렉토리의 계획 파일 경로를 만든다: <workdir>/.coord/plan.md.
 //
-// 경로 규약을 이 함수 하나로 모은다. 계획을 읽는 쪽(LoadPlan)과 만드는 쪽(wd init)이 각자
+// 경로 규약을 이 함수 하나로 모은다. 계획을 읽는 쪽(LoadPlan)과 만드는 쪽(kyu init)이 각자
 // 경로를 조립하면 한쪽만 고쳤을 때 도구가 자기가 만든 파일을 읽지 못하게 되고,
 // 그 어긋남은 "계획이 없다" 는 정상 결과로 보여서 드러나지 않는다.
 func PlanFilePath(workDirPath string) string {
@@ -106,7 +106,7 @@ func LoadPlan(workDirPath string) (Plan, error) {
 
 	planFileContent, err := os.ReadFile(planFilePath)
 	if errors.Is(err, os.ErrNotExist) {
-		// wd init 을 아직 하지 않았거나 조율할 것이 없는 워크디렉토리다. 흔한 정상 상태다.
+		// kyu init 을 아직 하지 않았거나 조율할 것이 없는 워크디렉토리다. 흔한 정상 상태다.
 		return Plan{}, nil
 	}
 	if err != nil {

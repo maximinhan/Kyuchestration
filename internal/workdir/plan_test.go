@@ -204,7 +204,7 @@ func assertPlanDroppedWithWarning(t *testing.T, plan Plan, wantWarningFragments 
 }
 
 func TestLoadPlanReturnsNoPlanWhenPlanFileIsMissing(t *testing.T) {
-	// wd init 을 아직 하지 않았거나 조율할 것이 없는 워크디렉토리다. 흔한 정상 상태이므로
+	// kyu init 을 아직 하지 않았거나 조율할 것이 없는 워크디렉토리다. 흔한 정상 상태이므로
 	// 에러가 아니다 — 여기서 에러를 올리면 계획과 무관한 레포 목록조차 볼 수 없다.
 	plan, err := LoadPlan(t.TempDir())
 	if err != nil {

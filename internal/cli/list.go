@@ -20,11 +20,11 @@ import (
 // mainRowLabel 은 메인 세션 행에 찍히는 이름이다.
 //
 // 세션 이름 규칙에서 레포 자리에 들어가는 main 과 같은 낱말이지만, 이쪽은 화면에 보이는 표시다.
-// 사용자가 `wd attach main` 이라고 부를 때의 이름이 세션 이름 규칙과 함께 움직여야 할 이유가 없어
+// 사용자가 `kyu attach main` 이라고 부를 때의 이름이 세션 이름 규칙과 함께 움직여야 할 이유가 없어
 // session 패키지의 상수를 끌어오지 않는다.
 const mainRowLabel = "main"
 
-// ListWorkDir 는 wd list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
+// ListWorkDir 는 kyu list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
 //
 // 계획에 대한 경고는 out 이 아니라 errOut 으로 나간다. 목록은 다른 명령의 입력으로 넘길 수 있어야
 // 하는데 경고가 섞이면 그 쓰임이 깨지고, 계획이 깨져도 목록 자체는 그대로 성립하기 때문이다
@@ -228,7 +228,7 @@ const tableColumnPadding = 2
 
 const emptyWorkDirGuidance = "레포 없음 — 이 디렉토리 아래에 git 레포를 클론하세요"
 
-const attachGuidance = "wd attach <repo> 로 진입"
+const attachGuidance = "kyu attach <repo> 로 진입"
 
 // writeWorkDirListing 은 관찰 결과를 한 화면으로 옮긴다.
 func writeWorkDirListing(out io.Writer, listing workDirListing) error {

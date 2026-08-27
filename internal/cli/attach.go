@@ -9,10 +9,10 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
-const attachUsageText = `사용법: wd attach <repo>
+const attachUsageText = `사용법: kyu attach <repo>
 
-  wd attach <repo>   해당 레포의 세션으로 진입한다
-  wd attach main     메인 세션으로 진입한다`
+  kyu attach <repo>   해당 레포의 세션으로 진입한다
+  kyu attach main     메인 세션으로 진입한다`
 
 // detachKeyBinding 은 세션에서 빠져나오는 키다.
 //
@@ -27,7 +27,7 @@ const detachKeyBinding = "Ctrl-b d"
 // 세션에 들어간 뒤에는 이 도구가 말을 걸 수 없으므로, 진입 직전이 그것을 알릴 유일한 기회다.
 const detachGuidance = "빠져나오기: " + detachKeyBinding
 
-// AttachSession 은 wd attach 를 실행한다. 사용자가 세션에서 빠져나올 때까지 블로킹된다.
+// AttachSession 은 kyu attach 를 실행한다. 사용자가 세션에서 빠져나올 때까지 블로킹된다.
 func AttachSession(out io.Writer, args []string, backend session.SessionBackend) error {
 	label, err := parseAttachArgs(args)
 	if err != nil {
@@ -47,7 +47,7 @@ func AttachSession(out io.Writer, args []string, backend session.SessionBackend)
 		return fmt.Errorf("세션 생존 확인 실패 (%s): %w", sessionName, err)
 	}
 	if !isAlive {
-		return fmt.Errorf("%s 세션이 없습니다\n시작: wd start %s", label, label)
+		return fmt.Errorf("%s 세션이 없습니다\n시작: kyu start %s", label, label)
 	}
 
 	fmt.Fprintln(out, detachGuidance)

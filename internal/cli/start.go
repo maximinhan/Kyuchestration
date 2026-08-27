@@ -37,13 +37,13 @@ const repoClaudeMdEnvAssignment = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=
 // 할 것이 늘어난다(설계 문서 5.2 의 "플랫폼 의존부는 5개 함수가 전부다").
 const envCommandName = "env"
 
-const startUsageText = `사용법: wd start [repo] [--repo-claude-md]
+const startUsageText = `사용법: kyu start [repo] [--repo-claude-md]
 
-  wd start                     워크디렉토리 최상위에서 메인 세션을 띄운다
-  wd start <repo>              해당 레포 디렉토리에서 세션을 띄운다
-  wd start --repo-claude-md    메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다`
+  kyu start                     워크디렉토리 최상위에서 메인 세션을 띄운다
+  kyu start <repo>              해당 레포 디렉토리에서 세션을 띄운다
+  kyu start --repo-claude-md    메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다`
 
-// StartSession 은 wd start 를 실행한다. 인자가 없으면 메인 세션을, 레포 이름이 있으면 그 레포의 세션을 띄운다.
+// StartSession 은 kyu start 를 실행한다. 인자가 없으면 메인 세션을, 레포 이름이 있으면 그 레포의 세션을 띄운다.
 //
 // 대상 워크디렉토리는 명령을 실행한 디렉토리다. list 처럼 경로 인자를 받지 않는 이유는,
 // 세션을 띄우는 일은 그 워크디렉토리에서 작업을 시작하겠다는 뜻이라 다른 디렉토리를 가리킬 일이 없어서다.
@@ -71,7 +71,7 @@ func StartSession(out io.Writer, args []string, backend session.SessionBackend) 
 	return startRepoSession(out, location, repos, request.repoName, backend)
 }
 
-// startRequest 는 파싱이 끝난 wd start 요청이다.
+// startRequest 는 파싱이 끝난 kyu start 요청이다.
 type startRequest struct {
 	// repoName 이 비어 있으면 메인 세션 요청이다(설계 문서 9.3 의 "인자 없으면 main").
 	repoName string
@@ -159,16 +159,16 @@ func createSession(out io.Writer, backend session.SessionBackend, sessionName, l
 	err := backend.Create(sessionName, cwd, command)
 
 	// 이미 떠 있는 것은 사용자가 원한 상태와 다르지 않다 — 그 세션에서 작업하면 된다.
-	// 실패로 끝내면 wd start 를 앞에 둔 스크립트가 두 번째 실행부터 깨지므로 안내만 하고 성공으로 끝낸다.
+	// 실패로 끝내면 kyu start 를 앞에 둔 스크립트가 두 번째 실행부터 깨지므로 안내만 하고 성공으로 끝낸다.
 	if errors.Is(err, session.ErrSessionExists) {
-		fmt.Fprintf(out, "%s 세션이 이미 실행 중입니다.\n진입: wd attach %s\n", label, label)
+		fmt.Fprintf(out, "%s 세션이 이미 실행 중입니다.\n진입: kyu attach %s\n", label, label)
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("%s 세션 생성 실패: %w", label, err)
 	}
 
-	fmt.Fprintf(out, "%s 세션을 시작했습니다.\n진입: wd attach %s\n", label, label)
+	fmt.Fprintf(out, "%s 세션을 시작했습니다.\n진입: kyu attach %s\n", label, label)
 	return nil
 }
 

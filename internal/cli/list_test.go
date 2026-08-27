@@ -306,7 +306,7 @@ func TestListWorkDirWritesEachRepoWithMarkerAndStateInAlignedColumns(t *testing.
   ●  zeta-service   RUNNING
   ○  main           IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }
 
@@ -329,7 +329,7 @@ func TestListWorkDirCountsEveryLiveSessionIncludingMain(t *testing.T) {
   ●  zeta-service   RUNNING
   ●  main           RUNNING
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }
 
@@ -345,7 +345,7 @@ func TestListWorkDirWritesSingularNounsWhenThereIsExactlyOne(t *testing.T) {
   ○  alpha-commons  IDLE
   ●  main           RUNNING
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }
 
@@ -360,7 +360,7 @@ func TestListWorkDirGuidesToCloneWhenThereIsNoRepo(t *testing.T) {
 
   ○  main  IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }
 
@@ -375,7 +375,7 @@ func TestListWorkDirWithoutArgumentsListsCurrentDirectory(t *testing.T) {
   ○  alpha-commons  IDLE
   ○  main           IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 `)
 }
 

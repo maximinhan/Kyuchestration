@@ -8,16 +8,16 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
-const killUsageText = `사용법: wd kill [repo|--all]
+const killUsageText = `사용법: kyu kill [repo|--all]
 
-  wd kill <repo>   해당 레포의 세션을 종료한다
-  wd kill main     메인 세션을 종료한다
-  wd kill --all    이 워크디렉토리의 세션을 모두 종료한다`
+  kyu kill <repo>   해당 레포의 세션을 종료한다
+  kyu kill main     메인 세션을 종료한다
+  kyu kill --all    이 워크디렉토리의 세션을 모두 종료한다`
 
 // allSessionsOptionName 은 이 워크디렉토리의 세션을 모두 종료하는 옵션이다.
 const allSessionsOptionName = "--all"
 
-// KillSessions 는 wd kill 을 실행한다. 이름 하나 또는 --all 로 이 워크디렉토리의 세션을 종료한다.
+// KillSessions 는 kyu kill 을 실행한다. 이름 하나 또는 --all 로 이 워크디렉토리의 세션을 종료한다.
 func KillSessions(out io.Writer, args []string, backend session.SessionBackend) error {
 	request, err := parseKillArgs(args)
 	if err != nil {
@@ -35,7 +35,7 @@ func KillSessions(out io.Writer, args []string, backend session.SessionBackend) 
 	return killOneSession(out, location.name, request.label, backend)
 }
 
-// killRequest 는 파싱이 끝난 wd kill 요청이다.
+// killRequest 는 파싱이 끝난 kyu kill 요청이다.
 type killRequest struct {
 	// label 은 종료할 대상의 이름이다. allSessions 가 참이면 비어 있다.
 	label string
@@ -105,7 +105,7 @@ func killOneSession(out io.Writer, workDirName, label string, backend session.Se
 		return fmt.Errorf("세션 생존 확인 실패 (%s): %w", sessionName, err)
 	}
 
-	// 없는 세션을 지우라는 요청은 이미 이뤄진 상태다. 실패로 끝내면 wd kill 을 앞에 둔 정리
+	// 없는 세션을 지우라는 요청은 이미 이뤄진 상태다. 실패로 끝내면 kyu kill 을 앞에 둔 정리
 	// 스크립트가 두 번째 실행부터 깨진다. 그래도 조용히 끝내지는 않는다 — 이름을 잘못 적었을 때
 	// 아무 말이 없으면 사용자는 그 세션을 죽였다고 믿는다.
 	if !isAlive {

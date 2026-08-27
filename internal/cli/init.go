@@ -11,19 +11,19 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/workdir"
 )
 
-const initUsageText = `사용법: wd init [name]
+const initUsageText = `사용법: kyu init [name]
 
-  wd init          현재 디렉토리를 워크디렉토리로 초기화한다
-  wd init <name>   <name> 디렉토리를 만들어(있으면 그대로 쓴다) 그 안을 초기화한다`
+  kyu init          현재 디렉토리를 워크디렉토리로 초기화한다
+  kyu init <name>   <name> 디렉토리를 만들어(있으면 그대로 쓴다) 그 안을 초기화한다`
 
-// planFileTemplate 은 wd init 이 만드는 .coord/plan.md 의 초기 내용이다.
+// planFileTemplate 은 kyu init 이 만드는 .coord/plan.md 의 초기 내용이다.
 //
 // 빈 파일을 두지 않고 형식을 가르치는 내용을 넣는다. 계획 파일은 사람이 손으로 쓰는 파일인데
 // (설계 문서 6.1) 형식을 설계 문서에서 찾아 옮겨 적게 하면, 그 왕복을 한 번이라도 건너뛴 순간
 // 도구가 읽지 못하는 계획이 만들어진다.
 //
 // 예시를 전부 주석으로 두는 것이 이 템플릿의 핵심이다. 실제 작업으로 살려두면 갓 초기화한
-// 워크디렉토리의 wd list 에 있지도 않은 레포의 작업이 찍힌다. 주석뿐인 frontmatter 는
+// 워크디렉토리의 kyu list 에 있지도 않은 레포의 작업이 찍힌다. 주석뿐인 frontmatter 는
 // LoadPlan 이 "계획 없음" 으로 읽으므로(tasks 가 비어 있다) 목록이 오염되지 않는다.
 //
 // 예시 줄만 # 뒤에 두 칸을 두어 주석 처리했다. 설명 줄은 # 뒤에 한 칸이라, 줄 맨 앞의 # 를
@@ -74,7 +74,7 @@ const (
 	planFilePermission       = 0o644
 )
 
-// InitWorkDir 는 wd init 을 실행한다. 워크디렉토리에 .coord/plan.md 템플릿을 만든다.
+// InitWorkDir 는 kyu init 을 실행한다. 워크디렉토리에 .coord/plan.md 템플릿을 만든다.
 //
 // 세션 백엔드를 받지 않는다. 초기화는 파일을 만드는 일이라 tmux 가 필요 없는데, 백엔드를 받으면
 // 진입점이 그것을 먼저 조립하느라 tmux 가 없는 머신에서 초기화조차 못 하게 된다.
@@ -105,7 +105,7 @@ func InitWorkDir(out io.Writer, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "워크디렉토리를 초기화했습니다: %s\n계획 파일: %s\n\n다음: 이 디렉토리 아래에 레포를 클론한 뒤 wd list\n",
+	fmt.Fprintf(out, "워크디렉토리를 초기화했습니다: %s\n계획 파일: %s\n\n다음: 이 디렉토리 아래에 레포를 클론한 뒤 kyu list\n",
 		absoluteWorkDirPath, planFilePath)
 	return nil
 }

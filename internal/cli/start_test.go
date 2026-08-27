@@ -56,7 +56,7 @@ func TestStartSessionWithoutRepoCreatesMainSessionWithAddDirForEveryRepo(t *test
 		},
 	})
 
-	if !strings.Contains(out.String(), "wd attach main") {
+	if !strings.Contains(out.String(), "kyu attach main") {
 		t.Errorf("출력 = %q, 진입 방법 안내를 포함하기를 기대", out.String())
 	}
 }
@@ -101,7 +101,7 @@ func TestStartSessionWithRepoCreatesSessionInThatRepoDirectory(t *testing.T) {
 		command: []string{"claude"},
 	})
 
-	if !strings.Contains(out.String(), "wd attach beta-gateway") {
+	if !strings.Contains(out.String(), "kyu attach beta-gateway") {
 		t.Errorf("출력 = %q, 진입 방법 안내를 포함하기를 기대", out.String())
 	}
 }
@@ -133,7 +133,7 @@ func TestStartSessionOnUnknownRepoListsTheReposItFoundAndCreatesNothing(t *testi
 }
 
 func TestStartSessionGuidesToAttachWhenTheSessionIsAlreadyRunning(t *testing.T) {
-	// 이미 떠 있는 것은 사용자가 원한 상태와 같다. 실패로 끝내면 wd start 를 앞에 둔 스크립트가
+	// 이미 떠 있는 것은 사용자가 원한 상태와 같다. 실패로 끝내면 kyu start 를 앞에 둔 스크립트가
 	// 두 번째 실행부터 깨진다.
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
@@ -150,7 +150,7 @@ func TestStartSessionGuidesToAttachWhenTheSessionIsAlreadyRunning(t *testing.T) 
 	if !strings.Contains(out.String(), "이미 실행 중") {
 		t.Errorf("출력 = %q, 이미 실행 중이라는 안내를 기대", out.String())
 	}
-	if !strings.Contains(out.String(), "wd attach alpha-commons") {
+	if !strings.Contains(out.String(), "kyu attach alpha-commons") {
 		t.Errorf("출력 = %q, 진입 방법 안내를 포함하기를 기대", out.String())
 	}
 }

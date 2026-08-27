@@ -20,13 +20,13 @@ import (
 //
 // 이 도구가 무엇을 하는 도구인지가 이 한 화면에서 드러나야 하므로, 명령 목록을 여기 한 곳에만 둔다.
 // 명령별 자세한 사용법은 각 명령이 자기 거절 메시지에 함께 싣는다.
-const usageText = `사용법: wd <명령> [인자]
+const usageText = `사용법: kyu <명령> [인자]
 
-  wd init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-  wd list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
-  wd start [repo]       세션 시작. 인자 없으면 main
-  wd attach <repo>      세션 진입. main 도 가능
-  wd kill [repo|--all]  세션 종료`
+  kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
+  kyu list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
+  kyu start [repo]       세션 시작. 인자 없으면 main
+  kyu attach <repo>      세션 진입. main 도 가능
+  kyu kill [repo|--all]  세션 종료`
 
 // defaultCommandName 은 인자 없이 실행했을 때의 명령이다(설계 문서 9.3).
 // 이 도구 앞에서 가장 자주 하는 일이 "지금 어떻게 돼 있지?" 라서 목록이 기본이다.

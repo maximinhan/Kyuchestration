@@ -124,7 +124,7 @@ func TestTmuxBackendCreatePreservesCommandArgumentBoundaries(t *testing.T) {
 	workingDirectory := t.TempDir()
 
 	// cmd 를 공백으로 이어 붙여 넘기면 공백 든 경로가 두 인자로 쪼개지고 `;` 는 셸 구분자가 된다.
-	// `wd start` 가 `claude --add-dir <공백 든 경로>` 를 넘기게 되므로 실제로 걸리는 문제다.
+	// `kyu start` 가 `claude --add-dir <공백 든 경로>` 를 넘기게 되므로 실제로 걸리는 문제다.
 	if err := backend.Create(sessionName, workingDirectory, []string{
 		"sh", "-c", `printf "[%s]" "$@" > argv.txt; sleep 60`, "_", "a b", "c;d",
 	}); err != nil {
@@ -233,7 +233,7 @@ func TestTmuxBackendListReturnsCreatedSessionNames(t *testing.T) {
 // 검증 대상이 결국 tmux 자체의 동작이라 테스트가 감당할 복잡도에 비해 얻는 것이 없다.
 //
 // Attach 는 명령 한 줄에 stdin/stdout/stderr 를 그대로 연결하는 것이 전부이며,
-// 설계 문서 9.2 의 5단계(`wd attach`)에서 손으로 확인한다.
+// 설계 문서 9.2 의 5단계(`kyu attach`)에서 손으로 확인한다.
 
 // waitForFileContent 는 세션 안에서 실행된 명령이 파일을 남길 때까지 기다린다.
 // `tmux new-session -d` 는 명령의 완료를 기다리지 않고 곧바로 반환하므로 폴링이 필요하다.

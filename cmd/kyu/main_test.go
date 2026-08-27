@@ -82,7 +82,7 @@ func TestKillWithoutArgumentsPrintsUsageToStderrAndExitsWithCodeOne(t *testing.T
 	if exitErr.ExitCode() != 1 {
 		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
 	}
-	if !strings.Contains(stderr.String(), "사용법: wd kill") {
+	if !strings.Contains(stderr.String(), "사용법: kyu kill") {
 		t.Errorf("stderr = %q, kill 의 사용법 안내를 기대", stderr.String())
 	}
 }
