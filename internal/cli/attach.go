@@ -14,11 +14,18 @@ const attachUsageText = `사용법: wd attach <repo>
   wd attach <repo>   해당 레포의 세션으로 진입한다
   wd attach main     메인 세션으로 진입한다`
 
+// detachKeyBinding 은 세션에서 빠져나오는 키다.
+//
+// tmux 의 키 바인딩이므로 엄밀히는 세션 계층의 지식이다. 그런데도 표시 계층에 두는 이유는
+// 백엔드가 아직 하나뿐이어서다. 두 번째 백엔드가 생기면 그때 세션 계층이 답하도록 옮긴다 —
+// 지금 인터페이스를 미리 넓히면 쓰이지도 않을 메서드를 앞으로의 모든 구현이 채워야 한다.
+const detachKeyBinding = "Ctrl-b d"
+
 // detachGuidance 는 세션에서 빠져나오는 방법이다.
 //
 // 사용자는 tmux 를 몰라도 되지만(설계 문서 8.2) 빠져나오는 방법 하나만은 알아야 한다.
 // 세션에 들어간 뒤에는 이 도구가 말을 걸 수 없으므로, 진입 직전이 그것을 알릴 유일한 기회다.
-const detachGuidance = "빠져나오기: Ctrl-b d"
+const detachGuidance = "빠져나오기: " + detachKeyBinding
 
 // AttachSession 은 wd attach 를 실행한다. 사용자가 세션에서 빠져나올 때까지 블로킹된다.
 func AttachSession(out io.Writer, args []string, backend session.SessionBackend) error {
@@ -48,7 +55,7 @@ func AttachSession(out io.Writer, args []string, backend session.SessionBackend)
 	if err := backend.Attach(sessionName); err != nil {
 		// 백엔드는 "중첩이다" 까지만 말한다. 그것을 사용자가 할 수 있는 행동으로 옮기는 것은 이쪽 몫이다.
 		if errors.Is(err, session.ErrNestedSession) {
-			return errors.New("이 터미널은 이미 세션 안입니다 — Ctrl-b d 로 빠져나온 뒤 다시 실행하세요")
+			return fmt.Errorf("이 터미널은 이미 세션 안입니다 — %s 로 빠져나온 뒤 다시 실행하세요", detachKeyBinding)
 		}
 		return fmt.Errorf("%s 세션 진입 실패: %w", label, err)
 	}
