@@ -117,9 +117,11 @@ func LoadPlan(workDirPath string) (Plan, error) {
 	frontMatter, err := decodeFrontMatter(frontMatterYAML)
 	if err != nil {
 		// yaml 라이브러리의 메시지를 그대로 붙인다. 어느 줄이 문제인지는 그 메시지에만 들어있고,
-		// 우리 말로 바꿔 적으면 그 정보가 사라진다.
+		// 우리 말로 바꿔 적으면 그 정보가 사라진다. 다만 필드 오타를 알릴 때는 여러 줄로 오므로
+		// 공백으로 접는다 — 경고 하나가 한 줄이어야 호출부가 붙이는 들여쓰기가 어긋나지 않는다.
+		singleLineDecodeFailure := strings.Join(strings.Fields(err.Error()), " ")
 		return planDroppedWithWarnings(planFilePath,
-			fmt.Sprintf("frontmatter 의 YAML 을 해석하지 못했습니다 (%s)", flattenToSingleLine(err.Error()))), nil
+			fmt.Sprintf("frontmatter 의 YAML 을 해석하지 못했습니다 (%s)", singleLineDecodeFailure)), nil
 	}
 
 	tasks := toTasks(frontMatter.Tasks)
@@ -140,15 +142,6 @@ func planDroppedWithWarnings(planFilePath string, reasons ...string) Plan {
 		warnings = append(warnings, fmt.Sprintf("%s: %s", planFilePath, reason))
 	}
 	return Plan{Warnings: warnings}
-}
-
-// flattenToSingleLine 은 줄바꿈과 연속된 공백을 한 칸으로 접는다.
-//
-// 경고 하나가 한 줄이라는 전제를 지키기 위해서다. yaml 라이브러리는 필드 오타를 알릴 때
-// 여러 줄짜리 메시지를 돌려주는데("yaml: unmarshal errors:\n  line 6: ..."), 그것을 그대로
-// 담으면 호출부가 경고마다 붙이는 들여쓰기나 접두사가 둘째 줄부터 어긋난다.
-func flattenToSingleLine(message string) string {
-	return strings.Join(strings.Fields(message), " ")
 }
 
 // frontMatterDelimiter 는 frontmatter 의 시작과 끝을 나타내는 줄이다.
