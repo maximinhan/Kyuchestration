@@ -2,7 +2,9 @@
 
 **뀨케스트레이션** — "뀨" + 오케스트레이션.
 
-여러 레포가 하나의 목표로 묶여 움직일 때, 각 레포의 독립성을 유지한 채 조율하는 CLI 도구 `wd`.
+여러 레포가 하나의 목표로 묶여 움직일 때, 각 레포의 독립성을 유지한 채 조율하는 CLI 도구 `kyu`.
+
+명령 이름 `kyu` 는 프로젝트 이름에서 땄다 — 뀨케스트레이션의 앞 글자다.
 
 - 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md)
 - 핵심 원칙: **프로세스는 격리, 지식은 공유**
@@ -22,13 +24,13 @@ WorkDir-featureX/
 ```
 
 각 레포에서 세션을 따로 띄워야 그 레포의 `.mcp.json`·`CLAUDE.md`·에이전트 설정이 살아난다.
-`wd` 는 그 세션들을 한 화면에서 띄우고, 보고, 오가게 한다.
+`kyu` 는 그 세션들을 한 화면에서 띄우고, 보고, 오가게 한다.
 
 ## 요구사항
 
 | 프로그램 | 쓰이는 곳 | 없으면 |
 |---|---|---|
-| tmux | 세션 생성·진입·종료 | `wd init` 외의 명령이 안내와 함께 종료 |
+| tmux | 세션 생성·진입·종료 | `kyu init` 외의 명령이 안내와 함께 종료 |
 | git | 레포 발견과 상태 판정 | 상태를 판정하지 못함 |
 | claude CLI | 세션 안에서 실행되는 명령 | 세션은 뜨지만 바로 끝남 |
 | Go | 빌드할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | — |
@@ -41,19 +43,19 @@ macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 —
 ```sh
 git clone https://github.com/maximinhan/Kyuchestration.git
 cd Kyuchestration
-go build ./cmd/wd          # 현재 디렉토리에 wd 바이너리가 생긴다
+go build ./cmd/kyu          # 현재 디렉토리에 kyu 바이너리가 생긴다
 ```
 
 PATH 에 둔다.
 
 ```sh
-mv wd ~/.local/bin/        # PATH 에 들어있는 아무 디렉토리
+mv kyu ~/.local/bin/        # PATH 에 들어있는 아무 디렉토리
 ```
 
 또는 한 번에.
 
 ```sh
-go install ./cmd/wd        # $(go env GOPATH)/bin/wd 에 설치된다
+go install ./cmd/kyu        # $(go env GOPATH)/bin/kyu 에 설치된다
 ```
 
 `go install` 을 쓰면 `$(go env GOPATH)/bin` 이 PATH 에 있어야 한다.
@@ -66,11 +68,11 @@ go install ./cmd/wd        # $(go env GOPATH)/bin/wd 에 설치된다
 
 ```sh
 cd ~/work
-wd init WorkDir-featureX
+kyu init WorkDir-featureX
 cd WorkDir-featureX
 ```
 
-`.coord/plan.md` 가 만들어진다. 이름을 주지 않고 `wd init` 만 실행하면 현재 디렉토리가
+`.coord/plan.md` 가 만들어진다. 이름을 주지 않고 `kyu init` 만 실행하면 현재 디렉토리가
 워크디렉토리가 된다. **이미 계획 파일이 있으면 덮어쓰지 않고 거절한다** — 사람이 쓴 계획을
 도구가 지우지 않는다.
 
@@ -86,7 +88,7 @@ git clone <proj-b 주소> proj-b
 **3. 지금 상태를 본다**
 
 ```sh
-wd list
+kyu list
 ```
 
 ```
@@ -96,13 +98,13 @@ WorkDir: WorkDir-featureX   (2 repos, 0 sessions)
   ○  proj-b  IDLE
   ○  main    IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 ```
 
 **4. 레포 세션을 띄운다**
 
 ```sh
-wd start proj-a
+kyu start proj-a
 ```
 
 `proj-a` 디렉토리에서 세션이 뜬다. 그 레포의 MCP 설정·지침·에이전트가 그대로 로드된다.
@@ -110,14 +112,14 @@ wd start proj-a
 **5. 세션에 들어간다**
 
 ```sh
-wd attach proj-a
+kyu attach proj-a
 ```
 
 **빠져나올 때는 `Ctrl-b d`** — `Ctrl` 과 `b` 를 함께 누르고 뗀 다음 `d` 를 누른다.
 세션은 살아있고 터미널만 빠져나온다. tmux 에서 알아야 할 것은 이 키 하나뿐이다.
 
-> `Ctrl-b d` 대신 창을 닫아도 세션은 살아있다. 다시 `wd attach proj-a` 로 들어가면 된다.
-> 세션을 진짜로 끝내려면 `wd kill` 을 쓴다.
+> `Ctrl-b d` 대신 창을 닫아도 세션은 살아있다. 다시 `kyu attach proj-a` 로 들어가면 된다.
+> 세션을 진짜로 끝내려면 `kyu kill` 을 쓴다.
 
 **6. 계획을 적는다**
 
@@ -140,7 +142,7 @@ tasks:
 ---
 ```
 
-이제 `wd list` 가 작업까지 함께 보여준다.
+이제 `kyu list` 가 작업까지 함께 보여준다.
 
 ```
 WorkDir: WorkDir-featureX   (2 repos, 1 session)
@@ -149,26 +151,26 @@ WorkDir: WorkDir-featureX   (2 repos, 1 session)
   ○  proj-b  DIRTY    [publish] doing
   ○  main    IDLE
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 ```
 
 **7. 정리한다**
 
 ```sh
-wd kill --all
+kyu kill --all
 ```
 
 ## 명령
 
 ```
-wd init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-wd list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
-wd start [repo]       세션 시작. 인자 없으면 main
-wd attach <repo>      세션 진입. main 도 가능
-wd kill [repo|--all]  세션 종료
+kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
+kyu list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
+kyu start [repo]       세션 시작. 인자 없으면 main
+kyu attach <repo>      세션 진입. main 도 가능
+kyu kill [repo|--all]  세션 종료
 ```
 
-### `wd init [name]`
+### `kyu init [name]`
 
 `.coord/plan.md` 템플릿을 만든다. 이름을 주면 그 디렉토리를 만들어(이미 있으면 그대로 쓴다)
 그 안을 초기화하고, 이름이 없으면 현재 디렉토리를 초기화한다.
@@ -178,9 +180,9 @@ wd kill [repo|--all]  세션 종료
 
 이 명령만 tmux 없이 동작한다.
 
-### `wd list [path]`
+### `kyu list [path]`
 
-인자 없이 `wd` 만 실행해도 같다. 경로를 주면 그 워크디렉토리를 본다.
+인자 없이 `kyu` 만 실행해도 같다. 경로를 주면 그 워크디렉토리를 본다.
 
 ```
 WorkDir: WorkDir-featureX   (3 repos, 2 sessions)
@@ -190,7 +192,7 @@ WorkDir: WorkDir-featureX   (3 repos, 2 sessions)
   ○  proj-c  IDLE     [consume] blocked ← needs commons-schema
   ●  main    RUNNING
 
-wd attach <repo> 로 진입
+kyu attach <repo> 로 진입
 ```
 
 왼쪽 동그라미는 세션 생존이다. `●` 는 세션이 떠 있고 `○` 는 없다.
@@ -212,12 +214,12 @@ wd attach <repo> 로 진입
 계획을 읽지 못했거나 없는 레포를 가리키는 작업이 있으면 **경고를 stderr 로** 내고 목록은 그대로
 보여준다. 계획이 깨져도 도구 전체가 멈추지는 않는다.
 
-### `wd start [repo]`
+### `kyu start [repo]`
 
 ```sh
-wd start proj-a            # proj-a 디렉토리에서 세션을 띄운다
-wd start                   # 워크디렉토리 최상위에서 메인 세션을 띄운다
-wd start --repo-claude-md  # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
+kyu start proj-a            # proj-a 디렉토리에서 세션을 띄운다
+kyu start                   # 워크디렉토리 최상위에서 메인 세션을 띄운다
+kyu start --repo-claude-md  # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
 ```
 
 **레포 세션**은 그 레포 디렉토리에서 뜬다. 설정은 오직 세션을 시작한 디렉토리에서만 오기 때문에,
@@ -239,13 +241,13 @@ claude --add-dir /abs/path/WorkDir-featureX/proj-a --add-dir /abs/path/WorkDir-f
 컨텍스트가 늘어나므로 기본은 꺼져 있다. 계획이 레포 컨벤션과 어긋나는 문제가 실제로 생겼을 때 켠다.
 레포 세션은 자기 디렉토리의 `CLAUDE.md` 를 이미 읽으므로 이 옵션을 함께 줄 수 없다.
 
-이미 떠 있는 세션에 `wd start` 를 다시 실행해도 실패하지 않는다. 안내만 하고 끝난다.
+이미 떠 있는 세션에 `kyu start` 를 다시 실행해도 실패하지 않는다. 안내만 하고 끝난다.
 
-### `wd attach <repo>`
+### `kyu attach <repo>`
 
 ```sh
-wd attach proj-a
-wd attach main
+kyu attach proj-a
+kyu attach main
 ```
 
 **빠져나오기는 `Ctrl-b d`.** 진입 직전에 이 안내가 한 줄 찍힌다.
@@ -253,16 +255,16 @@ wd attach main
 이미 세션 안에서 실행하면 거절한다 — 세션 안의 세션이 되면 어느 쪽에서 빠져나오는 것인지
 알 수 없다.
 
-### `wd kill [repo|--all]`
+### `kyu kill [repo|--all]`
 
 ```sh
-wd kill proj-a   # 하나만
-wd kill main     # 메인 세션
-wd kill --all    # 이 워크디렉토리의 세션 전부
+kyu kill proj-a   # 하나만
+kyu kill main     # 메인 세션
+kyu kill --all    # 이 워크디렉토리의 세션 전부
 ```
 
 `--all` 은 이 워크디렉토리의 세션만 종료한다. 다른 워크디렉토리의 세션과 직접 띄운 tmux 세션은
-건드리지 않는다. 인자 없는 `wd kill` 을 "전부"로 해석하지 않는다 — 이름을 빠뜨린 한 번으로
+건드리지 않는다. 인자 없는 `kyu kill` 을 "전부"로 해석하지 않는다 — 이름을 빠뜨린 한 번으로
 다른 레포의 작업까지 날아가지 않게 한다.
 
 ## `.coord/plan.md`
@@ -302,7 +304,7 @@ tasks:
 `status` 는 사람 또는 세션이 갱신한다. 도구는 읽어서 보여줄 뿐 자동으로 바꾸지 않는다.
 선행이 다 끝났으니 `blocked` → `ready` 로 옮기는 자동 전이는 v2 후보다.
 
-`wd init` 이 만드는 템플릿에는 이 예시가 전부 주석으로 들어 있다. 줄 맨 앞의 `#` 를 지우면
+`kyu init` 이 만드는 템플릿에는 이 예시가 전부 주석으로 들어 있다. 줄 맨 앞의 `#` 를 지우면
 그대로 계획이 된다. 주석뿐인 상태는 "계획 없음" 으로 읽히므로 목록이 오염되지 않는다.
 
 자세한 규약은 [설계 문서 6.1](workdir-orchestrator-design.md#61-planmd) 에 있다.
@@ -310,7 +312,7 @@ tasks:
 ## 구조
 
 ```
-cmd/wd/          # 진입점, 명령 라우팅
+cmd/kyu/         # 진입점, 명령 라우팅
 internal/
     session/     # SessionBackend 인터페이스 + tmux 구현 (유일한 플랫폼 의존부)
     workdir/     # 스캔 · 상태 추론 · plan 파싱 (플랫폼 무관 핵심)
@@ -324,5 +326,5 @@ internal/
 
 ```sh
 go test ./...
-go build ./cmd/wd
+go build ./cmd/kyu
 ```
