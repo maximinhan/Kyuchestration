@@ -108,6 +108,29 @@ func TestLoadPlanParsesTasksFromDesignDocumentExample(t *testing.T) {
 	})
 }
 
+func TestLoadPlanParsesFileSavedWithWindowsLineEndings(t *testing.T) {
+	// 계획 파일은 도구가 만들고 끝나는 파일이 아니라 사람이 자기 에디터로 고치는 파일이라
+	// CRLF 로 저장될 수 있다. 그때 구분자 줄은 "---\r" 이 되어 "---" 와의 비교가 어긋나고,
+	// 계획 전체가 "frontmatter 없음" 으로 사라진다.
+	workDirPath := newWorkDirWithPlanFile(t, strings.ReplaceAll(designDocumentPlanFile, "\n", "\r\n"))
+
+	plan, err := LoadPlan(workDirPath)
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v", err)
+	}
+	if len(plan.Warnings) != 0 {
+		t.Fatalf("경고 = %v, 줄 끝 문자만 다른 같은 계획이므로 경고 없음을 기대", plan.Warnings)
+	}
+
+	// 값에 \r 이 남으면 needs 가 가리키는 id 와 다른 작업의 id 가 어긋나 검증에서 걸러진다.
+	// 위에서 경고가 없음을 확인했으므로 여기서는 값 자체가 깨끗한지만 본다.
+	assertTasks(t, plan.Tasks, []Task{
+		{ID: "commons-event", Repo: "proj-a", Title: "이벤트 클래스 추가", Needs: nil, Status: TaskStatusDone},
+		{ID: "publish", Repo: "proj-b", Title: "발행 로직 구현", Needs: []string{"commons-event"}, Status: TaskStatusReady},
+		{ID: "consume", Repo: "proj-c", Title: "컨슈머 구현", Needs: []string{"commons-event"}, Status: TaskStatusBlocked},
+	})
+}
+
 func TestLoadPlanKeepsTaskOrderAsWritten(t *testing.T) {
 	// 계획을 적은 사람은 작업을 순서대로 늘어놓는다. 그 순서가 곧 읽는 순서이므로
 	// 도구가 id 순으로 정렬해버리면 사람이 의도한 흐름이 사라진다.
