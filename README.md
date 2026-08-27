@@ -31,7 +31,7 @@ WorkDir-featureX/
 | 프로그램 | 쓰이는 곳 | 없으면 |
 |---|---|---|
 | tmux | 세션 생성·진입·종료 | `kyu init` 외의 명령이 안내와 함께 종료 |
-| git | 레포 발견과 상태 판정 | 상태를 판정하지 못함 |
+| git | 레포 발견 · 상태 판정 · `kyu clone` 의 클론 | 상태를 판정하지 못하고 클론도 못 함 |
 | claude CLI | 세션 안에서 실행되는 명령 | 세션은 뜨지만 바로 끝남 |
 | Go | 소스에서 설치할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | 릴리스 바이너리를 받는다 (설치 방식 A·B) |
 
@@ -164,8 +164,7 @@ mv kyu ~/.local/bin/        # PATH 에 들어있는 아무 디렉토리
 
 ```sh
 mkdir -p ~/work/WorkDir-featureX && cd ~/work/WorkDir-featureX
-git clone <proj-a 주소> proj-a
-git clone <proj-b 주소> proj-b
+kyu clone   # GitHub 목록에서 번호로 골라 클론 (손으로 git clone 해도 된다)
 kyu
 ```
 
@@ -207,6 +206,12 @@ cd WorkDir-featureX
 도구가 지우지 않는다.
 
 **2. 레포를 클론한다**
+
+```sh
+kyu clone
+```
+
+GitHub 목록에서 번호로 고른다(아래 [`kyu clone`](#kyu-clone)). 손으로 해도 결과는 같다.
 
 ```sh
 git clone <proj-a 주소> proj-a
@@ -296,10 +301,12 @@ kyu kill --all
 kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
 kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
+kyu clone              GitHub 레포 목록에서 골라 이 디렉토리에 클론
 kyu list [path]        레포 목록 + 상태
 kyu start [repo]       세션 시작. 인자 없으면 main
 kyu attach <repo>      세션 진입. main 도 가능
 kyu kill [repo|--all]  세션 종료
+kyu auth <list|remove> 저장한 GitHub 토큰 프로필 관리
 kyu version            이 바이너리의 버전
 
 옵션 (kyu, kyu start):
@@ -330,6 +337,109 @@ kyu version            이 바이너리의 버전
 직접 지우거나 옮긴다.
 
 이 명령만 tmux 없이 동작한다.
+
+### `kyu clone`
+
+```sh
+kyu clone
+```
+
+GitHub 레포 목록에서 번호로 골라 **현재 디렉토리에** 클론한다. 워크디렉토리는 필요한 레포를
+클론해서 쓰는 자리인데(설계 문서 1.1) 그 클론만은 손으로 하고 있었다 — 주소를 하나씩 조립하는
+일이라 오타가 나고, "이 계정에 어떤 레포가 있더라" 를 GitHub 화면에서 확인하고 돌아와야 한다.
+
+진입 플로우(`kyu`)에 끼워 넣지 않았다. 클론은 워크디렉토리를 만들 때 한 번 하는 일이고, 매번
+진입할 때마다 GitHub 에 붙어 목록을 묻는 것은 원한 적 없는 왕복이다.
+
+흐름은 네 걸음이다.
+
+1. **토큰 프로필을 고른다** — 등록된 것이 없으면 그 자리에서 등록한다 ([아래](#kyu-clone-의-토큰))
+2. **소유자를 고른다** — 개인 계정과 소속 조직 중에서. 조직이 없으면 묻지 않는다
+3. **목록에서 번호를 고른다** — `1,3,5-8` 처럼 쉼표와 범위를 섞어 적는다. 빈 줄이면 취소
+4. **클론한다** — 하나가 실패해도 나머지는 계속하고, 마지막에 실패한 이름을 모아 알린다
+
+```
+maximinhan 의 레포 3 개 — 최근 푸시 순
+
+  1)  Kyuchestration  private  2026-08-27  (이미 있음)
+  2)  proj-a                   2026-08-20
+  3)  proj-b          private  2026-08-11
+
+클론할 레포 (1,3,5-8 / 빈 줄이면 취소): 2,3
+
+  proj-a 클론 완료
+  proj-b 클론 완료
+
+클론 2 개
+```
+
+같은 이름의 디렉토리가 이미 있으면 `(이미 있음)` 이 붙고, 골라도 건너뛴다. `git clone` 은 그
+자리에서 실패하는데, 그 실패를 넘기는 대신 목록에서 미리 알린다.
+
+클론이 끝나면 **이미 떠 있는 메인 세션에는 새 레포가 붙지 않는다**고 알린다. 세션의 `--add-dir`
+목록은 만드는 순간 굳기 때문이다 — `kyu kill main` 뒤에 `kyu` 를 다시 실행하면 반영된다.
+
+목록을 보고 그만두는 것은 실패가 아니다. 빈 줄로 취소하면 종료 코드 0 으로 끝난다.
+
+#### `kyu clone` 의 토큰
+
+**머신에 굴러다니는 인증을 읽지 않는다.** `GITHUB_TOKEN` 환경변수도, `gh` 의 로그인도 쓰지 않는다.
+그런 것을 집어 쓰면 회사 토큰이 깔린 머신에서 개인 레포를 클론하려던 사람이 엉뚱한 계정의 목록을
+보게 되고, 무엇으로 인증했는지 화면에서 확인할 방법도 없다. 쓰는 것은 직접 등록한 토큰뿐이고,
+어느 프로필로 붙었는지는 매번 화면에 찍힌다.
+
+처음 실행하면 그 자리에서 등록을 물어본다. 토큰은 저장하기 전에 GitHub 에 한 번 확인하고,
+거절당하면 저장하지 않고 다시 묻는다.
+
+```
+프로필 이름 (예: 개인, 회사): 개인
+GitHub personal access token (입력은 보이지 않습니다):
+토큰 확인 완료 — maximinhan 계정입니다.
+토큰을 저장했습니다: 개인 (macOS 키체인)
+```
+
+필요한 권한은 **레포 목록 조회와 클론**이다.
+
+| 토큰 종류 | 필요한 권한 |
+|---|---|
+| 클래식 | `repo` — 비공개 레포를 목록에 띄우고 클론하는 데 필요하다 |
+| fine-grained | Repository permissions → **Contents: Read**. 조직 레포까지 보려면 그 조직을 토큰의 대상(Resource owner)에 포함한다 |
+
+> 설치 방식 [A](#a-설치-스크립트-추천) 의 토큰과 다르다. 그쪽은 릴리스 자산을 내려받는 최소
+> 토큰이라 이 목록을 볼 권한이 없다. 같은 토큰을 쓰고 싶다면 권한을 넓혀 발급한다.
+
+토큰은 이 머신에만 저장된다. 저장 자리는 순서대로 고른다.
+
+| 자리 | 언제 |
+|---|---|
+| macOS 키체인 | macOS (`security`) |
+| secret-service (libsecret) | 리눅스 데스크톱 — `secret-tool` 이 실제로 응답할 때 |
+| 설정 파일 (평문, 권한 0600) | 위 둘이 없을 때 (WSL·데스크톱 없는 SSH 등) |
+
+마지막 폴백은 **평문**이다. 감추는 대신 드러낸다 — 토큰을 받기 전에 경고를 내고, `kyu auth list`
+에도 저장 위치가 계속 보인다. 토큰을 디스크에 남기고 싶지 않다면 그 자리에서 중단한다.
+
+```
+경고: 이 머신에는 키체인도 secret-service 도 없어 토큰을 설정 파일에 평문으로 저장합니다 (권한 0600).
+      토큰을 남기고 싶지 않다면 지금 중단하고(Ctrl-C), 키체인이 있는 머신에서 실행하세요.
+```
+
+프로필 이름 목록은 `$XDG_CONFIG_HOME/kyu/profiles.json`(macOS 는 `~/Library/Application Support/kyu/`)
+에 남는다. **이름만 적힌다** — 키체인·secret-service 를 쓰는 머신에서는 토큰 값이 어느 파일에도
+들어가지 않는다.
+
+**클론에도 토큰이 디스크에 남지 않는다.** 이번 실행에만 사는 credential helper 로 흘린다.
+
+```sh
+git -c credential.helper= \
+    -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$KYU_CLONE_TOKEN"; }; f' \
+    clone https://github.com/maximinhan/proj-a.git
+```
+
+앞의 빈 `credential.helper=` 가 전역 helper(`store` 등)를 이번 실행에서만 끄고, 토큰은 인자가 아니라
+자식 프로세스의 환경변수로 넘어간다 — 인자는 같은 머신의 다른 사용자가 `ps` 로 읽을 수 있다.
+클론된 `.git/config` 에는 깨끗한 `https://github.com/...` 주소만 남는다. 주소에 토큰을 끼워 넣는
+방법(`https://x-access-token:<토큰>@github.com/...`)을 쓰지 않는 이유가 이것이다.
 
 ### `kyu list [path]`
 
@@ -453,6 +563,34 @@ kyu kill --all    # 이 워크디렉토리의 세션 전부
 건드리지 않는다. 인자 없는 `kyu kill` 을 "전부"로 해석하지 않는다 — 이름을 빠뜨린 한 번으로
 다른 레포의 작업까지 날아가지 않게 한다.
 
+### `kyu auth <list|remove>`
+
+```sh
+kyu auth list            # 등록된 토큰 프로필과 저장 위치
+kyu auth remove 회사     # 프로필과 그 토큰을 지운다
+```
+
+```
+토큰 프로필 2 개
+
+  개인  macOS 키체인
+  회사  설정 파일 (평문, 권한 0600)
+
+지우기: kyu auth remove <이름>
+```
+
+**토큰 값은 출력하지 않는다.** 목록을 띄운 채 화면을 공유하거나 캡처하는 일이 흔하고, 한 번 새
+나간 토큰은 폐기할 때까지 계속 유효하다. 이 명령은 저장소에 값을 물어보지도 않는다.
+
+등록하는 하위 명령은 두지 않았다. 토큰이 필요한 자리는 `kyu clone` 하나뿐이고, 거기서 물어보는
+것이 실제로 지나는 길이다. 등록 명령을 따로 두면 "먼저 등록하고 나서 클론" 이라는 순서를 사람이
+기억해야 한다.
+
+저장된 토큰이 만료되면 `kyu clone` 이 그 사실을 알리고 같은 이름으로 다시 등록하게 해준다.
+지우고 다시 등록하는 두 걸음을 스스로 찾지 않아도 된다.
+
+`tmux` 없이도 동작한다 — 저장해둔 토큰을 보고 지우는 일은 세션과 무관하다.
+
 ### `kyu version`
 
 ```sh
@@ -528,6 +666,8 @@ cmd/kyu/         # 진입점, 명령 라우팅
 internal/
     session/     # SessionBackend 인터페이스 + tmux 구현 (유일한 플랫폼 의존부)
     workdir/     # 스캔 · 상태 추론 · plan 파싱 (플랫폼 무관 핵심)
+    github/      # GitHub REST API 조회 + 클론 (kyu clone 이 닿는 유일한 바깥 세계)
+    secretstore/ # 토큰 프로필 저장 (키체인 · secret-service · 파일 폴백)
     cli/         # 명령 구현
 ```
 
