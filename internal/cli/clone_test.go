@@ -102,8 +102,10 @@ func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWerePushed(t *testing.T
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
+	// 푸시 시각을 실행 머신의 시간대로 만든다. UTC 로 적으면 목록이 로컬 날짜를 찍는 한
+	// 시간대가 다른 머신에서 하루 어긋난 날짜를 기대하게 되어, CI 에서만 깨지는 테스트가 된다.
 	gitHub := newTestGitHubWithRepos(
-		makeRepository("비공개-레포", true, time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)),
+		makeRepository("비공개-레포", true, time.Date(2026, 8, 27, 12, 0, 0, 0, time.Local)),
 		makeRepository("공개-레포", false, time.Time{}),
 	)
 
