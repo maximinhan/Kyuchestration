@@ -1,0 +1,17 @@
+# 빌드 산출물
+/wd
+/dist/
+
+# Go 테스트·커버리지 산출물
+*.test
+*.out
+
+# 환경·비밀 (secret 평문 보관 금지)
+.env
+*.local.yml
+credentials*
+secrets/
+
+# 에디터
+.idea/
+.vscode/
