@@ -50,28 +50,38 @@ func runCommand(args []string, out io.Writer) error {
 
 	switch commandName {
 	case "list":
-		return runListCommand(out, commandArgs)
+		return runWithSessionBackend(out, commandArgs, cli.ListWorkDir)
+	case "start":
+		return runWithSessionBackend(out, commandArgs, cli.StartSession)
+	case "attach":
+		return runWithSessionBackend(out, commandArgs, cli.AttachSession)
+	case "kill":
+		return runWithSessionBackend(out, commandArgs, cli.KillSessions)
 
 	// 아직 없는 명령을 빈 함수로 만들어두지 않는다. 호출하면 아무 일도 하지 않고 성공한 것처럼 끝나는
 	// 자리가 생기고, 그 자리는 다음 PR 이 채우기 전까지 사용자를 속인다.
-	case "start", "attach", "kill":
-		return fmt.Errorf("아직 구현되지 않은 명령입니다: %s (PR 5 예정)", commandName)
 	case "init":
-		return fmt.Errorf("아직 구현되지 않은 명령입니다: %s (PR 6 예정)", commandName)
+		return fmt.Errorf("아직 구현되지 않은 명령입니다: %s (PR 7 예정)", commandName)
 
 	default:
 		return fmt.Errorf("알 수 없는 명령: %s\n\n%s", commandName, usageText)
 	}
 }
 
-// runListCommand 는 목록 명령에 필요한 것을 조립한다.
+// sessionCommand 는 세션 백엔드를 받아 동작하는 명령 하나다. 네 명령이 모두 같은 모양이다.
+type sessionCommand func(out io.Writer, args []string, backend session.SessionBackend) error
+
+// runWithSessionBackend 는 명령에 세션 백엔드를 조립해 넘긴다.
 //
-// 세션 백엔드를 여기서 만드는 이유: 어느 플랫폼 구현을 쓸지는 진입점의 결정이다.
+// 백엔드를 여기서 만드는 이유: 어느 플랫폼 구현을 쓸지는 진입점의 결정이다.
 // 그래야 internal/cli 가 tmux 를 모른 채로 남고, 백엔드가 늘어날 때 바뀌는 파일이 이 하나로 끝난다.
-func runListCommand(out io.Writer, args []string) error {
+//
+// 조립을 명령마다 되풀이하지 않고 한 곳으로 모은다. tmux 미설치 안내처럼 모든 명령이 똑같이
+// 해야 하는 일이 여기 있으므로, 새 명령이 그것을 빠뜨릴 자리 자체가 없다.
+func runWithSessionBackend(out io.Writer, args []string, command sessionCommand) error {
 	backend, err := session.NewTmuxBackend()
 	if err != nil {
 		return err
 	}
-	return cli.ListWorkDir(out, args, backend)
+	return command(out, args, backend)
 }
