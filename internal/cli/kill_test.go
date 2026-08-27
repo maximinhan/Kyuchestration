@@ -12,14 +12,14 @@ func TestKillSessionsEndsTheRunningSessionOfThatRepo(t *testing.T) {
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-alpha-commons")
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-alpha-commons")
 
 	var out bytes.Buffer
 	if err := KillSessions(&out, []string{"alpha-commons"}, backend); err != nil {
 		t.Fatalf("KillSessions() 실패: %v", err)
 	}
 
-	if want := []string{"wd-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.killedSessionNames, want) {
+	if want := []string{"kyu-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.killedSessionNames, want) {
 		t.Errorf("종료한 세션 = %q, want %q", backend.killedSessionNames, want)
 	}
 	if !strings.Contains(out.String(), "종료했습니다") {
@@ -31,14 +31,14 @@ func TestKillSessionsAcceptsMainAsTarget(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-main")
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
 
 	var out bytes.Buffer
 	if err := KillSessions(&out, []string{"main"}, backend); err != nil {
 		t.Fatalf("KillSessions() 실패: %v", err)
 	}
 
-	if want := []string{"wd-WorkDir-featureX-main"}; !slices.Equal(backend.killedSessionNames, want) {
+	if want := []string{"kyu-WorkDir-featureX-main"}; !slices.Equal(backend.killedSessionNames, want) {
 		t.Errorf("종료한 세션 = %q, want %q", backend.killedSessionNames, want)
 	}
 }
@@ -82,7 +82,7 @@ func TestKillSessionsRequiresATarget(t *testing.T) {
 			workDirPath := makeWorkDir(t)
 			t.Chdir(workDirPath)
 
-			backend := newRecordingSessionBackend("wd-WorkDir-featureX-alpha-commons")
+			backend := newRecordingSessionBackend("kyu-WorkDir-featureX-alpha-commons")
 
 			var out bytes.Buffer
 			if err := KillSessions(&out, tt.args, backend); err == nil {
@@ -103,9 +103,9 @@ func TestKillSessionsWithAllOptionEndsOnlyTheSessionsOfThisWorkDir(t *testing.T)
 
 	backend := newRecordingSessionBackend()
 	backend.listedSessionNames = []string{
-		"wd-WorkDir-featureX-alpha-commons",
-		"wd-OtherWorkDir-alpha-commons",
-		"wd-WorkDir-featureX-main",
+		"kyu-WorkDir-featureX-alpha-commons",
+		"kyu-OtherWorkDir-alpha-commons",
+		"kyu-WorkDir-featureX-main",
 		"직접-띄운-세션",
 	}
 
@@ -114,7 +114,7 @@ func TestKillSessionsWithAllOptionEndsOnlyTheSessionsOfThisWorkDir(t *testing.T)
 		t.Fatalf("KillSessions() 실패: %v", err)
 	}
 
-	want := []string{"wd-WorkDir-featureX-alpha-commons", "wd-WorkDir-featureX-main"}
+	want := []string{"kyu-WorkDir-featureX-alpha-commons", "kyu-WorkDir-featureX-main"}
 	if !slices.Equal(backend.killedSessionNames, want) {
 		t.Errorf("종료한 세션 = %q, want %q", backend.killedSessionNames, want)
 	}
@@ -129,7 +129,7 @@ func TestKillSessionsWithAllOptionSaysThereWasNothingToKill(t *testing.T) {
 	t.Chdir(workDirPath)
 
 	backend := newRecordingSessionBackend()
-	backend.listedSessionNames = []string{"wd-OtherWorkDir-alpha-commons"}
+	backend.listedSessionNames = []string{"kyu-OtherWorkDir-alpha-commons"}
 
 	var out bytes.Buffer
 	if err := KillSessions(&out, []string{"--all"}, backend); err != nil {
@@ -151,7 +151,7 @@ func TestKillSessionsRejectsAllOptionCombinedWithARepoName(t *testing.T) {
 	t.Chdir(workDirPath)
 
 	backend := newRecordingSessionBackend()
-	backend.listedSessionNames = []string{"wd-WorkDir-featureX-alpha-commons"}
+	backend.listedSessionNames = []string{"kyu-WorkDir-featureX-alpha-commons"}
 
 	var out bytes.Buffer
 	if err := KillSessions(&out, []string{"--all", "alpha-commons"}, backend); err == nil {

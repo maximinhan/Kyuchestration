@@ -46,7 +46,7 @@ func TestStartSessionWithoutRepoCreatesMainSessionWithAddDirForEveryRepo(t *test
 	}
 
 	assertOnlyCreatedSession(t, backend, createdSession{
-		name: "wd-WorkDir-featureX-main",
+		name: "kyu-WorkDir-featureX-main",
 		cwd:  workDirPath,
 		command: []string{
 			"claude",
@@ -74,7 +74,7 @@ func TestStartSessionWithoutRepoInEmptyWorkDirCreatesMainSessionWithoutAddDir(t 
 	}
 
 	assertOnlyCreatedSession(t, backend, createdSession{
-		name:    "wd-WorkDir-featureX-main",
+		name:    "kyu-WorkDir-featureX-main",
 		cwd:     workDirPath,
 		command: []string{"claude"},
 	})
@@ -96,7 +96,7 @@ func TestStartSessionWithRepoCreatesSessionInThatRepoDirectory(t *testing.T) {
 	}
 
 	assertOnlyCreatedSession(t, backend, createdSession{
-		name:    "wd-WorkDir-featureX-beta-gateway",
+		name:    "kyu-WorkDir-featureX-beta-gateway",
 		cwd:     filepath.Join(workDirPath, "beta-gateway"),
 		command: []string{"claude"},
 	})
@@ -140,7 +140,7 @@ func TestStartSessionGuidesToAttachWhenTheSessionIsAlreadyRunning(t *testing.T) 
 	t.Chdir(workDirPath)
 
 	backend := newRecordingSessionBackend()
-	backend.createError = fmt.Errorf("%w: wd-WorkDir-featureX-alpha-commons", session.ErrSessionExists)
+	backend.createError = fmt.Errorf("%w: kyu-WorkDir-featureX-alpha-commons", session.ErrSessionExists)
 
 	var out bytes.Buffer
 	if err := StartSession(&out, []string{"alpha-commons"}, backend); err != nil {
@@ -220,7 +220,7 @@ func TestStartSessionWithRepoClaudeMdOptionWrapsTheCommandInEnvAssignment(t *tes
 	}
 
 	assertOnlyCreatedSession(t, backend, createdSession{
-		name: "wd-WorkDir-featureX-main",
+		name: "kyu-WorkDir-featureX-main",
 		cwd:  workDirPath,
 		command: []string{
 			"env", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1",

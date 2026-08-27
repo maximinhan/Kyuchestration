@@ -138,7 +138,7 @@ func (listing workDirListing) liveSessionCount() int {
 
 // inspectWorkDir 는 워크디렉토리를 훑어 레포별 상태와 메인 세션 상태를 모은다.
 func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDirListing, error) {
-	// 세션 이름에 워크디렉토리 이름이 들어가므로(wd-<workdir>-<repo>) 이름을 먼저 확정해야 한다.
+	// 세션 이름에 워크디렉토리 이름이 들어가므로(kyu-<workdir>-<repo>) 이름을 먼저 확정해야 한다.
 	// 인자로 흔히 들어오는 "." 이나 ".." 는 그 자체로는 이름이 아니라서, 절대경로로 편 뒤 마지막 요소를 쓴다.
 	absoluteWorkDirPath, err := filepath.Abs(workDirPath)
 	if err != nil {

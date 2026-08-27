@@ -153,7 +153,7 @@ func startRepoSession(out io.Writer, location workDirLocation, repos []workdir.R
 
 // createSession 은 세션을 만들고 그 결과를 사람이 읽을 안내로 옮긴다.
 //
-// label 은 사용자가 부르는 이름(레포 이름 또는 main)이다. 세션 이름(wd-...)을 안내에 그대로 쓰면
+// label 은 사용자가 부르는 이름(레포 이름 또는 main)이다. 세션 이름(kyu-...)을 안내에 그대로 쓰면
 // 사용자가 그것을 다음 명령의 인자로 되돌려 주게 되는데, 이 도구의 명령은 레포 이름을 받는다.
 func createSession(out io.Writer, backend session.SessionBackend, sessionName, label, cwd string, command []string) error {
 	err := backend.Create(sessionName, cwd, command)

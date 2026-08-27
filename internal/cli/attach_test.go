@@ -17,14 +17,14 @@ func TestAttachSessionEntersTheRunningSessionAfterTellingHowToLeave(t *testing.T
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-alpha-commons")
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-alpha-commons")
 
 	var out bytes.Buffer
 	if err := AttachSession(&out, []string{"alpha-commons"}, backend); err != nil {
 		t.Fatalf("AttachSession() 실패: %v", err)
 	}
 
-	if want := []string{"wd-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.attachedSessionNames, want) {
+	if want := []string{"kyu-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.attachedSessionNames, want) {
 		t.Errorf("진입한 세션 = %q, want %q", backend.attachedSessionNames, want)
 	}
 	if !strings.Contains(out.String(), "Ctrl-b d") {
@@ -37,14 +37,14 @@ func TestAttachSessionAcceptsMainAsTarget(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-main")
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-main")
 
 	var out bytes.Buffer
 	if err := AttachSession(&out, []string{"main"}, backend); err != nil {
 		t.Fatalf("AttachSession() 실패: %v", err)
 	}
 
-	if want := []string{"wd-WorkDir-featureX-main"}; !slices.Equal(backend.attachedSessionNames, want) {
+	if want := []string{"kyu-WorkDir-featureX-main"}; !slices.Equal(backend.attachedSessionNames, want) {
 		t.Errorf("진입한 세션 = %q, want %q", backend.attachedSessionNames, want)
 	}
 }
@@ -78,8 +78,8 @@ func TestAttachSessionTranslatesNestedSessionRefusalIntoGuidance(t *testing.T) {
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	backend := newRecordingSessionBackend("wd-WorkDir-featureX-alpha-commons")
-	backend.attachError = fmt.Errorf("%w: wd-WorkDir-featureX-alpha-commons", session.ErrNestedSession)
+	backend := newRecordingSessionBackend("kyu-WorkDir-featureX-alpha-commons")
+	backend.attachError = fmt.Errorf("%w: kyu-WorkDir-featureX-alpha-commons", session.ErrNestedSession)
 
 	var out bytes.Buffer
 	err := AttachSession(&out, []string{"alpha-commons"}, backend)

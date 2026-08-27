@@ -11,8 +11,8 @@ import (
 )
 
 // testSessionName 은 상태 추론에 넘기는 세션 이름이다.
-// 실제 규칙(wd-<workdir>-<repo>)을 따르지만, 이 패키지는 이름을 해석하지 않고 그대로 전달만 한다.
-const testSessionName = "wd-test-workdir-proj-a"
+// 실제 규칙(kyu-<workdir>-<repo>)을 따르지만, 이 패키지는 이름을 해석하지 않고 그대로 전달만 한다.
+const testSessionName = "kyu-test-workdir-proj-a"
 
 // stubSessionBackend 는 세션 생존 여부만 지정해 넣는 테스트용 SessionBackend 다.
 //

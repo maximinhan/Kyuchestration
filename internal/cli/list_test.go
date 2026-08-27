@@ -17,7 +17,7 @@ import (
 // testWorkDirName 은 테스트가 만드는 워크디렉토리의 이름이다.
 //
 // t.TempDir() 이 준 경로를 그대로 워크디렉토리로 쓰지 않는다. 그 마지막 요소는 "001" 같은
-// 일련번호인데, 워크디렉토리 이름은 세션 이름(wd-<workdir>-<repo>)과 헤더에 그대로 드러나는 값이라
+// 일련번호인데, 워크디렉토리 이름은 세션 이름(kyu-<workdir>-<repo>)과 헤더에 그대로 드러나는 값이라
 // 기대값을 적으려면 테스트가 이름을 직접 정해야 한다.
 const testWorkDirName = "WorkDir-featureX"
 
@@ -223,9 +223,9 @@ func TestInspectWorkDirAsksOnlyForSessionNamesScopedToThisWorkDir(t *testing.T) 
 	}
 
 	want := []string{
-		"wd-WorkDir-featureX-alpha-commons",
-		"wd-WorkDir-featureX-beta-gateway",
-		"wd-WorkDir-featureX-main",
+		"kyu-WorkDir-featureX-alpha-commons",
+		"kyu-WorkDir-featureX-beta-gateway",
+		"kyu-WorkDir-featureX-main",
 	}
 	if !slices.Equal(backend.queriedSessionNames, want) {
 		t.Errorf("생존을 물어본 세션 이름 = %q, want %q", backend.queriedSessionNames, want)
