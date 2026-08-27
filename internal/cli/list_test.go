@@ -261,6 +261,23 @@ func TestInspectWorkDirNamesTheRepoWhoseStateCouldNotBeJudged(t *testing.T) {
 	}
 }
 
+// runListForTest 는 목록을 실행해 stdout 을 돌려주고, 경고가 나오지 않았음을 함께 확인한다.
+//
+// 계획이 없거나 멀쩡하면 stderr 는 비어 있어야 한다. stdout 만 비교하면 목록은 맞는데 매번
+// 경고가 함께 찍히는 상태를 아무도 잡지 못한다.
+func runListForTest(t *testing.T, args []string, backend session.SessionBackend) string {
+	t.Helper()
+
+	var out, errOut bytes.Buffer
+	if err := ListWorkDir(&out, &errOut, args, backend); err != nil {
+		t.Fatalf("ListWorkDir() 실패: %v", err)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, 경고 없음을 기대", errOut.String())
+	}
+	return out.String()
+}
+
 // assertListOutput 은 기대 출력을 그대로 적어두고 통째로 비교한다.
 //
 // 열 너비나 공백 개수를 계산해서 비교하지 않는다. 목록의 값어치는 "한 화면에 읽히는가" 이고
@@ -282,12 +299,7 @@ func TestListWorkDirWritesEachRepoWithMarkerAndStateInAlignedColumns(t *testing.
 
 	backend := newFakeSessionBackend(session.RepoSessionName(testWorkDirName, "zeta-service"))
 
-	var out bytes.Buffer
-	if err := ListWorkDir(&out, []string{workDirPath}, backend); err != nil {
-		t.Fatalf("ListWorkDir() 실패: %v", err)
-	}
-
-	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (3 repos, 1 session)
+	assertListOutput(t, runListForTest(t, []string{workDirPath}, backend), `WorkDir: WorkDir-featureX   (3 repos, 1 session)
 
   ○  alpha-commons  IDLE
   ○  beta-gateway   DIRTY
@@ -310,12 +322,7 @@ func TestListWorkDirCountsEveryLiveSessionIncludingMain(t *testing.T) {
 		session.MainSessionName(testWorkDirName),
 	)
 
-	var out bytes.Buffer
-	if err := ListWorkDir(&out, []string{workDirPath}, backend); err != nil {
-		t.Fatalf("ListWorkDir() 실패: %v", err)
-	}
-
-	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (3 repos, 3 sessions)
+	assertListOutput(t, runListForTest(t, []string{workDirPath}, backend), `WorkDir: WorkDir-featureX   (3 repos, 3 sessions)
 
   ●  alpha-commons  RUNNING
   ○  beta-gateway   IDLE
@@ -333,12 +340,7 @@ func TestListWorkDirWritesSingularNounsWhenThereIsExactlyOne(t *testing.T) {
 
 	backend := newFakeSessionBackend(session.MainSessionName(testWorkDirName))
 
-	var out bytes.Buffer
-	if err := ListWorkDir(&out, []string{workDirPath}, backend); err != nil {
-		t.Fatalf("ListWorkDir() 실패: %v", err)
-	}
-
-	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (1 repo, 1 session)
+	assertListOutput(t, runListForTest(t, []string{workDirPath}, backend), `WorkDir: WorkDir-featureX   (1 repo, 1 session)
 
   ○  alpha-commons  IDLE
   ●  main           RUNNING
@@ -352,12 +354,7 @@ func TestListWorkDirGuidesToCloneWhenThereIsNoRepo(t *testing.T) {
 	// 메인 행은 그대로 둔다 — 레포가 하나도 없어도 메인 세션은 떠 있을 수 있다.
 	workDirPath := makeWorkDir(t)
 
-	var out bytes.Buffer
-	if err := ListWorkDir(&out, []string{workDirPath}, newFakeSessionBackend()); err != nil {
-		t.Fatalf("ListWorkDir() 실패: %v", err)
-	}
-
-	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (0 repos, 0 sessions)
+	assertListOutput(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()), `WorkDir: WorkDir-featureX   (0 repos, 0 sessions)
 
   레포 없음 — 이 디렉토리 아래에 git 레포를 클론하세요
 
@@ -373,12 +370,7 @@ func TestListWorkDirWithoutArgumentsListsCurrentDirectory(t *testing.T) {
 
 	t.Chdir(workDirPath)
 
-	var out bytes.Buffer
-	if err := ListWorkDir(&out, nil, newFakeSessionBackend()); err != nil {
-		t.Fatalf("ListWorkDir() 실패: %v", err)
-	}
-
-	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (1 repo, 0 sessions)
+	assertListOutput(t, runListForTest(t, nil, newFakeSessionBackend()), `WorkDir: WorkDir-featureX   (1 repo, 0 sessions)
 
   ○  alpha-commons  IDLE
   ○  main           IDLE
@@ -390,8 +382,8 @@ wd attach <repo> 로 진입
 func TestListWorkDirRejectsMoreThanOnePath(t *testing.T) {
 	// 경로를 두 개 받으면 어느 쪽을 보여줘야 할지 알 수 없다. 하나를 골라 나머지를 조용히 버리면
 	// 사용자는 자기가 지정한 워크디렉토리를 보고 있다고 착각한다.
-	var out bytes.Buffer
-	err := ListWorkDir(&out, []string{"첫-번째-경로", "두-번째-경로"}, newFakeSessionBackend())
+	var out, errOut bytes.Buffer
+	err := ListWorkDir(&out, &errOut, []string{"첫-번째-경로", "두-번째-경로"}, newFakeSessionBackend())
 
 	if err == nil {
 		t.Fatalf("ListWorkDir() 가 에러를 반환하지 않음, 인자 개수 에러를 기대")

@@ -33,7 +33,7 @@ const usageText = `사용법: wd <명령> [인자]
 const defaultCommandName = "list"
 
 func main() {
-	if err := runCommand(os.Args[1:], os.Stdout); err != nil {
+	if err := runCommand(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		// 실패 안내는 stderr 로 보낸다. stdout 은 목록처럼 다른 명령의 입력으로 넘길 수 있는 것만 쓴다.
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -41,7 +41,10 @@ func main() {
 }
 
 // runCommand 는 인자를 명령으로 갈라 실행한다. 에러를 반환하면 그것이 곧 종료 코드 1 이다.
-func runCommand(args []string, out io.Writer) error {
+//
+// 두 스트림을 모두 받는다. 명령이 내는 말에는 다른 명령의 입력으로 넘길 수 있는 것(out)과
+// 사람에게만 하는 말(errOut)이 섞여 있고, 그 구분은 명령마다 다르다.
+func runCommand(args []string, out, errOut io.Writer) error {
 	commandName := defaultCommandName
 	var commandArgs []string
 	if len(args) > 0 {
@@ -50,13 +53,21 @@ func runCommand(args []string, out io.Writer) error {
 
 	switch commandName {
 	case "list":
-		return runWithSessionBackend(out, commandArgs, cli.ListWorkDir)
+		return withSessionBackend(func(backend session.SessionBackend) error {
+			return cli.ListWorkDir(out, errOut, commandArgs, backend)
+		})
 	case "start":
-		return runWithSessionBackend(out, commandArgs, cli.StartSession)
+		return withSessionBackend(func(backend session.SessionBackend) error {
+			return cli.StartSession(out, commandArgs, backend)
+		})
 	case "attach":
-		return runWithSessionBackend(out, commandArgs, cli.AttachSession)
+		return withSessionBackend(func(backend session.SessionBackend) error {
+			return cli.AttachSession(out, commandArgs, backend)
+		})
 	case "kill":
-		return runWithSessionBackend(out, commandArgs, cli.KillSessions)
+		return withSessionBackend(func(backend session.SessionBackend) error {
+			return cli.KillSessions(out, commandArgs, backend)
+		})
 
 	// 아직 없는 명령을 빈 함수로 만들어두지 않는다. 호출하면 아무 일도 하지 않고 성공한 것처럼 끝나는
 	// 자리가 생기고, 그 자리는 다음 PR 이 채우기 전까지 사용자를 속인다.
@@ -68,20 +79,20 @@ func runCommand(args []string, out io.Writer) error {
 	}
 }
 
-// sessionCommand 는 세션 백엔드를 받아 동작하는 명령 하나다. 네 명령이 모두 같은 모양이다.
-type sessionCommand func(out io.Writer, args []string, backend session.SessionBackend) error
-
-// runWithSessionBackend 는 명령에 세션 백엔드를 조립해 넘긴다.
+// withSessionBackend 는 명령에 세션 백엔드를 조립해 넘긴다.
 //
 // 백엔드를 여기서 만드는 이유: 어느 플랫폼 구현을 쓸지는 진입점의 결정이다.
 // 그래야 internal/cli 가 tmux 를 모른 채로 남고, 백엔드가 늘어날 때 바뀌는 파일이 이 하나로 끝난다.
 //
 // 조립을 명령마다 되풀이하지 않고 한 곳으로 모은다. tmux 미설치 안내처럼 모든 명령이 똑같이
 // 해야 하는 일이 여기 있으므로, 새 명령이 그것을 빠뜨릴 자리 자체가 없다.
-func runWithSessionBackend(out io.Writer, args []string, command sessionCommand) error {
+//
+// 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. list 는 stderr 까지 쓰지만 나머지는
+// 그렇지 않은데, 공통 시그니처를 강요하면 세 명령이 쓰지도 않는 인자를 받게 된다.
+func withSessionBackend(command func(session.SessionBackend) error) error {
 	backend, err := session.NewTmuxBackend()
 	if err != nil {
 		return err
 	}
-	return command(out, args, backend)
+	return command(backend)
 }
