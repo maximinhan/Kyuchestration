@@ -78,6 +78,9 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.
 파일 내용 그대로" 라는 뜻이다.
 
 스크립트는 `uname` 으로 플랫폼을 가려 최신 릴리스에서 맞는 바이너리를 `~/.local/bin/kyu` 에 놓는다.
+**업데이트도 같은 명령을 다시 실행하면 된다** — 항상 최신 릴리스를 받아 기존 바이너리를 덮어쓴다.
+토큰이 만료 전이면 그대로 쓰고, 몇 버전인지는 `kyu version` 으로 확인한다.
+
 자리를 바꾸려면 먼저 내보낸다.
 
 ```sh
