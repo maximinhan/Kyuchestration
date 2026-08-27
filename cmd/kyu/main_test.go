@@ -115,6 +115,48 @@ func TestVersionIdentifiesTheCommitWhenTheBuildInjectedNothing(t *testing.T) {
 	}
 }
 
+func TestKyuWithoutArgumentsEntersTheWorkDirInsteadOfListingIt(t *testing.T) {
+	// 기본 명령이 바뀐 자리다. 인자 없는 kyu 가 list 로 남아 있으면 여기서 목록과 종료 코드 0 이 나온다.
+	//
+	// 관측점으로 홈 디렉토리의 자동 초기화 거절을 쓴다. 진입 플로우에만 있는 반응이고, 세션을
+	// 만들기 전에 끝나므로 이 테스트가 실제 tmux 세션이나 claude 프로세스를 남기지 않는다.
+	// 진입의 마지막 한 걸음은 어차피 TTY 를 잡아 자동 테스트로 따라갈 수 없다.
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux 가 PATH 에 없어 진입 라우팅 테스트를 건너뜁니다")
+	}
+
+	homeDirectoryPath := t.TempDir()
+
+	command := exec.Command(buildKyuBinary(t))
+	command.Dir = homeDirectoryPath
+	command.Env = append(os.Environ(), "HOME="+homeDirectoryPath)
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("kyu 실행 결과 = %v, 종료 코드로 끝나기를 기대", err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), "kyu init") {
+		t.Errorf("stderr = %q, 명시적 초기화 방법 안내를 기대", stderr.String())
+	}
+
+	// 목록 헤더가 찍혔다면 라우팅이 아직 list 를 가리키고 있다는 뜻이다.
+	if strings.Contains(stdout.String(), "WorkDir:") {
+		t.Errorf("stdout = %q, 목록이 아니라 진입으로 가기를 기대", stdout.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(homeDirectoryPath, ".coord")); statErr == nil {
+		t.Errorf("홈 디렉토리에 조율 디렉토리가 만들어졌습니다: %s", homeDirectoryPath)
+	}
+}
+
 func TestUnknownCommandPrintsUsageToStderrAndExitsWithCodeOne(t *testing.T) {
 	command := exec.Command(buildKyuBinary(t), "존재하지-않는-명령")
 

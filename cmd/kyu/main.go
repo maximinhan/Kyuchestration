@@ -20,18 +20,16 @@ import (
 //
 // 이 도구가 무엇을 하는 도구인지가 이 한 화면에서 드러나야 하므로, 명령 목록을 여기 한 곳에만 둔다.
 // 명령별 자세한 사용법은 각 명령이 자기 거절 메시지에 함께 싣는다.
-const usageText = `사용법: kyu <명령> [인자]
+const usageText = `사용법: kyu [명령] [인자]
+
+  kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-  kyu list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
+  kyu list [path]        레포 목록 + 상태
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
   kyu version            이 바이너리의 버전`
-
-// defaultCommandName 은 인자 없이 실행했을 때의 명령이다(설계 문서 9.3).
-// 이 도구 앞에서 가장 자주 하는 일이 "지금 어떻게 돼 있지?" 라서 목록이 기본이다.
-const defaultCommandName = "list"
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -46,11 +44,16 @@ func main() {
 // 두 스트림을 모두 받는다. 명령이 내는 말에는 다른 명령의 입력으로 넘길 수 있는 것(out)과
 // 사람에게만 하는 말(errOut)이 섞여 있고, 그 구분은 명령마다 다르다.
 func runCommand(args []string, out, errOut io.Writer) error {
-	commandName := defaultCommandName
-	var commandArgs []string
-	if len(args) > 0 {
-		commandName, commandArgs = args[0], args[1:]
+	// 인자 없는 kyu 는 서브커맨드의 기본값이 아니라 그 자체로 하나의 명령이다 — 이 도구를 여는 문이다.
+	// 목록을 기본으로 두던 때(설계 문서 9.3)와 달라진 자리이고, 그 결정의 근거는 사용자가 이 도구
+	// 앞에서 실제로 하는 일이 "상태를 본다" 가 아니라 "여기서 작업을 시작한다" 였다는 것이다.
+	if len(args) == 0 {
+		return withSessionBackend(func(backend session.SessionBackend) error {
+			return cli.EnterWorkDir(out, errOut, backend)
+		})
 	}
+
+	commandName, commandArgs := args[0], args[1:]
 
 	switch commandName {
 	case "list":
