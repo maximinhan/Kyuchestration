@@ -50,7 +50,15 @@ func newRecordingSessionBackend(aliveSessionNames ...string) *recordingSessionBa
 
 func (backend *recordingSessionBackend) Create(name, cwd string, command []string) error {
 	backend.createdSessions = append(backend.createdSessions, createdSession{name: name, cwd: cwd, command: command})
-	return backend.createError
+	if backend.createError != nil {
+		return backend.createError
+	}
+
+	// 실제 백엔드에서 Create 가 성공하면 그 세션은 그 순간부터 살아있다. 만들자마자 붙는 흐름이
+	// 생겼으므로(인자 없는 kyu) 이 대역도 그 사실을 지켜야 한다 — 아니면 실제로는 이어지는 일이
+	// 테스트에서만 "세션이 없습니다" 로 끊긴다.
+	backend.aliveSessionNames[name] = true
+	return nil
 }
 
 func (backend *recordingSessionBackend) Attach(name string) error {
