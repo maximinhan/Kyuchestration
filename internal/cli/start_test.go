@@ -203,3 +203,52 @@ func TestStartSessionRejectsUnknownOption(t *testing.T) {
 		t.Errorf("에러 = %v, 문제의 옵션을 그대로 되짚어 주기를 기대", err)
 	}
 }
+
+func TestStartSessionWithRepoClaudeMdOptionWrapsTheCommandInEnvAssignment(t *testing.T) {
+	// 추가 디렉토리의 CLAUDE.md 는 이 환경변수가 1 일 때만 로드된다(설계 문서 5.4).
+	// 백엔드 인터페이스에 환경변수 인자를 새로 뚫는 대신 명령을 env 로 감싼다 — 세션 계층은
+	// 플랫폼 의존부라 넓힐수록 다른 플랫폼 구현이 따라 해야 할 것이 늘어난다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out bytes.Buffer
+	if err := StartSession(&out, []string{"--repo-claude-md"}, backend); err != nil {
+		t.Fatalf("StartSession() 실패: %v", err)
+	}
+
+	assertOnlyCreatedSession(t, backend, createdSession{
+		name: "wd-WorkDir-featureX-main",
+		cwd:  workDirPath,
+		command: []string{
+			"env", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1",
+			"claude",
+			"--add-dir", filepath.Join(workDirPath, "alpha-commons"),
+		},
+	})
+}
+
+func TestStartSessionRejectsRepoClaudeMdOptionForARepoSession(t *testing.T) {
+	// 레포 세션은 자기 디렉토리에서 뜨므로 그 레포의 CLAUDE.md 를 이미 읽는다. 옵션을 조용히
+	// 무시하면 사용자는 무언가 켜졌다고 믿고, 그 믿음은 계획이 어긋날 때까지 드러나지 않는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	backend := newRecordingSessionBackend()
+
+	var out bytes.Buffer
+	err := StartSession(&out, []string{"alpha-commons", "--repo-claude-md"}, backend)
+
+	if err == nil {
+		t.Fatalf("StartSession() 가 에러를 반환하지 않음, 메인 세션 전용 옵션 에러를 기대")
+	}
+	if !strings.Contains(err.Error(), "메인 세션") {
+		t.Errorf("에러 = %v, 이 옵션이 메인 세션 전용이라는 이유를 알려주기를 기대", err)
+	}
+	if len(backend.createdSessions) != 0 {
+		t.Errorf("Create 호출 = %+v, 옵션이 잘못됐으면 아무것도 만들지 않기를 기대", backend.createdSessions)
+	}
+}

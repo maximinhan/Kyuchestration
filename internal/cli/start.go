@@ -22,10 +22,27 @@ const sessionCommandName = "claude"
 // addDirFlagName 은 메인 세션에 하위 레포를 파일 접근으로 붙이는 플래그다(설계 문서 5.4).
 const addDirFlagName = "--add-dir"
 
-const startUsageText = `사용법: wd start [repo]
+// repoClaudeMdOptionName 은 메인 세션이 각 레포의 지침 파일까지 읽게 하는 옵션이다.
+const repoClaudeMdOptionName = "--repo-claude-md"
 
-  wd start           워크디렉토리 최상위에서 메인 세션을 띄운다
-  wd start <repo>    해당 레포 디렉토리에서 세션을 띄운다`
+// repoClaudeMdEnvAssignment 는 추가 디렉토리의 CLAUDE.md 와 .claude/rules/ 를 로드시키는 환경변수다.
+//
+// 기본으로 켜지 않는다. 붙인 레포 수만큼 컨텍스트가 늘어나므로, 계획이 레포 컨벤션과 어긋나는
+// 문제가 실제로 생겼을 때만 켜는 것이 설계의 판단이다(설계 문서 5.4).
+const repoClaudeMdEnvAssignment = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1"
+
+// envCommandName 은 환경변수를 얹어 다른 명령을 실행하는 POSIX 표준 명령이다.
+//
+// SessionBackend.Create 에 환경변수 인자를 새로 뚫는 대신 명령을 이것으로 감싼다.
+// 세션 계층은 이 도구의 유일한 플랫폼 의존부라, 인터페이스를 넓힐수록 새 플랫폼 구현이 따라 해야
+// 할 것이 늘어난다(설계 문서 5.2 의 "플랫폼 의존부는 5개 함수가 전부다").
+const envCommandName = "env"
+
+const startUsageText = `사용법: wd start [repo] [--repo-claude-md]
+
+  wd start                     워크디렉토리 최상위에서 메인 세션을 띄운다
+  wd start <repo>              해당 레포 디렉토리에서 세션을 띄운다
+  wd start --repo-claude-md    메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다`
 
 // StartSession 은 wd start 를 실행한다. 인자가 없으면 메인 세션을, 레포 이름이 있으면 그 레포의 세션을 띄운다.
 //
@@ -50,7 +67,7 @@ func StartSession(out io.Writer, args []string, backend session.SessionBackend) 
 	}
 
 	if request.repoName == "" {
-		return startMainSession(out, location, repos, backend)
+		return startMainSession(out, location, repos, request.loadRepoClaudeMd, backend)
 	}
 	return startRepoSession(out, location, repos, request.repoName, backend)
 }
@@ -59,20 +76,35 @@ func StartSession(out io.Writer, args []string, backend session.SessionBackend) 
 type startRequest struct {
 	// repoName 이 비어 있으면 메인 세션 요청이다(설계 문서 9.3 의 "인자 없으면 main").
 	repoName string
+
+	// loadRepoClaudeMd 는 메인 세션이 추가 디렉토리의 지침 파일까지 읽을지다.
+	loadRepoClaudeMd bool
 }
 
 func parseStartArgs(args []string) (startRequest, error) {
 	var request startRequest
 
 	for _, arg := range args {
+		switch {
+		case arg == repoClaudeMdOptionName:
+			request.loadRepoClaudeMd = true
+
 		// 모르는 옵션을 레포 이름으로 흘려보내면 "없는 레포입니다: --typo" 라는 엉뚱한 안내가 나온다.
-		if strings.HasPrefix(arg, "-") {
+		case strings.HasPrefix(arg, "-"):
 			return startRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, startUsageText)
-		}
-		if request.repoName != "" {
+
+		case request.repoName != "":
 			return startRequest{}, fmt.Errorf("start 는 레포 이름 하나만 받습니다 (인자 %d 개를 받음)\n\n%s", len(args), startUsageText)
+
+		default:
+			request.repoName = arg
 		}
-		request.repoName = arg
+	}
+
+	// 레포 세션은 자기 디렉토리에서 뜨므로 그 레포의 CLAUDE.md 를 이미 읽는다. 조용히 무시하면
+	// 사용자는 무언가 켜졌다고 믿고, 그 믿음은 세션이 지침을 어길 때까지 드러나지 않는다.
+	if request.loadRepoClaudeMd && request.repoName != "" {
+		return startRequest{}, fmt.Errorf("%s 는 메인 세션 전용입니다 — 레포 세션은 자기 디렉토리의 CLAUDE.md 를 이미 읽습니다", repoClaudeMdOptionName)
 	}
 
 	return request, nil
@@ -97,10 +129,10 @@ func currentWorkDir() (workDirLocation, error) {
 }
 
 // startMainSession 은 워크디렉토리 최상위에서 조율용 세션을 띄운다(설계 문서 5.4).
-func startMainSession(out io.Writer, location workDirLocation, repos []workdir.Repo, backend session.SessionBackend) error {
+func startMainSession(out io.Writer, location workDirLocation, repos []workdir.Repo, loadRepoClaudeMd bool, backend session.SessionBackend) error {
 	return createSession(out, backend,
 		session.MainSessionName(location.name), mainRowLabel,
-		location.absolutePath, mainSessionCommand(repos))
+		location.absolutePath, mainSessionCommand(repos, loadRepoClaudeMd))
 }
 
 // mainSessionCommand 는 메인 세션이 실행할 명령을 조립한다: claude --add-dir <레포 절대경로>...
@@ -110,8 +142,11 @@ func startMainSession(out io.Writer, location workDirLocation, repos []workdir.R
 //
 // 절대경로로 넘기는 이유: 세션의 cwd 가 워크디렉토리라 상대경로도 당장은 맞지만, 서로 다른
 // 워크디렉토리에 같은 이름의 레포가 있을 수 있어 이름과 상대경로는 레포를 특정하지 못한다(설계 문서 11절 4번).
-func mainSessionCommand(repos []workdir.Repo) []string {
-	command := make([]string, 0, 1+2*len(repos))
+func mainSessionCommand(repos []workdir.Repo, loadRepoClaudeMd bool) []string {
+	command := make([]string, 0, 3+2*len(repos))
+	if loadRepoClaudeMd {
+		command = append(command, envCommandName, repoClaudeMdEnvAssignment)
+	}
 	command = append(command, sessionCommandName)
 	for _, repo := range repos {
 		command = append(command, addDirFlagName, repo.AbsolutePath)
