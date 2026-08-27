@@ -30,6 +30,9 @@ type recordingSessionBackend struct {
 	// createError 는 Create 가 돌려줄 에러다. ErrSessionExists 처리를 확인할 때 채운다.
 	createError error
 
+	// attachError 는 Attach 가 돌려줄 에러다. ErrNestedSession 처리를 확인할 때 채운다.
+	attachError error
+
 	createdSessions      []createdSession
 	attachedSessionNames []string
 	killedSessionNames   []string
@@ -52,7 +55,7 @@ func (backend *recordingSessionBackend) Create(name, cwd string, command []strin
 
 func (backend *recordingSessionBackend) Attach(name string) error {
 	backend.attachedSessionNames = append(backend.attachedSessionNames, name)
-	return nil
+	return backend.attachError
 }
 
 func (backend *recordingSessionBackend) Kill(name string) error {
