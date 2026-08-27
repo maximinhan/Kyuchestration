@@ -52,6 +52,14 @@ func (prompt *interactivePrompt) ask(question string) (string, error) {
 	}
 
 	line, err := prompt.reader.ReadString('\n')
+
+	// 터미널이 아니면 사용자가 친 개행이 화면에 남지 않는다 — 에코해줄 터미널이 없기 때문이다.
+	// 우리가 대신 줄을 바꾸지 않으면 다음 출력이 물음 뒤에 그대로 이어 붙어, 파이프로 넘긴
+	// 실행의 기록이 한 줄로 뭉친다.
+	if prompt.inputFile == nil {
+		fmt.Fprintln(prompt.out)
+	}
+
 	if errors.Is(err, io.EOF) {
 		// 마지막 줄에 개행이 없는 입력(파일·테스트)도 답으로 받는다. 정말 아무것도 오지 않았을 때만
 		// 끝난 것으로 본다.
