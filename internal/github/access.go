@@ -75,4 +75,10 @@ type RepositoryAccess interface {
 
 	// Repositories 는 해당 소유자의 레포를 최근 푸시 순으로 반환한다.
 	Repositories(owner Owner) ([]Repository, error)
+
+	// CloneRepository 는 레포를 destinationPath 에 클론한다.
+	//
+	// 자격증명을 어떻게 넘길지는 구현의 몫이다 — 부르는 쪽은 토큰을 만지지 않는다.
+	// 그래야 표시 계층이 토큰을 화면에 찍거나 로그에 남길 자리 자체가 생기지 않는다.
+	CloneRepository(repository Repository, destinationPath string) error
 }
