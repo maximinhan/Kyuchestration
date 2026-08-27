@@ -1,0 +1,38 @@
+name: CI
+
+# push 는 main 으로 제한한다. 작업 브랜치의 push 는 어차피 pull_request 로 검사되므로
+# 둘 다 켜두면 같은 커밋에 대해 워크플로가 두 번 돈다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  vet-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod 의 go 지시자를 단일 출처로 삼는다. 버전을 여기에 또 적으면 갈라진다.
+          go-version-file: go.mod
+
+      - name: tmux 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      # 세션 계층 테스트는 tmux 가 없으면 t.Skip 으로 넘어간다. 즉 설치가 조용히 실패하면
+      # tmux 를 한 줄도 검증하지 않은 채 CI 가 초록으로 통과한다. 여기서 먼저 끊는다.
+      - name: tmux 설치 확인
+        run: tmux -V
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
