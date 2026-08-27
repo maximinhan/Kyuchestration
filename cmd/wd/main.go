@@ -16,10 +16,10 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
-// usageText 는 설계 문서 9.3 의 명령 다섯 개를 그대로 싣는다.
+// usageText 는 이 도구의 명령 전부다(설계 문서 9.3).
 //
-// 아직 동작하지 않는 명령까지 적는 이유는, 이 도구가 무엇을 하는 도구인지가 사용법 한 화면에서
-// 드러나야 하기 때문이다. 라우팅은 미구현 명령을 따로 안내하므로 사용자가 헛물을 켜지는 않는다.
+// 이 도구가 무엇을 하는 도구인지가 이 한 화면에서 드러나야 하므로, 명령 목록을 여기 한 곳에만 둔다.
+// 명령별 자세한 사용법은 각 명령이 자기 거절 메시지에 함께 싣는다.
 const usageText = `사용법: wd <명령> [인자]
 
   wd init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
@@ -69,10 +69,10 @@ func runCommand(args []string, out, errOut io.Writer) error {
 			return cli.KillSessions(out, commandArgs, backend)
 		})
 
-	// 아직 없는 명령을 빈 함수로 만들어두지 않는다. 호출하면 아무 일도 하지 않고 성공한 것처럼 끝나는
-	// 자리가 생기고, 그 자리는 다음 PR 이 채우기 전까지 사용자를 속인다.
+	// init 만 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이라 tmux 가 필요 없는데,
+	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 워크디렉토리를 만들지도 못하게 된다.
 	case "init":
-		return fmt.Errorf("아직 구현되지 않은 명령입니다: %s (PR 7 예정)", commandName)
+		return cli.InitWorkDir(out, commandArgs)
 
 	default:
 		return fmt.Errorf("알 수 없는 명령: %s\n\n%s", commandName, usageText)

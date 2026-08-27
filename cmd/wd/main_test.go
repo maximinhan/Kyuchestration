@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -83,5 +84,31 @@ func TestKillWithoutArgumentsPrintsUsageToStderrAndExitsWithCodeOne(t *testing.T
 	}
 	if !strings.Contains(stderr.String(), "사용법: wd kill") {
 		t.Errorf("stderr = %q, kill 의 사용법 안내를 기대", stderr.String())
+	}
+}
+
+func TestInitCreatesThePlanFileWithoutNeedingTmux(t *testing.T) {
+	// init 은 파일을 만드는 일이라 세션 백엔드를 거치지 않는다. tmux 를 건너뛰는지까지 여기서 고정한다
+	// — 라우팅이 다른 명령과 같은 길로 지나가면 tmux 없는 머신에서 초기화조차 못 하게 된다.
+	workDirPath := t.TempDir()
+
+	command := exec.Command(buildWdBinary(t), "init")
+	command.Dir = workDirPath
+	// PATH 를 비워 tmux 를 찾을 수 없게 만든다. 그래도 성공해야 백엔드를 거치지 않는다는 뜻이다.
+	command.Env = append(os.Environ(), "PATH=")
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		t.Fatalf("wd init 실행 실패: %v (%s)", err, stderr.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(workDirPath, ".coord", "plan.md")); err != nil {
+		t.Errorf("계획 파일이 만들어지지 않았습니다: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "초기화") {
+		t.Errorf("stdout = %q, 초기화 안내를 기대", stdout.String())
 	}
 }
