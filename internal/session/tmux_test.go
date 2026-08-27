@@ -251,3 +251,18 @@ func waitForFileContent(t *testing.T, path string) string {
 	t.Fatalf("%s 가 5초 안에 생성되지 않았습니다", path)
 	return ""
 }
+
+func TestTmuxBackendAttachRefusesToNestInsideAnotherSession(t *testing.T) {
+	backend := newIsolatedTmuxBackend(t)
+
+	// 실제 attach 는 TTY 를 요구해 자동 테스트에서 부를 수 없다(그래서 이 파일에 Attach 성공 경로
+	// 테스트가 없다). 중첩 판정은 TTY 를 잡기 전에 끝나므로 이 분기만은 검증할 수 있고,
+	// 사용자가 attach 에서 가장 자주 부딪히는 실패이기도 하다.
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
+
+	err := backend.Attach("wd-test-nested")
+
+	if !errors.Is(err, ErrNestedSession) {
+		t.Errorf("Attach() 에러 = %v, ErrNestedSession 으로 풀리기를 기대", err)
+	}
+}

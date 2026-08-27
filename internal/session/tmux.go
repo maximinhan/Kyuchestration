@@ -15,6 +15,10 @@ import (
 // 실행 권한 범위를 넘고, 실패했을 때 되돌리기 어렵다. 안내만 하고 종료한다.
 var ErrTmuxNotInstalled = errors.New("tmux 를 찾을 수 없습니다. 설치 후 다시 실행하세요 — macOS: brew install tmux, Debian/Ubuntu: sudo apt install tmux")
 
+// insideTmuxEnvName 은 tmux 가 자기 세션 안에서 도는 프로세스에 심어두는 환경변수다.
+// 값(소켓 경로·클라이언트 pid)은 쓰지 않는다. 존재 여부만으로 "세션 안에서 실행 중" 이 판정된다.
+const insideTmuxEnvName = "TMUX"
+
 // TmuxBackend 는 tmux 에 세션 관리를 위임하는 SessionBackend 구현이다.
 //
 // PTY 관리·리사이즈·스크롤백·detach 재접속·도구와 독립적인 세션 생존을 전부 tmux 가 맡는다.
@@ -63,7 +67,19 @@ func (b *TmuxBackend) Create(name, cwd string, cmd []string) error {
 
 // Attach 는 호출한 터미널을 해당 세션에 연결한다.
 // 사용자가 빠져나올 때까지 블로킹된다.
+// 이미 tmux 세션 안에서 실행 중이면 ErrNestedSession 을 반환한다.
 func (b *TmuxBackend) Attach(name string) error {
+	// tmux 는 세션 안에서 attach-session 을 부르면 "sessions should be nested with care" 만
+	// 남기고 실패한다. 그 문장은 tmux 의 말이라 사용자가 이 도구의 안내로 읽지 못하고,
+	// 무엇을 해야 하는지도 알려주지 않는다. 판정을 여기서 끝내 호출부가 안내하게 한다.
+	//
+	// 중첩 대신 switch-client 로 현재 클라이언트를 옮겨 태우는 방법도 있지만 v1 은 하지 않는다.
+	// 그것은 사용자가 보고 있던 세션을 도구가 바꿔치기하는 일인데, 그 세션에서 무엇을 하던 중인지
+	// 도구는 알지 못한다(설계 원칙 3 — 도구는 세션 내부에 개입하지 않는다).
+	if _, isInsideSession := os.LookupEnv(insideTmuxEnvName); isInsideSession {
+		return fmt.Errorf("%w: %s", ErrNestedSession, name)
+	}
+
 	command := exec.Command(b.tmuxPath, "attach-session", "-t", exactTarget(name))
 
 	// attach 는 사용자가 직접 조작하는 화면이다. runTmuxCommand 처럼 출력을 버퍼에 담으면
