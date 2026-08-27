@@ -30,7 +30,7 @@ const mainRowLabel = "main"
 // 하는데 경고가 섞이면 그 쓰임이 깨지고, 계획이 깨져도 목록 자체는 그대로 성립하기 때문이다
 // (설계 문서 6.1 의 "계획 파싱 실패가 도구 전체를 막지 않는다").
 //
-// backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/wd)의 결정이고,
+// backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/kyu)의 결정이고,
 // 표시 계층이 tmux 를 직접 만들면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
 func ListWorkDir(out, errOut io.Writer, args []string, backend session.SessionBackend) error {
 	workDirPath, err := workDirPathFromListArgs(args)
