@@ -88,12 +88,21 @@ const (
 	planFileName       = "plan.md"
 )
 
+// PlanFilePath 는 워크디렉토리의 계획 파일 경로를 만든다: <workdir>/.coord/plan.md.
+//
+// 경로 규약을 이 함수 하나로 모은다. 계획을 읽는 쪽(LoadPlan)과 만드는 쪽(wd init)이 각자
+// 경로를 조립하면 한쪽만 고쳤을 때 도구가 자기가 만든 파일을 읽지 못하게 되고,
+// 그 어긋남은 "계획이 없다" 는 정상 결과로 보여서 드러나지 않는다.
+func PlanFilePath(workDirPath string) string {
+	return filepath.Join(workDirPath, coordDirectoryName, planFileName)
+}
+
 // LoadPlan 은 워크디렉토리의 .coord/plan.md 를 읽어 작업 목록을 돌려준다.
 //
 // frontmatter 만 해석하고 본문은 한 글자도 YAML 에 넘기지 않는다. 본문은 사람과 세션이 읽는
 // 자리이고(설계 문서 6.1), 도구가 본문의 형식까지 요구하기 시작하면 거기에 자유롭게 적을 수 없게 된다.
 func LoadPlan(workDirPath string) (Plan, error) {
-	planFilePath := filepath.Join(workDirPath, coordDirectoryName, planFileName)
+	planFilePath := PlanFilePath(workDirPath)
 
 	planFileContent, err := os.ReadFile(planFilePath)
 	if errors.Is(err, os.ErrNotExist) {

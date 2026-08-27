@@ -8,6 +8,305 @@
 - 핵심 원칙: **프로세스는 격리, 지식은 공유**
 - 스택: Go + tmux 백엔드
 
+## 이 도구가 하는 일
+
+MSA 환경에서 기능 하나가 여러 레포에 걸치면, 작업 단위마다 **워크디렉토리**를 만들고 그 아래에
+필요한 레포를 클론해서 쓴다.
+
+```
+WorkDir-featureX/
+    .coord/plan.md   # 조율용 계획 (이 도구가 만든다)
+    proj-a/          # git clone
+    proj-b/          # git clone
+    proj-c/          # git clone
+```
+
+각 레포에서 세션을 따로 띄워야 그 레포의 `.mcp.json`·`CLAUDE.md`·에이전트 설정이 살아난다.
+`wd` 는 그 세션들을 한 화면에서 띄우고, 보고, 오가게 한다.
+
+## 요구사항
+
+| 프로그램 | 쓰이는 곳 | 없으면 |
+|---|---|---|
+| tmux | 세션 생성·진입·종료 | `wd init` 외의 명령이 안내와 함께 종료 |
+| git | 레포 발견과 상태 판정 | 상태를 판정하지 못함 |
+| claude CLI | 세션 안에서 실행되는 명령 | 세션은 뜨지만 바로 끝남 |
+| Go | 빌드할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | — |
+
+macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 — `brew install tmux` 또는
+`sudo apt install tmux`.
+
+## 설치
+
+```sh
+git clone https://github.com/maximinhan/Kyuchestration.git
+cd Kyuchestration
+go build ./cmd/wd          # 현재 디렉토리에 wd 바이너리가 생긴다
+```
+
+PATH 에 둔다.
+
+```sh
+mv wd ~/.local/bin/        # PATH 에 들어있는 아무 디렉토리
+```
+
+또는 한 번에.
+
+```sh
+go install ./cmd/wd        # $(go env GOPATH)/bin/wd 에 설치된다
+```
+
+`go install` 을 쓰면 `$(go env GOPATH)/bin` 이 PATH 에 있어야 한다.
+
+## 처음부터 끝까지 한 번
+
+레포 두 개를 함께 고치는 작업을 예로 든다.
+
+**1. 워크디렉토리를 만든다**
+
+```sh
+cd ~/work
+wd init WorkDir-featureX
+cd WorkDir-featureX
+```
+
+`.coord/plan.md` 가 만들어진다. 이름을 주지 않고 `wd init` 만 실행하면 현재 디렉토리가
+워크디렉토리가 된다. **이미 계획 파일이 있으면 덮어쓰지 않고 거절한다** — 사람이 쓴 계획을
+도구가 지우지 않는다.
+
+**2. 레포를 클론한다**
+
+```sh
+git clone <proj-a 주소> proj-a
+git clone <proj-b 주소> proj-b
+```
+
+설정 파일에 레포 목록을 적을 필요는 없다. 클론하면 곧바로 인식된다.
+
+**3. 지금 상태를 본다**
+
+```sh
+wd list
+```
+
+```
+WorkDir: WorkDir-featureX   (2 repos, 0 sessions)
+
+  ○  proj-a  IDLE
+  ○  proj-b  IDLE
+  ○  main    IDLE
+
+wd attach <repo> 로 진입
+```
+
+**4. 레포 세션을 띄운다**
+
+```sh
+wd start proj-a
+```
+
+`proj-a` 디렉토리에서 세션이 뜬다. 그 레포의 MCP 설정·지침·에이전트가 그대로 로드된다.
+
+**5. 세션에 들어간다**
+
+```sh
+wd attach proj-a
+```
+
+**빠져나올 때는 `Ctrl-b d`** — `Ctrl` 과 `b` 를 함께 누르고 뗀 다음 `d` 를 누른다.
+세션은 살아있고 터미널만 빠져나온다. tmux 에서 알아야 할 것은 이 키 하나뿐이다.
+
+> `Ctrl-b d` 대신 창을 닫아도 세션은 살아있다. 다시 `wd attach proj-a` 로 들어가면 된다.
+> 세션을 진짜로 끝내려면 `wd kill` 을 쓴다.
+
+**6. 계획을 적는다**
+
+`.coord/plan.md` 를 열어 frontmatter 의 예시 주석을 풀고 내용을 바꿔 쓴다.
+
+```markdown
+---
+tasks:
+  - id: commons-event
+    repo: proj-a
+    title: 이벤트 클래스 추가
+    needs: []
+    status: done
+
+  - id: publish
+    repo: proj-b
+    title: 발행 로직 구현
+    needs: [commons-event]
+    status: doing
+---
+```
+
+이제 `wd list` 가 작업까지 함께 보여준다.
+
+```
+WorkDir: WorkDir-featureX   (2 repos, 1 session)
+
+  ●  proj-a  RUNNING  [commons-event] done
+  ○  proj-b  DIRTY    [publish] doing
+  ○  main    IDLE
+
+wd attach <repo> 로 진입
+```
+
+**7. 정리한다**
+
+```sh
+wd kill --all
+```
+
+## 명령
+
+```
+wd init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
+wd list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
+wd start [repo]       세션 시작. 인자 없으면 main
+wd attach <repo>      세션 진입. main 도 가능
+wd kill [repo|--all]  세션 종료
+```
+
+### `wd init [name]`
+
+`.coord/plan.md` 템플릿을 만든다. 이름을 주면 그 디렉토리를 만들어(이미 있으면 그대로 쓴다)
+그 안을 초기화하고, 이름이 없으면 현재 디렉토리를 초기화한다.
+
+계획 파일이 이미 있으면 아무것도 하지 않고 종료 코드 1 로 끝난다. 새로 만들려면 그 파일을
+직접 지우거나 옮긴다.
+
+이 명령만 tmux 없이 동작한다.
+
+### `wd list [path]`
+
+인자 없이 `wd` 만 실행해도 같다. 경로를 주면 그 워크디렉토리를 본다.
+
+```
+WorkDir: WorkDir-featureX   (3 repos, 2 sessions)
+
+  ●  proj-a  RUNNING  [commons-schema] doing (done 1/2)
+  ○  proj-b  DIRTY    [publish] ready
+  ○  proj-c  IDLE     [consume] blocked ← needs commons-schema
+  ●  main    RUNNING
+
+wd attach <repo> 로 진입
+```
+
+왼쪽 동그라미는 세션 생존이다. `●` 는 세션이 떠 있고 `○` 는 없다.
+
+상태는 도구가 tmux 와 git 에게 물어 매번 다시 계산한다. 세션이 자기 상태를 보고하지 않는다.
+
+| 상태 | 뜻 |
+|---|---|
+| `RUNNING` | 세션이 살아있다 |
+| `DIRTY` | 세션 없음 + 커밋하지 않은 변경이 있다 |
+| `AHEAD` | 세션 없음 + 워킹 트리는 깨끗한데 푸시하지 않은 커밋이 있다 |
+| `IDLE` | 세션도 없고 넘길 것도 없다 |
+
+오른쪽 칸은 `.coord/plan.md` 에 적어둔 작업이다. 한 레포에 작업이 여럿이면 **지금 볼 작업**
+하나만 보여준다 — `doing` → `ready` → `blocked` 순으로 고르고, 같은 상태면 계획에 먼저 적힌
+것이다. 뒤의 `(done 1/2)` 는 그 레포 전체 진척이고, 전부 끝났으면 `done 2/2` 로만 나온다.
+`blocked` 인 작업에는 아직 끝나지 않은 선행이 `← needs` 로 붙는다.
+
+계획을 읽지 못했거나 없는 레포를 가리키는 작업이 있으면 **경고를 stderr 로** 내고 목록은 그대로
+보여준다. 계획이 깨져도 도구 전체가 멈추지는 않는다.
+
+### `wd start [repo]`
+
+```sh
+wd start proj-a            # proj-a 디렉토리에서 세션을 띄운다
+wd start                   # 워크디렉토리 최상위에서 메인 세션을 띄운다
+wd start --repo-claude-md  # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
+```
+
+**레포 세션**은 그 레포 디렉토리에서 뜬다. 설정은 오직 세션을 시작한 디렉토리에서만 오기 때문에,
+이 한 가지로 그 레포의 `.mcp.json`·`CLAUDE.md`·`.claude/agents/`·훅이 전부 살아난다.
+
+**메인 세션**은 워크디렉토리 최상위에서 뜨고, 하위 레포를 `--add-dir` 로 자동으로 붙인다.
+목록을 손으로 관리하지 않는다 — 클론된 레포를 매번 다시 스캔해서 조립한다.
+
+```sh
+claude --add-dir /abs/path/WorkDir-featureX/proj-a --add-dir /abs/path/WorkDir-featureX/proj-b
+```
+
+메인은 각 레포를 읽어 현황을 파악하고, 인터페이스를 확정하고, 작업 순서를 `.coord/plan.md` 에
+적는 자리다. 코드는 직접 고치지 않는다. `--add-dir` 은 **파일 접근만 주고 설정은 주지 않기**
+때문에 이 용도에 정확히 맞는다.
+
+`--repo-claude-md` 는 그 예외를 연다. 이 옵션을 주면 메인 세션이 추가 디렉토리의 `CLAUDE.md` 와
+`.claude/rules/` 까지 읽는다(`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`). 붙인 레포 수만큼
+컨텍스트가 늘어나므로 기본은 꺼져 있다. 계획이 레포 컨벤션과 어긋나는 문제가 실제로 생겼을 때 켠다.
+레포 세션은 자기 디렉토리의 `CLAUDE.md` 를 이미 읽으므로 이 옵션을 함께 줄 수 없다.
+
+이미 떠 있는 세션에 `wd start` 를 다시 실행해도 실패하지 않는다. 안내만 하고 끝난다.
+
+### `wd attach <repo>`
+
+```sh
+wd attach proj-a
+wd attach main
+```
+
+**빠져나오기는 `Ctrl-b d`.** 진입 직전에 이 안내가 한 줄 찍힌다.
+
+이미 세션 안에서 실행하면 거절한다 — 세션 안의 세션이 되면 어느 쪽에서 빠져나오는 것인지
+알 수 없다.
+
+### `wd kill [repo|--all]`
+
+```sh
+wd kill proj-a   # 하나만
+wd kill main     # 메인 세션
+wd kill --all    # 이 워크디렉토리의 세션 전부
+```
+
+`--all` 은 이 워크디렉토리의 세션만 종료한다. 다른 워크디렉토리의 세션과 직접 띄운 tmux 세션은
+건드리지 않는다. 인자 없는 `wd kill` 을 "전부"로 해석하지 않는다 — 이름을 빠뜨린 한 번으로
+다른 레포의 작업까지 날아가지 않게 한다.
+
+## `.coord/plan.md`
+
+레포 사이에 공유해야 하는 것 — 확정한 인터페이스, 작업 순서, 지금 어디까지 왔는지 — 을 적는 파일이다.
+**레포 안에는 아무것도 넣지 않는다.** 레포는 팀 공용이고, 조율에 필요한 것은 전부 워크디렉토리에 둔다.
+
+세션끼리 직접 이야기하지 않는다. 메인이 이 파일에 쓰고 각 레포 세션이 필요할 때 읽는다.
+그래서 세션이 언제 뜨고 죽어도 조율 상태가 유실되지 않고, 사람이 직접 열어 고칠 수 있다.
+
+YAML frontmatter 와 Markdown 본문으로 이루어진다. **도구는 frontmatter 만 읽고, 본문은
+사람과 세션이 읽는다.**
+
+```markdown
+---
+tasks:
+  - id: commons-event      # 작업 식별자 (필수). 다른 작업의 needs 가 이것을 가리킨다
+    repo: proj-a           # 수행할 레포 디렉토리명 (필수)
+    title: 이벤트 클래스 추가  # 한 줄 설명 (필수)
+    needs: []              # 선행 작업 id 목록. 비었으면 바로 시작 가능
+    status: done           # blocked / ready / doing / done (필수)
+---
+
+## 확정 인터페이스
+
+다른 레포가 의존하는 시그니처를 그대로 적는다. 요약하지 않는다.
+
+## 배경
+
+이 작업을 하는 이유와 결정 근거.
+
+## 작업 순서 근거
+
+어느 작업이 먼저여야 하는지, 어느 작업이 병렬로 가능한지와 그 근거.
+```
+
+`status` 는 사람 또는 세션이 갱신한다. 도구는 읽어서 보여줄 뿐 자동으로 바꾸지 않는다.
+선행이 다 끝났으니 `blocked` → `ready` 로 옮기는 자동 전이는 v2 후보다.
+
+`wd init` 이 만드는 템플릿에는 이 예시가 전부 주석으로 들어 있다. 줄 맨 앞의 `#` 를 지우면
+그대로 계획이 된다. 주석뿐인 상태는 "계획 없음" 으로 읽히므로 목록이 오염되지 않는다.
+
+자세한 규약은 [설계 문서 6.1](workdir-orchestrator-design.md#61-planmd) 에 있다.
+
 ## 구조
 
 ```
@@ -17,6 +316,9 @@ internal/
     workdir/     # 스캔 · 상태 추론 · plan 파싱 (플랫폼 무관 핵심)
     cli/         # 명령 구현
 ```
+
+`internal/session` 밖에서는 tmux 를 직접 호출하지 않는다. 이 규칙이 지켜지는 한 새 플랫폼
+지원은 파일 하나를 더하는 것으로 끝난다.
 
 ## 개발
 

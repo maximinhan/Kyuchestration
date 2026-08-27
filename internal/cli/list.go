@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/maximinhan/Kyuchestration/internal/session"
@@ -25,9 +26,13 @@ const mainRowLabel = "main"
 
 // ListWorkDir 는 wd list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
 //
+// 계획에 대한 경고는 out 이 아니라 errOut 으로 나간다. 목록은 다른 명령의 입력으로 넘길 수 있어야
+// 하는데 경고가 섞이면 그 쓰임이 깨지고, 계획이 깨져도 목록 자체는 그대로 성립하기 때문이다
+// (설계 문서 6.1 의 "계획 파싱 실패가 도구 전체를 막지 않는다").
+//
 // backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/wd)의 결정이고,
 // 표시 계층이 tmux 를 직접 만들면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
-func ListWorkDir(out io.Writer, args []string, backend session.SessionBackend) error {
+func ListWorkDir(out, errOut io.Writer, args []string, backend session.SessionBackend) error {
 	workDirPath, err := workDirPathFromListArgs(args)
 	if err != nil {
 		return err
@@ -38,7 +43,27 @@ func ListWorkDir(out io.Writer, args []string, backend session.SessionBackend) e
 		return err
 	}
 
+	// 경고를 먼저 내보낸다. 목록이 길면 사용자의 화면에는 마지막 몇 줄만 남는데,
+	// 경고가 그 뒤에 붙으면 "계획을 버렸다" 는 사실이 목록보다 눈에 먼저 들어와 순서가 뒤집힌다.
+	if err := writePlanWarnings(errOut, listing.planWarnings); err != nil {
+		return err
+	}
+
 	return writeWorkDirListing(out, listing)
+}
+
+// planWarningPrefix 는 경고 줄 앞에 붙는 말이다. stderr 를 터미널에서 같은 화면으로 보게 되므로
+// 목록의 한 줄과 섞이지 않도록 표시한다.
+const planWarningPrefix = "경고: "
+
+// writePlanWarnings 는 계획에 대한 경고를 사용자에게 내보낸다.
+func writePlanWarnings(errOut io.Writer, warnings []string) error {
+	for _, warning := range warnings {
+		if _, err := fmt.Fprintf(errOut, "%s%s\n", planWarningPrefix, warning); err != nil {
+			return fmt.Errorf("계획 경고 출력 실패: %w", err)
+		}
+	}
+	return nil
 }
 
 // workDirPathFromListArgs 는 목록을 보여줄 워크디렉토리를 정한다. 인자가 없으면 현재 디렉토리다.
@@ -64,6 +89,14 @@ type listRow struct {
 	// state 는 관찰로 얻은 상태다. 메인 행도 같은 어휘를 쓰지만 RUNNING 아니면 IDLE 뿐이다
 	// — 워크디렉토리 최상위는 레포가 아니라 DIRTY·AHEAD 라는 말이 성립하지 않는다.
 	state workdir.RepoState
+
+	// planNote 는 계획에서 이 레포를 보고 뽑은 한 줄이다(설계 문서 9.3 의 "[commons-event] done").
+	// 계획이 없거나 이 레포를 가리키는 작업이 없으면 빈 문자열이고, 그러면 그 칸은 비어 있다.
+	//
+	// 관찰이 아니라 표시 문구를 행에 담는 이유는 이 타입이 "화면에 옮기기 직전의 결과" 여서다.
+	// 어느 작업을 보여줄지 고르는 판단은 행마다 한 번이면 되고, 출력 시점에 다시 계획을 뒤지면
+	// 그 판단이 표 조립 코드 안으로 흩어진다.
+	planNote string
 }
 
 // workDirListing 은 화면에 옮기기 직전의 관찰 결과다.
@@ -74,6 +107,9 @@ type workDirListing struct {
 	workDirName string
 	repoRows    []listRow
 	mainRow     listRow
+
+	// planWarnings 는 계획을 그대로 쓰지 못한 이유들이다. 비어 있지 않으면 stderr 로 나간다.
+	planWarnings []string
 }
 
 // displayRows 는 화면에 찍을 순서대로 행을 늘어놓는다.
@@ -115,6 +151,13 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 		return workDirListing{}, err
 	}
 
+	// 계획을 읽지 못한 것은 목록을 막지 않는다. LoadPlan 은 깨진 계획을 에러가 아니라 Warnings 로
+	// 돌려주므로, 여기서 에러로 올라오는 것은 파일이 거기 있는데 읽지 못한 경우뿐이다.
+	plan, err := workdir.LoadPlan(absoluteWorkDirPath)
+	if err != nil {
+		return workDirListing{}, err
+	}
+
 	repoRows := make([]listRow, 0, len(repos))
 	for _, repo := range repos {
 		repoSessionName := session.RepoSessionName(workDirName, repo.Name)
@@ -126,7 +169,7 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 			return workDirListing{}, fmt.Errorf("레포 상태 판정 실패 (%s): %w", repo.Name, err)
 		}
 
-		repoRows = append(repoRows, listRow{label: repo.Name, state: state})
+		repoRows = append(repoRows, listRow{label: repo.Name, state: state, planNote: planNoteForRepo(plan, repo.Name)})
 	}
 
 	mainRow, err := inspectMainSession(workDirName, backend)
@@ -134,7 +177,16 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 		return workDirListing{}, err
 	}
 
-	return workDirListing{workDirName: workDirName, repoRows: repoRows, mainRow: mainRow}, nil
+	// 메인 행에는 계획 칸을 두지 않는다. 계획의 작업은 레포에서 수행하는 것이고(설계 문서 6.1 의 repo 필드),
+	// 메인 세션은 코드를 직접 고치지 않는 조율용 자리다(설계 문서 5.4).
+	planWarnings := append(plan.Warnings, missingRepoWarnings(plan, repos, workdir.PlanFilePath(absoluteWorkDirPath))...)
+
+	return workDirListing{
+		workDirName:  workDirName,
+		repoRows:     repoRows,
+		mainRow:      mainRow,
+		planWarnings: planWarnings,
+	}, nil
 }
 
 // inspectMainSession 은 메인 세션 행을 만든다.
@@ -195,15 +247,11 @@ func writeWorkDirListing(out io.Writer, listing workDirListing) error {
 		fmt.Fprintf(&rendered, "%s%s\n\n", rowIndent, emptyWorkDirGuidance)
 	}
 
-	// 열 너비를 손으로 계산하지 않고 tabwriter 에 맡긴다. 레포 이름 길이는 워크디렉토리마다 다른데,
-	// 고정 너비로 잡으면 긴 이름에서 열이 밀리고 짧은 이름만 있을 때는 빈칸이 남는다.
-	table := tabwriter.NewWriter(&rendered, 0, 0, tableColumnPadding, ' ', 0)
-	for _, row := range listing.displayRows() {
-		fmt.Fprintf(table, "%s%s\t%s\t%s\n", rowIndent, sessionMarker(row.state), row.label, row.state)
+	alignedRows, err := renderListingTable(listing.displayRows())
+	if err != nil {
+		return err
 	}
-	if err := table.Flush(); err != nil {
-		return fmt.Errorf("목록 표 정렬 실패: %w", err)
-	}
+	rendered.WriteString(alignedRows)
 
 	fmt.Fprintf(&rendered, "\n%s\n", attachGuidance)
 
@@ -211,6 +259,39 @@ func writeWorkDirListing(out io.Writer, listing workDirListing) error {
 		return fmt.Errorf("목록 출력 실패: %w", err)
 	}
 	return nil
+}
+
+// renderListingTable 은 행들을 열이 맞은 표로 만든다.
+//
+// 열 너비를 손으로 계산하지 않고 tabwriter 에 맡긴다. 레포 이름 길이는 워크디렉토리마다 다른데,
+// 고정 너비로 잡으면 긴 이름에서 열이 밀리고 짧은 이름만 있을 때는 빈칸이 남는다.
+func renderListingTable(rows []listRow) (string, error) {
+	var alignedRows bytes.Buffer
+
+	table := tabwriter.NewWriter(&alignedRows, 0, 0, tableColumnPadding, ' ', 0)
+	for _, row := range rows {
+		// 계획 칸을 비었더라도 반드시 적는다. 어떤 행에서 칸을 아예 빼면 tabwriter 가 거기서 열 블록을
+		// 끊어버려, 계획이 있는 레포와 없는 레포가 섞였을 때 상태 열의 너비가 행마다 달라진다.
+		fmt.Fprintf(table, "%s%s\t%s\t%s\t%s\n", rowIndent, sessionMarker(row.state), row.label, row.state, row.planNote)
+	}
+	if err := table.Flush(); err != nil {
+		return "", fmt.Errorf("목록 표 정렬 실패: %w", err)
+	}
+
+	return trimLineEndPadding(alignedRows.String()), nil
+}
+
+// trimLineEndPadding 은 줄 끝에 남은 정렬용 공백을 걷어낸다.
+//
+// 계획 칸이 빈 행에서는 그 앞 열을 채운 공백이 줄 끝에 그대로 남는다. 화면에서는 보이지 않지만
+// 출력을 파일로 넘기거나 붙여넣을 때 따라다니고, 계획 도입 전과 같은 출력이어야 할 자리를
+// 눈에 보이지 않는 공백만큼 어긋나게 만든다.
+func trimLineEndPadding(alignedRows string) string {
+	lines := strings.Split(alignedRows, "\n")
+	for lineIndex, line := range lines {
+		lines[lineIndex] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func sessionMarker(state workdir.RepoState) string {
