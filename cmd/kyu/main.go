@@ -30,7 +30,11 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
-  kyu version            이 바이너리의 버전`
+  kyu version            이 바이너리의 버전
+
+옵션 (kyu, kyu start):
+  --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
+  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdout, os.Stderr); err != nil {

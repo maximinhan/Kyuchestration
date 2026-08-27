@@ -52,8 +52,8 @@ const startUsageText = `사용법: kyu start [repo] [옵션]
   kyu start <repo>         해당 레포 디렉토리에서 세션을 띄운다
 
 옵션:
-  --repo-claude-md         메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
-  --bypass-permissions     claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만`
+  --bypass-permissions     claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
+  --repo-claude-md         메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)`
 
 // StartSession 은 kyu start 를 실행한다. 인자가 없으면 메인 세션을, 레포 이름이 있으면 그 레포의 세션을 띄운다.
 //
