@@ -18,14 +18,25 @@ const mainSessionSuffix = "main"
 // "can't find pane" 으로 실패한다. 이름을 만드는 시점에 미리 치환해 어긋남 자체를 없앤다.
 var tmuxTargetSyntaxReplacer = strings.NewReplacer(".", "-", ":", "-")
 
+// WorkDirSessionPrefix 는 한 워크디렉토리의 세션 이름들이 공유하는 접두사다: wd-<workdir>-.
+//
+// List() 결과에서 이 워크디렉토리의 세션만 골라내는 근거다(설계 문서 5.2). 스캔 결과로 거르는
+// 방법과 달리, 디렉토리가 지워졌거나 이름이 바뀐 레포의 세션도 걸린다 — 전체 종료로 정리하려는
+// 대상이 바로 그런 세션이다.
+//
+// 알려진 한계: 워크디렉토리 이름이 다른 워크디렉토리 이름의 접두사이면(featureX 와 featureX-hotfix)
+// 이 접두사가 남의 세션까지 잡는다. 이름 규칙이 하이픈으로 구분하는데 이름 자체에도 하이픈이 들어갈
+// 수 있어, 세션 이름만으로는 경계를 되짚을 수 없다. 규칙을 바꿔야 풀리는 문제라 여기 적어둔다.
+func WorkDirSessionPrefix(workdirName string) string {
+	return sessionNamePrefix + tmuxTargetSyntaxReplacer.Replace(workdirName) + "-"
+}
+
 // RepoSessionName 은 레포 세션의 이름을 만든다: wd-<workdir>-<repo>.
 //
 // 워크디렉토리 이름을 포함하므로, 서로 다른 워크디렉토리에 같은 이름의 레포가
 // 클론되어 있어도 세션이 충돌하지 않는다.
 func RepoSessionName(workdirName, repoName string) string {
-	return sessionNamePrefix +
-		tmuxTargetSyntaxReplacer.Replace(workdirName) + "-" +
-		tmuxTargetSyntaxReplacer.Replace(repoName)
+	return WorkDirSessionPrefix(workdirName) + tmuxTargetSyntaxReplacer.Replace(repoName)
 }
 
 // MainSessionName 은 워크디렉토리 메인 세션의 이름을 만든다: wd-<workdir>-main.

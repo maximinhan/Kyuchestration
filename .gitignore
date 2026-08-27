@@ -15,3 +15,6 @@ secrets/
 # 에디터
 .idea/
 .vscode/
+
+# 병렬 작업용 임시 git worktree (도구가 만들고 지운다)
+/.claude/worktrees/

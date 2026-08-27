@@ -54,3 +54,34 @@ func TestUnknownCommandPrintsUsageToStderrAndExitsWithCodeOne(t *testing.T) {
 		t.Errorf("stderr = %q, 사용법 안내를 포함하기를 기대", stderr.String())
 	}
 }
+
+func TestKillWithoutArgumentsPrintsUsageToStderrAndExitsWithCodeOne(t *testing.T) {
+	// 라우팅이 실제로 이어졌는지는 "명령이 자기 사용법으로 거절하는가" 로 드러난다.
+	// 미구현 안내가 남아 있으면 그 자리에서 다른 문구가 나온다.
+	//
+	// 진입점이 세션 백엔드를 먼저 조립하므로 tmux 가 없으면 인자를 보기도 전에 그쪽으로 끝난다.
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux 가 PATH 에 없어 라우팅 테스트를 건너뜁니다")
+	}
+
+	command := exec.Command(buildWdBinary(t), "kill")
+	// 워크디렉토리를 훑기 전에 인자에서 걸리지만, 이 레포를 워크디렉토리로 오해할 여지 자체를 없앤다.
+	command.Dir = t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("wd kill 실행 결과 = %v, 종료 코드로 끝나기를 기대", err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), "사용법: wd kill") {
+		t.Errorf("stderr = %q, kill 의 사용법 안내를 기대", stderr.String())
+	}
+}
