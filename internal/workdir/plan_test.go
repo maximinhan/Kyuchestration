@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,156 @@ tasks:
 	}
 	if !slices.Equal(gotIDs, []string{"zeta", "alpha"}) {
 		t.Errorf("작업 id 순서 = %v, 파일에 적힌 순서 [zeta alpha] 를 기대", gotIDs)
+	}
+}
+
+// assertNoPlan 은 계획이 없다는 결과인지 본다. 계획이 깨진 경우와 달리 경고도 없어야 한다.
+func assertNoPlan(t *testing.T, plan Plan) {
+	t.Helper()
+
+	if len(plan.Tasks) != 0 {
+		t.Errorf("작업 목록 = %+v, 계획 없음을 기대", plan.Tasks)
+	}
+	if len(plan.Warnings) != 0 {
+		t.Errorf("경고 = %v, 계획이 없는 것은 경고할 일이 아니므로 경고 없음을 기대", plan.Warnings)
+	}
+}
+
+// assertPlanDroppedWithWarning 은 계획을 버리고 그 이유를 경고로 남겼는지 본다.
+//
+// 경고 문구 전체를 비교하지 않고 조각만 확인한다. 문구는 사람에게 보이는 문장이라 다듬어질 수
+// 있지만, 사용자가 파일의 어디를 고쳐야 하는지 알아내는 데 필요한 조각은 남아있어야 한다.
+func assertPlanDroppedWithWarning(t *testing.T, plan Plan, wantWarningFragments ...string) {
+	t.Helper()
+
+	if len(plan.Tasks) != 0 {
+		t.Errorf("작업 목록 = %+v, 깨진 계획은 통째로 버려지기를 기대", plan.Tasks)
+	}
+	if len(plan.Warnings) == 0 {
+		t.Fatal("경고가 없음. 계획을 버렸다면 이유를 알려야 한다")
+	}
+
+	joinedWarnings := strings.Join(plan.Warnings, "\n")
+	for _, wantFragment := range wantWarningFragments {
+		if !strings.Contains(joinedWarnings, wantFragment) {
+			t.Errorf("경고 = %q, %q 를 포함하기를 기대", joinedWarnings, wantFragment)
+		}
+	}
+}
+
+func TestLoadPlanReturnsNoPlanWhenPlanFileIsMissing(t *testing.T) {
+	// wd init 을 아직 하지 않았거나 조율할 것이 없는 워크디렉토리다. 흔한 정상 상태이므로
+	// 에러가 아니다 — 여기서 에러를 올리면 계획과 무관한 레포 목록조차 볼 수 없다.
+	plan, err := LoadPlan(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v, 계획 파일이 없는 것은 에러가 아니다", err)
+	}
+
+	assertNoPlan(t, plan)
+}
+
+func TestLoadPlanReturnsNoPlanWhenFileHasBodyWithoutFrontMatter(t *testing.T) {
+	// 사람이 메모만 적어둔 계획 파일이다. 도구가 읽을 것이 없을 뿐 잘못된 파일이 아니다.
+	workDirPath := newWorkDirWithPlanFile(t, `## 배경
+
+아직 작업을 쪼개지 않았다. 인터페이스부터 정하는 중.
+`)
+
+	plan, err := LoadPlan(workDirPath)
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v", err)
+	}
+
+	assertNoPlan(t, plan)
+}
+
+func TestLoadPlanReturnsNoPlanWhenFileIsEmpty(t *testing.T) {
+	plan, err := LoadPlan(newWorkDirWithPlanFile(t, ""))
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v", err)
+	}
+
+	assertNoPlan(t, plan)
+}
+
+func TestLoadPlanReturnsNoPlanWhenFrontMatterHasNoTasks(t *testing.T) {
+	// 계획 파일의 뼈대만 만들어두고 아직 작업을 적지 않은 상태다.
+	plan, err := LoadPlan(newWorkDirWithPlanFile(t, "---\n---\n\n## 배경\n"))
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v", err)
+	}
+
+	assertNoPlan(t, plan)
+}
+
+func TestLoadPlanWarnsWhenFrontMatterIsNotTerminated(t *testing.T) {
+	// 여는 --- 를 적었다면 계획을 적으려던 것이다. 닫는 --- 를 빠뜨린 것을 "계획 없음" 으로
+	// 흘려보내면 사용자는 자기가 적어둔 작업이 왜 안 보이는지 알 수 없다.
+	workDirPath := newWorkDirWithPlanFile(t, `---
+tasks:
+  - id: publish
+    repo: proj-b
+    title: 발행 로직 구현
+    status: ready
+
+## 배경
+`)
+
+	plan, err := LoadPlan(workDirPath)
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v, 깨진 계획은 에러가 아니라 경고여야 한다", err)
+	}
+
+	assertPlanDroppedWithWarning(t, plan, "---")
+}
+
+func TestLoadPlanWarnsWhenFrontMatterYAMLIsBroken(t *testing.T) {
+	workDirPath := newWorkDirWithPlanFile(t, `---
+tasks:
+  - id: publish
+    repo: [닫히지 않은 목록
+    title: 발행 로직 구현
+    status: ready
+---
+`)
+
+	plan, err := LoadPlan(workDirPath)
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v, 깨진 계획은 에러가 아니라 경고여야 한다", err)
+	}
+
+	assertPlanDroppedWithWarning(t, plan, "yaml")
+}
+
+func TestLoadPlanWarningNamesThePlanFilePath(t *testing.T) {
+	// 경고는 호출부가 그대로 출력한다. 어느 파일을 고쳐야 하는지가 문장 안에 없으면
+	// 사용자는 워크디렉토리를 뒤지게 된다.
+	workDirPath := newWorkDirWithPlanFile(t, "---\ntasks: [닫히지 않은 목록\n---\n")
+
+	plan, err := LoadPlan(workDirPath)
+	if err != nil {
+		t.Fatalf("LoadPlan() 실패: %v", err)
+	}
+
+	assertPlanDroppedWithWarning(t, plan, filepath.Join(workDirPath, ".coord", "plan.md"))
+}
+
+func TestLoadPlanPropagatesReadFailure(t *testing.T) {
+	// 파일이 거기 있는데 읽지 못한 것은 관찰 자체가 실패한 것이라 "계획 없음" 과 다르다.
+	// 없는 계획으로 뭉뚱그리면 사용자는 자기가 적어둔 계획이 왜 사라졌는지 알 길이 없다.
+	workDirPath := newWorkDirWithPlanFile(t, designDocumentPlanFile)
+	planFilePath := filepath.Join(workDirPath, ".coord", "plan.md")
+
+	if err := os.Chmod(planFilePath, 0o000); err != nil {
+		t.Skipf("권한을 바꿀 수 없어 건너뜁니다: %v", err)
+	}
+	// root 로 실행하면 권한 비트를 무시하고 읽는다. Windows 에서도 이렇게는 읽기를 막지 못한다.
+	// 그런 환경에서 이 테스트는 아무것도 검증하지 못하므로 실패가 아니라 건너뛴다.
+	if _, err := os.ReadFile(planFilePath); err == nil {
+		t.Skip("이 환경에서는 파일 읽기를 막을 수 없어 건너뜁니다")
+	}
+
+	if _, err := LoadPlan(workDirPath); err == nil {
+		t.Fatal("LoadPlan() 이 에러 없이 끝남. 읽기 실패는 전파되어야 한다")
 	}
 }
