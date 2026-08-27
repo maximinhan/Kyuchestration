@@ -1,7 +1,10 @@
 package workdir
 
 import (
+	"bytes"
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/maximinhan/Kyuchestration/internal/session"
 )
@@ -59,5 +62,47 @@ func InferRepoState(repo Repo, sessionName string, backend session.SessionBacken
 		return RepoStateRunning, nil
 	}
 
+	return inferStateFromGit(repo.AbsolutePath)
+}
+
+// inferStateFromGit 은 세션이 없는 레포에 무엇이 남아있는지를 git 에게 물어 판정한다.
+func inferStateFromGit(repoAbsolutePath string) (RepoState, error) {
+	// --porcelain 은 사람이 읽는 출력과 달리 git 버전이 올라가도 형식이 고정된다.
+	// 추적 중인 파일의 수정도, 추적되지 않는 새 파일(?? 로 시작하는 줄)도 한 줄씩 나오므로
+	// "커밋되지 않은 변경이 있는가" 는 이 한 번의 호출로 끝난다.
+	statusOutput, err := runGitCommand(repoAbsolutePath, "status", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(statusOutput) != "" {
+		return RepoStateDirty, nil
+	}
+
 	return RepoStateIdle, nil
+}
+
+// runGitCommand 는 레포 디렉토리에서 git 을 실행하고 표준 출력을 돌려준다.
+//
+// git 라이브러리를 쓰지 않고 CLI 를 부른다. 외부 의존을 0 으로 유지하려는 이유도 있지만,
+// 더 중요한 것은 사용자가 쓰는 바로 그 git 이 그 레포의 설정(.gitattributes, core.autocrlf,
+// .gitignore)까지 그대로 적용해 답한다는 점이다. 도구가 보는 상태와 사용자가 터미널에서
+// `git status` 로 보는 상태가 어긋나면, 관찰로 상태를 얻는다는 전제 자체가 무너진다.
+//
+// 실패 시 git 이 남긴 stderr 를 함께 감싼다. 종료 코드만으로는 원인이 드러나지 않는다.
+func runGitCommand(repoAbsolutePath string, args ...string) (string, error) {
+	command := exec.Command("git", args...)
+
+	// 레포를 절대경로로 지정한다. 프로세스의 cwd 를 옮기지 않으므로 여러 레포를 훑는 도중에도
+	// 서로 간섭하지 않고, 호출부가 어디에서 실행되든 같은 레포를 본다.
+	command.Dir = repoAbsolutePath
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("git %s 실패 (%s): %w (%s)",
+			strings.Join(args, " "), repoAbsolutePath, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }

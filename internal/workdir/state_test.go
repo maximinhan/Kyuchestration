@@ -144,3 +144,86 @@ func TestInferRepoStateReturnsIdleWhenSessionIsGoneAndNothingIsLeftBehind(t *tes
 		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateIdle)
 	}
 }
+
+// newBrokenGitRepo 는 git 이 저장소로 인정하지 않는 디렉토리를 만든다.
+//
+// 그냥 빈 디렉토리를 쓰지 않는 이유: 임시 디렉토리가 어쩌다 다른 git 저장소 안에 놓이면
+// git 이 상위를 타고 올라가 그 저장소의 상태를 답해버려 테스트가 환경에 따라 갈린다.
+// 존재하지 않는 곳을 가리키는 .git 파일을 두면 어디에 있든 확실히 실패한다.
+func newBrokenGitRepo(t *testing.T) Repo {
+	t.Helper()
+	isolateGitFromUserConfig(t)
+
+	repoPath := t.TempDir()
+	writeFileInRepo(t, repoPath, ".git", "gitdir: /존재하지-않는-git-디렉토리\n")
+
+	return Repo{Name: filepath.Base(repoPath), AbsolutePath: repoPath}
+}
+
+func TestInferRepoStateReturnsDirtyWhenTrackedFileIsModified(t *testing.T) {
+	repo := newCleanGitRepo(t)
+	writeFileInRepo(t, repo.AbsolutePath, "README.md", "고친 내용\n")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateDirty {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateDirty)
+	}
+}
+
+func TestInferRepoStateReturnsDirtyWhenUntrackedFileExists(t *testing.T) {
+	repo := newCleanGitRepo(t)
+
+	// 추적되지 않는 새 파일도 "커밋되지 않은 변경" 이다. 세션에서 새로 만든 파일이 여기 해당하는데,
+	// 이것을 빠뜨리면 작업 결과가 통째로 남아있는 레포가 IDLE 로 보인다.
+	writeFileInRepo(t, repo.AbsolutePath, "새-파일.txt", "아직 add 하지 않은 파일\n")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateDirty {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateDirty)
+	}
+}
+
+func TestInferRepoStateReturnsRunningEvenWhenWorkingTreeIsDirty(t *testing.T) {
+	repo := newCleanGitRepo(t)
+	writeFileInRepo(t, repo.AbsolutePath, "README.md", "세션 안에서 고치는 중\n")
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(true))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateRunning {
+		t.Errorf("InferRepoState() = %q, 세션이 살아있으면 git 상태보다 우선하므로 %q 를 기대", got, RepoStateRunning)
+	}
+}
+
+func TestInferRepoStateSkipsGitEntirelyWhenSessionIsAlive(t *testing.T) {
+	// git 이 반드시 실패하는 디렉토리인데도 RUNNING 이 나온다면, 세션이 살아있을 때
+	// git 을 아예 부르지 않는다는 뜻이다. 레포 하나당 git 프로세스 두 개를 아끼는 문제이기도 하다.
+	repo := newBrokenGitRepo(t)
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(true))
+	if err != nil {
+		t.Fatalf("InferRepoState() 실패: %v", err)
+	}
+	if got != RepoStateRunning {
+		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateRunning)
+	}
+}
+
+func TestInferRepoStatePropagatesGitFailure(t *testing.T) {
+	repo := newBrokenGitRepo(t)
+
+	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	if err == nil {
+		t.Fatalf("InferRepoState() = %q, 에러 없이 끝남. git 실패는 전파되어야 한다", got)
+	}
+	if got != "" {
+		t.Errorf("InferRepoState() = %q, 판정 실패 시 빈 값을 기대", got)
+	}
+}
