@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Repo 는 워크디렉토리 바로 아래에서 발견한 git 레포 하나다.
@@ -44,7 +45,18 @@ func ScanRepos(workDirPath string) ([]Repo, error) {
 
 	var repos []Repo
 	for _, entry := range entries {
+		// DirEntry 의 종류는 lstat 결과라, 디렉토리를 가리키는 심볼릭 링크도 여기서 걸러진다.
+		// 링크를 따라가지 않는 쪽을 택했다. 링크가 워크디렉토리 밖을 가리키면 두 워크디렉토리가
+		// 같은 워킹 트리를 각자 자기 것으로 알고 세션을 띄우게 되어, 절대경로로 레포를 특정한다는
+		// 전제(설계 문서 11절 4번)가 무너진다. v1 의 요구는 "클론하면 인식"이고 클론은 실제 디렉토리를 만든다.
 		if !entry.IsDir() {
+			continue
+		}
+
+		// 점으로 시작하는 디렉토리는 도구·에디터의 것이지 클론해온 레포가 아니다.
+		// 특히 .coord 는 이 도구가 만드는 조율 디렉토리인데(설계 문서 6절), 사용자가 계획 파일을
+		// 버전 관리하려고 그 안에서 git init 을 하면 레포로 잡혀 세션까지 뜬다. 후보에서 아예 뺀다.
+		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 

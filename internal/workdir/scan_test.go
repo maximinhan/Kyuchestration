@@ -105,6 +105,46 @@ func TestScanReposReturnsAbsolutePathEvenWhenGivenRelativePath(t *testing.T) {
 	}
 }
 
+func TestScanReposIgnoresSymlinkToRepoOutsideWorkDir(t *testing.T) {
+	workDirPath := t.TempDir()
+	outsidePath := t.TempDir()
+	makeGitRepoDirectory(t, outsidePath, "shared-commons")
+
+	linkTarget := filepath.Join(outsidePath, "shared-commons")
+	linkPath := filepath.Join(workDirPath, "shared-commons")
+	if err := os.Symlink(linkTarget, linkPath); err != nil {
+		// Windows 는 심볼릭 링크 생성에 별도 권한이 필요하다. 링크를 못 만드는 환경에서
+		// 이 테스트는 아무것도 검증하지 못하므로 실패가 아니라 건너뛴다.
+		t.Skipf("심볼릭 링크를 만들 수 없어 건너뜁니다: %v", err)
+	}
+
+	got, err := ScanRepos(workDirPath)
+	if err != nil {
+		t.Fatalf("ScanRepos() 실패: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ScanRepos() = %+v, 심볼릭 링크는 레포로 잡지 않기를 기대", got)
+	}
+}
+
+func TestScanReposIgnoresHiddenDirectoryEvenWhenItHasGit(t *testing.T) {
+	workDirPath := t.TempDir()
+	makeGitRepoDirectory(t, workDirPath, "alpha-commons")
+
+	// 계획 파일을 버전 관리하려고 .coord 안에서 git init 을 해도 조율 디렉토리가 레포로 잡히면 안 된다.
+	makeGitRepoDirectory(t, workDirPath, ".coord")
+
+	got, err := ScanRepos(workDirPath)
+	if err != nil {
+		t.Fatalf("ScanRepos() 실패: %v", err)
+	}
+
+	want := []Repo{{Name: "alpha-commons", AbsolutePath: filepath.Join(workDirPath, "alpha-commons")}}
+	if !slices.Equal(got, want) {
+		t.Errorf("ScanRepos() = %+v, want %+v", got, want)
+	}
+}
+
 func TestScanReposOnEmptyWorkDirReturnsNoReposAndNoError(t *testing.T) {
 	got, err := ScanRepos(t.TempDir())
 	if err != nil {
