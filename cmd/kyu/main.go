@@ -3,7 +3,7 @@
 // 이 파일은 얇게 유지한다 — 인자를 명령으로 가르고, 세션 백엔드를 조립하고, 종료 코드를 정하는 것까지다.
 // 명령이 실제로 하는 일은 internal/cli 에 있다(설계 문서 9.1).
 //
-// 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 다섯 개뿐이라 switch 한 번이면 끝나고,
+// 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 여섯 개뿐이라 switch 한 번이면 끝나고,
 // 의존을 0 으로 두면 새 머신에서 바이너리 하나 복사로 끝난다는 Go 선택의 이유(설계 문서 8.1)가 유지된다.
 package main
 
@@ -26,7 +26,8 @@ const usageText = `사용법: kyu <명령> [인자]
   kyu list [path]        레포 목록 + 상태 (기본 명령, 인자 없이 실행 시)
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
-  kyu kill [repo|--all]  세션 종료`
+  kyu kill [repo|--all]  세션 종료
+  kyu version            이 바이너리의 버전`
 
 // defaultCommandName 은 인자 없이 실행했을 때의 명령이다(설계 문서 9.3).
 // 이 도구 앞에서 가장 자주 하는 일이 "지금 어떻게 돼 있지?" 라서 목록이 기본이다.
@@ -69,10 +70,15 @@ func runCommand(args []string, out, errOut io.Writer) error {
 			return cli.KillSessions(out, commandArgs, backend)
 		})
 
-	// init 만 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이라 tmux 가 필요 없는데,
-	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 워크디렉토리를 만들지도 못하게 된다.
+	// init 과 version 은 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이고 버전은
+	// 이 바이너리 자신에 대한 질문이라 둘 다 tmux 가 필요 없는데, 백엔드를 먼저 조립하면
+	// tmux 가 없는 머신에서 워크디렉토리를 만들지도, 무엇을 받았는지 확인하지도 못하게 된다.
+	// 릴리스 바이너리가 tmux 를 아직 깔지 않은 새 머신에 먼저 도착하는 것이 오히려 흔한 순서다.
 	case "init":
 		return cli.InitWorkDir(out, commandArgs)
+
+	case "version":
+		return cli.PrintVersion(out, commandArgs)
 
 	default:
 		return fmt.Errorf("알 수 없는 명령: %s\n\n%s", commandName, usageText)
