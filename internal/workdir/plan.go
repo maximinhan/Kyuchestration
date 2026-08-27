@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -117,10 +118,16 @@ func LoadPlan(workDirPath string) (Plan, error) {
 	if err != nil {
 		// yaml 라이브러리의 메시지를 그대로 붙인다. 어느 줄이 문제인지는 그 메시지에만 들어있고,
 		// 우리 말로 바꿔 적으면 그 정보가 사라진다.
-		return planDroppedWithWarnings(planFilePath, fmt.Sprintf("frontmatter 의 YAML 을 해석하지 못했습니다 (%v)", err)), nil
+		return planDroppedWithWarnings(planFilePath,
+			fmt.Sprintf("frontmatter 의 YAML 을 해석하지 못했습니다 (%s)", flattenToSingleLine(err.Error()))), nil
 	}
 
-	return Plan{Tasks: toTasks(frontMatter.Tasks)}, nil
+	tasks := toTasks(frontMatter.Tasks)
+	if problems := findTaskProblems(tasks); len(problems) > 0 {
+		return planDroppedWithWarnings(planFilePath, problems...), nil
+	}
+
+	return Plan{Tasks: tasks}, nil
 }
 
 // planDroppedWithWarnings 는 계획을 버리고 그 이유만 담은 결과를 만든다.
@@ -133,6 +140,15 @@ func planDroppedWithWarnings(planFilePath string, reasons ...string) Plan {
 		warnings = append(warnings, fmt.Sprintf("%s: %s", planFilePath, reason))
 	}
 	return Plan{Warnings: warnings}
+}
+
+// flattenToSingleLine 은 줄바꿈과 연속된 공백을 한 칸으로 접는다.
+//
+// 경고 하나가 한 줄이라는 전제를 지키기 위해서다. yaml 라이브러리는 필드 오타를 알릴 때
+// 여러 줄짜리 메시지를 돌려주는데("yaml: unmarshal errors:\n  line 6: ..."), 그것을 그대로
+// 담으면 호출부가 경고마다 붙이는 들여쓰기나 접두사가 둘째 줄부터 어긋난다.
+func flattenToSingleLine(message string) string {
+	return strings.Join(strings.Fields(message), " ")
 }
 
 // frontMatterDelimiter 는 frontmatter 의 시작과 끝을 나타내는 줄이다.
@@ -210,6 +226,84 @@ func decodeFrontMatter(frontMatterYAML string) (planFrontMatter, error) {
 		return planFrontMatter{}, err
 	}
 	return frontMatter, nil
+}
+
+// definedTaskStatuses 는 status 에 쓸 수 있는 값 전부다(설계 문서 6.1).
+//
+// 상수를 늘어놓은 슬라이스를 따로 두는 이유는 검사와 안내 문구가 같은 목록을 보게 하기 위해서다.
+// 검사는 switch 로, 문구는 손으로 적은 목록으로 두면 값이 하나 늘 때 둘 중 하나만 고치게 된다.
+var definedTaskStatuses = []TaskStatus{TaskStatusBlocked, TaskStatusReady, TaskStatusDoing, TaskStatusDone}
+
+// findTaskProblems 는 계획을 쓸 수 있는지 확인하고, 쓸 수 없는 이유를 모두 모아 돌려준다.
+//
+// 첫 문제에서 멈추지 않는다. 계획을 고치는 사람은 파일을 열어 한 번에 고치는데, 문제를 하나씩만
+// 알려주면 고치고 다시 돌리기를 문제 수만큼 반복하게 된다.
+func findTaskProblems(tasks []Task) []string {
+	var problems []string
+
+	declaredTaskIDs := make(map[string]bool, len(tasks))
+	for taskIndex, task := range tasks {
+		taskLocation := describeTaskLocation(taskIndex, task.ID)
+
+		if isBlank(task.ID) {
+			problems = append(problems, fmt.Sprintf("%s: 필수 필드 id 가 없습니다", taskLocation))
+		}
+		if isBlank(task.Repo) {
+			problems = append(problems, fmt.Sprintf("%s: 필수 필드 repo 가 없습니다", taskLocation))
+		}
+		if isBlank(task.Title) {
+			problems = append(problems, fmt.Sprintf("%s: 필수 필드 title 이 없습니다", taskLocation))
+		}
+
+		switch {
+		case isBlank(string(task.Status)):
+			problems = append(problems, fmt.Sprintf("%s: 필수 필드 status 가 없습니다", taskLocation))
+		case !slices.Contains(definedTaskStatuses, task.Status):
+			problems = append(problems, fmt.Sprintf("%s: status 값이 정의되지 않았습니다 (적힌 값: %q, 쓸 수 있는 값: %v)",
+				taskLocation, task.Status, definedTaskStatuses))
+		}
+
+		if !isBlank(task.ID) {
+			if declaredTaskIDs[task.ID] {
+				// id 가 겹치면 needs 가 어느 작업을 가리키는지 정해지지 않는다.
+				// 계획의 선행 관계가 읽는 사람마다 달라지므로 통과시킬 수 없다.
+				problems = append(problems, fmt.Sprintf("%s: id 가 앞의 작업과 중복됩니다", taskLocation))
+			}
+			declaredTaskIDs[task.ID] = true
+		}
+	}
+
+	// needs 검사는 id 를 다 모은 뒤에 한다. needs 는 파일에서 뒤에 오는 작업을 가리켜도 되므로
+	// (계획을 적는 사람에게 위상 순서로 늘어놓으라고 요구하지 않는다) 한 번 훑는 것으로는 판정할 수 없다.
+	for taskIndex, task := range tasks {
+		for _, neededTaskID := range task.Needs {
+			if !declaredTaskIDs[neededTaskID] {
+				problems = append(problems, fmt.Sprintf("%s: needs 가 계획에 없는 id 를 가리킵니다 (없는 id: %q)",
+					describeTaskLocation(taskIndex, task.ID), neededTaskID))
+			}
+		}
+	}
+
+	return problems
+}
+
+// describeTaskLocation 은 경고 문구에서 작업을 가리키는 말을 만든다.
+//
+// 순번과 id 를 함께 적는다. id 만으로는 그 id 자체가 빠졌거나 중복일 때 가리키지 못하고,
+// 순번만으로는 사용자가 파일에서 몇 번째 항목인지 세어야 한다.
+func describeTaskLocation(taskIndex int, taskID string) string {
+	if isBlank(taskID) {
+		return fmt.Sprintf("%d 번째 작업", taskIndex+1)
+	}
+	return fmt.Sprintf("%d 번째 작업(%s)", taskIndex+1, taskID)
+}
+
+// isBlank 는 값이 비어있거나 공백뿐인지 본다.
+//
+// 공백뿐인 값을 있는 것으로 치지 않는다. YAML 에서 따옴표로 감싼 공백(id: "   ")은 값으로
+// 인정되므로, 필드가 있는지만 보면 아무것도 가리키지 못하는 id 가 그대로 통과한다.
+func isBlank(value string) bool {
+	return strings.TrimSpace(value) == ""
 }
 
 // toTasks 는 YAML 에서 받은 항목을 계층 밖으로 나가는 Task 로 옮긴다.
