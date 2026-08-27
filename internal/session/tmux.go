@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -23,6 +24,10 @@ type TmuxBackend struct {
 	// 매 호출마다 PATH 를 다시 뒤지지 않고, 실행 도중 PATH 가 바뀌어도 같은 바이너리를 쓴다.
 	tmuxPath string
 }
+
+// 인터페이스 충족 여부를 컴파일 시점에 확인한다.
+// 메서드 시그니처가 어긋나면 실제 사용처가 생기기 전에 빌드가 깨진다.
+var _ SessionBackend = (*TmuxBackend)(nil)
 
 // NewTmuxBackend 는 tmux 백엔드를 만든다.
 // tmux 가 설치되어 있지 않으면 ErrTmuxNotInstalled 를 반환한다.
@@ -47,9 +52,28 @@ func (b *TmuxBackend) Create(name, cwd string, cmd []string) error {
 		return fmt.Errorf("%w: %s", ErrSessionExists, name)
 	}
 
+	// tmux 는 뒤에 붙은 인자들의 경계를 그대로 유지한 채 실행한다(3.4 로 확인).
+	// 따라서 셸 인용을 흉내 낼 필요가 없고, 공백이 든 경로도 그대로 넘기면 된다.
 	args := append([]string{"new-session", "-d", "-s", name, "-c", cwd}, cmd...)
 	if _, err := b.runTmuxCommand(args...); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Attach 는 호출한 터미널을 해당 세션에 연결한다.
+// 사용자가 빠져나올 때까지 블로킹된다.
+func (b *TmuxBackend) Attach(name string) error {
+	command := exec.Command(b.tmuxPath, "attach-session", "-t", exactTarget(name))
+
+	// attach 는 사용자가 직접 조작하는 화면이다. runTmuxCommand 처럼 출력을 버퍼에 담으면
+	// tmux 가 TTY 를 얻지 못해 실행 자체가 되지 않으므로, 호출한 터미널을 그대로 물려준다.
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("tmux attach-session 실패 (세션 %s): %w", name, err)
 	}
 	return nil
 }
@@ -68,6 +92,28 @@ func (b *TmuxBackend) Kill(name string) error {
 		return err
 	}
 	return nil
+}
+
+// List 는 이 백엔드가 관리하는 세션 이름 전체를 반환한다.
+//
+// 이 도구가 만들지 않은 세션도 함께 나온다. 접두사로 걸러내는 일은 조율 계층의 몫이다.
+func (b *TmuxBackend) List() ([]string, error) {
+	stdout, err := b.runTmuxCommand("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		// tmux 서버는 마지막 세션이 죽으면 함께 종료된다. 즉 "세션 0개"의 정상적인 표현이
+		// "서버 없음"이고, tmux 는 이때 종료 코드 1 로 끝난다. 빈 목록으로 답하는 것이 맞다.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	trimmed := strings.TrimRight(stdout, "\n")
+	if trimmed == "" {
+		return nil, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
 }
 
 // IsAlive 는 세션의 생존 여부를 반환한다.
