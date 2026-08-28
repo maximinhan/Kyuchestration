@@ -1,0 +1,11 @@
+[versions]
+# Compose Multiplatform 1.12.0 은 Kotlin 2.2.20 의 stdlib 로 배포됐다. 컴파일러는 그보다 새로워도
+# 되지만, Compose 컴파일러 플러그인은 Kotlin 과 같은 버전으로 함께 배포되므로 두 곳에 같은
+# 버전을 적지 않도록 kotlin 하나만 참조한다.
+kotlin = "2.4.10"
+composeMultiplatform = "1.12.0"
+
+[plugins]
+kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlinComposeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
