@@ -85,22 +85,19 @@ internal fun managedEngineExecutablePath(engineDirectory: Path = managedEngineDi
  */
 internal const val PINNED_KYU_EXECUTABLE_VARIABLE = "KYU_BINARY_PATH"
 
+/**
+ * 확장자가 붙은 이름(kyu.exe)은 찾지 않는다.
+ *
+ * 릴리스가 윈도우 바이너리를 내지 않고(release.yml 의 크로스 컴파일 목록), 설치 패키지에서도
+ * msi 가 빠졌다(build.gradle.kts 의 targetFormats). 엔진이 tmux 위에서 도는 한 윈도우 네이티브는
+ * 대상이 아니므로, 그 이름으로 찾아질 파일이 이 프로젝트에는 없다. 찾는 시늉만 하면 윈도우에서
+ * 띄운 사람이 받게 될 답이 "WSL 에서 띄우세요" 가 아니라 침묵이 된다.
+ */
 private fun findOnSearchPath(searchPath: String?, isExecutableFile: (Path) -> Boolean): Path? =
     searchPath.orEmpty()
         .split(File.pathSeparatorChar)
         .filter { it.isNotBlank() }
-        .flatMap { directory -> KYU_EXECUTABLE_NAMES.map { Path.of(directory, it) } }
+        .map { directory -> Path.of(directory, "kyu") }
         .firstOrNull(isExecutableFile)
 
 private fun isExecutableRegularFile(path: Path): Boolean = path.isRegularFile() && path.isExecutable()
-
-/**
- * 윈도우에서는 확장자가 붙은 이름으로만 실행 파일이 잡힌다. 설치 패키지에 Msi 가 들어 있으므로
- * (build.gradle.kts 의 targetFormats) 그쪽에서 도는 것도 이 앱이 감당해야 할 자리다.
- */
-private val KYU_EXECUTABLE_NAMES: List<String> =
-    if (System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) {
-        listOf("kyu.exe", "kyu")
-    } else {
-        listOf("kyu")
-    }
