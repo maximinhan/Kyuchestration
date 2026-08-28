@@ -210,3 +210,26 @@ func TestAuthAddSaysNothingWasStoredWhenTheTokenIsRejected(t *testing.T) {
 		t.Errorf("에러 = %q, 아무것도 저장되지 않았다는 사실을 기대", err.Error())
 	}
 }
+
+func TestAuthAddDoesNotPrintTheTokenQuestionWhenStdinIsNotATerminal(t *testing.T) {
+	// GUI 는 이 명령을 비 TTY 로 부르고, 실패하면 우리 stderr 를 오류 화면에 그대로 올린다.
+	// 답할 상대가 없는 물음이 거기 섞이면 사용자는 그 물음을 실패 이유로 읽는다.
+	tokenStore := newFakeTokenStore(secretstore.StorageConfigFile)
+
+	var out, errOut bytes.Buffer
+	err := ManageTokenProfiles(strings.NewReader("잘못된-토큰\n"), &out, &errOut,
+		[]string{"add", "개인"}, newTestGitHub().newAccess, tokenStore)
+	if err == nil {
+		t.Fatal("ManageTokenProfiles() 가 거절당한 토큰을 성공으로 끝냈습니다")
+	}
+
+	if strings.Contains(errOut.String(), tokenQuestion) {
+		t.Errorf("errOut = %q, 비 TTY 에서는 토큰 물음을 찍지 않기를 기대", errOut.String())
+	}
+
+	// 경고는 물음과 함께 사라져서는 안 된다. 그것은 답을 기다리는 물음이 아니라, 토큰이 어디에
+	// 어떻게 저장되는지에 대한 고지다 — GUI 화면에 떠도 사용자가 읽어야 할 것이다.
+	if !strings.Contains(errOut.String(), "평문") {
+		t.Errorf("errOut = %q, 평문 저장 경고는 그대로 나가기를 기대", errOut.String())
+	}
+}
