@@ -10,9 +10,12 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
+import com.kyuchestration.desktop.engine.EngineInstallationStateHolder
+import com.kyuchestration.desktop.engine.githubrelease.GitHubReleaseEngineInstaller
 import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
+import com.kyuchestration.desktop.kyu.managedEngineDirectory
 import com.kyuchestration.desktop.kyu.planFileExistsIn
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
@@ -38,6 +41,14 @@ fun main() = application {
     // 관찰과 초기화가 같은 실행기를 함께 쓴다. 실행기는 부를 때마다 kyu 를 새로 찾는 무상태라
     // 둘로 나눌 이유가 없다.
     val kyuCommandRunner = remember { ProcessKyuCommandRunner() }
+    // 앱의 첫 갈림길. 다른 홀더보다 먼저 세우는 것이 뜻이다 — 엔진이 없으면 나머지 화면은
+    // 뜨지 않는다.
+    val engineInstallationStateHolder = remember(applicationCoroutineScope) {
+        EngineInstallationStateHolder(
+            engineInstaller = GitHubReleaseEngineInstaller(),
+            coroutineScope = applicationCoroutineScope,
+        )
+    }
     val dashboardStateHolder = remember(applicationCoroutineScope) {
         WorkDirDashboardStateHolder(
             workDirObserver = KyuCliWorkDirObserver(kyuCommandRunner),
@@ -65,9 +76,13 @@ fun main() = application {
             coroutineScope = applicationCoroutineScope,
         )
     }
+    val engineInstallationState by engineInstallationStateHolder.state.collectAsState()
     val dashboardState by dashboardStateHolder.state.collectAsState()
     val initializationState by initializationStateHolder.state.collectAsState()
     val terminalState by terminalStateHolder.state.collectAsState()
+    // 받아 둘 자리는 앱이 도는 동안 바뀌지 않는다. 그릴 때마다 홈 디렉토리와 os.name 을 다시
+    // 읽을 이유가 없다.
+    val engineDirectoryLabel = remember { managedEngineDirectory().toString() }
 
     Window(
         onCloseRequest = {
@@ -87,10 +102,14 @@ fun main() = application {
 
         KyuchestrationDesktopScreen(
             versionLabel = DesktopBuildVersion.label,
+            engineInstallationState = engineInstallationState,
+            engineDirectoryLabel = engineDirectoryLabel,
             dashboardState = dashboardState,
             initializationState = initializationState,
             terminalState = terminalState,
             repositoryCloneStateHolder = repositoryCloneStateHolder,
+            onInstallEngineRequested = engineInstallationStateHolder::installEngine,
+            onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
             onOpenWorkDirRequested = {
                 chooseWorkDirDirectory(ownerWindow)?.let {
                     // 만들다 실패한 문구를 여기서 거둔다. 그대로 두면 방금 연 워크디렉토리의
