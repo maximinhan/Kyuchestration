@@ -4,8 +4,14 @@
 # 버전을 적지 않도록 kotlin 하나만 참조한다.
 kotlin = "2.4.10"
 composeMultiplatform = "1.12.0"
+# Material 3 은 Compose Multiplatform 본체와 릴리스 주기가 갈라져 버전이 따로 논다. 그래서 1.12.0
+# 부터 `compose.material3` 단축 접근자가 폐기되고 좌표를 직접 적게 됐다.
+composeMaterial3 = "1.9.0"
 
 [plugins]
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlinComposeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+
+[libraries]
+composeMaterial3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "composeMaterial3" }
