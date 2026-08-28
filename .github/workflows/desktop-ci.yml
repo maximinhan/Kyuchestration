@@ -18,8 +18,20 @@ permissions:
   contents: read
 
 jobs:
+  # 우분투와 맥 양쪽에서 돈다.
+  #
+  # 맥을 뒤늦게 들인 이유가 있다. 이 CI 가 우분투 하나였을 때, 맥에서만 깨지는 PTY 시험이
+  # 릴리스 워크플로의 dmg 잡에서야 드러나 v1.0.0 을 통째로 막았다(PR 28). 데스크톱 앱은 맥과
+  # 리눅스 둘 다에 설치 패키지를 내는데, 검사가 한쪽에서만 돌면 나머지 한쪽은 태그를 미는
+  # 순간에 처음 시험된다 — 가장 늦고 가장 비싼 자리다.
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # 한쪽이 깨져도 다른 쪽 결과를 함께 보고 싶다. OS 별로 갈리는 실패를 다루려면 "어느 쪽이
+      # 초록인가" 가 그 자체로 단서다.
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest]
     defaults:
       run:
         working-directory: desktop
