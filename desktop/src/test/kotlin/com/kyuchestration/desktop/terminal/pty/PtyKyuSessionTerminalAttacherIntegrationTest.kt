@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.pty
 
 import com.jediterm.terminal.TtyConnector
+import com.kyuchestration.desktop.kyu.PINNED_KYU_EXECUTABLE_VARIABLE
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
 import kotlin.io.path.absolutePathString
@@ -210,16 +211,16 @@ class PtyKyuSessionTerminalAttacherIntegrationTest {
      * 쓰고, 그것도 없으면 이 검증을 건너뛴다 — 데스크톱 CI 는 Go 를 세우지 않는다.
      */
     private fun locateKyuOrSkip(): Path {
-        val pinnedPath = System.getenv(KYU_BINARY_PATH_VARIABLE)?.let(Path::of)
+        val pinnedPath = System.getenv(PINNED_KYU_EXECUTABLE_VARIABLE)?.let(Path::of)
         if (pinnedPath != null) {
             if (!pinnedPath.isExecutable()) {
-                abort<Unit>("$KYU_BINARY_PATH_VARIABLE 가 가리키는 $pinnedPath 를 실행할 수 없습니다")
+                abort<Unit>("$PINNED_KYU_EXECUTABLE_VARIABLE 가 가리키는 $pinnedPath 를 실행할 수 없습니다")
             }
             return pinnedPath
         }
 
         return findOnSystemPath("kyu")
-            ?: abort("PATH 에도 $KYU_BINARY_PATH_VARIABLE 에도 kyu 가 없어 건너뜁니다")
+            ?: abort("PATH 에도 $PINNED_KYU_EXECUTABLE_VARIABLE 에도 kyu 가 없어 건너뜁니다")
     }
 
     private fun isTmuxInstalled(): Boolean = findOnSystemPath("tmux") != null
@@ -233,7 +234,6 @@ class PtyKyuSessionTerminalAttacherIntegrationTest {
 
     private companion object {
         const val REPO_NAME = "proj-a"
-        const val KYU_BINARY_PATH_VARIABLE = "KYU_BINARY_PATH"
         const val TMUX_TMPDIR_ENV_NAME = "TMUX_TMPDIR"
         const val CLIENT_POLL_ATTEMPTS = 100
         const val CLIENT_POLL_INTERVAL_MILLIS = 50L

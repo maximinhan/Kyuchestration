@@ -1,7 +1,7 @@
 package com.kyuchestration.desktop.terminal.pty
 
 import com.jediterm.terminal.TtyConnector
-import com.kyuchestration.desktop.kyu.findKyuExecutableOnSystemPath
+import com.kyuchestration.desktop.kyu.findKyuExecutable
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.SessionTerminalAttacher
@@ -32,7 +32,7 @@ class PtyKyuSessionTerminalAttacher(
 
     override fun attachTo(workDirPath: Path, target: SessionTarget): TtyConnector {
         val executable = fixedKyuExecutablePath
-            ?: findKyuExecutableOnSystemPath()
+            ?: findKyuExecutable()
             ?: throw TerminalSessionFailure.KyuExecutableNotFound()
 
         val plan = planSessionEntry(

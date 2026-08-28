@@ -15,10 +15,10 @@ import org.junit.jupiter.api.Assumptions.abort
  * 한쪽에서만 바뀌는 날이 온다.
  */
 internal fun realKyuCommandRunnerOrSkip(): KyuCommandRunner {
-    val pinnedPath = System.getenv(KYU_BINARY_PATH_VARIABLE)?.let(Path::of)
+    val pinnedPath = System.getenv(PINNED_KYU_EXECUTABLE_VARIABLE)?.let(Path::of)
     if (pinnedPath != null) {
         if (!pinnedPath.isExecutable()) {
-            abort<Unit>("$KYU_BINARY_PATH_VARIABLE 가 가리키는 $pinnedPath 를 실행할 수 없습니다")
+            abort<Unit>("$PINNED_KYU_EXECUTABLE_VARIABLE 가 가리키는 $pinnedPath 를 실행할 수 없습니다")
         }
         return ProcessKyuCommandRunner(pinnedPath)
     }
@@ -27,9 +27,7 @@ internal fun realKyuCommandRunnerOrSkip(): KyuCommandRunner {
     try {
         runnerFromSystemPath.run(listOf("version"))
     } catch (failure: KyuCommandFailure.ExecutableNotFound) {
-        abort<Unit>("PATH 에도 $KYU_BINARY_PATH_VARIABLE 에도 kyu 가 없어 건너뜁니다 (${failure.message})")
+        abort<Unit>("PATH 에도 $PINNED_KYU_EXECUTABLE_VARIABLE 에도 kyu 가 없어 건너뜁니다 (${failure.message})")
     }
     return runnerFromSystemPath
 }
-
-private const val KYU_BINARY_PATH_VARIABLE = "KYU_BINARY_PATH"

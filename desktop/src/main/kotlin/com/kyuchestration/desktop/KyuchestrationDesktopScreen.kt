@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
@@ -45,6 +46,8 @@ import java.nio.file.Path
 @Composable
 fun KyuchestrationDesktopScreen(
     versionLabel: String,
+    engineInstallationState: EngineInstallationState,
+    engineDirectoryLabel: String,
     dashboardState: WorkDirDashboardState,
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
@@ -54,6 +57,8 @@ fun KyuchestrationDesktopScreen(
      * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
      */
     repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    onInstallEngineRequested: () -> Unit,
+    onLookForEngineAgainRequested: () -> Unit,
     onOpenWorkDirRequested: () -> Unit,
     onChooseNewWorkDirParentRequested: () -> Path?,
     onCreateWorkDirRequested: (Path, String) -> Unit,
@@ -67,44 +72,57 @@ fun KyuchestrationDesktopScreen(
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            when (dashboardState) {
-                is WorkDirDashboardState.NoWorkDirOpened ->
-                    StartScreen(
-                        versionLabel = versionLabel,
-                        initializationState = initializationState,
-                        onOpenWorkDirRequested = onOpenWorkDirRequested,
-                        onChooseNewWorkDirParentRequested = onChooseNewWorkDirParentRequested,
-                        onCreateWorkDirRequested = onCreateWorkDirRequested,
-                        onCreateWorkDirGivenUp = onCreateWorkDirGivenUp,
-                    )
+            // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 만들고 세션에 들어가는
+            // 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는 무엇을
+            // 눌러도 같은 실패를 만난다. 갈림길을 여기 하나 두어 그 자리를 아예 만들지 않는다.
+            if (engineInstallationState != EngineInstallationState.EngineReady) {
+                EngineInstallationScreen(
+                    versionLabel = versionLabel,
+                    engineDirectoryLabel = engineDirectoryLabel,
+                    engineInstallationState = engineInstallationState,
+                    onInstallEngineRequested = onInstallEngineRequested,
+                    onLookForEngineAgainRequested = onLookForEngineAgainRequested,
+                )
+            } else {
+                when (dashboardState) {
+                    is WorkDirDashboardState.NoWorkDirOpened ->
+                        StartScreen(
+                            versionLabel = versionLabel,
+                            initializationState = initializationState,
+                            onOpenWorkDirRequested = onOpenWorkDirRequested,
+                            onChooseNewWorkDirParentRequested = onChooseNewWorkDirParentRequested,
+                            onCreateWorkDirRequested = onCreateWorkDirRequested,
+                            onCreateWorkDirGivenUp = onCreateWorkDirGivenUp,
+                        )
 
-                is WorkDirDashboardState.FirstObservationRunning ->
-                    FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
+                    is WorkDirDashboardState.FirstObservationRunning ->
+                        FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
 
-                is WorkDirDashboardState.WorkDirObserved -> {
-                    DashboardWithTerminal(
-                        observed = dashboardState,
-                        initializationState = initializationState,
-                        terminalState = terminalState,
-                        onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
-                        onCloneRepositoriesRequested = onCloneRepositoriesRequested,
-                        onRefreshRequested = onRefreshRequested,
-                        onCloseWorkDirRequested = onCloseWorkDirRequested,
-                        onEnterSessionRequested = onEnterSessionRequested,
-                        onCloseTerminalRequested = onCloseTerminalRequested,
-                    )
+                    is WorkDirDashboardState.WorkDirObserved -> {
+                        DashboardWithTerminal(
+                            observed = dashboardState,
+                            initializationState = initializationState,
+                            terminalState = terminalState,
+                            onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
+                            onCloneRepositoriesRequested = onCloneRepositoriesRequested,
+                            onRefreshRequested = onRefreshRequested,
+                            onCloseWorkDirRequested = onCloseWorkDirRequested,
+                            onEnterSessionRequested = onEnterSessionRequested,
+                            onCloseTerminalRequested = onCloseTerminalRequested,
+                        )
 
-                    // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
-                    RepositoryCloneDialog(repositoryCloneStateHolder)
+                        // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
+                        RepositoryCloneDialog(repositoryCloneStateHolder)
+                    }
+
+                    is WorkDirDashboardState.FirstObservationFailed ->
+                        ObservationFailureScreen(
+                            workDirPath = dashboardState.workDirPath,
+                            failure = dashboardState.failure,
+                            onRetryRequested = onRefreshRequested,
+                            onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
+                        )
                 }
-
-                is WorkDirDashboardState.FirstObservationFailed ->
-                    ObservationFailureScreen(
-                        workDirPath = dashboardState.workDirPath,
-                        failure = dashboardState.failure,
-                        onRetryRequested = onRefreshRequested,
-                        onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
-                    )
             }
         }
     }
