@@ -307,6 +307,17 @@ func (model repositoryPickerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) 
 
 	updatedList, listCommand := model.repositoryList.Update(message)
 	model.repositoryList = updatedList
+
+	// 한 쪽에 담을 줄 수를 다시 세게 한다.
+	//
+	// bubbles 는 그 수를 "화면 높이 - 제목 - 쪽 표시 - 도움말" 로 계산하는데, 쪽 표시의 높이를
+	// 재는 시점의 쪽 수가 아직 옛 값이다. 검색으로 한 쪽까지 좁혔다가 풀면 쪽 표시가 없던 때의
+	// 높이로 계산해 줄이 하나 더 들어가고, 화면이 터미널보다 한 줄 길어져 터미널이 위로 밀어
+	// 올린다 — 그 순간 맨 위의 제목 줄이 사라진다.
+	//
+	// 크기를 그대로 다시 알려 주면 이제 맞는 쪽 수로 한 번 더 계산한다.
+	model.repositoryList.SetSize(model.repositoryList.Width(), model.repositoryList.Height())
+
 	return model, listCommand
 }
 

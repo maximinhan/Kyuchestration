@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -445,5 +446,37 @@ func TestPickerHelpLineNamesTheKeysThatAreNotTheListsOwn(t *testing.T) {
 		if !strings.Contains(rendered, expectedHelp) {
 			t.Errorf("화면에 %q 안내가 없습니다:\n%s", expectedHelp, rendered)
 		}
+	}
+}
+
+func TestPickerScreenNeverGrowsTallerThanTheTerminalWhenTheFilterIsCleared(t *testing.T) {
+	// 화면이 터미널보다 한 줄이라도 길면 터미널이 위로 밀어 올리고, 그 순간 제목 줄이 사라진다.
+	// 검색을 걸었다 푸는 사이에 쪽 표시가 없어졌다 다시 생기는데, 한 쪽에 담을 줄 수를 그 옛
+	// 쪽 표시 높이로 계산하면 줄이 한 개 더 들어간다.
+	const terminalHeight = 24
+
+	rows := make([]repositoryRow, 0, 40)
+	for rowNumber := range 40 {
+		rows = append(rows, makePickerRow(fmt.Sprintf("proj-%02d", rowNumber), false, false))
+	}
+
+	sized, _ := newRepositoryPickerModel(github.Owner{Login: "maximinhan"}, rows).
+		Update(tea.WindowSizeMsg{Width: 80, Height: terminalHeight})
+	model := sized.(repositoryPickerModel)
+
+	if height := lipgloss.Height(model.View()); height > terminalHeight {
+		t.Fatalf("첫 화면 높이 = %d, 터미널 %d 줄 안에 들어가기를 기대", height, terminalHeight)
+	}
+
+	keys := append([]tea.KeyMsg{typedKeys("/")[0]}, typedKeys("proj-1")...)
+	keys = append(keys, enterKey, escapeKey)
+
+	model, hasClosed := pressKeys(t, model, keys...)
+	if hasClosed {
+		t.Fatal("검색을 걸었다 푸는 사이에 화면이 닫혔습니다")
+	}
+
+	if height := lipgloss.Height(model.View()); height > terminalHeight {
+		t.Errorf("검색을 푼 뒤 화면 높이 = %d, 터미널 %d 줄 안에 들어가기를 기대", height, terminalHeight)
 	}
 }
