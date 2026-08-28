@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
 )
 
@@ -68,6 +69,11 @@ func addTokenProfile(in io.Reader, out, errOut io.Writer, args []string, newAcce
 	}
 
 	_, owner, err := verifyAndStoreToken(request.profileName, token, tokenStore, newAccess)
+	// 거절당했다는 사실만으로는 부르는 쪽이 "그래서 저장은 됐나" 를 알 수 없다. 대화형 등록은
+	// 그 자리에서 "저장하지 않았습니다" 라고 말하는데, 그 보장이 여기서만 사라져서는 안 된다.
+	if errors.Is(err, github.ErrInvalidToken) {
+		return fmt.Errorf("%s 프로필에 아무것도 저장하지 않았습니다: %w", request.profileName, err)
+	}
 	if err != nil {
 		return err
 	}

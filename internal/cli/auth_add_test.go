@@ -196,3 +196,17 @@ func TestAuthAddWithJSONPutsNothingButTheDocumentOnStdout(t *testing.T) {
 		t.Errorf("stdout = %q, 문서 말고 아무것도 나오지 않기를 기대", out.String())
 	}
 }
+
+func TestAuthAddSaysNothingWasStoredWhenTheTokenIsRejected(t *testing.T) {
+	// 거절당했다는 사실만으로는 부르는 쪽이 "그래서 저장은 됐나" 를 알 수 없다. 앱은 그 답에 따라
+	// 사용자에게 다시 붙여넣으라고 할지, 지우고 다시 등록하라고 할지를 정한다.
+	var out, errOut bytes.Buffer
+	err := ManageTokenProfiles(strings.NewReader("잘못된-토큰\n"), &out, &errOut,
+		[]string{"add", "개인"}, newTestGitHub().newAccess, newFakeTokenStore(secretstore.StorageKeychain))
+	if err == nil {
+		t.Fatal("ManageTokenProfiles() 가 거절당한 토큰을 성공으로 끝냈습니다")
+	}
+	if !strings.Contains(err.Error(), "저장하지 않았습니다") {
+		t.Errorf("에러 = %q, 아무것도 저장되지 않았다는 사실을 기대", err.Error())
+	}
+}

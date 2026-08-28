@@ -154,7 +154,7 @@ func parseReposArgs(subcommand string, args []string) (reposRequest, error) {
 			ownerOptionName, reposOwnersSubcommand, reposUsageText)
 	}
 	if !asJSON {
-		return reposRequest{}, fmt.Errorf("repos 는 %s 로만 답합니다 — 사람이 레포를 골라 클론하는 자리는 kyu clone 입니다\n\n%s",
+		return reposRequest{}, fmt.Errorf("repos 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 사람이 레포를 골라 클론하는 자리는 kyu clone 입니다\n\n%s",
 			machineJSONOptionName, reposUsageText)
 	}
 	return request, nil
