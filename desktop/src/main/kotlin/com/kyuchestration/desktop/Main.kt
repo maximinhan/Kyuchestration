@@ -11,8 +11,13 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
 import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
+import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
 import com.kyuchestration.desktop.kyu.planFileExistsIn
+import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
+import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
+import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
+import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.pty.PtyKyuSessionTerminalAttacher
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
@@ -43,6 +48,14 @@ fun main() = application {
     val initializationStateHolder = remember(applicationCoroutineScope) {
         WorkDirInitializationStateHolder(
             workDirInitializer = KyuCliWorkDirInitializer(kyuCommandRunner),
+            coroutineScope = applicationCoroutineScope,
+        )
+    }
+    val repositoryCloneStateHolder = remember(applicationCoroutineScope) {
+        RepositoryCloneStateHolder(
+            tokenProfileRegistry = KyuCliTokenProfileRegistry(kyuCommandRunner),
+            gitHubRepositoryCatalog = KyuCliGitHubRepositoryCatalog(kyuCommandRunner),
+            workDirRepositoryCloner = KyuCliWorkDirRepositoryCloner(kyuCommandRunner),
             coroutineScope = applicationCoroutineScope,
         )
     }
@@ -77,6 +90,7 @@ fun main() = application {
             dashboardState = dashboardState,
             initializationState = initializationState,
             terminalState = terminalState,
+            repositoryCloneStateHolder = repositoryCloneStateHolder,
             onOpenWorkDirRequested = {
                 chooseWorkDirDirectory(ownerWindow)?.let {
                     // 만들다 실패한 문구를 여기서 거둔다. 그대로 두면 방금 연 워크디렉토리의
@@ -99,13 +113,26 @@ fun main() = application {
             onInitializeOpenedWorkDirRequested = {
                 dashboardState.workDirPath?.let(initializationStateHolder::initializeExistingWorkDir)
             },
+            onCloneRepositoriesRequested = {
+                // 무엇을 이미 받아 뒀는지는 방금 관찰한 목록이 알고 있다. 대화상자가 그것을 다시
+                // 알아내려면 워크디렉토리를 한 번 더 훑어야 하는데, 그 앎은 대시보드의 것이다.
+                (dashboardState as? WorkDirDashboardState.WorkDirObserved)?.let { observed ->
+                    repositoryCloneStateHolder.open(
+                        workDirPath = observed.workDirPath,
+                        alreadyClonedRepositoryNames = observed.snapshot.repos.map { it.name }.toSet(),
+                    )
+                }
+            },
             onRefreshRequested = dashboardStateHolder::refreshNow,
             onCloseWorkDirRequested = {
                 // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 놓지 않으면 다른
                 // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 터미널이 남는다.
                 terminalStateHolder.closeTerminal()
-                // 초기화 실패 문구도 그 워크디렉토리의 것이다. 같은 이유로 여기서 함께 놓는다.
+                // 초기화 실패 문구도, 고르던 레포도 그 워크디렉토리의 것이다. 같은 이유로 여기서
+                // 함께 놓는다 — 다른 워크디렉토리를 연 채로 앞 워크디렉토리에 받을 레포를 고르고
+                // 있으면, 받아 온 것이 화면에 없는 자리에 떨어진다.
                 initializationStateHolder.forgetLastFailure()
+                repositoryCloneStateHolder.close()
                 dashboardStateHolder.closeWorkDir()
             },
             onEnterSessionRequested = { target ->
