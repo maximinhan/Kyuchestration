@@ -86,6 +86,13 @@ type fakeGitHub struct {
 	// tokensAskedFor 는 대역이 받아본 토큰 전부다. 어느 토큰으로 붙었는지 확인하는 데 쓴다.
 	tokensAskedFor []string
 
+	// repositoriesAskedFor 는 레포 목록을 물은 소유자 전부다.
+	//
+	// 이름만으로는 부족해서 소유자를 통째로 받아 적는다. 실제 구현은 IsOrganization 으로 API
+	// 경로를 가르는데(개인은 /user/repos, 조직은 /orgs/{org}/repos), 이름만 보면 그 갈림이
+	// 틀려도 대역은 같은 답을 돌려준다.
+	repositoriesAskedFor []github.Owner
+
 	clonedRepositories []clonedRepository
 }
 
@@ -120,6 +127,7 @@ func (access *fakeRepositoryAccess) Organizations() ([]github.Owner, error) {
 }
 
 func (access *fakeRepositoryAccess) Repositories(owner github.Owner) ([]github.Repository, error) {
+	access.gitHub.repositoriesAskedFor = append(access.gitHub.repositoriesAskedFor, owner)
 	return access.gitHub.repositoriesByOwnerLogin[owner.Login], nil
 }
 

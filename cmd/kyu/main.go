@@ -28,20 +28,27 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-  kyu clone              GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
+  kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
   kyu list [path]        레포 목록 + 상태
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
-  kyu auth <list|remove> 저장한 GitHub 토큰 프로필 관리
+  kyu repos <owners|list>
+                         GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
+  kyu auth <add|list|remove>
+                         저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
 
 옵션 (kyu, kyu start):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
 
-옵션 (kyu list):
-  --json                 사람용 표 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
+옵션 (kyu clone):
+  --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
+  --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
+
+옵션 (kyu list, kyu clone, kyu repos, kyu auth add, kyu auth list):
+  --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -102,11 +109,18 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 			})
 		})
 
-	// auth 는 세션 백엔드를 거치지 않는다. 저장해둔 토큰을 보고 지우는 일이라 tmux 와 무관하고,
+	// repos 도 세션 백엔드를 거치지 않는다. GitHub 에 무엇이 있는지 묻기만 하는 명령이라
+	// 워크디렉토리도 tmux 도 보지 않는다 — 앱이 아직 워크디렉토리를 만들기 전에 부르는 자리다.
+	case "repos":
+		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+			return cli.BrowseGitHubRepositories(out, errOut, commandArgs, newGitHubAccess, tokenStore)
+		})
+
+	// auth 는 세션 백엔드를 거치지 않는다. 토큰을 등록하고 보고 지우는 일이라 tmux 와 무관하고,
 	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
 	case "auth":
 		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
-			return cli.ManageTokenProfiles(out, commandArgs, tokenStore)
+			return cli.ManageTokenProfiles(in, out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
 	// init 과 version 은 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이고 버전은

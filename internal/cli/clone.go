@@ -26,11 +26,20 @@ import (
 // 진입 플로우(인자 없는 kyu)에 끼우지 않는다. 클론은 워크디렉토리를 만들 때 한 번 하는 일이고,
 // 매번 진입할 때마다 GitHub 에 붙어 목록을 묻는 것은 사용자가 원한 적 없는 왕복이다.
 
-const cloneUsageText = `사용법: kyu clone
+const cloneUsageText = `사용법: kyu clone [--profile <이름> --repo <owner/name> ...] [--json]
 
-  kyu clone   GitHub 레포 목록에서 화살표로 골라 이 워크디렉토리에 클론한다
+  kyu clone                                          GitHub 레포 목록에서 화살표로 골라 클론한다
+  kyu clone --profile <이름> --repo <owner/name>      묻지 않고 그 레포를 클론한다 (--repo 는 여러 번)
 
-토큰은 처음 실행할 때 물어보고 이 머신에 저장한다 (kyu auth list 로 확인).`
+옵션:
+  --profile <이름>   어느 토큰으로 붙을지 (묻지 않는 실행에 필수)
+  --repo <owner/name>  클론할 레포. 여러 번 적을 수 있다
+  --json             사람용 출력 대신 기계용 JSON 을 낸다 (--repo 와 함께 쓴다)
+
+토큰은 처음 실행할 때 물어보고 이 머신에 저장한다 (kyu auth add 로 미리 등록할 수도 있다).`
+
+// repoOptionName 은 묻지 않고 클론할 레포를 지정하는 옵션이다. 여러 번 적을 수 있다.
+const repoOptionName = "--repo"
 
 // repositorySelectionQuestion 은 무엇을 클론할지 묻는 말이다.
 const repositorySelectionQuestion = "\n클론할 레포 (1,3,5-8 / 빈 줄이면 취소): "
@@ -68,8 +77,9 @@ const newReposNeedASessionRestartWarning = "새로 클론한 레포는 이미 �
 // 세션 백엔드를 받는 이유는 마지막 한 줄 때문이다 — 클론이 끝난 뒤 떠 있는 메인 세션이 있는지
 // 물어야, 새 레포가 그 세션에 닿지 않는다는 사실을 그 자리에서 알릴 수 있다.
 func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore, backend session.SessionBackend) error {
-	if len(args) != 0 {
-		return fmt.Errorf("clone 은 인자를 받지 않습니다 (인자 %d 개를 받음)\n\n%s", len(args), cloneUsageText)
+	request, err := parseCloneArgs(args)
+	if err != nil {
+		return err
 	}
 
 	location, err := currentWorkDir()
@@ -77,6 +87,17 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 		return err
 	}
 
+	// 무엇을 클론할지 이미 적어 보냈으면 아무것도 묻지 않는다. 그 갈림이 이 명령의 두 사용처를
+	// 가른다 — 사람은 목록을 보며 고르고, GUI 는 자기 화면에서 이미 고른 것을 건넨다.
+	if len(request.repositoryReferences) > 0 {
+		return cloneWithoutAsking(out, errOut, request, location, newAccess, tokenStore, backend)
+	}
+
+	return cloneByAsking(in, out, errOut, location, newAccess, tokenStore, backend)
+}
+
+// cloneByAsking 은 목록을 보여주고 고르게 해서 클론한다 — 사람이 지나는 길이다.
+func cloneByAsking(in io.Reader, out, errOut io.Writer, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore, backend session.SessionBackend) error {
 	prompt := newInteractivePrompt(in, out)
 
 	access, personalOwner, err := authenticateWithTokenProfile(prompt, errOut, tokenStore, newAccess)
@@ -111,21 +132,49 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 		return nil
 	}
 
-	result := cloneSelectedRepositories(out, access, rows, selectedIndexes)
-	writeCloneSummary(out, result)
+	selectedRows := make([]repositoryRow, 0, len(selectedIndexes))
+	for _, selectedIndex := range selectedIndexes {
+		selectedRows = append(selectedRows, rows[selectedIndex])
+	}
 
-	// 실패가 섞여 있어도 안내는 한다. 하나라도 클론됐다면 세션이 보는 레포 목록은 이미 어긋나 있다.
-	if result.clonedCount > 0 {
-		if err := warnNewReposDoNotReachRunningMainSession(errOut, location.name, backend); err != nil {
-			return err
+	attempts := cloneEachRow(access, selectedRows)
+	writeCloneAttempts(out, attempts)
+
+	return finishClone(errOut, attempts, location.name, backend)
+}
+
+// finishClone 은 클론이 끝난 뒤에 남은 두 가지를 처리한다 — 세션 안내와 종료 코드.
+//
+// 두 길이 함께 쓴다. 사람용은 안내를 stderr 한 줄로 내고 기계용은 문서의 필드로 담지만,
+// "떠 있는 메인 세션이 새 레포를 보지 못한다" 는 판정과 "실패가 있으면 종료 코드 1" 은 같다.
+func finishClone(errOut io.Writer, attempts []cloneAttempt, workDirName string, backend session.SessionBackend) error {
+	restartNeeded, err := runningMainSessionWouldMissNewRepos(workDirName, backend, attempts)
+	if err != nil {
+		return err
+	}
+	if restartNeeded {
+		if _, err := fmt.Fprint(errOut, newReposNeedASessionRestartWarning); err != nil {
+			return fmt.Errorf("세션 재시작 안내 출력 실패: %w", err)
 		}
 	}
+	return failedCloneError(attempts)
+}
 
-	if len(result.failedRepositoryNames) > 0 {
-		// 종료 코드로 실패를 알린다. 화면의 줄들은 스크롤 위로 사라지지만 종료 코드는 남는다.
-		return fmt.Errorf("클론 실패: %s", strings.Join(result.failedRepositoryNames, ", "))
+// failedCloneError 는 실패한 레포가 있으면 그것을 종료 코드로 옮길 에러를 만든다.
+//
+// 종료 코드로 실패를 알린다. 화면의 줄들은 스크롤 위로 사라지지만 종료 코드는 남고,
+// 이 명령을 앞에 둔 스크립트가 보는 것도 그것이다.
+func failedCloneError(attempts []cloneAttempt) error {
+	var failedLabels []string
+	for _, attempt := range attempts {
+		if attempt.status == cloneAttemptFailed {
+			failedLabels = append(failedLabels, attempt.label)
+		}
 	}
-	return nil
+	if len(failedLabels) == 0 {
+		return nil
+	}
+	return fmt.Errorf("클론 실패: %s", strings.Join(failedLabels, ", "))
 }
 
 // chooseRepositoriesToClone 는 무엇을 클론할지 고르게 하고 고른 줄의 인덱스를 돌려준다.
@@ -175,27 +224,19 @@ func cancellationOrError(out io.Writer, err error) error {
 }
 
 // chooseRepositoryOwner 는 개인 계정과 소속 조직 중 어느 것의 레포를 볼지 고르게 한다.
+//
+// 목록을 모으는 일은 kyu repos owners 와 같은 함수에 맡긴다. 어느 문으로 들어왔든 사용자가
+// 보게 되는 후보가 같아야 한다 — 특히 fine-grained 토큰의 403 을 통과시키는 규칙이 그렇다.
 func chooseRepositoryOwner(prompt *interactivePrompt, errOut io.Writer, access github.RepositoryAccess, personalOwner github.Owner) (github.Owner, error) {
-	organizations, err := access.Organizations()
-
-	// fine-grained 토큰은 조직 목록에 권한이 없으면 403 으로 답한다. 그것으로 명령을 끝내면
-	// 개인 레포를 클론하려던 사용자가 아무것도 하지 못한다 — 이 실패만 통과시킨다.
-	if errors.Is(err, github.ErrForbidden) {
-		fmt.Fprintf(errOut, "이 토큰으로는 조직 목록을 볼 수 없습니다 — %s 계정의 레포만 보여줍니다.\n", personalOwner.Login)
-		return personalOwner, nil
-	}
+	owners, err := listOwnersTheTokenCanSee(errOut, access, personalOwner)
 	if err != nil {
 		return github.Owner{}, err
 	}
 
 	// 고를 것이 하나뿐인 물음은 묻지 않는다. 물으면 사용자는 매번 1 을 치게 된다.
-	if len(organizations) == 0 {
-		return personalOwner, nil
+	if len(owners) == 1 {
+		return owners[0], nil
 	}
-
-	owners := make([]github.Owner, 0, len(organizations)+1)
-	owners = append(owners, personalOwner)
-	owners = append(owners, organizations...)
 
 	fmt.Fprintf(prompt.out, "\n어느 계정의 레포를 볼까요.\n\n")
 	table := tabwriter.NewWriter(prompt.out, 0, 0, tableColumnPadding, ' ', 0)
@@ -241,19 +282,27 @@ type repositoryRow struct {
 func repositoryRowsFor(repositories []github.Repository, absoluteWorkDirPath string) []repositoryRow {
 	rows := make([]repositoryRow, 0, len(repositories))
 	for _, repository := range repositories {
-		destinationPath := filepath.Join(absoluteWorkDirPath, repository.Name)
-
-		// 디렉토리인지 파일인지 따지지 않는다. 그 이름이 이미 쓰이고 있으면 git clone 은 어차피
-		// 실패하고, 이 도구가 그 자리의 것을 지울 일은 없다.
-		_, statErr := os.Stat(destinationPath)
-
-		rows = append(rows, repositoryRow{
-			repository:         repository,
-			destinationPath:    destinationPath,
-			isAlreadyInWorkDir: statErr == nil,
-		})
+		rows = append(rows, repositoryRowFor(repository, absoluteWorkDirPath))
 	}
 	return rows
+}
+
+// repositoryRowFor 는 레포 하나를 클론 직전의 행으로 바꾼다.
+//
+// 묻지 않는 클론도 이 함수를 쓴다. "이미 있으면 건너뛴다" 는 판정이 두 길에서 갈리면, 같은
+// 워크디렉토리에 같은 레포를 두고도 어느 문으로 들어왔는지에 따라 결과가 달라진다.
+func repositoryRowFor(repository github.Repository, absoluteWorkDirPath string) repositoryRow {
+	destinationPath := filepath.Join(absoluteWorkDirPath, repository.Name)
+
+	// 디렉토리인지 파일인지 따지지 않는다. 그 이름이 이미 쓰이고 있으면 git clone 은 어차피
+	// 실패하고, 이 도구가 그 자리의 것을 지울 일은 없다.
+	_, statErr := os.Stat(destinationPath)
+
+	return repositoryRow{
+		repository:         repository,
+		destinationPath:    destinationPath,
+		isAlreadyInWorkDir: statErr == nil,
+	}
 }
 
 // writeRepositoryListing 은 고를 수 있는 레포를 번호와 함께 보여준다.
@@ -301,75 +350,116 @@ func alreadyThereNote(row repositoryRow) string {
 	return ""
 }
 
-// cloneOutcome 은 클론을 마친 뒤의 결과다.
-type cloneOutcome struct {
-	clonedCount           int
-	skippedCount          int
-	failedRepositoryNames []string
+// cloneAttemptStatus 는 레포 하나가 어떻게 끝났는지다. 기계용 문서의 status 가 곧 이 값이다.
+type cloneAttemptStatus string
+
+const (
+	cloneAttemptCloned  cloneAttemptStatus = "cloned"
+	cloneAttemptSkipped cloneAttemptStatus = "skipped"
+	cloneAttemptFailed  cloneAttemptStatus = "failed"
+)
+
+// cloneAttempt 는 레포 하나에 대한 시도와 그 결말이다.
+//
+// 화면 문구를 담지 않는다. 이 값 하나에서 사람용 줄도, 기계용 문서의 항목도 나오는데,
+// 실행 단계에서 문자열로 굳혀버리면 뒤에 오는 출력은 그 문자열을 되파싱하는 수밖에 없다.
+type cloneAttempt struct {
+	// label 은 사용자가 이 레포를 부른 이름이다 — 대화형은 목록에 찍힌 레포 이름, 묻지 않는
+	// 실행은 --repo 에 적은 owner/name. 앱이 자기가 보낸 것과 돌아온 것을 이 값으로 맞춘다.
+	label string
+
+	status cloneAttemptStatus
+
+	// message 는 왜 그렇게 끝났는지다. 클론된 레포에서는 비어 있다 — 성공에 덧붙일 이유가 없다.
+	message string
 }
 
-// cloneSelectedRepositories 는 고른 레포를 목록 순서대로 클론한다.
+// alreadyInWorkDirMessage 는 그 자리에 이미 무언가 있어 건너뛴 이유다.
+const alreadyInWorkDirMessage = "같은 이름의 디렉토리가 이미 있습니다"
+
+// cloneEachRow 는 행을 받은 순서대로 클론하고 각각의 결말을 모은다.
 //
 // 하나가 실패해도 멈추지 않는다. 멈추면 사용자는 남은 레포를 손으로 클론해야 하는데, 실패의
 // 흔한 이유(그 레포에 권한이 없다)는 다른 레포와 상관이 없다.
-func cloneSelectedRepositories(out io.Writer, access github.RepositoryAccess, rows []repositoryRow, selectedIndexes []int) cloneOutcome {
-	var outcome cloneOutcome
-
-	fmt.Fprintln(out)
-	for _, selectedIndex := range selectedIndexes {
-		row := rows[selectedIndex]
-		repositoryName := row.repository.Name
-
-		if row.isAlreadyInWorkDir {
-			fmt.Fprintf(out, "%s%s 는 이미 있어 건너뜁니다.\n", rowIndent, repositoryName)
-			outcome.skippedCount++
-			continue
-		}
-
-		if err := access.CloneRepository(row.repository, row.destinationPath); err != nil {
-			// 실패한 이유를 그 자리에서 보여준다. 마지막 요약에는 이름만 남으므로, 무엇 때문에
-			// 실패했는지는 여기서만 알 수 있다.
-			fmt.Fprintf(out, "%s%s 클론 실패: %v\n", rowIndent, repositoryName, err)
-			outcome.failedRepositoryNames = append(outcome.failedRepositoryNames, repositoryName)
-			continue
-		}
-
-		fmt.Fprintf(out, "%s%s 클론 완료\n", rowIndent, repositoryName)
-		outcome.clonedCount++
+func cloneEachRow(access github.RepositoryAccess, rows []repositoryRow) []cloneAttempt {
+	attempts := make([]cloneAttempt, 0, len(rows))
+	for _, row := range rows {
+		attempts = append(attempts, cloneOneRow(access, row.repository.Name, row))
 	}
-	return outcome
+	return attempts
 }
 
-// writeCloneSummary 는 무엇이 몇 개였는지 한 줄로 모은다.
-//
-// 레포가 많으면 위의 줄들은 화면 밖으로 밀려난다. 사용자가 마지막에 보는 한 줄이 결과여야 한다.
-func writeCloneSummary(out io.Writer, outcome cloneOutcome) {
-	parts := []string{fmt.Sprintf("클론 %d 개", outcome.clonedCount)}
-	if outcome.skippedCount > 0 {
-		parts = append(parts, fmt.Sprintf("건너뜀 %d 개", outcome.skippedCount))
+// cloneOneRow 는 행 하나를 클론하고 그 결말을 돌려준다.
+func cloneOneRow(access github.RepositoryAccess, label string, row repositoryRow) cloneAttempt {
+	if row.isAlreadyInWorkDir {
+		return cloneAttempt{label: label, status: cloneAttemptSkipped, message: alreadyInWorkDirMessage}
 	}
-	if len(outcome.failedRepositoryNames) > 0 {
-		parts = append(parts, fmt.Sprintf("실패 %d 개", len(outcome.failedRepositoryNames)))
+
+	if err := access.CloneRepository(row.repository, row.destinationPath); err != nil {
+		return cloneAttempt{label: label, status: cloneAttemptFailed, message: err.Error()}
+	}
+	return cloneAttempt{label: label, status: cloneAttemptCloned}
+}
+
+// writeCloneAttempts 는 결말들을 사람이 읽는 줄로 옮기고 마지막에 요약 한 줄을 붙인다.
+//
+// 요약을 붙이는 이유: 레포가 많으면 위의 줄들은 화면 밖으로 밀려난다. 사용자가 마지막에 보는
+// 한 줄이 결과여야 한다.
+func writeCloneAttempts(out io.Writer, attempts []cloneAttempt) {
+	fmt.Fprintln(out)
+
+	clonedCount, skippedCount, failedCount := 0, 0, 0
+	for _, attempt := range attempts {
+		switch attempt.status {
+		case cloneAttemptCloned:
+			clonedCount++
+			fmt.Fprintf(out, "%s%s 클론 완료\n", rowIndent, attempt.label)
+		case cloneAttemptSkipped:
+			skippedCount++
+			fmt.Fprintf(out, "%s%s 는 이미 있어 건너뜁니다.\n", rowIndent, attempt.label)
+		case cloneAttemptFailed:
+			failedCount++
+			// 실패한 이유를 그 자리에서 보여준다. 마지막 요약에는 개수만 남으므로, 무엇 때문에
+			// 실패했는지는 여기서만 알 수 있다.
+			fmt.Fprintf(out, "%s%s 클론 실패: %s\n", rowIndent, attempt.label, attempt.message)
+		}
+	}
+
+	parts := []string{fmt.Sprintf("클론 %d 개", clonedCount)}
+	if skippedCount > 0 {
+		parts = append(parts, fmt.Sprintf("건너뜀 %d 개", skippedCount))
+	}
+	if failedCount > 0 {
+		parts = append(parts, fmt.Sprintf("실패 %d 개", failedCount))
 	}
 	fmt.Fprintf(out, "\n%s\n", strings.Join(parts, ", "))
 }
 
-// warnNewReposDoNotReachRunningMainSession 은 떠 있는 메인 세션이 새 레포를 보지 못한다는 사실을 알린다.
-func warnNewReposDoNotReachRunningMainSession(errOut io.Writer, workDirName string, backend session.SessionBackend) error {
-	mainSessionName := session.MainSessionName(workDirName)
+// runningMainSessionWouldMissNewRepos 는 떠 있는 메인 세션이 방금 클론한 레포를 보지 못하는지다.
+//
+// 세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다(PR 10·12 와 같은 자리).
+// 조용히 넘어가면 사용자는 방금 클론한 레포가 세션에서 왜 안 보이는지 알 수 없다.
+func runningMainSessionWouldMissNewRepos(workDirName string, backend session.SessionBackend, attempts []cloneAttempt) (bool, error) {
+	// 하나도 클론되지 않았으면 세션이 보는 목록은 어긋나지 않았다. 세션 생존을 묻지도 않는다.
+	if !hasAnyClonedRepository(attempts) {
+		return false, nil
+	}
 
+	mainSessionName := session.MainSessionName(workDirName)
 	isAlive, err := backend.IsAlive(mainSessionName)
 	if err != nil {
-		return fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
+		return false, fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
 	}
 	// 떠 있지도 않은 세션을 다시 띄우라는 안내는 사용자를 헷갈리게 한다. 다음에 kyu 를 실행하면
 	// 그때 스캔한 목록으로 세션이 뜬다.
-	if !isAlive {
-		return nil
-	}
+	return isAlive, nil
+}
 
-	if _, err := fmt.Fprint(errOut, newReposNeedASessionRestartWarning); err != nil {
-		return fmt.Errorf("세션 재시작 안내 출력 실패: %w", err)
+func hasAnyClonedRepository(attempts []cloneAttempt) bool {
+	for _, attempt := range attempts {
+		if attempt.status == cloneAttemptCloned {
+			return true
+		}
 	}
-	return nil
+	return false
 }
