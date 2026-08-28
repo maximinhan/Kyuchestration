@@ -30,6 +30,13 @@ dependencies {
     // 직접 적는다. 끌려온 것에 기대면 Compose 의존이 바뀔 때 이유도 모르고 깨진다.
     implementation(libs.kotlinxCoroutinesCore)
 
+    // 앱 안의 터미널. JediTerm 이 화면과 터미널 에뮬레이션을, pty4j 가 그 아래의 진짜 PTY 를 맡는다.
+    // 이 둘이 있어야 kyu attach 가 요구하는 TTY 가 앱 안에 생긴다.
+    implementation(libs.jeditermUi)
+    implementation(libs.jeditermCore)
+    implementation(libs.pty4j)
+    runtimeOnly(libs.slf4jSimple)
+
     // kotlin("test") 는 적용된 Kotlin 플러그인의 버전을 그대로 따라간다. 버전 카탈로그에 한 줄 더
     // 적으면 Kotlin 을 올릴 때 두 곳을 맞춰야 하므로 여기서는 일부러 버전을 적지 않는다.
     testImplementation(kotlin("test"))

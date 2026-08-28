@@ -13,6 +13,14 @@ kotlinxSerializationJson = "1.11.0"
 # Compose Multiplatform 1.12.0 이 코루틴 1.9.0 을 끌고 온다. 여기에 더 새 판을 적으면 테스트
 # 클래스패스만 올라가 실행 때와 다른 코루틴으로 시험하게 된다. 그래서 일부러 같은 판에 못 박는다.
 kotlinxCoroutines = "1.9.0"
+# JediTerm 은 IntelliJ 의 터미널 위젯이다. 2.x 에서는 core·ui·pty 세 아티팩트였지만 3.x 는
+# jediterm-pty 를 더 내지 않는다(그쪽은 2.69 에서 멈췄다) — pty4j 를 잇는 커넥터는 각자 쓴다.
+jediterm = "3.74"
+# PTY 를 여는 네이티브 구현. 리눅스·맥·윈도우용 바이너리가 이 한 아티팩트 안에 들어 있다.
+pty4j = "0.13.12"
+# JediTerm 과 pty4j 가 함께 끌고 오는 slf4j-api 2.0.13 이 이 판의 계열이다. 알파(2.1.0-alpha1)는
+# 쓰지 않는다.
+slf4jSimple = "2.0.18"
 
 [plugins]
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -25,3 +33,12 @@ composeMaterial3 = { module = "org.jetbrains.compose.material3:material3", versi
 kotlinxSerializationJson = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 kotlinxCoroutinesCore = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinxCoroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+
+# 터미널 화면(Swing 위젯)과 그 아래의 터미널 모델. 화면 쪽만 적어도 core 가 딸려오지만, 우리가
+# ProcessTtyConnector(core) 를 직접 상속하므로 쓰는 것을 그대로 적는다.
+jeditermUi = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
+jeditermCore = { module = "org.jetbrains.jediterm:jediterm-core", version.ref = "jediterm" }
+pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
+# 위 둘이 자기 진단을 slf4j 로 흘리는데, 받을 구현이 없으면 그 말이 통째로 사라지고 실행할
+# 때마다 "No SLF4J providers were found" 경고가 세 줄 뜬다. 로그를 stderr 로 흘려보낸다.
+slf4jSimple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4jSimple" }

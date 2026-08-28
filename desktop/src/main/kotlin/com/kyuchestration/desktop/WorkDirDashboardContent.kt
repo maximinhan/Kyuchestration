@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.RepoSnapshot
 import com.kyuchestration.desktop.workdir.RepoState
 import com.kyuchestration.desktop.workdir.RepoTask
@@ -34,6 +36,7 @@ fun WorkDirDashboardContent(
     observed: WorkDirDashboardState.WorkDirObserved,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
+    onEnterSessionRequested: (SessionTarget) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -59,7 +62,7 @@ fun WorkDirDashboardContent(
             )
         }
 
-        RepoCardList(observed.snapshot)
+        RepoCardList(observed.snapshot, onEnterSessionRequested)
     }
 }
 
@@ -96,7 +99,7 @@ private fun WorkDirHeader(
 }
 
 @Composable
-private fun RepoCardList(snapshot: WorkDirSnapshot) {
+private fun RepoCardList(snapshot: WorkDirSnapshot, onEnterSessionRequested: (SessionTarget) -> Unit) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (snapshot.repos.isEmpty()) {
             item {
@@ -110,15 +113,25 @@ private fun RepoCardList(snapshot: WorkDirSnapshot) {
 
         // 절대경로를 키로 쓴다. 이름은 워크디렉토리 안에서만 유일하고, 경로가 그 레포의 진짜
         // 신원이다(설계 문서 11 의 4번).
-        items(snapshot.repos, key = { it.absolutePath }) { repo -> RepoCard(repo) }
+        items(snapshot.repos, key = { it.absolutePath }) { repo ->
+            RepoCard(repo) { onEnterSessionRequested(SessionTarget.Repo(repo.name)) }
+        }
 
-        item { MainSessionRow(snapshot.mainSessionAlive) }
+        item {
+            MainSessionRow(snapshot.mainSessionAlive) { onEnterSessionRequested(SessionTarget.Main) }
+        }
     }
 }
 
+/**
+ * 카드 한 장을 누르는 것이 곧 그 레포의 세션에 들어가는 일이다.
+ *
+ * 카드 안에 "열기" 버튼을 따로 두지 않는다. 카드가 가리키는 것이 레포 하나뿐이라 누를 곳마다
+ * 뜻이 갈릴 여지가 없고, 버튼을 두면 카드의 나머지 자리가 눌러도 아무 일이 없는 죽은 면이 된다.
+ */
 @Composable
-private fun RepoCard(repo: RepoSnapshot) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun RepoCard(repo: RepoSnapshot, onEnterSessionRequested: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEnterSessionRequested)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -184,9 +197,12 @@ private fun RepoStateChip(state: RepoState) {
 }
 
 @Composable
-private fun MainSessionRow(mainSessionAlive: Boolean) {
+private fun MainSessionRow(mainSessionAlive: Boolean, onEnterSessionRequested: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onEnterSessionRequested)
+            .padding(top = 8.dp, start = 4.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 사람용 목록과 같은 기호를 쓴다 — ● 는 세션이 떠 있고 ○ 는 없다.
