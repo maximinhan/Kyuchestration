@@ -153,6 +153,39 @@ class WorkDirDashboardStateHolderTest {
     }
 
     @Test
+    fun `계획 파일이 없다는 사실도 관찰 결과와 함께 싣는다`() = runTest {
+        val askedWorkDirPaths = mutableListOf<Path>()
+        val holder = stateHolder(RecordingWorkDirObserver(), planFileExists = { workDirPath ->
+            askedWorkDirPaths.add(workDirPath)
+            false
+        })
+
+        holder.openWorkDir(WORK_DIR_PATH)
+        runCurrent()
+
+        // kyu list 는 계획이 없어도 목록을 낸다. 없다는 사실은 실패가 아니라 화면이 안내 한 줄을
+        // 덧붙일 근거라, 스냅샷 옆에 함께 실려야 한다.
+        val observed = assertIs<WorkDirDashboardState.WorkDirObserved>(holder.state.value)
+        assertEquals(false, observed.planFilePresent)
+        assertEquals(listOf(WORK_DIR_PATH), askedWorkDirPaths)
+    }
+
+    @Test
+    fun `계획 파일이 생기면 다음 관찰에서 그 사실이 바뀐다`() = runTest {
+        var planFileWritten = false
+        val holder = stateHolder(RecordingWorkDirObserver(), planFileExists = { planFileWritten })
+
+        holder.openWorkDir(WORK_DIR_PATH)
+        runCurrent()
+        // 사용자가 그 사이에 초기화를 눌렀다.
+        planFileWritten = true
+        advanceTimeBy(REFRESH_INTERVAL)
+        runCurrent()
+
+        assertEquals(true, assertIs<WorkDirDashboardState.WorkDirObserved>(holder.state.value).planFilePresent)
+    }
+
+    @Test
     fun `새로고침은 주기를 기다리지 않고 즉시 다시 관찰한다`() = runTest {
         val observer = RecordingWorkDirObserver()
         val holder = stateHolder(observer)
@@ -223,8 +256,12 @@ class WorkDirDashboardStateHolderTest {
         assertEquals(listOf(WORK_DIR_PATH, otherWorkDirPath, otherWorkDirPath), observer.observedPaths)
     }
 
-    private fun TestScope.stateHolder(workDirObserver: WorkDirObserver) = WorkDirDashboardStateHolder(
+    private fun TestScope.stateHolder(
+        workDirObserver: WorkDirObserver,
+        planFileExists: (Path) -> Boolean = { true },
+    ) = WorkDirDashboardStateHolder(
         workDirObserver = workDirObserver,
+        planFileExists = planFileExists,
         coroutineScope = backgroundScope,
         // 관찰은 프로세스를 띄우는 막는 일이라 앱에서는 IO 디스패처로 나간다. 여기서는 가상
         // 시간을 쓰는 디스패처로 바꿔 3 초를 실제로 기다리지 않는다.

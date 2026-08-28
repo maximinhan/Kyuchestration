@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.dashboard
 
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import com.kyuchestration.desktop.workdir.WorkDirObserver
+import com.kyuchestration.desktop.workdir.WorkDirSnapshot
 import java.nio.file.Path
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -26,6 +27,13 @@ import kotlinx.coroutines.withContext
  */
 class WorkDirDashboardStateHolder(
     private val workDirObserver: WorkDirObserver,
+    /**
+     * 이 워크디렉토리에 계획 파일이 있는지 답하는 자리.
+     *
+     * 관찰과 함께 물어 스냅샷 옆에 실어 둔다. 화면이 그릴 때마다 직접 파일을 보게 하면 그리는
+     * 스레드가 매 프레임 디스크를 만지게 되고, 관찰과 다른 시점의 답이 섞여 배너가 깜빡인다.
+     */
+    private val planFileExists: (Path) -> Boolean,
     private val coroutineScope: CoroutineScope,
     // kyu 를 프로세스로 띄우고 기다리는 일이라 화면을 그리는 스레드에서 하면 창이 멎는다.
     private val observationDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -74,8 +82,12 @@ class WorkDirDashboardStateHolder(
     }
 
     private suspend fun observeOnce(workDirPath: Path) {
-        val observed = try {
-            withContext(observationDispatcher) { workDirObserver.observe(workDirPath) }
+        val observation = try {
+            withContext(observationDispatcher) {
+                // 계획 파일을 보는 것도 같은 디스패처에서 한 번에 한다. 관찰 한 번이 곧 화면 한
+                // 장이므로, 두 사실을 다른 시점에 모으면 없던 계획이 방금 생긴 것처럼 보인다.
+                Observation(workDirObserver.observe(workDirPath), planFileExists(workDirPath))
+            }
         } catch (failure: WorkDirObservationFailure) {
             mutableState.value = stateAfterFailure(workDirPath, failure)
             return
@@ -83,10 +95,13 @@ class WorkDirDashboardStateHolder(
 
         mutableState.value = WorkDirDashboardState.WorkDirObserved(
             workDirPath = workDirPath,
-            snapshot = observed,
+            snapshot = observation.snapshot,
             lastRefreshFailure = null,
+            planFilePresent = observation.planFilePresent,
         )
     }
+
+    private data class Observation(val snapshot: WorkDirSnapshot, val planFilePresent: Boolean)
 
     private fun stateAfterFailure(
         workDirPath: Path,

@@ -10,6 +10,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
+import com.kyuchestration.desktop.kyu.planFileExistsIn
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.pty.PtyKyuSessionTerminalAttacher
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
@@ -27,6 +28,7 @@ fun main() = application {
     val dashboardStateHolder = remember(applicationCoroutineScope) {
         WorkDirDashboardStateHolder(
             workDirObserver = KyuCliWorkDirObserver(ProcessKyuCommandRunner()),
+            planFileExists = ::planFileExistsIn,
             coroutineScope = applicationCoroutineScope,
         )
     }
