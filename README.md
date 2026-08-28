@@ -302,21 +302,53 @@ kyu kill --all
 kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
 kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-kyu clone              GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
+kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
 kyu list [path]        레포 목록 + 상태
 kyu start [repo]       세션 시작. 인자 없으면 main
 kyu attach <repo>      세션 진입. main 도 가능
 kyu kill [repo|--all]  세션 종료
-kyu auth <list|remove> 저장한 GitHub 토큰 프로필 관리
+kyu repos <owners|list>
+                       GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
+kyu auth <add|list|remove>
+                       저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
 kyu version            이 바이너리의 버전
 
 옵션 (kyu, kyu start):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
 
-옵션 (kyu list):
-  --json                 사람용 표 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
+옵션 (kyu clone):
+  --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
+  --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
+
+옵션 (kyu list, kyu clone, kyu repos, kyu auth add, kyu auth list):
+  --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 ```
+
+### 기계용 표면
+
+**이 CLI 는 데스크톱 GUI 와 스크립트의 엔진이기도 하다.** 사람이 지나는 대화형 흐름은 그대로 두고,
+같은 일을 물음 없이 시키고 결과를 문서 하나로 돌려받는 길을 명령마다 따로 열어뒀다.
+
+| 명령 | 하는 일 | 문서 |
+|---|---|---|
+| `kyu auth add <이름> --json` | 토큰을 stdin 으로 받아 확인하고 저장 | `{schemaVersion, profile, login}` |
+| `kyu auth list --json` | 등록된 프로필과 저장 위치 | `{schemaVersion, profiles[]}` |
+| `kyu repos owners --profile <이름> --json` | 고를 수 있는 계정 (개인 + 조직) | `{schemaVersion, owners[]}` |
+| `kyu repos list --profile <이름> --owner <로그인> --json` | 그 계정의 레포 | `{schemaVersion, repos[]}` |
+| `kyu clone --profile <이름> --repo <owner/name> --json` | 묻지 않고 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
+| `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
+
+공통 규칙이 다섯 가지다.
+
+- **stdout 에는 문서 하나뿐이다.** 사람에게 하는 말(물음·경고·안내)은 전부 stderr 로 간다.
+- **실패는 문서에 담지 않는다.** 시도 자체가 없었다는 뜻이라 빈 결과와 구분되어야 하고, 그 구분은
+  stderr 와 종료 코드 1 이 이미 하고 있다. 예외는 `kyu clone` 이다 — 레포별 성패가 곧 결과라
+  문서를 내고 나서 종료 코드 1 로 끝난다.
+- **`schemaVersion` 은 명령마다 따로 센다.** 필드가 늘어도 오르지 않고, 필드를 빼거나 뜻을 바꿀 때만
+  오른다. 한 문서의 판을 올리는 일이 다른 문서를 읽는 쪽까지 멈춰 세우지 않는다.
+- **비어 있는 목록은 `null` 이 아니라 `[]` 다.** "없음" 을 두 모양으로 다루게 하지 않는다.
+- **토큰 값은 어느 문서에도 없다.** 이 출력은 로그와 파일에 그대로 남기 쉽다.
 
 ### `kyu`
 
@@ -430,6 +462,48 @@ maximinhan 의 레포 3 개 — 최근 갱신 순
 ```
 
 번호는 `1,3,5-8` 처럼 쉼표와 범위를 섞어 적는다. 빈 줄이면 취소다.
+
+#### 묻지 않는 `kyu clone`
+
+`--repo` 로 무엇을 클론할지 적어 보내면 아무것도 묻지 않는다. 데스크톱 앱이 자기 화면에서 이미
+고른 레포를 건네는 자리이고, 스크립트로 워크디렉토리를 한 번에 채울 때도 쓴다.
+
+```sh
+kyu clone --profile 개인 \
+          --repo maximinhan/proj-a \
+          --repo maximinhan/proj-b \
+          --json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "results": [
+    { "repo": "maximinhan/proj-a", "status": "cloned",  "message": "" },
+    { "repo": "maximinhan/proj-b", "status": "skipped", "message": "같은 이름의 디렉토리가 이미 있습니다" }
+  ],
+  "mainSessionRestartNeeded": true
+}
+```
+
+클론이 실제로 하는 일은 대화형 흐름과 **같은 코드**다 — 일회성 credential helper, 같은 이름이
+이미 있으면 건너뛰기, 하나가 실패해도 나머지를 계속 시도하기. 나눠 갖지 않는 것은 대화뿐이다.
+
+| 필드 | 뜻 |
+|---|---|
+| `results[]` | `--repo` 를 적은 순서 그대로. 요청 한 줄에 결과 한 줄이 대응한다 |
+| `results[].repo` | 적어 보낸 `owner/name` 그대로. 앱이 자기가 보낸 줄과 결과를 맞추는 열쇠다 |
+| `results[].status` | `cloned` · `skipped` · `failed` |
+| `results[].message` | 왜 그렇게 끝났는지. 클론된 레포에서는 빈 문자열 |
+| `mainSessionRestartNeeded` | 떠 있는 메인 세션이 새 레포를 보지 못하는지. 사람용 모드에서 stderr 로 나가던 안내가 이 필드로 들어온다 |
+
+`--repo` 는 **`owner/name` 꼴이어야 한다.** 이름만 적은 것을 개인 계정으로 대신 채워주지 않는다 —
+같은 이름의 조직 레포를 적었다고 믿는 사람이 엉뚱한 레포를 받는다. 목록에 없는 이름은 조용히
+건너뛰지 않고 `failed` 로 돌려준다. 오타는 흔한데, 건너뛰면 앱은 클론했다고 믿고 다음 걸음으로 간다.
+
+`--json` 은 출력 형태만 정한다. `--repo` 를 적은 실행은 사람이 부르든 앱이 부르든 묻지 않고,
+`--json` 없이 부르면 대화형 흐름과 같은 사람용 줄이 나온다. `--repo` 없이 부르면 지금까지와
+똑같이 목록에서 고른다. 하나라도 실패하면 종료 코드는 1 이다.
 
 #### `kyu clone` 의 토큰
 
@@ -578,6 +652,64 @@ kyu list ~/work/WorkDir-featureX --json
 | `mainSession.alive` | 메인 세션이 떠 있는지 |
 | `planWarnings[]` | 계획을 그대로 쓰지 못한 이유. 없으면 빈 배열 |
 
+### `kyu repos <owners|list>`
+
+**GitHub 에 무엇이 있는지만 묻고 아무것도 바꾸지 않는다.** `kyu clone` 이 대화 안에서 하던 두
+걸음 — 어느 계정의 레포를 볼까, 그 계정에 무엇이 있나 — 을 밖으로 꺼낸 것이다. GUI 는 그 두
+걸음을 자기 화면으로 그려야 하는데, 대화형 흐름은 답을 표로만 내보내므로 그 표를 되파싱하는
+수밖에 없었다.
+
+이름이 `kyu list` 와 겹쳐 보이지만 **보는 곳이 다르다** — `kyu list` 는 이 머신의 워크디렉토리를
+훑고, `kyu repos` 는 GitHub 에 묻는다. 그래서 이 명령에는 워크디렉토리도 `tmux` 도 필요 없다.
+
+```sh
+kyu repos owners --profile 개인 --json
+kyu repos list --profile 개인 --owner maximinhan --json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "owners": [
+    { "login": "maximinhan", "kind": "user" },
+    { "login": "acme", "kind": "org" }
+  ]
+}
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "repos": [
+    {
+      "name": "proj-a",
+      "fullName": "maximinhan/proj-a",
+      "private": true,
+      "updatedAt": "2026-08-27T09:30:00Z"
+    }
+  ]
+}
+```
+
+| 필드 | 뜻 |
+|---|---|
+| `owners[]` | 개인 계정이 늘 첫 자리, 뒤는 소속 조직. 대화형 `kyu clone` 이 번호를 매겨 보여주는 그 순서다 |
+| `owners[].kind` | `user` 또는 `org`. 참·거짓이 아니라 낱말이라 종류가 셋이 되어도 늘릴 수 있다 |
+| `repos[]` | github.com 의 repositories 탭과 같은 최근 갱신 순. 페이지네이션도 같다 |
+| `repos[].fullName` | `owner/name`. `kyu clone --repo` 에 그대로 넣는 값이다 |
+| `repos[].updatedAt` | RFC3339(UTC). GitHub 이 주지 않았으면 `null` — 시각이 없는 것과 1970 년은 다른 사실이다 |
+
+`--owner` 에는 `kyu repos owners` 가 준 `login` 을 그대로 넣는다. 소유자 종류(개인/조직)는
+GitHub 에 다시 묻지 않고 이름 하나로 정한다 — 개인 레포 경로는 토큰의 주인 것만 답하므로,
+주인이 아닌 이름은 조직으로 묻는 것 말고 할 수 있는 일이 없다. 조직 목록으로 대조하면 왕복만
+늘고, fine-grained 토큰처럼 조직 목록에 권한이 없는 경우에는 이름을 정확히 아는 조직까지 거절하게 된다.
+
+이 토큰으로 조직 목록을 볼 수 없으면(fine-grained 403) `owners` 에는 개인 계정만 남고, 그 사실은
+**stderr 로** 알린다. 대화형 `kyu clone` 이 같은 자리에서 지키는 규칙과 같은 코드다.
+
+이 명령은 **`--json` 으로만 답한다.** 사람이 레포를 골라 클론하는 화면은 이미 `kyu clone` 에 있고,
+같은 일을 하는 화면을 하나 더 만들면 둘이 어긋나기 시작한다.
+
 ### `kyu start [repo]`
 
 ```sh
@@ -665,9 +797,10 @@ kyu kill --all    # 이 워크디렉토리의 세션 전부
 건드리지 않는다. 인자 없는 `kyu kill` 을 "전부"로 해석하지 않는다 — 이름을 빠뜨린 한 번으로
 다른 레포의 작업까지 날아가지 않게 한다.
 
-### `kyu auth <list|remove>`
+### `kyu auth <add|list|remove>`
 
 ```sh
+kyu auth add 개인        # 토큰을 stdin 으로 받아 확인하고 등록한다
 kyu auth list            # 등록된 토큰 프로필과 저장 위치
 kyu auth remove 회사     # 프로필과 그 토큰을 지운다
 ```
@@ -684,14 +817,66 @@ kyu auth remove 회사     # 프로필과 그 토큰을 지운다
 **토큰 값은 출력하지 않는다.** 목록을 띄운 채 화면을 공유하거나 캡처하는 일이 흔하고, 한 번 새
 나간 토큰은 폐기할 때까지 계속 유효하다. 이 명령은 저장소에 값을 물어보지도 않는다.
 
-등록하는 하위 명령은 두지 않았다. 토큰이 필요한 자리는 `kyu clone` 하나뿐이고, 거기서 물어보는
-것이 실제로 지나는 길이다. 등록 명령을 따로 두면 "먼저 등록하고 나서 클론" 이라는 순서를 사람이
-기억해야 한다.
-
 저장된 토큰이 만료되면 `kyu clone` 이 그 사실을 알리고 같은 이름으로 다시 등록하게 해준다.
 지우고 다시 등록하는 두 걸음을 스스로 찾지 않아도 된다.
 
-`tmux` 없이도 동작한다 — 저장해둔 토큰을 보고 지우는 일은 세션과 무관하다.
+`tmux` 없이도 동작한다 — 토큰을 등록하고 보고 지우는 일은 세션과 무관하다.
+
+#### `kyu auth add <이름>`
+
+등록하는 하위 명령이 뒤늦게 생긴 이유는 **GUI** 다. 사람이 지나는 길은 여전히 `kyu clone` 이
+필요한 자리에서 물어보는 것이지만, 앱은 "프로필 이름을 적으세요" 라는 물음에 답할 수 없다 —
+자기 화면에서 이름과 토큰을 이미 받아둔 채로, 그것을 엔진에 건네고 성공·실패만 돌려받아야 한다.
+
+**토큰은 인자가 아니라 stdin 으로 받는다.** 인자는 같은 머신의 다른 사용자가 `ps` 로 읽는다.
+이름 뒤에 인자를 하나 더 붙이면 거절한다 — 조용히 무시하면 인자로 넘긴 토큰이 등록됐다고 믿게 된다.
+
+```sh
+printf %s "$GITHUB_TOKEN" | kyu auth add 개인 --json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "profile": "개인",
+  "login": "maximinhan"
+}
+```
+
+`login` 은 GitHub 이 확인해준 이 토큰의 주인이다. 이름만 돌려주면 앱은 "저장됐다" 까지만 알고
+"무엇이 저장됐는지" 는 모르는데, 회사 토큰을 개인 프로필로 등록하는 것은 그 값을 보여줘야만 막힌다.
+
+**확인하고 나서 저장한다.** 이 순서는 대화형 등록과 같은 코드다 — 거절당한 토큰이 프로필에 남으면
+다음 실행에서도 같은 실패가 반복된다. GitHub 이 거절하면 저장하지 않고 종료 코드 1 로 끝나며,
+그 에러는 "아무것도 저장하지 않았습니다" 까지 함께 말한다. 대화형 등록은 그 자리에서 다시 묻지만
+파이프 너머에는 다시 붙여넣을 상대가 없다.
+
+```
+$ printf %s "틀린-토큰" | kyu auth add 개인 --json
+GitHub personal access token (입력은 보이지 않습니다):
+개인 프로필에 아무것도 저장하지 않았습니다: 토큰의 계정 확인 실패: GitHub 이 토큰을 거절했습니다 (Bad credentials)
+$ echo $?
+1
+```
+
+물음도 평문 저장 경고도 **stderr 로** 나간다. `--json` 에서 stdout 은 문서 하나가 통째로 쓰는
+자리이고, 사람용 모드에서도 "무엇을 물었는가" 는 명령의 결과가 아니다.
+
+#### `kyu auth list --json`
+
+```json
+{
+  "schemaVersion": 1,
+  "profiles": [
+    { "name": "개인", "storage": "keychain" },
+    { "name": "회사", "storage": "file" }
+  ]
+}
+```
+
+`storage` 는 화면에 보이는 문구("macOS 키체인")가 아니라 **코드**다 — `keychain` · `secret-service` ·
+`file`. 문구는 언제든 다듬을 수 있는 화면의 말인데, 읽는 쪽이 그것으로 분기하면 문구를 고치는 날
+함께 깨진다. 등록된 것이 없으면 사람용 모드가 내는 등록 안내 대신 빈 배열이 나간다.
 
 ### `kyu version`
 
@@ -768,7 +953,7 @@ cmd/kyu/         # 진입점, 명령 라우팅
 internal/
     session/     # SessionBackend 인터페이스 + tmux 구현 (유일한 플랫폼 의존부)
     workdir/     # 스캔 · 상태 추론 · plan 파싱 (플랫폼 무관 핵심)
-    github/      # GitHub REST API 조회 + 클론 (kyu clone 이 닿는 유일한 바깥 세계)
+    github/      # GitHub REST API 조회 + 클론 (kyu clone · kyu repos 가 닿는 유일한 바깥 세계)
     secretstore/ # 토큰 프로필 저장 (키체인 · secret-service · 파일 폴백)
     cli/         # 명령 구현
 desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Gradle 빌드)
@@ -790,6 +975,10 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 바로 그 자리를 터미널 대신 창으로 채운다. 조율 계층은 새로 쓰지 않고 `kyu` 를 엔진으로 부른다 —
 워크디렉토리 스캔 · 상태 추론 · 계획 파싱을 코틀린으로 한 번 더 옮기면 두 구현이 조용히 갈라진다.
 저장소 루트의 Go 모듈과는 완전히 분리된 독립 Gradle 빌드라 서로의 빌드에 끼어들지 않는다.
+
+앱이 부르는 것은 [기계용 표면](#기계용-표면)이다. 화면에 필요한 사실은 전부 `--json` 문서로
+받고, 사람용 표를 되파싱하지 않는다 — 그 표는 사람이 읽기 좋게 언제든 다듬을 수 있어야 하는데,
+앱이 그것에 자기 파싱을 맞춰두면 문구 하나를 고칠 때마다 함께 깨진다.
 
 설치 패키지(dmg/msi/deb)는 아직 없다 — 소스에서 받아 실행한다.
 
