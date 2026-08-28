@@ -26,6 +26,9 @@ const mainRowLabel = "main"
 
 // ListWorkDir 는 kyu list 를 실행한다. 워크디렉토리의 레포 목록과 각 레포의 상태를 out 에 쓴다.
 //
+// --json 이면 사람이 읽는 표 대신 기계가 읽는 문서 하나를 낸다(list_json.go). 관찰은 두 모드가
+// 똑같이 하고 갈리는 것은 옮기는 형태뿐이라, 이 함수에서 한 번만 갈라진다.
+//
 // 계획에 대한 경고는 out 이 아니라 errOut 으로 나간다. 목록은 다른 명령의 입력으로 넘길 수 있어야
 // 하는데 경고가 섞이면 그 쓰임이 깨지고, 계획이 깨져도 목록 자체는 그대로 성립하기 때문이다
 // (설계 문서 6.1 의 "계획 파싱 실패가 도구 전체를 막지 않는다").
@@ -33,14 +36,20 @@ const mainRowLabel = "main"
 // backend 는 SessionBackend 인터페이스로만 받는다. 어느 백엔드를 쓸지는 진입점(cmd/kyu)의 결정이고,
 // 표시 계층이 tmux 를 직접 만들면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
 func ListWorkDir(out, errOut io.Writer, args []string, backend session.SessionBackend) error {
-	workDirPath, err := workDirPathFromListArgs(args)
+	request, err := parseListArgs(args)
 	if err != nil {
 		return err
 	}
 
-	listing, err := inspectWorkDir(workDirPath, backend)
+	listing, err := inspectWorkDir(request.workDirPath, backend)
 	if err != nil {
 		return err
+	}
+
+	// JSON 모드에서는 경고도 문서 안으로 들어간다. 읽는 쪽은 스트림 하나만 파싱하는데,
+	// 사람에게 하는 말이 그 스트림에 섞이면 파싱이 깨지고 다른 스트림으로 빼면 그냥 사라진다.
+	if request.asJSON {
+		return writeWorkDirListingAsJSON(out, listing)
 	}
 
 	// 경고를 먼저 내보낸다. 목록이 길면 사용자의 화면에는 마지막 몇 줄만 남는데,
@@ -66,19 +75,52 @@ func writePlanWarnings(errOut io.Writer, warnings []string) error {
 	return nil
 }
 
-// workDirPathFromListArgs 는 목록을 보여줄 워크디렉토리를 정한다. 인자가 없으면 현재 디렉토리다.
+// listJSONOptionName 은 목록을 기계가 읽는 문서로 내보내는 옵션이다.
+const listJSONOptionName = "--json"
+
+const listUsageText = `사용법: kyu list [path] [옵션]
+
+  kyu list           현재 디렉토리의 레포 목록과 상태
+  kyu list <path>    그 워크디렉토리의 레포 목록과 상태
+
+옵션:
+  --json             사람용 표 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
+
+// listRequest 는 파싱이 끝난 kyu list 요청이다.
+type listRequest struct {
+	// workDirPath 는 목록을 보여줄 워크디렉토리다. 인자가 없으면 현재 디렉토리다.
+	workDirPath string
+
+	// asJSON 은 사람용 표 대신 기계용 JSON 을 낼지다.
+	asJSON bool
+}
+
+// parseListArgs 는 인자를 목록 요청으로 옮긴다.
 //
 // 경로를 두 개 이상 받으면 거절한다. 하나를 골라 나머지를 조용히 버리면 사용자는 자기가 지정한
 // 워크디렉토리를 보고 있다고 착각한다.
-func workDirPathFromListArgs(args []string) (string, error) {
-	switch len(args) {
-	case 0:
-		return ".", nil
-	case 1:
-		return args[0], nil
-	default:
-		return "", fmt.Errorf("list 는 워크디렉토리 경로 하나만 받습니다 (인자 %d 개를 받음)", len(args))
+func parseListArgs(args []string) (listRequest, error) {
+	request := listRequest{workDirPath: "."}
+	pathGiven := false
+
+	for _, arg := range args {
+		switch {
+		case arg == listJSONOptionName:
+			request.asJSON = true
+
+		// 모르는 옵션을 경로로 흘려보내면 "워크디렉토리 읽기 실패 (--jsonn)" 이라는 엉뚱한 안내가 나온다.
+		case strings.HasPrefix(arg, "-"):
+			return listRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, listUsageText)
+
+		case pathGiven:
+			return listRequest{}, fmt.Errorf("list 는 워크디렉토리 경로 하나만 받습니다 (인자 %d 개를 받음)\n\n%s", len(args), listUsageText)
+
+		default:
+			request.workDirPath, pathGiven = arg, true
+		}
 	}
+
+	return request, nil
 }
 
 // listRow 는 사람이 읽는 표의 한 줄이다. 레포 하나 또는 메인 세션에 대응한다.
