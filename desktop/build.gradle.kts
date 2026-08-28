@@ -12,7 +12,19 @@ plugins {
 }
 
 group = "com.kyuchestration.desktop"
-version = "0.1.0"
+
+// 릴리스 워크플로가 태그에서 뽑은 버전을 -PdesktopVersion 으로 넣는다(환경 변수로 넣을 때는
+// ORG_GRADLE_PROJECT_desktopVersion). 아무것도 넘기지 않으면 개발용 기본값이라, 로컬에서
+// ./gradlew run 하는 흐름은 이 줄이 생기기 전과 같다.
+//
+// jpackage 는 버전의 각 자리를 숫자로만 받는다. 태그 이름("v0.8.0")을 그대로 넘기면 컴파일도
+// 패키징도 다 지난 마지막 단계에서야 깨지므로, 빌드를 구성하는 이 자리에서 먼저 끊는다.
+val desktopVersion = (providers.gradleProperty("desktopVersion").orNull ?: "0.1.0").trim()
+require(Regex("""\d+\.\d+\.\d+""").matches(desktopVersion)) {
+    "desktopVersion 은 숫자 세 자리(MAJOR.MINOR.PATCH)여야 한다 — 받은 값: \"$desktopVersion\". " +
+        "태그 이름이라면 앞의 v 를 떼고 넘긴다."
+}
+version = desktopVersion
 
 kotlin {
     // 툴체인을 못 박아 두면 개발자 머신의 기본 JDK 가 무엇이든 같은 바이트코드가 나온다.
