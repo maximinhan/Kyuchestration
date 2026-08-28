@@ -3,10 +3,15 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/maximinhan/Kyuchestration/internal/github"
 )
 
 // 이 파일은 kyu clone 의 레포 선택 화면이다 — 설계 문서 10절의 v2("자체 TUI (bubbletea)")가
@@ -159,4 +164,199 @@ func toggleMark(isToggledOn bool) string {
 		return selectedRowMark
 	}
 	return unselectedRowMark
+}
+
+// repositoryPickerKeyMap 은 이 화면이 리스트 위에 얹은 키들이다.
+//
+// 리스트가 모르는 키라 도움말도 이쪽에서 낸다. 안내를 적지 않으면 화면 아래에는 "위/아래/검색"
+// 만 남고, 사용자는 여러 개를 고를 수 있다는 사실을 알 방법이 없다.
+type repositoryPickerKeyMap struct {
+	toggleRow key.Binding
+	confirm   key.Binding
+	cancel    key.Binding
+}
+
+func newRepositoryPickerKeyMap() repositoryPickerKeyMap {
+	return repositoryPickerKeyMap{
+		toggleRow: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "선택")),
+		confirm:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "클론")),
+
+		// esc 도 취소지만 안내에는 q 만 적는다. 같은 자리의 esc 는 "검색 해제" 로 이미 안내되고
+		// 있어서, 한 줄에 esc 가 두 번 나오면 어느 쪽이 지금 먹히는지 되레 알기 어렵다.
+		cancel: key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "취소")),
+	}
+}
+
+// koreanRepositoryListKeyMap 은 bubbles 기본 키맵에서 안내 문구만 한국어로 바꾼 것이다.
+//
+// 키 자체는 그대로 둔다. 화살표·j/k·/ 는 이런 화면의 관습이고, 이 도구가 그것을 다시 정하면
+// 사용자는 여기서만 쓰는 키를 따로 외워야 한다. 바꾸는 것은 화면 아래에 찍히는 말뿐이다.
+func koreanRepositoryListKeyMap() list.KeyMap {
+	keyMap := list.DefaultKeyMap()
+
+	keyMap.CursorUp.SetHelp("↑/k", "위")
+	keyMap.CursorDown.SetHelp("↓/j", "아래")
+	keyMap.PrevPage.SetHelp("←/h", "이전 쪽")
+	keyMap.NextPage.SetHelp("→/l", "다음 쪽")
+	keyMap.GoToStart.SetHelp("g", "처음")
+	keyMap.GoToEnd.SetHelp("G", "끝")
+	keyMap.Filter.SetHelp("/", "검색")
+	keyMap.ClearFilter.SetHelp("esc", "검색 해제")
+	keyMap.CancelWhileFiltering.SetHelp("esc", "검색 취소")
+	keyMap.AcceptWhileFiltering.SetHelp("enter", "검색 확정")
+	keyMap.ShowFullHelp.SetHelp("?", "더 보기")
+	keyMap.CloseFullHelp.SetHelp("?", "닫기")
+
+	return keyMap
+}
+
+// repositoryPickerModel 은 레포를 골라 확정하기까지의 화면 하나다.
+type repositoryPickerModel struct {
+	repositoryList list.Model
+	keyMap         repositoryPickerKeyMap
+
+	// toggledRowIndexes 는 스페이스로 켜둔 줄의 원본 인덱스다.
+	//
+	// 화면 위치가 아니라 원본 인덱스로 기억한다. 검색으로 좁히면 화면에 남는 줄과 그 순서가
+	// 바뀌는데, 화면 위치로 기억하면 검색어를 지우는 순간 엉뚱한 레포가 켜져 있게 된다.
+	toggledRowIndexes map[int]bool
+
+	// isConfirmed 는 엔터로 확정하고 닫았는지다.
+	//
+	// 취소와 갈라 두어야 한다. 둘 다 화면을 닫지만 확정은 클론으로 이어지고 취소는 아무것도
+	// 하지 않는데, 그 구분이 없으면 q 로 나간 사용자의 커서 아래 레포가 클론된다.
+	isConfirmed bool
+}
+
+var _ tea.Model = repositoryPickerModel{}
+
+func newRepositoryPickerModel(owner github.Owner, rows []repositoryRow) repositoryPickerModel {
+	toggledRowIndexes := map[int]bool{}
+	keyMap := newRepositoryPickerKeyMap()
+
+	repositoryList := list.New(repositoryPickerItems(rows), newRepositoryPickerDelegate(rows, toggledRowIndexes), 0, 0)
+	repositoryList.Title = fmt.Sprintf("%s 의 레포 %d 개 — 최근 갱신 순", owner.Login, len(rows))
+	repositoryList.KeyMap = koreanRepositoryListKeyMap()
+	repositoryList.FilterInput.Prompt = "검색: "
+
+	// 상태 줄을 끈다. bubbles 가 거기에 찍는 말("Nothing matched", "3 filtered")은 영어인데
+	// 이 도구의 화면은 모두 한국어이고, 개수는 제목에 이미 있다.
+	repositoryList.SetShowStatusBar(false)
+
+	// 검색창의 커서를 깜빡이지 않게 둔다. 깜빡임은 타이머 명령을 끊임없이 만들어 내는데,
+	// 검색창은 열려 있는 동안 늘 화면 맨 위에 있어 깜빡임으로 얻을 것이 없다.
+	repositoryList.FilterInput.Cursor.SetMode(cursor.CursorStatic)
+
+	// q·esc 를 리스트에 맡기지 않는다. 리스트는 그 자리에서 프로그램을 끝내버려서, 사용자가
+	// 취소한 것인지 확정한 것인지 이쪽에서 구분할 수 없게 된다.
+	repositoryList.DisableQuitKeybindings()
+
+	repositoryList.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{keyMap.toggleRow, keyMap.confirm, keyMap.cancel}
+	}
+	repositoryList.AdditionalFullHelpKeys = repositoryList.AdditionalShortHelpKeys
+
+	return repositoryPickerModel{
+		repositoryList:    repositoryList,
+		keyMap:            keyMap,
+		toggledRowIndexes: toggledRowIndexes,
+	}
+}
+
+func (model repositoryPickerModel) Init() tea.Cmd { return nil }
+
+// Update 는 키 하나를 받아 다음 상태를 돌려준다.
+//
+// 이 화면만의 키(스페이스·엔터·q·esc)를 먼저 집어내고 나머지는 리스트에 넘긴다. 커서 이동·
+// 쪽 넘김·검색은 리스트가 이미 하는 일이고, 그것을 다시 구현하면 관습과 어긋난 키가 생긴다.
+func (model repositoryPickerModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch typedMessage := message.(type) {
+	case tea.WindowSizeMsg:
+		model.repositoryList.SetSize(typedMessage.Width, typedMessage.Height)
+		return model, nil
+
+	case tea.KeyMsg:
+		// 검색어를 치는 중에는 한 글자도 가로채지 않는다. 그 상태의 스페이스는 검색어의 공백이고
+		// q 는 레포 이름의 글자이며 엔터는 검색어 확정이다 — 여기서 집어가면 사용자가 적으려던
+		// 글자가 사라지고, 보이지도 않는 줄이 조용히 켜진다.
+		if model.repositoryList.FilterState() == list.Filtering {
+			break
+		}
+
+		switch {
+		case key.Matches(typedMessage, model.keyMap.cancel), typedMessage.Type == tea.KeyCtrlC:
+			return model, tea.Quit
+
+		case typedMessage.Type == tea.KeyEsc:
+			// 검색이 걸려 있으면 esc 는 그것을 푸는 키다(리스트가 처리한다). 좁힌 목록을
+			// 되돌리려던 사용자를 명령 밖으로 내보내면 프로필 선택부터 다시 지나야 한다.
+			if model.repositoryList.FilterState() == list.FilterApplied {
+				break
+			}
+			return model, tea.Quit
+
+		case key.Matches(typedMessage, model.keyMap.toggleRow):
+			model.toggleRowUnderCursor()
+			return model, nil
+
+		case key.Matches(typedMessage, model.keyMap.confirm):
+			model.isConfirmed = true
+			return model, tea.Quit
+		}
+	}
+
+	updatedList, listCommand := model.repositoryList.Update(message)
+	model.repositoryList = updatedList
+	return model, listCommand
+}
+
+func (model repositoryPickerModel) View() string {
+	return model.repositoryList.View()
+}
+
+// toggleRowUnderCursor 는 커서가 있는 줄의 선택을 켜고 끈다.
+func (model *repositoryPickerModel) toggleRowUnderCursor() {
+	pickerItem, isPickerItem := model.repositoryList.SelectedItem().(repositoryPickerItem)
+	if !isPickerItem {
+		return
+	}
+
+	if model.toggledRowIndexes[pickerItem.rowIndex] {
+		// 꺼진 줄을 false 로 남기지 않고 지운다. 남기면 "고른 것이 하나도 없다" 를 개수로 판정할
+		// 수 없어, 켰다가 끈 사용자의 엔터가 커서 한 줄이 아니라 빈 선택이 된다.
+		delete(model.toggledRowIndexes, pickerItem.rowIndex)
+		return
+	}
+	model.toggledRowIndexes[pickerItem.rowIndex] = true
+}
+
+// selectedRowIndexes 는 확정된 선택을 원본 목록 순서의 인덱스로 돌려준다.
+//
+// 아무것도 켜지 않았으면 커서가 있는 한 줄이다. 하나만 클론하려고 스페이스를 먼저 눌러야 한다면
+// 가장 흔한 사용이 두 번의 키를 요구하게 된다.
+//
+// 취소했으면 빈 목록이다 — 번호를 적던 때의 빈 줄과 같은 뜻이라, 부르는 쪽은 두 방식을
+// 구분하지 않아도 된다.
+func (model repositoryPickerModel) selectedRowIndexes() []int {
+	if !model.isConfirmed {
+		return nil
+	}
+
+	if len(model.toggledRowIndexes) == 0 {
+		pickerItem, isPickerItem := model.repositoryList.SelectedItem().(repositoryPickerItem)
+		if !isPickerItem {
+			return nil
+		}
+		return []int{pickerItem.rowIndex}
+	}
+
+	selectedRowIndexes := make([]int, 0, len(model.toggledRowIndexes))
+	for rowIndex := range model.toggledRowIndexes {
+		selectedRowIndexes = append(selectedRowIndexes, rowIndex)
+	}
+
+	// 목록에 보이던 순서로 클론한다. map 의 순회 순서는 실행마다 달라서, 그대로 두면 같은 선택이
+	// 매번 다른 순서로 진행되어 어디까지 됐는지 눈으로 따라갈 수 없다.
+	slices.Sort(selectedRowIndexes)
+	return selectedRowIndexes
 }
