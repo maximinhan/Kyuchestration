@@ -10,6 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"golang.org/x/term"
+
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
 	"github.com/maximinhan/Kyuchestration/internal/session"
@@ -99,17 +101,10 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 	}
 
 	rows := repositoryRowsFor(repositories, location.absolutePath)
-	if err := writeRepositoryListing(out, owner, rows); err != nil {
-		return err
-	}
 
-	answer, err := prompt.ask(repositorySelectionQuestion)
+	selectedIndexes, err := chooseRepositoriesToClone(prompt, out, owner, rows)
 	if err != nil {
 		return cancellationOrError(out, err)
-	}
-	selectedIndexes, err := parseRepositorySelection(answer, len(rows))
-	if err != nil {
-		return err
 	}
 	if len(selectedIndexes) == 0 {
 		fmt.Fprintln(out, "취소했습니다.")
@@ -131,6 +126,40 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 		return fmt.Errorf("클론 실패: %s", strings.Join(result.failedRepositoryNames, ", "))
 	}
 	return nil
+}
+
+// chooseRepositoriesToClone 는 무엇을 클론할지 고르게 하고 고른 줄의 인덱스를 돌려준다.
+//
+// 실제 터미널이면 화살표·검색 화면을, 아니면 번호를 적는 방식을 쓴다. 갈림의 근거는 TUI 가
+// 터미널을 필요로 한다는 것이다 — 화면을 지웠다 다시 그리려면 커서를 옮기는 이스케이프를
+// 내보내고 키를 한 글자씩 받아야 하는데, 파이프로 넘어온 입력에는 그럴 상대가 없고 그 이스케이프는
+// 기록에 그대로 섞인다.
+//
+// 그래서 번호 방식을 지우지 않고 남긴다. 파이프로 답을 넘기는 실행(테스트·스크립트)은 이 명령이
+// 처음부터 지원하던 사용법이고, 화면을 바꿨다고 그것이 사라져서는 안 된다.
+//
+// 입력과 출력을 둘 다 본다. 한쪽만 터미널인 실행(kyu clone > log.txt)에서 화면을 그리면
+// 사용자는 아무것도 못 보고, 파일에는 이스케이프 뭉치만 남는다.
+func chooseRepositoriesToClone(prompt *interactivePrompt, out io.Writer, owner github.Owner, rows []repositoryRow) ([]int, error) {
+	if prompt.inputFile != nil && isTerminalWriter(out) {
+		return pickRepositoriesWithArrowKeys(prompt.inputFile, out, owner, rows)
+	}
+
+	if err := writeRepositoryListing(out, owner, rows); err != nil {
+		return nil, err
+	}
+
+	answer, err := prompt.ask(repositorySelectionQuestion)
+	if err != nil {
+		return nil, err
+	}
+	return parseRepositorySelection(answer, len(rows))
+}
+
+// isTerminalWriter 는 이 출력이 실제 터미널인지다.
+func isTerminalWriter(out io.Writer) bool {
+	outputFile, isFile := out.(*os.File)
+	return isFile && term.IsTerminal(int(outputFile.Fd()))
 }
 
 // cancellationOrError 는 사용자의 취소를 성공으로, 나머지 실패는 그대로 돌려준다.

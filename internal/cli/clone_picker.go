@@ -360,3 +360,27 @@ func (model repositoryPickerModel) selectedRowIndexes() []int {
 	slices.Sort(selectedRowIndexes)
 	return selectedRowIndexes
 }
+
+// pickRepositoriesWithArrowKeys 는 선택 화면을 띄워 고른 줄의 인덱스를 돌려준다.
+func pickRepositoriesWithArrowKeys(in io.Reader, out io.Writer, owner github.Owner, rows []repositoryRow) ([]int, error) {
+	program := tea.NewProgram(
+		newRepositoryPickerModel(owner, rows),
+		tea.WithInput(in),
+		tea.WithOutput(out),
+
+		// 대체 화면에 그린다. 수십 줄짜리 목록을 평소 화면에 남기면 뒤이은 클론 결과가 그 아래로
+		// 밀려나고, 대체 화면이라야 터미널 높이를 통째로 쓸 수 있어 한 쪽에 담기는 줄이 늘어난다.
+		tea.WithAltScreen(),
+	)
+
+	finishedModel, err := program.Run()
+	if err != nil {
+		return nil, fmt.Errorf("레포 선택 화면 실행 실패: %w", err)
+	}
+
+	picker, isPicker := finishedModel.(repositoryPickerModel)
+	if !isPicker {
+		return nil, fmt.Errorf("레포 선택 화면이 다른 모델로 끝났습니다: %T", finishedModel)
+	}
+	return picker.selectedRowIndexes(), nil
+}
