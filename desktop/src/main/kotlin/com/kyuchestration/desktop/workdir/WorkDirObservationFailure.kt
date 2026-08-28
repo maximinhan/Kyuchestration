@@ -23,6 +23,18 @@ sealed class WorkDirObservationFailure(
             "저장소에서 바로 만들려면 go build -o ~/.local/bin/kyu ./cmd/kyu 입니다.",
     )
 
+    /**
+     * 실행 파일은 찾았는데 프로세스를 띄우지 못했다.
+     *
+     * "찾지 못했다" 와 갈라 둔다. 사용자가 할 일이 다르기 때문이다 — 이쪽은 설치가 아니라 권한이나
+     * 깨진 파일을 봐야 한다. 여기서 뭉뚱그리면 이미 설치한 사람에게 "설치하세요" 라고 말하게 된다.
+     */
+    class KyuFailedToStart(cause: Throwable) : WorkDirObservationFailure(
+        message = "kyu 를 실행하지 못했습니다.",
+        guidance = "실행 권한이 있는지, 파일이 온전한지 확인하세요. 원인: ${cause.message}",
+        cause = cause,
+    )
+
     class KyuExitedWithFailure(
         val exitCode: Int,
         val standardError: String,
