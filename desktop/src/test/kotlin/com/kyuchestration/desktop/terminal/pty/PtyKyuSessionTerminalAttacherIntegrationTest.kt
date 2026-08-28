@@ -8,6 +8,7 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.isExecutable
 import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -30,8 +31,6 @@ import org.junit.jupiter.api.Assumptions.abort
  */
 class PtyKyuSessionTerminalAttacherIntegrationTest {
 
-    private val kyuExecutablePath = locateKyuOrSkip()
-
     // tmux 소켓은 유닉스 도메인 소켓이라 경로 길이 상한(약 108 바이트)이 있다. 시스템 임시
     // 디렉토리 바로 아래에 두어 상한에 걸리지 않게 한다.
     private val tmuxSocketDirectory = createTempDirectory("kyu-tmux")
@@ -42,10 +41,29 @@ class PtyKyuSessionTerminalAttacherIntegrationTest {
 
     private var openedConnector: TtyConnector? = null
 
+    private lateinit var kyuExecutablePath: Path
+
+    /**
+     * 건너뛸지를 시험 본문보다 먼저 정한다.
+     *
+     * 도구를 찾는 일을 본문 안에서 하면, 그 전에 부른 tmux 가 없는 기계에서 "건너뜀" 이 아니라
+     * "실패" 로 끝난다. 데스크톱 CI 는 Go 를 세우지 않아 kyu 가 없는 것이 정상이다.
+     */
+    @BeforeTest
+    fun 검증에_필요한_도구를_찾거나_건너뛴다() {
+        if (!isTmuxInstalled()) {
+            abort<Unit>("tmux 가 없어 건너뜁니다 — 세션 진입은 tmux 백엔드 위에서만 성립합니다")
+        }
+        kyuExecutablePath = locateKyuOrSkip()
+    }
+
     @AfterTest
     fun 격리한_tmux_서버와_임시_디렉토리를_지운다() {
         openedConnector?.close()
-        runTmux("kill-server")
+        // 건너뛴 실행은 서버를 띄운 적이 없고, tmux 자체가 없을 수도 있다.
+        if (isTmuxInstalled()) {
+            runTmux("kill-server")
+        }
         tmuxSocketDirectory.toFile().deleteRecursively()
         workDirPath.toFile().deleteRecursively()
     }
@@ -192,10 +210,6 @@ class PtyKyuSessionTerminalAttacherIntegrationTest {
      * 쓰고, 그것도 없으면 이 검증을 건너뛴다 — 데스크톱 CI 는 Go 를 세우지 않는다.
      */
     private fun locateKyuOrSkip(): Path {
-        if (!isTmuxInstalled()) {
-            abort<Unit>("tmux 가 없어 건너뜁니다 — 세션 진입은 tmux 백엔드 위에서만 성립합니다")
-        }
-
         val pinnedPath = System.getenv(KYU_BINARY_PATH_VARIABLE)?.let(Path::of)
         if (pinnedPath != null) {
             if (!pinnedPath.isExecutable()) {
