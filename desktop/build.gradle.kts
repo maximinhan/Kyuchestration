@@ -107,11 +107,4 @@ tasks.jar {
 
 tasks.test {
     useJUnitPlatform()
-
-    // 임시 진단(PR 28) — PTY 시험이 맥에서만 깨지는데, 기본 콘솔 출력은 예외의 위치만 찍고
-    // "expected: <0> but was: <?>" 를 감춘다. 원인을 확정하면 되돌린다.
-    testLogging {
-        showStandardStreams = true
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
-    }
 }
