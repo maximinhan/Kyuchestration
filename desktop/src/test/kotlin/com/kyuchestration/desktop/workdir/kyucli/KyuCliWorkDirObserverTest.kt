@@ -6,6 +6,7 @@ import kotlin.io.path.absolutePathString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class KyuCliWorkDirObserverTest {
 
@@ -36,6 +37,17 @@ class KyuCliWorkDirObserverTest {
     }
 
     @Test
+    fun `볼 자리를 인자로 못 박았으므로 작업 디렉토리는 정하지 않는다`() {
+        val runner = RecordingKyuCommandRunner { succeedingResult(EMPTY_WORK_DIR_OUTPUT) }
+
+        KyuCliWorkDirObserver(runner).observe(Path.of("/w/없는곳"))
+
+        // 없는 경로를 열었을 때 kyu 가 "워크디렉토리 읽기 실패" 라고 답할 수 있는 이유다. 그 자리를
+        // 작업 디렉토리로 주면 프로세스가 뜨지도 못해, kyu 의 안내 대신 실행 실패만 남는다.
+        assertEquals(listOf<Path?>(null), runner.receivedWorkingDirectories)
+    }
+
+    @Test
     fun `정상 출력은 스냅샷이 된다`() {
         val runner = RecordingKyuCommandRunner { succeedingResult(EMPTY_WORK_DIR_OUTPUT) }
 
@@ -63,12 +75,27 @@ class KyuCliWorkDirObserverTest {
     }
 
     @Test
-    fun `kyu 를 찾지 못했다는 실패는 손대지 않고 그대로 올린다`() {
-        val runner = RecordingKyuCommandRunner { throw WorkDirObservationFailure.KyuExecutableNotFound() }
+    fun `kyu 를 부르지 못했다는 사실을 관찰 실패로 옮긴다`() {
+        val runner = RecordingKyuCommandRunner { throw KyuCommandFailure.ExecutableNotFound() }
 
+        // 실행기가 던지는 것은 "부를 kyu 가 없다" 는 사실뿐이다. 목록을 보려던 사람에게 할 말
+        // ("설치한 뒤 새로고침하세요")로 옮기는 것은 이 어댑터의 몫이다.
         assertFailsWith<WorkDirObservationFailure.KyuExecutableNotFound> {
             KyuCliWorkDirObserver(runner).observe(Path.of("/w"))
         }
+    }
+
+    @Test
+    fun `kyu 를 띄우지 못한 원인은 관찰 실패의 안내 문구에 남는다`() {
+        val runner = RecordingKyuCommandRunner {
+            throw KyuCommandFailure.FailedToStart(java.io.IOException("Permission denied"))
+        }
+
+        val failure = assertFailsWith<WorkDirObservationFailure.KyuFailedToStart> {
+            KyuCliWorkDirObserver(runner).observe(Path.of("/w"))
+        }
+
+        assertTrue("Permission denied" in failure.guidance)
     }
 
     private fun succeedingResult(standardOutput: String) =
@@ -79,9 +106,11 @@ class KyuCliWorkDirObserverTest {
     ) : KyuCommandRunner {
 
         val receivedArguments = mutableListOf<List<String>>()
+        val receivedWorkingDirectories = mutableListOf<Path?>()
 
-        override fun run(arguments: List<String>): KyuCommandResult {
+        override fun run(arguments: List<String>, workingDirectory: Path?): KyuCommandResult {
             receivedArguments += arguments
+            receivedWorkingDirectories += workingDirectory
             return respondTo(arguments)
         }
     }

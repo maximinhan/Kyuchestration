@@ -98,7 +98,7 @@ class KyuCliWorkDirObserverIntegrationTest {
         val runnerFromSystemPath = ProcessKyuCommandRunner()
         try {
             runnerFromSystemPath.run(listOf("version"))
-        } catch (failure: WorkDirObservationFailure.KyuExecutableNotFound) {
+        } catch (failure: KyuCommandFailure.ExecutableNotFound) {
             abort<Unit>("PATH 에도 $KYU_BINARY_PATH_VARIABLE 에도 kyu 가 없어 건너뜁니다 (${failure.message})")
         }
         return runnerFromSystemPath
