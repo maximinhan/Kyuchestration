@@ -6,65 +6,40 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 
 /**
- * 임시 진단 — PTY 안의 sh 가 어떤 종료 코드로 끝나는지를 OS 별로 실측한다.
+ * 임시 진단 — 원인 확정용 대조 실험. 확인되면 지운다(PR 28).
  *
- * 원인을 확정하면 지운다. PR 28 의 진단용이다.
+ * 앞선 회차에서 열 가지 조건을 재 본 결과 두 가지가 갈렸다: 로케일과 글자의 종류.
+ * 이번에는 한 번에 한 변수만 바꿔 그 둘이 정말 원인인지 못 박는다.
+ *
+ * 기대: A 는 깨지고(맥), B 와 C 는 성한다. 리눅스는 셋 다 성한다.
  */
 class PtyShellExitDiagnostic {
 
     @Test
-    fun `PTY 안의 sh 종료를 여러 조건으로 실측한다`() {
-        println("PTY-DIAG === 시작 ===")
-        println("PTY-DIAG os.name=${System.getProperty("os.name")} os.arch=${System.getProperty("os.arch")}")
+    fun `로케일과 글자 종류를 한 번에 하나씩 바꿔 본다`() {
+        println("PTY-DIAG === 시작 === os.name=${System.getProperty("os.name")}")
 
-        probe("1-현재시험그대로", arrayOf("sh"), minimalEnvironment, "echo 뀨케스트레이션-확인; exit\n")
-        probe("2-부모환경전체", arrayOf("sh"), System.getenv(), "echo 뀨케스트레이션-확인; exit\n")
-        probe("3-exit0명시", arrayOf("sh"), minimalEnvironment, "echo 뀨케스트레이션-확인; exit 0\n")
-        probe(
-            "4-쓰기전500ms대기",
-            arrayOf("sh"),
-            minimalEnvironment,
-            "echo 뀨케스트레이션-확인; exit\n",
-            delayBeforeWriteMillis = 500,
-        )
-        probe("5-셸정보", arrayOf("sh"), minimalEnvironment, "echo FLAGS=[\$-]; echo ZERO=[\$0]; echo BASHV=[\$BASH_VERSION]; exit\n")
-        probe("6-비대화형-c", arrayOf("sh", "-c", "echo 뀨케스트레이션-확인"), minimalEnvironment, null)
-        probe("7-ASCII만", arrayOf("sh"), minimalEnvironment, "echo PLAIN-OK; exit\n")
-        probe("8-stty시험과동일", arrayOf("sh"), minimalEnvironment, "stty size; exit\n")
-        probe("9-exit만", arrayOf("sh"), minimalEnvironment, "exit\n")
-        probe(
-            "10-sh정체",
-            arrayOf("sh", "-c", "command -v sh; ls -l /bin/sh; echo BASHV=[\$BASH_VERSION]"),
-            minimalEnvironment,
-            null,
-        )
+        probe("A-로케일없음-한글", environmentWithoutLocale = true, input = "echo 뀨케스트레이션-확인; exit\n")
+        probe("B-로케일있음-한글", environmentWithoutLocale = false, input = "echo 뀨케스트레이션-확인; exit\n")
+        probe("C-로케일없음-ASCII", environmentWithoutLocale = true, input = "echo PLAIN-OK; exit\n")
 
         println("PTY-DIAG === 끝 ===")
     }
 
-    private val minimalEnvironment: Map<String, String>
-        get() = mapOf("TERM" to "xterm-256color", "PATH" to System.getenv("PATH"))
+    private fun probe(label: String, environmentWithoutLocale: Boolean, input: String) {
+        val environment = mutableMapOf("TERM" to "xterm-256color", "PATH" to System.getenv("PATH"))
+        if (!environmentWithoutLocale) {
+            environment["LANG"] = "en_US.UTF-8"
+        }
 
-    private fun probe(
-        label: String,
-        command: Array<String>,
-        environment: Map<String, String>,
-        input: String?,
-        delayBeforeWriteMillis: Long = 0,
-    ) {
-        val ptyProcess = PtyProcessBuilder(command)
+        val ptyProcess = PtyProcessBuilder(arrayOf("sh"))
             .setEnvironment(environment)
             .setInitialColumns(80)
             .setInitialRows(24)
             .start()
         val connector = KyuAttachTtyConnector(ptyProcess, SessionTarget.Repo("proj-a"))
 
-        if (input != null) {
-            if (delayBeforeWriteMillis > 0) {
-                Thread.sleep(delayBeforeWriteMillis)
-            }
-            connector.write(input)
-        }
+        connector.write(input)
 
         val collected = StringBuilder()
         val readerThread = Thread {
@@ -86,7 +61,6 @@ class PtyShellExitDiagnostic {
         readerThread.isDaemon = true
         readerThread.start()
         readerThread.join(10_000)
-        val readerStillRunning = readerThread.isAlive
 
         val exited = ptyProcess.waitFor(10, TimeUnit.SECONDS)
         val exitCode = if (exited) ptyProcess.exitValue() else null
@@ -95,7 +69,7 @@ class PtyShellExitDiagnostic {
         }
 
         val output = synchronized(collected) { collected.toString() }
-        println("PTY-DIAG [$label] exitCode=$exitCode exited=$exited readerStuck=$readerStillRunning")
+        println("PTY-DIAG [$label] exitCode=$exitCode exited=$exited")
         println("PTY-DIAG [$label] output=${output.escapeForLog()}")
     }
 
