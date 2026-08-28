@@ -18,6 +18,9 @@ kotlinxCoroutines = "1.9.0"
 jediterm = "3.74"
 # PTY 를 여는 네이티브 구현. 리눅스·맥·윈도우용 바이너리가 이 한 아티팩트 안에 들어 있다.
 pty4j = "0.13.12"
+# JediTerm 과 pty4j 가 함께 끌고 오는 slf4j-api 2.0.13 이 이 판의 계열이다. 알파(2.1.0-alpha1)는
+# 쓰지 않는다.
+slf4jSimple = "2.0.18"
 
 [plugins]
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -36,3 +39,6 @@ kotlinxCoroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-tes
 jeditermUi = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
 jeditermCore = { module = "org.jetbrains.jediterm:jediterm-core", version.ref = "jediterm" }
 pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
+# 위 둘이 자기 진단을 slf4j 로 흘리는데, 받을 구현이 없으면 그 말이 통째로 사라지고 실행할
+# 때마다 "No SLF4J providers were found" 경고가 세 줄 뜬다. 로그를 stderr 로 흘려보낸다.
+slf4jSimple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4jSimple" }

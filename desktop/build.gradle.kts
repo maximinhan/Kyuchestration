@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.jeditermUi)
     implementation(libs.jeditermCore)
     implementation(libs.pty4j)
+    runtimeOnly(libs.slf4jSimple)
 
     // kotlin("test") 는 적용된 Kotlin 플러그인의 버전을 그대로 따라간다. 버전 카탈로그에 한 줄 더
     // 적으면 Kotlin 을 올릴 때 두 곳을 맞춰야 하므로 여기서는 일부러 버전을 적지 않는다.

@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -21,6 +23,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
+import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 
@@ -34,9 +38,12 @@ import java.nio.file.Path
 fun KyuchestrationDesktopScreen(
     versionLabel: String,
     dashboardState: WorkDirDashboardState,
+    terminalState: EmbeddedTerminalState,
     onOpenWorkDirRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
+    onEnterSessionRequested: (SessionTarget) -> Unit,
+    onCloseTerminalRequested: () -> Unit,
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -48,7 +55,14 @@ fun KyuchestrationDesktopScreen(
                     FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
 
                 is WorkDirDashboardState.WorkDirObserved ->
-                    WorkDirDashboardContent(dashboardState, onRefreshRequested, onCloseWorkDirRequested)
+                    DashboardWithTerminal(
+                        observed = dashboardState,
+                        terminalState = terminalState,
+                        onRefreshRequested = onRefreshRequested,
+                        onCloseWorkDirRequested = onCloseWorkDirRequested,
+                        onEnterSessionRequested = onEnterSessionRequested,
+                        onCloseTerminalRequested = onCloseTerminalRequested,
+                    )
 
                 is WorkDirDashboardState.FirstObservationFailed ->
                     ObservationFailureScreen(
@@ -58,6 +72,44 @@ fun KyuchestrationDesktopScreen(
                         onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
                     )
             }
+        }
+    }
+}
+
+/**
+ * 목록과 터미널이 위아래로 나뉜다.
+ *
+ * 좌우가 아니라 위아래인 이유는 터미널이 폭을 먹기 때문이다. 세션 안의 화면은 80 칸을 기준으로
+ * 그려지는데, 창을 반으로 갈라 오른쪽에 두면 그 폭이 나오지 않아 줄이 접힌다. 목록 쪽은 카드가
+ * 세로로 쌓이므로 높이를 나눠 갖는 편이 덜 아쉽다.
+ */
+@Composable
+private fun DashboardWithTerminal(
+    observed: WorkDirDashboardState.WorkDirObserved,
+    terminalState: EmbeddedTerminalState,
+    onRefreshRequested: () -> Unit,
+    onCloseWorkDirRequested: () -> Unit,
+    onEnterSessionRequested: (SessionTarget) -> Unit,
+    onCloseTerminalRequested: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(DASHBOARD_HEIGHT_WEIGHT)) {
+            WorkDirDashboardContent(
+                observed = observed,
+                onRefreshRequested = onRefreshRequested,
+                onCloseWorkDirRequested = onCloseWorkDirRequested,
+                onEnterSessionRequested = onEnterSessionRequested,
+            )
+        }
+
+        // 아무 세션에도 들어가지 않았으면 목록이 창을 다 쓴다.
+        if (terminalState != EmbeddedTerminalState.NoTerminalOpen) {
+            HorizontalDivider()
+            EmbeddedTerminalPane(
+                terminalState = terminalState,
+                onCloseTerminalRequested = onCloseTerminalRequested,
+                modifier = Modifier.weight(TERMINAL_HEIGHT_WEIGHT),
+            )
         }
     }
 }
@@ -141,3 +193,9 @@ private fun CenteredColumn(content: @Composable () -> Unit) {
         content()
     }
 }
+
+/**
+ * 창을 나눠 갖는 비율. 터미널 쪽을 조금 크게 둔다 — 그쪽이 사람이 실제로 일하는 자리다.
+ */
+private const val DASHBOARD_HEIGHT_WEIGHT = 0.45f
+private const val TERMINAL_HEIGHT_WEIGHT = 0.55f
