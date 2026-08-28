@@ -12,7 +12,19 @@ plugins {
 }
 
 group = "com.kyuchestration.desktop"
-version = "0.1.0"
+
+// 릴리스 워크플로가 태그에서 뽑은 버전을 -PdesktopVersion 으로 넣는다(환경 변수로 넣을 때는
+// ORG_GRADLE_PROJECT_desktopVersion). 아무것도 넘기지 않으면 개발용 기본값이라, 로컬에서
+// ./gradlew run 하는 흐름은 이 줄이 생기기 전과 같다.
+//
+// jpackage 는 버전의 각 자리를 숫자로만 받는다. 태그 이름("v0.8.0")을 그대로 넘기면 컴파일도
+// 패키징도 다 지난 마지막 단계에서야 깨지므로, 빌드를 구성하는 이 자리에서 먼저 끊는다.
+val desktopVersion = (providers.gradleProperty("desktopVersion").orNull ?: "0.1.0").trim()
+require(Regex("""\d+\.\d+\.\d+""").matches(desktopVersion)) {
+    "desktopVersion 은 숫자 세 자리(MAJOR.MINOR.PATCH)여야 한다 — 받은 값: \"$desktopVersion\". " +
+        "태그 이름이라면 앞의 v 를 떼고 넘긴다."
+}
+version = desktopVersion
 
 kotlin {
     // 툴체인을 못 박아 두면 개발자 머신의 기본 JDK 가 무엇이든 같은 바이트코드가 나온다.
@@ -51,14 +63,28 @@ compose.desktop {
         // MainKt 다.
         mainClass = "com.kyuchestration.desktop.MainKt"
 
-        nativeDistributions {
-            // 세 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
-            // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
-            // 일어난다.
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+        // 배포 패키지는 packageDeb·packageDmg 로 만든다 — packageRelease* 가 아니다.
+        // release 변형은 프로가드로 코드를 줄이는데, JNA 가 네이티브 쪽에서 이름으로 찾아 쓰는
+        // com.sun.jna.Native.dispose 까지 "아무도 부르지 않는다" 며 지운다. 그러면 pty4j 가
+        // PTY 를 여는 첫 순간 UnsatisfiedLinkError 로 죽는다 — 앱의 핵심인 임베디드 터미널이
+        // 통째로 못 쓰게 되는데, 빌드는 끝까지 성공하므로 받아서 눌러 보기 전에는 알 수 없다.
+        // (같은 클래스패스로 PTY 를 여는 시험: 최소화본은 위 오류, 최소화 없는 쪽은 정상 — PR 26)
+        // 줄여서 얻는 것은 46MB 대 62MB 뿐이라, 검증할 수 없는 keep 규칙을 손으로 떠안느니
+        // CI 가 실제로 시험한 바이트코드를 그대로 배포한다.
 
-            // 설치 패키지 이름은 파일 이름·설치 경로·Windows 레지스트리 키에 그대로 쓰인다.
-            // 한글이 섞이면 그 경로들이 깨지므로, 창 제목("뀨케스트레이션")과 분리해 ASCII 로 둔다.
+        nativeDistributions {
+            // 두 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
+            // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
+            // 일어난다(.github/workflows/release.yml).
+            //
+            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 tmux 위에서 한다 —
+            // 윈도우 네이티브에는 그 tmux 가 없으므로(설계 문서 10 절 로드맵 v4) 설치는 되고
+            // 아무것도 되지 않는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
+
+            // 설치 패키지 이름은 파일 이름과 설치 경로(/opt/kyuchestration · /Applications)에
+            // 그대로 쓰인다. 한글이 섞이면 그 경로들이 깨지므로, 창 제목("뀨케스트레이션")과
+            // 분리해 ASCII 로 둔다.
             packageName = "Kyuchestration"
             packageVersion = project.version.toString()
             description = "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
