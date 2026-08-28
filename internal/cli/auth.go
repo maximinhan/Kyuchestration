@@ -108,13 +108,20 @@ func ManageTokenProfiles(in io.Reader, out, errOut io.Writer, args []string, new
 // 토큰 값을 꺼내지 않는다 — 이 명령은 저장소에 값을 물어보지도 않는다. 목록을 띄운 채로
 // 화면을 공유하거나 캡처하는 일이 흔하고, 한 번 새 나간 토큰은 폐기 전까지 계속 유효하다.
 func listTokenProfiles(out io.Writer, args []string, tokenStore secretstore.TokenStore) error {
-	if len(args) != 0 {
-		return fmt.Errorf("auth list 는 인자를 받지 않습니다 (인자 %d 개를 받음)\n\n%s", len(args), authUsageText)
+	asJSON, err := parseListTokenProfilesArgs(args)
+	if err != nil {
+		return err
 	}
 
 	profiles, err := tokenStore.Profiles()
 	if err != nil {
 		return err
+	}
+
+	// 기계용 문서는 빈 목록도 같은 모양으로 낸다. 사람용이 이 자리에서 하는 등록 안내는
+	// stdout 으로 나갈 수 없고(읽는 쪽의 파싱이 깨진다), 다른 스트림으로 빼면 그냥 사라진다.
+	if asJSON {
+		return writeTokenProfilesAsJSON(out, profiles)
 	}
 
 	if len(profiles) == 0 {
@@ -138,6 +145,21 @@ func listTokenProfiles(out io.Writer, args []string, tokenStore secretstore.Toke
 		return fmt.Errorf("프로필 목록 출력 실패: %w", err)
 	}
 	return nil
+}
+
+// parseListTokenProfilesArgs 는 목록에 붙은 인자를 읽는다. 받는 것은 --json 하나뿐이다.
+//
+// 모르는 인자를 조용히 버리지 않는다. 오타 난 옵션(--jsonn)을 흘려보내면 사람용 표가 나오는데,
+// 그것을 파싱하려던 쪽에는 "JSON 이 깨졌다" 로만 보인다.
+func parseListTokenProfilesArgs(args []string) (bool, error) {
+	asJSON := false
+	for _, arg := range args {
+		if arg != machineJSONOptionName {
+			return false, fmt.Errorf("auth list 는 %s 말고 인자를 받지 않습니다: %s\n\n%s", machineJSONOptionName, arg, authUsageText)
+		}
+		asJSON = true
+	}
+	return asJSON, nil
 }
 
 // removeTokenProfile 은 프로필과 그 토큰을 지운다.

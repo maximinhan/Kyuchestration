@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -163,9 +162,7 @@ func TestAuthAddWithJSONTellsTheCallerWhichAccountTheTokenBelongsTo(t *testing.T
 	}
 
 	var document authAddJSONDocumentForTest
-	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
-		t.Fatalf("stdout 을 JSON 으로 읽지 못했습니다: %v\n--- stdout ---\n%s", err, out.String())
-	}
+	decodeMachineJSONForTest(t, out.String(), &document)
 
 	if document.SchemaVersion != 1 {
 		t.Errorf("schemaVersion = %d, want 1", document.SchemaVersion)
