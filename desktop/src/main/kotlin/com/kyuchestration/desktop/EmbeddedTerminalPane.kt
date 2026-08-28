@@ -80,13 +80,18 @@ private fun EmbeddedTerminalHeader(
             style = MaterialTheme.typography.titleSmall,
             fontFamily = FontFamily.Monospace,
         )
-        Spacer(Modifier.width(12.dp))
         // tmux 를 몰라도 되지만 이 한 가지는 알아야 한다 — 닫는 것이 끝내는 것이 아니라는 사실.
-        Text(
-            text = "닫아도 세션은 계속 돕니다",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        //
+        // 붙어 있을 때만 말한다. 진입에 실패한 자리에서는 계속 돌 세션이 아예 없을 수도 있어서,
+        // 그때도 같은 문구를 띄우면 없는 것을 있다고 말하게 된다.
+        if (terminalState is EmbeddedTerminalState.TerminalAttached) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "닫아도 세션은 계속 돕니다",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         Spacer(Modifier.weight(1f))
 
