@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.RepoSnapshot
 import com.kyuchestration.desktop.workdir.RepoState
@@ -34,6 +35,8 @@ import com.kyuchestration.desktop.workdir.WorkDirSnapshot
 @Composable
 fun WorkDirDashboardContent(
     observed: WorkDirDashboardState.WorkDirObserved,
+    initializationState: WorkDirInitializationState,
+    onInitializeOpenedWorkDirRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
@@ -43,6 +46,10 @@ fun WorkDirDashboardContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         WorkDirHeader(observed.snapshot, onRefreshRequested, onCloseWorkDirRequested)
+
+        if (!observed.planFilePresent) {
+            PlanFileMissingBanner(initializationState, onInitializeOpenedWorkDirRequested)
+        }
 
         observed.lastRefreshFailure?.let { failure ->
             // 목록은 그대로 두고 이 줄만 덧붙인다. 아래 카드들은 실패 직전에 본 것이라는 사실을
@@ -63,6 +70,42 @@ fun WorkDirDashboardContent(
         }
 
         RepoCardList(observed.snapshot, onEnterSessionRequested)
+    }
+}
+
+/**
+ * 계획이 아직 없다는 안내. 막는 것이 아니라 알리는 것이다.
+ *
+ * 계획이 없어도 카드와 세션은 그대로 쓸 수 있다 — kyu list 는 계획 없이도 답한다. 그래서 이
+ * 자리는 화면을 가로막는 벽이 아니라 목록 위에 얹히는 한 줄이고, 초기화 버튼은 그 한 줄에서
+ * 곧바로 다음 걸음을 밟게 해 주는 것뿐이다.
+ */
+@Composable
+private fun PlanFileMissingBanner(
+    initializationState: WorkDirInitializationState,
+    onInitializeOpenedWorkDirRequested: () -> Unit,
+) {
+    NoticeBanner(
+        accentColor = PLAN_MISSING_COLOR,
+        title = "계획 파일이 없습니다",
+        lines = listOf(
+            "이 워크디렉토리에는 아직 .coord/plan.md 가 없습니다. 카드와 세션은 그대로 쓸 수 있고, " +
+                "계획을 두면 카드마다 지금 볼 작업이 함께 뜹니다.",
+        ),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                onClick = onInitializeOpenedWorkDirRequested,
+                enabled = initializationState != WorkDirInitializationState.Running,
+            ) {
+                Text("초기화")
+            }
+            Spacer(Modifier.width(12.dp))
+            InitializationProgressOrFailure(
+                initializationState = initializationState,
+                runningLabel = "kyu init 으로 계획 파일을 만드는 중입니다",
+            )
+        }
     }
 }
 
@@ -221,8 +264,17 @@ private fun MainSessionRow(mainSessionAlive: Boolean, onEnterSessionRequested: (
     }
 }
 
+/**
+ * @param trailingContent 배너 아래에 붙는 것. 안내만 하는 배너는 비워 두고, 사람이 그 자리에서
+ *   할 일이 있는 배너는 여기에 버튼을 둔다.
+ */
 @Composable
-private fun NoticeBanner(accentColor: Color, title: String, lines: List<String>) {
+private fun NoticeBanner(
+    accentColor: Color,
+    title: String,
+    lines: List<String>,
+    trailingContent: @Composable () -> Unit = {},
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -234,6 +286,7 @@ private fun NoticeBanner(accentColor: Color, title: String, lines: List<String>)
         lines.forEach { line ->
             Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
         }
+        trailingContent()
     }
 }
 
@@ -255,3 +308,7 @@ private val RepoState.chipColor: Color
 private val NEUTRAL_COLOR = Color(0xFF6B6B6B)
 private val PLAN_WARNING_COLOR = Color(0xFFB26A00)
 private val REFRESH_FAILURE_COLOR = Color(0xFFB3261E)
+
+// 계획이 없는 것은 잘못이 아니라 아직 밟지 않은 걸음이다. 경고색(주황)이 아니라 안내하는
+// 파랑으로 둬서, 목록 위의 다른 배너들과 급한 정도가 다르다는 것이 색으로 먼저 읽히게 한다.
+private val PLAN_MISSING_COLOR = Color(0xFF1565C0)

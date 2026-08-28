@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.kyu.planFileExistsIn
 import com.kyuchestration.desktop.workdir.WorkDirInitializationResult
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
@@ -9,6 +10,7 @@ import kotlin.io.path.readText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -44,6 +46,21 @@ class KyuCliWorkDirInitializerIntegrationTest {
         val planFile = initialized.workDirPath.resolve(".coord").resolve("plan.md")
         assertTrue(planFile.isRegularFile(), "kyu init 이 계획 파일을 놓아야 한다")
         assertTrue("tasks:" in planFile.readText(), "빈 파일이 아니라 형식을 가르치는 템플릿이어야 한다")
+    }
+
+    @Test
+    fun `앱이 아는 계획 파일 자리가 kyu 가 만드는 자리와 같다`() {
+        val initializer = KyuCliWorkDirInitializer(realKyuCommandRunnerOrSkip())
+
+        val initialized = assertIs<WorkDirInitializationResult.Initialized>(
+            initializer.createWorkDir(temporaryDirectory, "WorkDir-featureX"),
+        )
+
+        // 대시보드의 초기화 배너는 이 판단 하나에 걸려 있다. 앱이 아는 자리(.coord/plan.md)가
+        // 엔진이 만드는 자리와 어긋나면 배너는 초기화한 뒤에도 영영 사라지지 않는다 — 그리고
+        // 그 어긋남은 계약에 실려 오지 않으므로 여기서 진짜 kyu 에게 물어야만 드러난다.
+        assertTrue(planFileExistsIn(initialized.workDirPath))
+        assertFalse(planFileExistsIn(temporaryDirectory.resolve("아직-만들지-않은-곳")))
     }
 
     @Test

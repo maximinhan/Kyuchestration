@@ -137,6 +137,32 @@ class WorkDirInitializationStateHolderTest {
         assertEquals(WorkDirInitializationState.Failed("계획 파일 생성 실패"), holder.state.value)
     }
 
+    @Test
+    fun `시도를 그만두면 지난 실패 문구를 거둔다`() = runTest {
+        val initializer = RecordingWorkDirInitializer().apply {
+            respondWith { WorkDirInitializationResult.NotInitialized("이미 계획 파일이 있습니다") }
+        }
+        val holder = stateHolder(initializer)
+
+        holder.createWorkDir(PARENT_DIRECTORY, "WorkDir-featureX") {}
+        runCurrent()
+        holder.forgetLastFailure()
+
+        // 그대로 두면 워크디렉토리 A 의 거절 이유가 B 의 배너에 뜬다.
+        assertEquals(WorkDirInitializationState.Idle, holder.state.value)
+    }
+
+    @Test
+    fun `도는 중에는 그만두라고 해도 진행 표시를 지우지 않는다`() = runTest {
+        val holder = stateHolder(RecordingWorkDirInitializer())
+
+        holder.createWorkDir(PARENT_DIRECTORY, "WorkDir-featureX") {}
+        holder.forgetLastFailure()
+
+        // 진행 표시만 지우면 결과가 돌아왔을 때 기다린 적도 없는 문구가 튀어나온다.
+        assertEquals(WorkDirInitializationState.Running, holder.state.value)
+    }
+
     private fun TestScope.stateHolder(workDirInitializer: WorkDirInitializer) = WorkDirInitializationStateHolder(
         workDirInitializer = workDirInitializer,
         coroutineScope = backgroundScope,

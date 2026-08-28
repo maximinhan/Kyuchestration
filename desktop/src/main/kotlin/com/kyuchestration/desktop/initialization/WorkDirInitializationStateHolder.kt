@@ -62,6 +62,22 @@ class WorkDirInitializationStateHolder(
         runInitialization(onInitialized = {}) { workDirInitializer.initializeExistingWorkDir(workDirPath) }
     }
 
+    /**
+     * 지난 실패 문구를 거둔다.
+     *
+     * 실패는 그것을 부른 시도에 속한다. 만들기를 그만두거나 다른 워크디렉토리로 옮기면 그 시도는
+     * 끝난 것인데, 문구가 따라가면 엉뚱한 자리의 실패로 읽힌다 — 워크디렉토리 A 의 초기화가
+     * 거절당한 이유가 B 의 배너에 뜨는 식이다.
+     *
+     * 도는 중에는 아무것도 하지 않는다. 진행 표시만 지우면 결과가 돌아왔을 때 기다린 적도 없는
+     * 문구가 튀어나온다.
+     */
+    fun forgetLastFailure() {
+        if (mutableState.value is WorkDirInitializationState.Failed) {
+            mutableState.value = WorkDirInitializationState.Idle
+        }
+    }
+
     private fun runInitialization(
         onInitialized: (Path) -> Unit,
         initialize: () -> WorkDirInitializationResult,

@@ -10,9 +10,11 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
+import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
 import com.kyuchestration.desktop.kyu.planFileExistsIn
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.pty.PtyKyuSessionTerminalAttacher
+import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
 import com.kyuchestration.desktop.workdir.kyucli.ProcessKyuCommandRunner
 
@@ -25,10 +27,19 @@ import com.kyuchestration.desktop.workdir.kyucli.ProcessKyuCommandRunner
  */
 fun main() = application {
     val applicationCoroutineScope = rememberCoroutineScope()
+    // 관찰과 초기화가 같은 실행기를 함께 쓴다. 실행기는 부를 때마다 kyu 를 새로 찾는 무상태라
+    // 둘로 나눌 이유가 없다.
+    val kyuCommandRunner = remember { ProcessKyuCommandRunner() }
     val dashboardStateHolder = remember(applicationCoroutineScope) {
         WorkDirDashboardStateHolder(
-            workDirObserver = KyuCliWorkDirObserver(ProcessKyuCommandRunner()),
+            workDirObserver = KyuCliWorkDirObserver(kyuCommandRunner),
             planFileExists = ::planFileExistsIn,
+            coroutineScope = applicationCoroutineScope,
+        )
+    }
+    val initializationStateHolder = remember(applicationCoroutineScope) {
+        WorkDirInitializationStateHolder(
+            workDirInitializer = KyuCliWorkDirInitializer(kyuCommandRunner),
             coroutineScope = applicationCoroutineScope,
         )
     }
@@ -39,6 +50,7 @@ fun main() = application {
         )
     }
     val dashboardState by dashboardStateHolder.state.collectAsState()
+    val initializationState by initializationStateHolder.state.collectAsState()
     val terminalState by terminalStateHolder.state.collectAsState()
 
     Window(
@@ -60,15 +72,37 @@ fun main() = application {
         KyuchestrationDesktopScreen(
             versionLabel = DesktopBuildVersion.label,
             dashboardState = dashboardState,
+            initializationState = initializationState,
             terminalState = terminalState,
             onOpenWorkDirRequested = {
-                chooseWorkDirDirectory(ownerWindow)?.let(dashboardStateHolder::openWorkDir)
+                chooseWorkDirDirectory(ownerWindow)?.let {
+                    // 만들다 실패한 문구를 여기서 거둔다. 그대로 두면 방금 연 워크디렉토리의
+                    // 배너에 다른 자리의 거절 이유가 뜬다.
+                    initializationStateHolder.forgetLastFailure()
+                    dashboardStateHolder.openWorkDir(it)
+                }
+            },
+            onChooseNewWorkDirParentRequested = { chooseNewWorkDirParentDirectory(ownerWindow) },
+            onCreateWorkDirRequested = { parentDirectory, newWorkDirName ->
+                // 다 만들면 그 자리를 곧바로 연다. 만들어 놓고 다시 "열기" 로 찾아 들어가게 하면,
+                // 앱이 시작점이 된 뜻이 반쯤만 산다.
+                initializationStateHolder.createWorkDir(
+                    parentDirectory = parentDirectory,
+                    newWorkDirName = newWorkDirName,
+                    onWorkDirCreated = dashboardStateHolder::openWorkDir,
+                )
+            },
+            onCreateWorkDirGivenUp = initializationStateHolder::forgetLastFailure,
+            onInitializeOpenedWorkDirRequested = {
+                dashboardState.workDirPath?.let(initializationStateHolder::initializeExistingWorkDir)
             },
             onRefreshRequested = dashboardStateHolder::refreshNow,
             onCloseWorkDirRequested = {
                 // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 놓지 않으면 다른
                 // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 터미널이 남는다.
                 terminalStateHolder.closeTerminal()
+                // 초기화 실패 문구도 그 워크디렉토리의 것이다. 같은 이유로 여기서 함께 놓는다.
+                initializationStateHolder.forgetLastFailure()
                 dashboardStateHolder.closeWorkDir()
             },
             onEnterSessionRequested = { target ->

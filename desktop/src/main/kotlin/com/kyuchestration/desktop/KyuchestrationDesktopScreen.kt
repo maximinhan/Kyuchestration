@@ -13,16 +13,23 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
@@ -38,8 +45,13 @@ import java.nio.file.Path
 fun KyuchestrationDesktopScreen(
     versionLabel: String,
     dashboardState: WorkDirDashboardState,
+    initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
     onOpenWorkDirRequested: () -> Unit,
+    onChooseNewWorkDirParentRequested: () -> Path?,
+    onCreateWorkDirRequested: (Path, String) -> Unit,
+    onCreateWorkDirGivenUp: () -> Unit,
+    onInitializeOpenedWorkDirRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
@@ -49,7 +61,14 @@ fun KyuchestrationDesktopScreen(
         Surface(modifier = Modifier.fillMaxSize()) {
             when (dashboardState) {
                 is WorkDirDashboardState.NoWorkDirOpened ->
-                    StartScreen(versionLabel, onOpenWorkDirRequested)
+                    StartScreen(
+                        versionLabel = versionLabel,
+                        initializationState = initializationState,
+                        onOpenWorkDirRequested = onOpenWorkDirRequested,
+                        onChooseNewWorkDirParentRequested = onChooseNewWorkDirParentRequested,
+                        onCreateWorkDirRequested = onCreateWorkDirRequested,
+                        onCreateWorkDirGivenUp = onCreateWorkDirGivenUp,
+                    )
 
                 is WorkDirDashboardState.FirstObservationRunning ->
                     FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
@@ -57,7 +76,9 @@ fun KyuchestrationDesktopScreen(
                 is WorkDirDashboardState.WorkDirObserved ->
                     DashboardWithTerminal(
                         observed = dashboardState,
+                        initializationState = initializationState,
                         terminalState = terminalState,
+                        onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                         onRefreshRequested = onRefreshRequested,
                         onCloseWorkDirRequested = onCloseWorkDirRequested,
                         onEnterSessionRequested = onEnterSessionRequested,
@@ -86,7 +107,9 @@ fun KyuchestrationDesktopScreen(
 @Composable
 private fun DashboardWithTerminal(
     observed: WorkDirDashboardState.WorkDirObserved,
+    initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
+    onInitializeOpenedWorkDirRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
@@ -96,6 +119,8 @@ private fun DashboardWithTerminal(
         Box(modifier = Modifier.weight(DASHBOARD_HEIGHT_WEIGHT)) {
             WorkDirDashboardContent(
                 observed = observed,
+                initializationState = initializationState,
+                onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                 onRefreshRequested = onRefreshRequested,
                 onCloseWorkDirRequested = onCloseWorkDirRequested,
                 onEnterSessionRequested = onEnterSessionRequested,
@@ -114,8 +139,27 @@ private fun DashboardWithTerminal(
     }
 }
 
+/**
+ * 앱이 시작점이다 — 여기서 워크디렉토리를 열 수도, 새로 만들 수도 있다.
+ *
+ * 만들기 폼을 처음부터 펼쳐 두지 않는다. 만들 자리를 고르는 것이 첫 걸음이므로, 자리를 고른
+ * 뒤에야 이름을 묻는 칸이 나온다 — 고른 자리가 있다는 것 하나로 폼을 보일지가 정해지니
+ * "폼이 펼쳐졌는가" 를 따로 기억할 필요가 없다.
+ */
 @Composable
-private fun StartScreen(versionLabel: String, onOpenWorkDirRequested: () -> Unit) {
+private fun StartScreen(
+    versionLabel: String,
+    initializationState: WorkDirInitializationState,
+    onOpenWorkDirRequested: () -> Unit,
+    onChooseNewWorkDirParentRequested: () -> Path?,
+    onCreateWorkDirRequested: (Path, String) -> Unit,
+    onCreateWorkDirGivenUp: () -> Unit,
+) {
+    // 고른 자리와 적어 넣은 이름은 화면이 잠깐 들고 있는 것이지 앱의 상태가 아니다. 창을 닫으면
+    // 함께 사라지는 것이 맞고, 상태 홀더로 올리면 시작 화면을 벗어난 뒤에도 남는다.
+    var newWorkDirParentDirectory by remember { mutableStateOf<Path?>(null) }
+    var newWorkDirName by remember { mutableStateOf("") }
+
     CenteredColumn {
         Text("뀨케스트레이션", style = MaterialTheme.typography.headlineMedium)
         Text(
@@ -124,15 +168,83 @@ private fun StartScreen(versionLabel: String, onOpenWorkDirRequested: () -> Unit
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onOpenWorkDirRequested) { Text("워크디렉토리 열기") }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onOpenWorkDirRequested) { Text("워크디렉토리 열기") }
+            OutlinedButton(
+                onClick = { onChooseNewWorkDirParentRequested()?.let { newWorkDirParentDirectory = it } },
+            ) {
+                Text("새 워크디렉토리 만들기")
+            }
+        }
+
+        val parentDirectory = newWorkDirParentDirectory
+        if (parentDirectory == null) {
+            Text(
+                text = "레포가 클론된 워크디렉토리를 고르면 각 레포의 상태와 계획을 카드로 보여줍니다. " +
+                    "아직 없다면 여기서 새로 만듭니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            NewWorkDirForm(
+                parentDirectory = parentDirectory,
+                newWorkDirName = newWorkDirName,
+                initializationState = initializationState,
+                onNewWorkDirNameChanged = { newWorkDirName = it },
+                onCreateRequested = { onCreateWorkDirRequested(parentDirectory, newWorkDirName) },
+                onCancelRequested = {
+                    newWorkDirParentDirectory = null
+                    newWorkDirName = ""
+                    onCreateWorkDirGivenUp()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NewWorkDirForm(
+    parentDirectory: Path,
+    newWorkDirName: String,
+    initializationState: WorkDirInitializationState,
+    onNewWorkDirNameChanged: (String) -> Unit,
+    onCreateRequested: () -> Unit,
+    onCancelRequested: () -> Unit,
+) {
+    val creating = initializationState == WorkDirInitializationState.Running
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
-            text = "레포가 클론된 워크디렉토리를 고르면 각 레포의 상태와 계획을 카드로 보여줍니다.",
+            text = "만들 자리: $parentDirectory",
             style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+        )
+        OutlinedTextField(
+            value = newWorkDirName,
+            onValueChange = onNewWorkDirNameChanged,
+            label = { Text("새 워크디렉토리 이름") },
+            placeholder = { Text("WorkDir-featureX") },
+            singleLine = true,
+            enabled = !creating,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onCreateRequested, enabled = !creating) { Text("만들기") }
+            TextButton(onClick = onCancelRequested, enabled = !creating) { Text("취소") }
+        }
+
+        InitializationProgressOrFailure(
+            initializationState = initializationState,
+            runningLabel = "kyu init 으로 만드는 중입니다",
         )
     }
 }
+
 
 @Composable
 private fun FirstObservationRunningScreen(workDirPath: Path, onCancelRequested: () -> Unit) {
