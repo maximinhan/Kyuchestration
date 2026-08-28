@@ -28,7 +28,7 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-  kyu clone              GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
+  kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
   kyu list [path]        레포 목록 + 상태
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
@@ -43,8 +43,12 @@ const usageText = `사용법: kyu [명령] [인자]
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
 
-옵션 (kyu list):
-  --json                 사람용 표 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
+옵션 (kyu clone):
+  --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
+  --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
+
+옵션 (kyu list, kyu clone, kyu repos, kyu auth add, kyu auth list):
+  --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
