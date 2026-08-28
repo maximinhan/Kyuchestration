@@ -68,9 +68,9 @@ class GitHubReleaseEngineInstallerTest {
         latestReleaseResponse = releaseDocument("v9.9.9", "kyu_linux_amd64" to assetUrl())
         assetResponse = StubResponse(200, engineScriptAnsweringVersion())
 
-        val installedPath = installer().installEngine()
+        installer().installEngine()
 
-        assertEquals(engineDirectory.resolve("kyu"), installedPath)
+        val installedPath = engineDirectory.resolve("kyu")
         assertTrue(installedPath.isExecutable(), "받아 둔 엔진은 실행 가능해야 한다")
         assertEquals(engineScriptAnsweringVersion(), installedPath.readText())
     }
@@ -105,9 +105,9 @@ class GitHubReleaseEngineInstallerTest {
         )
         assetResponse = StubResponse(200, engineScriptAnsweringVersion())
 
-        val installedPath = installer().installEngine()
+        installer().installEngine()
 
-        assertEquals(engineScriptAnsweringVersion(), installedPath.readText())
+        assertEquals(engineScriptAnsweringVersion(), engineDirectory.resolve("kyu").readText())
     }
 
     @Test
@@ -116,9 +116,9 @@ class GitHubReleaseEngineInstallerTest {
         latestReleaseResponse = releaseDocument("v9.9.9", "kyu_linux_amd64" to assetUrl())
         assetResponse = StubResponse(200, engineScriptAnsweringVersion())
 
-        val installedPath = installer().installEngine()
+        installer().installEngine()
 
-        assertEquals(engineScriptAnsweringVersion(), installedPath.readText())
+        assertEquals(engineScriptAnsweringVersion(), engineDirectory.resolve("kyu").readText())
         assertNoDownloadLeftovers()
     }
 

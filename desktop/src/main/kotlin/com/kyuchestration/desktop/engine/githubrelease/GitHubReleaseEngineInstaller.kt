@@ -43,7 +43,7 @@ class GitHubReleaseEngineInstaller(
     private val osArchitecture: String = System.getProperty("os.arch").orEmpty(),
 ) : EngineInstaller {
 
-    override fun installEngine(): Path {
+    override fun installEngine() {
         val assetName = when (val target = engineReleaseTargetFor(osName, osArchitecture)) {
             is EngineReleaseTarget.ReleaseAsset -> target.assetName
             EngineReleaseTarget.WindowsNeedsWsl -> throw EngineInstallationFailure.WindowsNeedsWsl()
@@ -55,7 +55,7 @@ class GitHubReleaseEngineInstaller(
         val assetDownloadUrl = latestRelease.assetDownloadUrls[assetName]
             ?: throw EngineInstallationFailure.AssetMissingFromLatestRelease(assetName, latestRelease.tagName)
 
-        return installDownloadedEngine(assetDownloadUrl)
+        installDownloadedEngine(assetDownloadUrl)
     }
 
     /**
@@ -71,7 +71,7 @@ class GitHubReleaseEngineInstaller(
      * 옮기기 전에 검증하는 이유도 같다. 다른 플랫폼의 바이너리는 실행 가능한 파일이긴 하므로,
      * 자리를 먼저 내주면 돌지 않는 엔진이 설치된 것으로 남는다.
      */
-    private fun installDownloadedEngine(assetDownloadUrl: String): Path {
+    private fun installDownloadedEngine(assetDownloadUrl: String) {
         Files.createDirectories(engineDirectory)
 
         // 임시 파일도 관리 디렉토리 안에 만든다. /tmp 에 받으면 파일 시스템이 달라 옮기기가
@@ -82,9 +82,11 @@ class GitHubReleaseEngineInstaller(
             Files.setPosixFilePermissions(downloadPath, PosixFilePermissions.fromString("rwxr-xr-x"))
             verifyEngineRuns(downloadPath)
 
-            val installedPath = engineDirectory.resolve(ENGINE_EXECUTABLE_NAME)
-            Files.move(downloadPath, installedPath, StandardCopyOption.ATOMIC_MOVE)
-            return installedPath
+            Files.move(
+                downloadPath,
+                engineDirectory.resolve(ENGINE_EXECUTABLE_NAME),
+                StandardCopyOption.ATOMIC_MOVE,
+            )
         } catch (failure: Throwable) {
             // 실패로 끝나는 길에서는 받다 만 것을 남기지 않는다. 남기면 관리 디렉토리가 시도할
             // 때마다 커지고, 그 파일들은 아무도 다시 보지 않는다.
