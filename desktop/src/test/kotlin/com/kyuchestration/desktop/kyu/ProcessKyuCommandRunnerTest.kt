@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import java.nio.file.attribute.PosixFilePermissions
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.condition.DisabledOnOs
 import org.junit.jupiter.api.condition.OS
 
@@ -93,6 +94,40 @@ class ProcessKyuCommandRunnerTest {
         val result = ProcessKyuCommandRunner(executable).run(emptyList(), workingDirectory)
 
         assertEquals(workingDirectory.toRealPath().toString(), result.standardOutput.trim())
+    }
+
+    @Test
+    fun `표준 입력으로 준 값은 자식 프로세스가 그대로 읽는다`() {
+        // kyu auth add 는 토큰을 인자가 아니라 stdin 으로 받는다(auth_add.go) — 인자는 같은 머신의
+        // 다른 사용자가 ps 로 읽는다. 그 통로가 실제로 이어지는지가 이 시험의 전부다.
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo "받은 것: ${'$'}(cat)"
+            """.trimIndent(),
+        )
+
+        val result = ProcessKyuCommandRunner(executable)
+            .run(listOf("auth", "add", "개인", "--json"), standardInput = "ghp_예시토큰")
+
+        assertEquals("받은 것: ghp_예시토큰\n", result.standardOutput)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `줄 것이 없으면 표준 입력을 곧바로 닫아 자식이 기다리지 않게 한다`() {
+        // 닫지 않으면 stdin 을 읽는 kyu 는 영영 끝나지 않고, 화면은 스피너를 돌린 채로 멎는다.
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            cat > /dev/null
+            echo "입력이 끝났다"
+            """.trimIndent(),
+        )
+
+        val result = ProcessKyuCommandRunner(executable).run(emptyList())
+
+        assertEquals("입력이 끝났다\n", result.standardOutput)
     }
 
     private fun executableScript(source: String): Path =

@@ -14,7 +14,11 @@ class ProcessKyuCommandRunner(
     private val fixedKyuExecutablePath: Path? = null,
 ) : KyuCommandRunner {
 
-    override fun run(arguments: List<String>, workingDirectory: Path?): KyuCommandResult {
+    override fun run(
+        arguments: List<String>,
+        workingDirectory: Path?,
+        standardInput: String?,
+    ): KyuCommandResult {
         val executable = fixedKyuExecutablePath
             ?: findKyuExecutableOnSystemPath()
             ?: throw KyuCommandFailure.ExecutableNotFound()
@@ -35,6 +39,17 @@ class ProcessKyuCommandRunner(
         val standardErrorReading = CompletableFuture.supplyAsync {
             process.errorStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         }
+
+        // 읽기 전에 쓰고 닫는다. 여기로 가는 것은 토큰 한 줄뿐이라 파이프 버퍼(리눅스 64KB)에
+        // 다 들어가므로 이 순서로 굳지 않는다 — 보낼 것이 그보다 커지는 날에는 stderr 처럼
+        // 다른 스레드로 빼야 한다.
+        //
+        // 줄 것이 없어도 닫는 것이 이 블록의 요점이다. 열어 둔 채로 두면 stdin 을 읽는 kyu
+        // (auth add)가 영영 끝나지 않고, 화면은 스피너를 돌린 채로 멎는다.
+        process.outputStream.use { childStandardInput ->
+            standardInput?.let { childStandardInput.write(it.toByteArray(Charsets.UTF_8)) }
+        }
+
         val standardOutput = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
 
         return KyuCommandResult(

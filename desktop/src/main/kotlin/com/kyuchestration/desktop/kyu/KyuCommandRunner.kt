@@ -21,9 +21,16 @@ interface KyuCommandRunner {
      *   `kyu list <절대경로>` 처럼 볼 자리를 인자로 못 박는 명령은 어디서 실행되든 결과가 같으므로
      *   굳이 정하지 않는다. 반대로 `kyu init <이름>` 은 이름을 작업 디렉토리 기준으로 풀기 때문에
      *   그쪽은 반드시 자리를 준다.
+     * @param standardInput 자식 프로세스의 stdin 으로 흘려보낼 것. 준 것을 그대로 보내고 닫는다 —
+     *   개행 한 글자도 덧붙이지 않는다. 여기 실리는 것은 토큰이고, 값을 손대는 자리가 늘수록
+     *   무엇이 저장됐는지 말하기 어려워진다. null 이면 아무것도 보내지 않고 곧바로 닫는다.
      * @throws KyuCommandFailure 부를 kyu 가 없거나 프로세스를 띄우지 못했을 때.
      */
-    fun run(arguments: List<String>, workingDirectory: Path? = null): KyuCommandResult
+    fun run(
+        arguments: List<String>,
+        workingDirectory: Path? = null,
+        standardInput: String? = null,
+    ): KyuCommandResult
 }
 
 /**
