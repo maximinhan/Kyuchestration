@@ -28,7 +28,7 @@ import (
 
 const cloneUsageText = `사용법: kyu clone
 
-  kyu clone   GitHub 레포 목록에서 골라 이 워크디렉토리에 클론한다
+  kyu clone   GitHub 레포 목록에서 화살표로 골라 이 워크디렉토리에 클론한다
 
 토큰은 처음 실행할 때 물어보고 이 머신에 저장한다 (kyu auth list 로 확인).`
 
