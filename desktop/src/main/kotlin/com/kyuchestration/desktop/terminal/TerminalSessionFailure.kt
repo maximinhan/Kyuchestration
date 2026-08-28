@@ -15,9 +15,9 @@ sealed class TerminalSessionFailure(
 ) : Exception(message, cause) {
 
     class KyuExecutableNotFound : TerminalSessionFailure(
-        message = "PATH 에서 kyu 실행 파일을 찾지 못했습니다.",
+        message = "kyu 실행 파일을 찾지 못했습니다.",
         guidance = "세션을 띄우고 진입하는 일은 전부 kyu 가 합니다. " +
-            "설치해 PATH 에 넣은 뒤 다시 눌러 주세요.",
+            "앱을 다시 띄우면 엔진 설치 화면이 뜹니다.",
     )
 
     class KyuFailedToStart(cause: Throwable) : TerminalSessionFailure(

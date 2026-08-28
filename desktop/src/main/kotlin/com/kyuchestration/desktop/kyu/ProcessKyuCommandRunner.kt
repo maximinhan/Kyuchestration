@@ -20,7 +20,7 @@ class ProcessKyuCommandRunner(
         standardInput: String?,
     ): KyuCommandResult {
         val executable = fixedKyuExecutablePath
-            ?: findKyuExecutableOnSystemPath()
+            ?: findKyuExecutable()
             ?: throw KyuCommandFailure.ExecutableNotFound()
 
         val process = try {

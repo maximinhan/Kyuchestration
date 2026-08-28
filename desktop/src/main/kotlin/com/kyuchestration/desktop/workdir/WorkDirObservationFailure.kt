@@ -18,9 +18,10 @@ sealed class WorkDirObservationFailure(
 ) : Exception(message, cause) {
 
     class KyuExecutableNotFound : WorkDirObservationFailure(
-        message = "PATH 에서 kyu 실행 파일을 찾지 못했습니다.",
-        guidance = "kyu 를 설치해 PATH 에 넣은 뒤 새로고침하세요. " +
-            "저장소에서 바로 만들려면 go build -o ~/.local/bin/kyu ./cmd/kyu 입니다.",
+        message = "kyu 실행 파일을 찾지 못했습니다.",
+        guidance = "앱을 다시 띄우면 엔진 설치 화면이 뜹니다. " +
+            "직접 넣으려면 kyu 를 PATH 에 두세요 — 저장소에서 바로 만들려면 " +
+            "go build -o ~/.local/bin/kyu ./cmd/kyu 입니다.",
     )
 
     /**
