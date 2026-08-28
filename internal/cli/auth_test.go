@@ -180,8 +180,8 @@ func TestAuthListShowsNamesAndStorageButNeverTheToken(t *testing.T) {
 		t.Fatalf("준비 실패: %v", err)
 	}
 
-	var out bytes.Buffer
-	if err := ManageTokenProfiles(&out, []string{"list"}, tokenStore); err != nil {
+	var out, errOut bytes.Buffer
+	if err := ManageTokenProfiles(nil, &out, &errOut, []string{"list"}, nil, tokenStore); err != nil {
 		t.Fatalf("ManageTokenProfiles() 실패: %v", err)
 	}
 
@@ -198,8 +198,8 @@ func TestAuthListShowsNamesAndStorageButNeverTheToken(t *testing.T) {
 }
 
 func TestAuthListWithoutAnyProfileTellsHowOneGetsRegistered(t *testing.T) {
-	var out bytes.Buffer
-	if err := ManageTokenProfiles(&out, []string{"list"}, newFakeTokenStore(secretstore.StorageKeychain)); err != nil {
+	var out, errOut bytes.Buffer
+	if err := ManageTokenProfiles(nil, &out, &errOut, []string{"list"}, nil, newFakeTokenStore(secretstore.StorageKeychain)); err != nil {
 		t.Fatalf("ManageTokenProfiles() 실패: %v", err)
 	}
 
@@ -214,8 +214,8 @@ func TestAuthRemoveDeletesTheProfileAndSaysWhichOne(t *testing.T) {
 		t.Fatalf("준비 실패: %v", err)
 	}
 
-	var out bytes.Buffer
-	if err := ManageTokenProfiles(&out, []string{"remove", "개인"}, tokenStore); err != nil {
+	var out, errOut bytes.Buffer
+	if err := ManageTokenProfiles(nil, &out, &errOut, []string{"remove", "개인"}, nil, tokenStore); err != nil {
 		t.Fatalf("ManageTokenProfiles() 실패: %v", err)
 	}
 
@@ -234,8 +234,8 @@ func TestAuthRemoveOfAnUnknownProfileListsTheOnesThatExist(t *testing.T) {
 		t.Fatalf("준비 실패: %v", err)
 	}
 
-	var out bytes.Buffer
-	err := ManageTokenProfiles(&out, []string{"remove", "게인"}, tokenStore)
+	var out, errOut bytes.Buffer
+	err := ManageTokenProfiles(nil, &out, &errOut, []string{"remove", "게인"}, nil, tokenStore)
 	if err == nil {
 		t.Fatal("ManageTokenProfiles() 가 없는 프로필을 지웠다고 답했습니다")
 	}
@@ -245,8 +245,8 @@ func TestAuthRemoveOfAnUnknownProfileListsTheOnesThatExist(t *testing.T) {
 }
 
 func TestAuthWithoutASubcommandExplainsWhatItCanDo(t *testing.T) {
-	var out bytes.Buffer
-	err := ManageTokenProfiles(&out, nil, newFakeTokenStore(secretstore.StorageKeychain))
+	var out, errOut bytes.Buffer
+	err := ManageTokenProfiles(nil, &out, &errOut, nil, nil, newFakeTokenStore(secretstore.StorageKeychain))
 	if err == nil {
 		t.Fatal("ManageTokenProfiles() 가 인자 없이 성공했습니다")
 	}

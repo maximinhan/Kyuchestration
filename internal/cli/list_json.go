@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"io"
 )
 
@@ -97,28 +94,11 @@ type listJSONMainSession struct {
 }
 
 // writeWorkDirListingAsJSON 은 관찰 결과를 기계가 읽는 문서 하나로 내보낸다.
+//
+// 내보내는 방법 자체는 json_output.go 가 쥔다. 같은 규칙을 지켜야 하는 명령이 여럿이 된 뒤로는
+// (auth · repos · clone) 그 규칙이 명령마다 다시 정해질 자리에 있어서는 안 된다.
 func writeWorkDirListingAsJSON(out io.Writer, listing workDirListing) error {
-	// 버퍼에 다 만들고 한 번에 내보낸다. out 으로 바로 흘리면 도중에 실패했을 때 반쪽짜리 문서가
-	// 이미 나가 있고, 읽는 쪽에는 그것이 "깨진 JSON" 으로만 보여 무엇이 실패했는지 알 수 없다.
-	var rendered bytes.Buffer
-
-	encoder := json.NewEncoder(&rendered)
-
-	// 읽는 쪽은 들여쓰기를 신경 쓰지 않지만, 사람이 이 출력을 눈으로 확인하는 일은 계속 생긴다.
-	encoder.SetIndent("", "  ")
-
-	// & 와 < 를 \u0026 · \u003c 로 바꾸지 않는다. 여기 담기는 값은 레포 이름·경로·작업 id 이지
-	// HTML 에 박히는 문자열이 아니라, 그 이스케이프는 읽는 사람에게 부담만 된다.
-	encoder.SetEscapeHTML(false)
-
-	if err := encoder.Encode(newListJSONDocument(listing)); err != nil {
-		return fmt.Errorf("목록 JSON 조립 실패: %w", err)
-	}
-
-	if _, err := out.Write(rendered.Bytes()); err != nil {
-		return fmt.Errorf("목록 JSON 출력 실패: %w", err)
-	}
-	return nil
+	return writeJSONDocument(out, newListJSONDocument(listing))
 }
 
 // newListJSONDocument 는 관찰 결과를 계약이 정한 모양으로 옮긴다.

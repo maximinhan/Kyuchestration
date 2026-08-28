@@ -33,7 +33,8 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
-  kyu auth <list|remove> 저장한 GitHub 토큰 프로필 관리
+  kyu auth <add|list|remove>
+                         저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
 
 옵션 (kyu, kyu start):
@@ -102,11 +103,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 			})
 		})
 
-	// auth 는 세션 백엔드를 거치지 않는다. 저장해둔 토큰을 보고 지우는 일이라 tmux 와 무관하고,
+	// auth 는 세션 백엔드를 거치지 않는다. 토큰을 등록하고 보고 지우는 일이라 tmux 와 무관하고,
 	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
 	case "auth":
 		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
-			return cli.ManageTokenProfiles(out, commandArgs, tokenStore)
+			return cli.ManageTokenProfiles(in, out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
 	// init 과 version 은 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이고 버전은

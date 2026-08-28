@@ -146,7 +146,7 @@ tasks:
 		session.MainSessionName(testWorkDirName),
 	)
 
-	run := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, backend)
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, backend)
 
 	if run.document.SchemaVersion != listJSONSchemaVersion {
 		t.Errorf("schemaVersion = %d, want %d", run.document.SchemaVersion, listJSONSchemaVersion)
@@ -255,7 +255,7 @@ tasks:
 ---
 `)
 
-	run := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
 
 	repo := repoInDocument(t, run.document, "alpha-commons")
 	if repo.Task == nil {
@@ -275,7 +275,7 @@ func TestListWorkDirAsJSONLeavesTheTaskNullWhenThePlanHasNothingForTheRepo(t *te
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	run := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
 
 	repo := repoInDocument(t, run.document, "alpha-commons")
 	if repo.Task != nil {
@@ -309,7 +309,7 @@ tasks:
 ---
 `)
 
-	run := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
 
 	if len(run.document.PlanWarnings) != 1 {
 		t.Fatalf("planWarnings = %q, 없는 레포에 대한 경고 한 줄을 기대", run.document.PlanWarnings)
@@ -334,7 +334,7 @@ tasks:
 func TestListWorkDirAsJSONWritesAnEmptyArrayWhenThereIsNoRepo(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 
-	run := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
 
 	if len(run.document.Repos) != 0 {
 		t.Errorf("repos = %+v, 빈 목록을 기대", run.document.Repos)
@@ -369,7 +369,7 @@ tasks:
 ---
 `)
 
-	run := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
 
 	for _, humanOnlyText := range []string{emptyWorkDirGuidance, attachGuidance, planWarningPrefix, "WorkDir:"} {
 		if strings.Contains(run.stdout, humanOnlyText) {
@@ -389,8 +389,8 @@ func TestListWorkDirTakesTheJSONOptionBeforeOrAfterThePath(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	afterPath := runListJSONForTest(t, []string{workDirPath, listJSONOptionName}, newFakeSessionBackend())
-	beforePath := runListJSONForTest(t, []string{listJSONOptionName, workDirPath}, newFakeSessionBackend())
+	afterPath := runListJSONForTest(t, []string{workDirPath, machineJSONOptionName}, newFakeSessionBackend())
+	beforePath := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
 
 	if afterPath.stdout != beforePath.stdout {
 		t.Errorf("옵션 위치에 따라 출력이 다릅니다.\n--- 경로 뒤 ---\n%s\n--- 경로 앞 ---\n%s",

@@ -75,9 +75,6 @@ func writePlanWarnings(errOut io.Writer, warnings []string) error {
 	return nil
 }
 
-// listJSONOptionName 은 목록을 기계가 읽는 문서로 내보내는 옵션이다.
-const listJSONOptionName = "--json"
-
 const listUsageText = `사용법: kyu list [path] [옵션]
 
   kyu list           현재 디렉토리의 레포 목록과 상태
@@ -105,7 +102,7 @@ func parseListArgs(args []string) (listRequest, error) {
 
 	for _, arg := range args {
 		switch {
-		case arg == listJSONOptionName:
+		case arg == machineJSONOptionName:
 			request.asJSON = true
 
 		// 모르는 옵션을 경로로 흘려보내면 "워크디렉토리 읽기 실패 (--jsonn)" 이라는 엉뚱한 안내가 나온다.
