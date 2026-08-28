@@ -6,6 +6,9 @@ plugins {
     // composeMultiplatform 이 아니라 kotlin 버전을 따라간다.
     alias(libs.plugins.kotlinComposeCompiler)
     alias(libs.plugins.composeMultiplatform)
+    // kyu 의 JSON 계약을 읽는 데이터 클래스에 직렬화기를 붙여 준다. 리플렉션 없이 컴파일
+    // 시점에 만들어지므로, 필드 이름을 잘못 적으면 실행이 아니라 빌드에서 걸린다.
+    alias(libs.plugins.kotlinSerialization)
 }
 
 group = "com.kyuchestration.desktop"
@@ -21,10 +24,18 @@ dependencies {
     // 만들기 때문에 개발 빌드가 세 플랫폼의 네이티브 바이너리를 모두 받을 이유가 없다.
     implementation(compose.desktop.currentOs)
     implementation(libs.composeMaterial3)
+    implementation(libs.kotlinxSerializationJson)
+
+    // Compose 가 이미 끌고 오지만, 상태 홀더가 Compose 없이 도는 순수 코틀린이라 여기서
+    // 직접 적는다. 끌려온 것에 기대면 Compose 의존이 바뀔 때 이유도 모르고 깨진다.
+    implementation(libs.kotlinxCoroutinesCore)
 
     // kotlin("test") 는 적용된 Kotlin 플러그인의 버전을 그대로 따라간다. 버전 카탈로그에 한 줄 더
     // 적으면 Kotlin 을 올릴 때 두 곳을 맞춰야 하므로 여기서는 일부러 버전을 적지 않는다.
     testImplementation(kotlin("test"))
+
+    // 폴링을 실제로 3 초 기다리며 시험하면 테스트가 그만큼 느려진다. 가상 시간으로 돌린다.
+    testImplementation(libs.kotlinxCoroutinesTest)
 }
 
 compose.desktop {
