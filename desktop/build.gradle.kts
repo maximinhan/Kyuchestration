@@ -63,14 +63,28 @@ compose.desktop {
         // MainKt 다.
         mainClass = "com.kyuchestration.desktop.MainKt"
 
-        nativeDistributions {
-            // 세 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
-            // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
-            // 일어난다.
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+        // 배포 패키지는 packageDeb·packageDmg 로 만든다 — packageRelease* 가 아니다.
+        // release 변형은 프로가드로 코드를 줄이는데, JNA 가 네이티브 쪽에서 이름으로 찾아 쓰는
+        // com.sun.jna.Native.dispose 까지 "아무도 부르지 않는다" 며 지운다. 그러면 pty4j 가
+        // PTY 를 여는 첫 순간 UnsatisfiedLinkError 로 죽는다 — 앱의 핵심인 임베디드 터미널이
+        // 통째로 못 쓰게 되는데, 빌드는 끝까지 성공하므로 받아서 눌러 보기 전에는 알 수 없다.
+        // (같은 클래스패스로 PTY 를 여는 시험: 최소화본은 위 오류, 최소화 없는 쪽은 정상 — PR 26)
+        // 줄여서 얻는 것은 46MB 대 62MB 뿐이라, 검증할 수 없는 keep 규칙을 손으로 떠안느니
+        // CI 가 실제로 시험한 바이트코드를 그대로 배포한다.
 
-            // 설치 패키지 이름은 파일 이름·설치 경로·Windows 레지스트리 키에 그대로 쓰인다.
-            // 한글이 섞이면 그 경로들이 깨지므로, 창 제목("뀨케스트레이션")과 분리해 ASCII 로 둔다.
+        nativeDistributions {
+            // 두 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
+            // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
+            // 일어난다(.github/workflows/release.yml).
+            //
+            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 tmux 위에서 한다 —
+            // 윈도우 네이티브에는 그 tmux 가 없으므로(설계 문서 10 절 로드맵 v4) 설치는 되고
+            // 아무것도 되지 않는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
+
+            // 설치 패키지 이름은 파일 이름과 설치 경로(/opt/kyuchestration · /Applications)에
+            // 그대로 쓰인다. 한글이 섞이면 그 경로들이 깨지므로, 창 제목("뀨케스트레이션")과
+            // 분리해 ASCII 로 둔다.
             packageName = "Kyuchestration"
             packageVersion = project.version.toString()
             description = "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
