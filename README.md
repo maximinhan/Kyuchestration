@@ -34,53 +34,32 @@ WorkDir-featureX/
 | tmux | 세션 생성·진입·종료 | `kyu init` 외의 명령이 안내와 함께 종료 |
 | git | 레포 발견 · 상태 판정 · `kyu clone` 의 클론 | 상태를 판정하지 못하고 클론도 못 함 |
 | claude CLI | 세션 안에서 실행되는 명령 | 세션은 뜨지만 바로 끝남 |
-| Go | 소스에서 설치할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | 릴리스 바이너리를 받는다 (설치 방식 A·B) |
+| Go | 소스에서 설치할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | 릴리스 바이너리를 받는다 (설치 방식 A) |
 
 macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 — `brew install tmux` 또는
 `sudo apt install tmux`.
 
 ## 설치
 
-네 가지 길이 있다. 이 저장소는 아직 **프라이빗**이라 어느 길이든 GitHub 인증이 한 번은 필요하다.
+세 가지 길이 있다. **어느 길에도 GitHub 인증이 필요 없다** — 이 저장소는 공개다.
 
 | 방식 | 언제 쓰나 | 미리 있어야 하는 것 |
 |---|---|---|
 | [A. 설치 스크립트](#a-설치-스크립트-추천) | 새 머신 — 가장 빠르다 | `curl` |
-| [B. gh 로 내려받기](#b-gh-로-내려받기) | `gh` 에 이미 로그인한 머신 | `gh` |
-| [C. go install](#c-go-install) | Go 가 있는 개발 머신 | Go + git 인증 |
-| [D. 소스 빌드](#d-소스-빌드) | 이 저장소를 고치는 중 | Go, git |
+| [B. go install](#b-go-install) | Go 가 있는 개발 머신 | Go |
+| [C. 소스 빌드](#c-소스-빌드) | 이 저장소를 고치는 중 | Go, git |
 
 ### A. 설치 스크립트 (추천)
 
-Go 도 git 도 `gh` 도 필요 없다. 이미 있는 `gh` 인증을 건드리지도 않는다.
-
-**1. fine-grained personal access token 을 발급한다**
-
-Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token
-
-| 항목 | 값 |
-|---|---|
-| Repository access | Only select repositories → `maximinhan/Kyuchestration` |
-| Repository permissions | Contents: **Read-only** |
-| Expiration | 짧게 — 필요할 때 다시 발급한다 |
-
-읽기 권한 하나로 끝난다. 토큰이 할 수 있는 일을 이만큼으로 묶어 두면, 새어 나가도 잃는 것이 이만큼이다.
-
-**2. 실행한다**
+Go 도 git 도 `gh` 도 필요 없다. 한 줄이다.
 
 ```sh
-export GITHUB_TOKEN=<발급한 토큰>
-curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github.raw" \
-  https://api.github.com/repos/maximinhan/Kyuchestration/contents/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash
 ```
-
-설치 스크립트 자체도 프라이빗 저장소 안에 있어서 `raw.githubusercontent.com` 으로는 받지 못한다.
-그래서 파일 하나를 토큰으로 읽는 API 를 쓴다 — `Accept: application/vnd.github.raw` 가 "JSON 말고
-파일 내용 그대로" 라는 뜻이다.
 
 스크립트는 `uname` 으로 플랫폼을 가려 최신 릴리스에서 맞는 바이너리를 `~/.local/bin/kyu` 에 놓는다.
 **업데이트도 같은 명령을 다시 실행하면 된다** — 항상 최신 릴리스를 받아 기존 바이너리를 덮어쓴다.
-토큰이 만료 전이면 그대로 쓰고, 몇 버전인지는 `kyu version` 으로 확인한다.
+몇 버전인지는 `kyu version` 으로 확인한다.
 
 자리를 바꾸려면 먼저 내보낸다.
 
@@ -94,52 +73,12 @@ export KYU_INSTALL_DIR=/usr/local/bin
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-> 이 저장소를 공개로 바꾸면 `Authorization` 헤더 줄만 빼고 같은 명령이 그대로 동작한다.
-> 스크립트가 무인증으로 먼저 물어보고, 거절당했을 때에만 토큰을 꺼내기 때문이다.
+> 무인증이 막히는 특수한 자리(레이트리밋에 걸린 CI 등)에서는 `GITHUB_TOKEN` 을 내보내 두면
+> 스크립트가 그 토큰으로 다시 받는다. 평소에는 쓸 일이 없다.
 
-### B. gh 로 내려받기
+### B. go install
 
-`gh` 에 이미 로그인해 둔 머신이면 세 줄이다.
-
-```sh
-mkdir -p ~/.local/bin
-gh release download -R maximinhan/Kyuchestration \
-  --pattern 'kyu_linux_amd64' -O ~/.local/bin/kyu
-chmod +x ~/.local/bin/kyu
-```
-
-macOS 는 패턴만 바꾼다 — Apple Silicon 은 `kyu_darwin_arm64`, Intel 은 `kyu_darwin_amd64`.
-
-읽기만 하므로 이미 해 둔 `gh` 인증에 아무 영향이 없다. 다만 그 머신의 `gh` 가 다른 계정으로
-로그인돼 있으면 이 저장소를 보지 못한다. 그때 계정을 바꾸는 대신 방식 A 를 쓴다 — A 는 `gh` 를
-아예 지나가지 않는다.
-
-### C. go install
-
-Go 가 있는 머신에서 클론 없이 설치한다. 프라이빗 저장소라 두 가지를 먼저 맞춘다.
-
-```sh
-# 1. 모듈 프록시와 체크섬 DB 를 지나가지 않게 한다. 둘 다 이 모듈을 볼 수 없어서,
-#    그대로 두면 설치가 프록시 단계에서 404 로 끝난다.
-go env -w GOPRIVATE='github.com/maximinhan/*'
-
-# 2. go 가 쓰는 git HTTPS 자격증명을 gh 인증에 연결한다
-gh auth setup-git
-```
-
-`gh` 를 쓰지 않는다면 2번 대신 토큰을 git 에 물린다.
-
-```sh
-git config --global url."https://<토큰>@github.com/".insteadOf "https://github.com/"
-```
-
-이 방법은 토큰이 `~/.gitconfig` 에 평문으로 남는다. 만료를 짧게 잡고, 다 쓰면 지운다.
-
-```sh
-git config --global --unset url."https://<토큰>@github.com/".insteadOf
-```
-
-그다음.
+Go 가 있는 머신에서 클론 없이 설치한다.
 
 ```sh
 go install github.com/maximinhan/Kyuchestration/cmd/kyu@latest
@@ -150,7 +89,7 @@ go install github.com/maximinhan/Kyuchestration/cmd/kyu@latest
 이 경로로 받은 바이너리에는 릴리스 빌드의 버전 주입이 없다. 대신 `kyu version` 이 모듈 버전을
 답한다 — 태그가 있으면 `v0.1.0`, 없으면 커밋이 박힌 유사 버전이다.
 
-### D. 소스 빌드
+### C. 소스 빌드
 
 이 저장소를 고치는 중이라면 이것이다.
 
@@ -507,6 +446,10 @@ kyu clone --profile 개인 \
 
 #### `kyu clone` 의 토큰
 
+**이 토큰은 이 저장소가 아니라 여러분의 레포에 접근하기 위한 것이다.** Kyuchestration 은 공개라
+[설치](#설치)에 인증이 필요 없다. 여기서 묻는 토큰은 워크디렉토리에 클론할 여러분의 레포 —
+비공개일 수 있는 — 를 GitHub 에서 보고 받아 오는 데 쓴다.
+
 **머신에 굴러다니는 인증을 읽지 않는다.** `GITHUB_TOKEN` 환경변수도, `gh` 의 로그인도 쓰지 않는다.
 그런 것을 집어 쓰면 회사 토큰이 깔린 머신에서 개인 레포를 클론하려던 사람이 엉뚱한 계정의 목록을
 보게 되고, 무엇으로 인증했는지 화면에서 확인할 방법도 없다. 쓰는 것은 직접 등록한 토큰뿐이고,
@@ -528,9 +471,6 @@ GitHub personal access token (입력은 보이지 않습니다):
 |---|---|
 | 클래식 | `repo` — 비공개 레포를 목록에 띄우고 클론하는 데 필요하다 |
 | fine-grained | Repository permissions → **Contents: Read**. 조직 레포까지 보려면 그 조직을 토큰의 대상(Resource owner)에 포함한다 |
-
-> 설치 방식 [A](#a-설치-스크립트-추천) 의 토큰과 다르다. 그쪽은 릴리스 자산을 내려받는 최소
-> 토큰이라 이 목록을 볼 권한이 없다. 같은 토큰을 쓰고 싶다면 권한을 넓혀 발급한다.
 
 토큰은 이 머신에만 저장된다. 저장 자리는 순서대로 고른다.
 
@@ -898,9 +838,9 @@ kyu v0.1.0 (a1b2c3d4e5f6)
 
 | 설치 방식 | `kyu version` 이 답하는 것 |
 |---|---|
-| 릴리스 바이너리 (A·B) | 릴리스 태그. 빌드할 때 링커가 박아 넣는다 |
-| `go install` (C) | 모듈 버전. 태그가 없으면 커밋이 들어간 유사 버전 |
-| 소스 빌드 (D) | 유사 버전 + 커밋 |
+| 릴리스 바이너리 (A) | 릴리스 태그. 빌드할 때 링커가 박아 넣는다 |
+| `go install` (B) | 모듈 버전. 태그가 없으면 커밋이 들어간 유사 버전 |
+| 소스 빌드 (C) | 유사 버전 + 커밋 |
 
 `tmux` 없이도 답한다. 릴리스 바이너리는 tmux 를 아직 깔지 않은 새 머신에 먼저 도착한다.
 
@@ -996,7 +936,7 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 
 아무것도 없는 자리에서 시작한다면 이 순서다.
 
-1. **`kyu` 를 설치한다** — [설치](#설치)의 네 방식 중 하나. `kyu version` 이 답하면 됐다.
+1. **`kyu` 를 설치한다** — [설치](#설치)의 세 방식 중 하나. `kyu version` 이 답하면 됐다.
 2. **앱을 띄운다**
 
    ```sh
