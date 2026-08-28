@@ -136,9 +136,11 @@ fail_no_release_yet() {
          "v 로 시작하는 태그를 밀면 릴리스가 만들어집니다 (.github/workflows/release.yml)."
 }
 
-# explain_missing_token 은 토큰이 아예 없을 때 무엇을 하면 되는지 알린다.
+# explain_missing_token 은 무인증 접근이 거부됐고 토큰도 없을 때 무엇을 하면 되는지 알린다.
+# 저장소가 public 이 된 뒤로 이 자리는 레이트리밋·네트워크 문제, 또는 저장소가
+# 다시 프라이빗이 된 경우에만 닿는다 — 원인을 단정하지 않고 전부 알린다.
 explain_missing_token() {
-    fail "이 저장소는 아직 프라이빗이라 토큰이 필요합니다." \
+    fail "저장소 정보를 무인증으로 읽지 못했습니다 — 레이트리밋이거나, 네트워크 문제거나, 저장소가 프라이빗일 수 있습니다." \
          "" \
          "fine-grained personal access token 을 발급하세요:" \
          "  1. https://github.com/settings/personal-access-tokens/new" \
