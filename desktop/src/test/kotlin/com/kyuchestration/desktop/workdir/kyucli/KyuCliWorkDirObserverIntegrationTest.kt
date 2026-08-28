@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.kyu.realKyuCommandRunnerOrSkip
 import com.kyuchestration.desktop.workdir.RepoState
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path

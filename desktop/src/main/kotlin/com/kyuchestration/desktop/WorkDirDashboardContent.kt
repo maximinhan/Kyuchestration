@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,6 +38,7 @@ fun WorkDirDashboardContent(
     observed: WorkDirDashboardState.WorkDirObserved,
     initializationState: WorkDirInitializationState,
     onInitializeOpenedWorkDirRequested: () -> Unit,
+    onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
@@ -45,7 +47,12 @@ fun WorkDirDashboardContent(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        WorkDirHeader(observed.snapshot, onRefreshRequested, onCloseWorkDirRequested)
+        WorkDirHeader(
+            snapshot = observed.snapshot,
+            onCloneRepositoriesRequested = onCloneRepositoriesRequested,
+            onRefreshRequested = onRefreshRequested,
+            onCloseWorkDirRequested = onCloseWorkDirRequested,
+        )
 
         if (!observed.planFilePresent) {
             PlanFileMissingBanner(initializationState, onInitializeOpenedWorkDirRequested)
@@ -112,6 +119,7 @@ private fun PlanFileMissingBanner(
 @Composable
 private fun WorkDirHeader(
     snapshot: WorkDirSnapshot,
+    onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
 ) {
@@ -133,6 +141,11 @@ private fun WorkDirHeader(
 
         Spacer(Modifier.weight(1f))
 
+        // 워크디렉토리를 채우는 일이라 목록 위가 그 자리다. 카드가 없는 워크디렉토리에서는 이
+        // 버튼이 유일한 다음 걸음이고, 카드가 있어도 레포를 더 넣는 일은 늘 여기서 시작한다.
+        Button(onClick = onCloneRepositoriesRequested) { Text("레포 클론") }
+        Spacer(Modifier.width(8.dp))
+
         // 화면은 3 초마다 저절로 갱신되지만 버튼을 둔다. 방금 세션을 띄운 사람은 그 결과를
         // 곧바로 보고 싶어 하고, 다음 주기까지 기다리는 동안 앱이 멈춘 것처럼 보인다.
         OutlinedButton(onClick = onRefreshRequested) { Text("새로고침") }
@@ -147,7 +160,7 @@ private fun RepoCardList(snapshot: WorkDirSnapshot, onEnterSessionRequested: (Se
         if (snapshot.repos.isEmpty()) {
             item {
                 Text(
-                    text = "이 워크디렉토리 바로 아래에 클론된 레포가 없습니다. kyu clone 으로 받아 오세요.",
+                    text = "이 워크디렉토리 바로 아래에 클론된 레포가 없습니다. 위의 레포 클론으로 받아 오세요.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

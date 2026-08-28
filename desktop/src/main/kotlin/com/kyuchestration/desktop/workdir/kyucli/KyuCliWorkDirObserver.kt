@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.kyu.KyuCommandFailure
+import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import com.kyuchestration.desktop.workdir.WorkDirObserver
 import com.kyuchestration.desktop.workdir.WorkDirSnapshot

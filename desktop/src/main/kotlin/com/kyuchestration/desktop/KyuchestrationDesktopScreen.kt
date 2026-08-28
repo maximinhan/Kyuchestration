@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
@@ -47,11 +48,18 @@ fun KyuchestrationDesktopScreen(
     dashboardState: WorkDirDashboardState,
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
+    /**
+     * 레포를 골라 받아 오는 대화상자가 자기 상태를 직접 구독한다. 다른 상태들처럼 위에서 받아
+     * 내려보내지 않는 이유는, 그 상태를 보는 곳이 대화상자 하나뿐이기 때문이다 — 여기서
+     * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
+     */
+    repositoryCloneStateHolder: RepositoryCloneStateHolder,
     onOpenWorkDirRequested: () -> Unit,
     onChooseNewWorkDirParentRequested: () -> Path?,
     onCreateWorkDirRequested: (Path, String) -> Unit,
     onCreateWorkDirGivenUp: () -> Unit,
     onInitializeOpenedWorkDirRequested: () -> Unit,
+    onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
@@ -73,17 +81,22 @@ fun KyuchestrationDesktopScreen(
                 is WorkDirDashboardState.FirstObservationRunning ->
                     FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
 
-                is WorkDirDashboardState.WorkDirObserved ->
+                is WorkDirDashboardState.WorkDirObserved -> {
                     DashboardWithTerminal(
                         observed = dashboardState,
                         initializationState = initializationState,
                         terminalState = terminalState,
                         onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
+                        onCloneRepositoriesRequested = onCloneRepositoriesRequested,
                         onRefreshRequested = onRefreshRequested,
                         onCloseWorkDirRequested = onCloseWorkDirRequested,
                         onEnterSessionRequested = onEnterSessionRequested,
                         onCloseTerminalRequested = onCloseTerminalRequested,
                     )
+
+                    // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
+                    RepositoryCloneDialog(repositoryCloneStateHolder)
+                }
 
                 is WorkDirDashboardState.FirstObservationFailed ->
                     ObservationFailureScreen(
@@ -110,6 +123,7 @@ private fun DashboardWithTerminal(
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
     onInitializeOpenedWorkDirRequested: () -> Unit,
+    onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
@@ -121,6 +135,7 @@ private fun DashboardWithTerminal(
                 observed = observed,
                 initializationState = initializationState,
                 onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
+                onCloneRepositoriesRequested = onCloneRepositoriesRequested,
                 onRefreshRequested = onRefreshRequested,
                 onCloseWorkDirRequested = onCloseWorkDirRequested,
                 onEnterSessionRequested = onEnterSessionRequested,

@@ -1,5 +1,9 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.kyu.KyuCommandFailure
+import com.kyuchestration.desktop.kyu.KyuCommandResult
+import com.kyuchestration.desktop.kyu.RecordingKyuCommandRunner
+import com.kyuchestration.desktop.kyu.succeedingKyuCommandResult
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 import kotlin.io.path.absolutePathString
@@ -12,7 +16,7 @@ class KyuCliWorkDirObserverTest {
 
     @Test
     fun `워크디렉토리 절대경로를 붙여 kyu list --json 을 부른다`() {
-        val runner = RecordingKyuCommandRunner { succeedingResult(EMPTY_WORK_DIR_OUTPUT) }
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(EMPTY_WORK_DIR_OUTPUT) }
 
         KyuCliWorkDirObserver(runner).observe(Path.of("/home/me/work/WorkDir-featureX"))
 
@@ -24,7 +28,7 @@ class KyuCliWorkDirObserverTest {
 
     @Test
     fun `상대 경로로 열어도 kyu 에는 절대경로로 넘긴다`() {
-        val runner = RecordingKyuCommandRunner { succeedingResult(EMPTY_WORK_DIR_OUTPUT) }
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(EMPTY_WORK_DIR_OUTPUT) }
 
         KyuCliWorkDirObserver(runner).observe(Path.of("work/WorkDir-featureX"))
 
@@ -38,7 +42,7 @@ class KyuCliWorkDirObserverTest {
 
     @Test
     fun `볼 자리를 인자로 못 박았으므로 작업 디렉토리는 정하지 않는다`() {
-        val runner = RecordingKyuCommandRunner { succeedingResult(EMPTY_WORK_DIR_OUTPUT) }
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(EMPTY_WORK_DIR_OUTPUT) }
 
         KyuCliWorkDirObserver(runner).observe(Path.of("/w/없는곳"))
 
@@ -49,7 +53,7 @@ class KyuCliWorkDirObserverTest {
 
     @Test
     fun `정상 출력은 스냅샷이 된다`() {
-        val runner = RecordingKyuCommandRunner { succeedingResult(EMPTY_WORK_DIR_OUTPUT) }
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(EMPTY_WORK_DIR_OUTPUT) }
 
         val snapshot = KyuCliWorkDirObserver(runner).observe(Path.of("/w"))
 
@@ -96,23 +100,6 @@ class KyuCliWorkDirObserverTest {
         }
 
         assertTrue("Permission denied" in failure.guidance)
-    }
-
-    private fun succeedingResult(standardOutput: String) =
-        KyuCommandResult(exitCode = 0, standardOutput = standardOutput, standardError = "")
-
-    private class RecordingKyuCommandRunner(
-        private val respondTo: (List<String>) -> KyuCommandResult,
-    ) : KyuCommandRunner {
-
-        val receivedArguments = mutableListOf<List<String>>()
-        val receivedWorkingDirectories = mutableListOf<Path?>()
-
-        override fun run(arguments: List<String>, workingDirectory: Path?): KyuCommandResult {
-            receivedArguments += arguments
-            receivedWorkingDirectories += workingDirectory
-            return respondTo(arguments)
-        }
     }
 
     private companion object {

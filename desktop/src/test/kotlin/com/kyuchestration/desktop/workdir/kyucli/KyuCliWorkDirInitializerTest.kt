@@ -1,5 +1,9 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.kyu.KyuCommandFailure
+import com.kyuchestration.desktop.kyu.KyuCommandResult
+import com.kyuchestration.desktop.kyu.RecordingKyuCommandRunner
+import com.kyuchestration.desktop.kyu.succeedingKyuCommandResult
 import com.kyuchestration.desktop.workdir.WorkDirInitializationResult
 import java.io.IOException
 import java.nio.file.Path
@@ -101,23 +105,6 @@ class KyuCliWorkDirInitializerTest {
         assertTrue("Permission denied" in notInitialized.reason, notInitialized.reason)
     }
 
-    private fun succeeded() = KyuCommandResult(
-        exitCode = 0,
-        standardOutput = "워크디렉토리를 초기화했습니다: /home/me/work/WorkDir-featureX\n",
-        standardError = "",
-    )
-
-    private class RecordingKyuCommandRunner(
-        private val respondTo: (List<String>) -> KyuCommandResult,
-    ) : KyuCommandRunner {
-
-        val receivedArguments = mutableListOf<List<String>>()
-        val receivedWorkingDirectories = mutableListOf<Path?>()
-
-        override fun run(arguments: List<String>, workingDirectory: Path?): KyuCommandResult {
-            receivedArguments += arguments
-            receivedWorkingDirectories += workingDirectory
-            return respondTo(arguments)
-        }
-    }
+    private fun succeeded() =
+        succeedingKyuCommandResult("워크디렉토리를 초기화했습니다: /home/me/work/WorkDir-featureX\n")
 }
