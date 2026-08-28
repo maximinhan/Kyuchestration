@@ -11,12 +11,12 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
 import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
+import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
 import com.kyuchestration.desktop.kyu.planFileExistsIn
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.pty.PtyKyuSessionTerminalAttacher
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
-import com.kyuchestration.desktop.workdir.kyucli.ProcessKyuCommandRunner
 
 /**
  * 조립이 일어나는 유일한 자리.

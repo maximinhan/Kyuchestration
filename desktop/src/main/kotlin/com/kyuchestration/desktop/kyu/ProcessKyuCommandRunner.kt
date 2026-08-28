@@ -1,6 +1,5 @@
-package com.kyuchestration.desktop.workdir.kyucli
+package com.kyuchestration.desktop.kyu
 
-import com.kyuchestration.desktop.kyu.findKyuExecutableOnSystemPath
 import java.io.IOException
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture

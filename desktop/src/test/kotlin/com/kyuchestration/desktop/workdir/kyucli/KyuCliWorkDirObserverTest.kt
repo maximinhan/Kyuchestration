@@ -1,5 +1,8 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.kyu.KyuCommandFailure
+import com.kyuchestration.desktop.kyu.KyuCommandResult
+import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 import kotlin.io.path.absolutePathString

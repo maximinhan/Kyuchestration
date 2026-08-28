@@ -1,4 +1,4 @@
-package com.kyuchestration.desktop.workdir.kyucli
+package com.kyuchestration.desktop.kyu
 
 import java.nio.file.Path
 import kotlin.io.path.isExecutable

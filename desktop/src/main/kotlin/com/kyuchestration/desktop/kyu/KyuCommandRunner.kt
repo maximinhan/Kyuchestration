@@ -1,4 +1,4 @@
-package com.kyuchestration.desktop.workdir.kyucli
+package com.kyuchestration.desktop.kyu
 
 import java.nio.file.Path
 
@@ -7,6 +7,11 @@ import java.nio.file.Path
  *
  * 어댑터 안쪽의 이음매다. 이 인터페이스가 있어야 "출력을 어떻게 읽고 실패를 어떻게 옮기는가" 를
  * 실제 프로세스 없이 시험할 수 있다.
+ *
+ * 관찰 어댑터(workdir.kyucli) 안에 있다가 이 패키지로 나왔다. 부르는 자리가 워크디렉토리 밖으로
+ * 늘면서(레포 클론은 GitHub 에 묻는 일이라 워크디렉토리와 상관이 없다) 한쪽 어댑터 안에 두면
+ * 다른 어댑터가 그 패키지를 들여다보게 된다 — 어댑터끼리 서로를 아는 자리가 생기는 것이다.
+ * 이 패키지는 원래 "kyu 가 어디에 있는가" 를 아는 곳이었고, "kyu 를 어떻게 부르는가" 도 같은 앎이다.
  */
 interface KyuCommandRunner {
 
