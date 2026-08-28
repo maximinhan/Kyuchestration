@@ -25,11 +25,13 @@ class KyuAttachTtyConnectorTest {
         connector.write("echo 뀨케스트레이션-확인; exit\n")
         val output = connector.readUntilClosed()
 
-        assertEquals(0, connector.waitFor())
+        // 무엇이 나왔는지를 먼저 본다. 종료 코드가 앞에 있으면 셸이 우리가 쓴 것과 다른 줄을
+        // 실행했을 때 "0 이 아니다" 만 남고, 정작 원인인 그 줄이 어디에도 찍히지 않는다.
         assertTrue(
             "뀨케스트레이션-확인" in output,
             "PTY 가 낸 출력에 echo 결과가 있어야 한다. 실제로 읽은 것: $output",
         )
+        assertEquals(0, connector.waitFor(), "셸이 정상으로 끝나야 한다. PTY 가 낸 것: $output")
     }
 
     @Test
@@ -52,7 +54,21 @@ class KyuAttachTtyConnectorTest {
 
     private fun shellInPty(): KyuAttachTtyConnector {
         val ptyProcess = PtyProcessBuilder(arrayOf("sh"))
-            .setEnvironment(mapOf("TERM" to "xterm-256color", "PATH" to System.getenv("PATH")))
+            .setEnvironment(
+                mapOf(
+                    "TERM" to "xterm-256color",
+                    "PATH" to System.getenv("PATH"),
+                    // 터미널을 여는 쪽은 자식에게 두 가지를 말해 줘야 한다 — 어떤 화면인가(TERM)와
+                    // 어떤 글자인가(LANG). 커넥터는 자기 쪽 인코딩을 UTF-8 로 못 박아 두는데
+                    // (KyuAttachTtyConnector 가 ProcessTtyConnector 에 넘기는 Charsets.UTF_8),
+                    // 자식에게 같은 말을 하지 않으면 맥의 /bin/sh(bash 3.2)가 C 로케일로 뜬다.
+                    // 그 readline 은 8 비트 바이트를 글자가 아니라 Meta 키 조합으로 읽어서, 한글
+                    // 한 글자가 편집 명령 여럿이 된다 — 우리가 쓴 줄 대신 히스토리에서 끌려 나온
+                    // 다른 줄이 실행되고, 셸은 그 줄의 결과(127)로 끝났다.
+                    // 리눅스의 /bin/sh(dash)는 줄 편집기 자체가 없어 이 구멍이 보이지 않았다.
+                    "LANG" to "en_US.UTF-8",
+                ),
+            )
             .setInitialColumns(80)
             .setInitialRows(24)
             .start()
