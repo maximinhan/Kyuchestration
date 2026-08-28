@@ -81,7 +81,11 @@ func workDirPathFromListArgs(args []string) (string, error) {
 	}
 }
 
-// listRow 는 목록의 한 줄이다. 레포 하나 또는 메인 세션에 대응한다.
+// listRow 는 사람이 읽는 표의 한 줄이다. 레포 하나 또는 메인 세션에 대응한다.
+//
+// 관찰 결과가 아니라 그것을 표로 옮긴 결과다. 같은 관찰에서 --json 은 전혀 다른 모양을 만들어내므로,
+// 표에만 있는 것 — 메인 세션을 레포와 같은 어휘로 부르는 것, 계획을 한 줄 문구로 접는 것 —
+// 은 이 타입 안에서 끝나야 한다.
 type listRow struct {
 	// label 은 화면에 찍히고 사용자가 명령 인자로 되돌려 주는 이름이다.
 	label string
@@ -92,23 +96,46 @@ type listRow struct {
 
 	// planNote 는 계획에서 이 레포를 보고 뽑은 한 줄이다(설계 문서 9.3 의 "[commons-event] done").
 	// 계획이 없거나 이 레포를 가리키는 작업이 없으면 빈 문자열이고, 그러면 그 칸은 비어 있다.
-	//
-	// 관찰이 아니라 표시 문구를 행에 담는 이유는 이 타입이 "화면에 옮기기 직전의 결과" 여서다.
-	// 어느 작업을 보여줄지 고르는 판단은 행마다 한 번이면 되고, 출력 시점에 다시 계획을 뒤지면
-	// 그 판단이 표 조립 코드 안으로 흩어진다.
 	planNote string
 }
 
-// workDirListing 은 화면에 옮기기 직전의 관찰 결과다.
+// observedRepo 는 레포 하나에 대해 관찰과 계획 조회가 모두 끝난 결과다.
 //
-// 관찰과 출력을 이 타입에서 끊는다. 출력 형식을 바꿀 때 판정 코드를 건드리지 않아도 되고,
+// 표시 문구를 담지 않는다. 이 값 하나에서 사람용 표의 한 줄도, JSON 의 레포 항목도 나오는데,
+// 관찰 단계에서 문자열로 굳혀버리면 뒤에 오는 출력은 그 문자열을 되파싱하는 수밖에 없다.
+type observedRepo struct {
+	// name 은 워크디렉토리 바로 아래의 디렉토리명이다. 사용자가 명령 인자로 되돌려 주는 이름이다.
+	name string
+
+	// absolutePath 는 레포의 절대경로다. 이름은 레포를 특정하지 못하므로(설계 문서 11절 4번),
+	// 이 도구 밖에서 그 레포를 여는 쪽 — 이를테면 GUI — 은 이름이 아니라 이 값을 봐야 한다.
+	absolutePath string
+
+	// state 는 도구가 세션과 git 을 관찰해 판정한 상태다.
+	state workdir.RepoState
+
+	// planSummary 는 계획에서 이 레포를 보고 뽑은 것이다. 계획이 없으면 영 값이다.
+	planSummary repoPlanSummary
+}
+
+// workDirListing 은 출력에 옮기기 직전의 관찰 결과다.
+//
+// 관찰과 출력을 이 타입에서 끊는다. 출력 형식이 늘어도(사람용 표, --json) 판정 코드는 그대로이고,
 // v2 에서 TUI 가 표시 계층을 대신할 때 가져갈 것이 무엇인지도 이 타입이 알려준다.
 type workDirListing struct {
 	workDirName string
-	repoRows    []listRow
-	mainRow     listRow
 
-	// planWarnings 는 계획을 그대로 쓰지 못한 이유들이다. 비어 있지 않으면 stderr 로 나간다.
+	// workDirAbsolutePath 는 관찰한 워크디렉토리의 절대경로다. 인자로 받은 "." 을 편 결과다.
+	workDirAbsolutePath string
+
+	repos []observedRepo
+
+	// mainSessionAlive 는 메인 세션이 떠 있는지다. 레포처럼 상태 어휘를 쓰지 않는다 —
+	// 판정 근거가 세션 생존 하나뿐이라(inspectWorkDir 아래 isMainSessionAlive) 참·거짓이 그 사실 전부다.
+	mainSessionAlive bool
+
+	// planWarnings 는 계획을 그대로 쓰지 못한 이유들이다. 사람용 모드에서는 stderr 로 나가고,
+	// JSON 모드에서는 문서의 한 필드로 들어간다.
 	planWarnings []string
 }
 
@@ -117,9 +144,22 @@ type workDirListing struct {
 // 레포는 ScanRepos 가 준 이름순 그대로이고 메인은 마지막이다. 메인은 레포가 아니라 그 묶음을
 // 관장하는 자리라, 이름순에 섞여 들어가면 정렬 규칙이 깨진 것처럼 보인다.
 func (listing workDirListing) displayRows() []listRow {
-	rows := make([]listRow, 0, len(listing.repoRows)+1)
-	rows = append(rows, listing.repoRows...)
-	return append(rows, listing.mainRow)
+	rows := make([]listRow, 0, len(listing.repos)+1)
+	for _, repo := range listing.repos {
+		rows = append(rows, listRow{label: repo.name, state: repo.state, planNote: repo.planSummary.note()})
+	}
+	return append(rows, listing.mainDisplayRow())
+}
+
+// mainDisplayRow 는 메인 세션 행을 만든다.
+//
+// 계획 칸을 두지 않는다. 계획의 작업은 레포에서 수행하는 것이고(설계 문서 6.1 의 repo 필드),
+// 메인 세션은 코드를 직접 고치지 않는 조율용 자리다(설계 문서 5.4).
+func (listing workDirListing) mainDisplayRow() listRow {
+	if listing.mainSessionAlive {
+		return listRow{label: mainRowLabel, state: workdir.RepoStateRunning}
+	}
+	return listRow{label: mainRowLabel, state: workdir.RepoStateIdle}
 }
 
 // liveSessionCount 는 이 워크디렉토리에서 살아있는 세션 수를 센다(메인 포함).
@@ -158,7 +198,7 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 		return workDirListing{}, err
 	}
 
-	repoRows := make([]listRow, 0, len(repos))
+	observedRepos := make([]observedRepo, 0, len(repos))
 	for _, repo := range repos {
 		repoSessionName := session.RepoSessionName(workDirName, repo.Name)
 
@@ -169,43 +209,43 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 			return workDirListing{}, fmt.Errorf("레포 상태 판정 실패 (%s): %w", repo.Name, err)
 		}
 
-		repoRows = append(repoRows, listRow{label: repo.Name, state: state, planNote: planNoteForRepo(plan, repo.Name)})
+		observedRepos = append(observedRepos, observedRepo{
+			name:         repo.Name,
+			absolutePath: repo.AbsolutePath,
+			state:        state,
+			planSummary:  summarizeRepoPlan(plan, repo.Name),
+		})
 	}
 
-	mainRow, err := inspectMainSession(workDirName, backend)
+	mainSessionAlive, err := isMainSessionAlive(workDirName, backend)
 	if err != nil {
 		return workDirListing{}, err
 	}
 
-	// 메인 행에는 계획 칸을 두지 않는다. 계획의 작업은 레포에서 수행하는 것이고(설계 문서 6.1 의 repo 필드),
-	// 메인 세션은 코드를 직접 고치지 않는 조율용 자리다(설계 문서 5.4).
 	planWarnings := append(plan.Warnings, missingRepoWarnings(plan, repos, workdir.PlanFilePath(absoluteWorkDirPath))...)
 
 	return workDirListing{
-		workDirName:  workDirName,
-		repoRows:     repoRows,
-		mainRow:      mainRow,
-		planWarnings: planWarnings,
+		workDirName:         workDirName,
+		workDirAbsolutePath: absoluteWorkDirPath,
+		repos:               observedRepos,
+		mainSessionAlive:    mainSessionAlive,
+		planWarnings:        planWarnings,
 	}, nil
 }
 
-// inspectMainSession 은 메인 세션 행을 만든다.
+// isMainSessionAlive 는 메인 세션이 떠 있는지 묻는다.
 //
 // 레포와 달리 git 에 묻지 않는다. 메인 세션이 뜨는 곳은 워크디렉토리 최상위이고 그곳은 레포가 아니다
 // (설계 문서 5.4). 거기에 굴러다니는 파일은 커밋할 대상이 아니므로 DIRTY 라고 말하면 거짓이 된다.
 // 판정 근거는 세션 생존 하나뿐이다.
-func inspectMainSession(workDirName string, backend session.SessionBackend) (listRow, error) {
+func isMainSessionAlive(workDirName string, backend session.SessionBackend) (bool, error) {
 	mainSessionName := session.MainSessionName(workDirName)
 
 	isAlive, err := backend.IsAlive(mainSessionName)
 	if err != nil {
-		return listRow{}, fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
+		return false, fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
 	}
-
-	if isAlive {
-		return listRow{label: mainRowLabel, state: workdir.RepoStateRunning}, nil
-	}
-	return listRow{label: mainRowLabel, state: workdir.RepoStateIdle}, nil
+	return isAlive, nil
 }
 
 const (
@@ -238,10 +278,10 @@ func writeWorkDirListing(out io.Writer, listing workDirListing) error {
 
 	fmt.Fprintf(&rendered, "WorkDir: %s   (%s, %s)\n\n",
 		listing.workDirName,
-		countWithEnglishPlural(len(listing.repoRows), "repo"),
+		countWithEnglishPlural(len(listing.repos), "repo"),
 		countWithEnglishPlural(listing.liveSessionCount(), "session"))
 
-	if len(listing.repoRows) == 0 {
+	if len(listing.repos) == 0 {
 		// 빈 목록만 보여주면 사용자는 도구가 레포를 못 찾은 것인지 아직 아무것도 없는 것인지 모른다.
 		// 메인 행은 그대로 이어 붙인다 — 레포가 하나도 없어도 메인 세션은 떠 있을 수 있다.
 		fmt.Fprintf(&rendered, "%s%s\n\n", rowIndent, emptyWorkDirGuidance)

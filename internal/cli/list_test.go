@@ -184,8 +184,8 @@ func TestInspectWorkDirCountsMainSessionAsLiveWhenItIsAlive(t *testing.T) {
 	}
 
 	want := listRow{label: "main", state: workdir.RepoStateRunning}
-	if listing.mainRow != want {
-		t.Errorf("mainRow = %+v, want %+v", listing.mainRow, want)
+	if got := listing.mainDisplayRow(); got != want {
+		t.Errorf("mainDisplayRow() = %+v, want %+v", got, want)
 	}
 	// 메인도 이 워크디렉토리의 세션이므로 숫자에 들어간다(설계 문서 9.3 의 "2 sessions" 가 메인을 포함한다).
 	if got := listing.liveSessionCount(); got != 1 {
@@ -205,8 +205,8 @@ func TestInspectWorkDirDoesNotJudgeGitStateOfMainRow(t *testing.T) {
 	}
 
 	want := listRow{label: "main", state: workdir.RepoStateIdle}
-	if listing.mainRow != want {
-		t.Errorf("mainRow = %+v, want %+v", listing.mainRow, want)
+	if got := listing.mainDisplayRow(); got != want {
+		t.Errorf("mainDisplayRow() = %+v, want %+v", got, want)
 	}
 }
 
