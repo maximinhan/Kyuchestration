@@ -28,6 +28,7 @@ import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import javax.swing.SwingUtilities
 
 /**
  * 세션 하나가 앱 안에서 보이는 자리.
@@ -111,7 +112,13 @@ private fun AttachedTerminal(ttyConnector: TtyConnector) {
     DisposableEffect(terminalWidget) {
         // 읽기 스레드를 띄운다. 이것을 부르기 전까지 화면은 통로에서 아무것도 읽지 않는다.
         terminalWidget.start()
-        terminalWidget.requestFocusInWindow()
+
+        // 키를 받을 자리를 이 터미널로 옮긴다. 카드를 누른 사람이 바라는 다음 동작은 타이핑이지
+        // 터미널을 한 번 더 누르는 것이 아니다.
+        //
+        // 지금 부르면 아무 일도 일어나지 않는다 — SwingPanel 이 이 컴포넌트를 창에 붙이는 것은
+        // 이 합성이 끝난 뒤이고, 창에 붙지 않은 컴포넌트는 포커스를 받지 못한다.
+        SwingUtilities.invokeLater { terminalWidget.requestFocusInWindow() }
 
         onDispose {
             // 위젯이 화면에서 사라진다는 것은 이 터미널을 놓는다는 뜻이다. 상태 홀더가 이미
