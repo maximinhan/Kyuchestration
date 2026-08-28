@@ -18,7 +18,17 @@ class KyuCliWorkDirObserver(private val kyuCommandRunner: KyuCommandRunner) : Wo
     override fun observe(workDirPath: Path): WorkDirSnapshot {
         // 절대경로로 못 박아 넘긴다. 상대 경로는 kyu 프로세스의 작업 디렉토리 기준으로 풀리는데,
         // 그것은 GUI 를 어디서 띄웠는지에 달려 있어 사용자가 고른 곳과 다를 수 있다.
-        val result = kyuCommandRunner.run(listOf("list", workDirPath.absolutePathString(), "--json"))
+        val result = try {
+            kyuCommandRunner.run(listOf("list", workDirPath.absolutePathString(), "--json"))
+        } catch (failure: KyuCommandFailure) {
+            // 실행기는 "부르지 못했다" 는 사실만 던진다. 그 사실을 관찰하던 사람에게 할 말로
+            // 옮기는 것이 이 어댑터의 몫이다.
+            throw when (failure) {
+                is KyuCommandFailure.ExecutableNotFound -> WorkDirObservationFailure.KyuExecutableNotFound()
+                is KyuCommandFailure.FailedToStart ->
+                    WorkDirObservationFailure.KyuFailedToStart(failure.processStartFailure)
+            }
+        }
 
         if (result.exitCode != 0) {
             throw WorkDirObservationFailure.KyuExitedWithFailure(

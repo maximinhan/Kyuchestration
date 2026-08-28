@@ -5,14 +5,12 @@ import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
-import kotlin.io.path.isExecutable
 import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.Assumptions.abort
 
 /**
  * 진짜 kyu 바이너리와 진짜 git 저장소로 어댑터 전체를 한 번 통과시킨다.
@@ -21,8 +19,7 @@ import org.junit.jupiter.api.Assumptions.abort
  * 그 모양으로 온다는 것은 엔진에게 직접 물어야만 알 수 있고, 계약이 조용히 어긋나는 자리도
  * 정확히 거기다.
  *
- * kyu 를 찾지 못하면 건너뛴다. 데스크톱 CI 는 Gradle 만 세우고 Go 는 세우지 않으므로, 여기서
- * 실패로 처리하면 엔진과 무관한 이유로 데스크톱 빌드가 빨개진다.
+ * kyu 를 찾지 못하면 건너뛴다(realKyuCommandRunnerOrSkip).
  */
 class KyuCliWorkDirObserverIntegrationTest {
 
@@ -35,7 +32,7 @@ class KyuCliWorkDirObserverIntegrationTest {
 
     @Test
     fun `실제 kyu 가 관찰한 워크디렉토리를 카드로 그릴 수 있는 스냅샷으로 읽어낸다`() {
-        val observer = KyuCliWorkDirObserver(locateKyuOrSkip())
+        val observer = KyuCliWorkDirObserver(realKyuCommandRunnerOrSkip())
         val workDirPath = temporaryDirectory.resolve("WorkDir-featureX").createDirectories()
 
         gitRepository(workDirPath.resolve("proj-a"))
@@ -72,7 +69,7 @@ class KyuCliWorkDirObserverIntegrationTest {
 
     @Test
     fun `워크디렉토리가 아닌 곳을 열면 kyu 가 남긴 이유를 그대로 받는다`() {
-        val observer = KyuCliWorkDirObserver(locateKyuOrSkip())
+        val observer = KyuCliWorkDirObserver(realKyuCommandRunnerOrSkip())
 
         val failure = assertFailsWith<WorkDirObservationFailure.KyuExitedWithFailure> {
             observer.observe(temporaryDirectory.resolve("있지도-않은-워크디렉토리"))
@@ -80,28 +77,6 @@ class KyuCliWorkDirObserverIntegrationTest {
 
         assertEquals(1, failure.exitCode)
         assertTrue(failure.guidance.isNotBlank(), "kyu 가 stderr 로 남긴 이유가 안내 문구가 되어야 한다")
-    }
-
-    /**
-     * 소스에서 빌드한 바이너리를 겨누려면 KYU_BINARY_PATH 를 준다. 없으면 PATH 에 설치된 kyu 를
-     * 쓰고, 그것도 없으면 이 검증을 건너뛴다.
-     */
-    private fun locateKyuOrSkip(): KyuCommandRunner {
-        val pinnedPath = System.getenv(KYU_BINARY_PATH_VARIABLE)?.let(Path::of)
-        if (pinnedPath != null) {
-            if (!pinnedPath.isExecutable()) {
-                abort<Unit>("$KYU_BINARY_PATH_VARIABLE 가 가리키는 $pinnedPath 를 실행할 수 없습니다")
-            }
-            return ProcessKyuCommandRunner(pinnedPath)
-        }
-
-        val runnerFromSystemPath = ProcessKyuCommandRunner()
-        try {
-            runnerFromSystemPath.run(listOf("version"))
-        } catch (failure: WorkDirObservationFailure.KyuExecutableNotFound) {
-            abort<Unit>("PATH 에도 $KYU_BINARY_PATH_VARIABLE 에도 kyu 가 없어 건너뜁니다 (${failure.message})")
-        }
-        return runnerFromSystemPath
     }
 
     private fun gitRepository(repositoryPath: Path): Path {
@@ -123,8 +98,6 @@ class KyuCliWorkDirObserverIntegrationTest {
     }
 
     private companion object {
-        const val KYU_BINARY_PATH_VARIABLE = "KYU_BINARY_PATH"
-
         val PLAN_WITH_A_BLOCKED_TASK = """
             ---
             tasks:

@@ -1,7 +1,7 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
-import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
+import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.setPosixFilePermissions
 import kotlin.io.path.writeText
@@ -73,9 +73,26 @@ class ProcessKyuCommandRunnerTest {
             setPosixFilePermissions(PosixFilePermissions.fromString("rw-r--r--"))
         }
 
-        assertFailsWith<WorkDirObservationFailure.KyuFailedToStart> {
+        assertFailsWith<KyuCommandFailure.FailedToStart> {
             ProcessKyuCommandRunner(notExecutable).run(emptyList())
         }
+    }
+
+    @Test
+    fun `작업 디렉토리를 주면 그 자리에서 kyu 를 띄운다`() {
+        // kyu init 은 이름을 작업 디렉토리 기준으로 푼다. 그 자리를 정해 주는 것이 실행기의 일이라
+        // 여기서 실제 프로세스의 작업 디렉토리로 전달되는지 확인한다.
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            pwd
+            """.trimIndent(),
+        )
+        val workingDirectory = temporaryDirectory.resolve("여기서-실행").apply { createDirectories() }
+
+        val result = ProcessKyuCommandRunner(executable).run(emptyList(), workingDirectory)
+
+        assertEquals(workingDirectory.toRealPath().toString(), result.standardOutput.trim())
     }
 
     private fun executableScript(source: String): Path =

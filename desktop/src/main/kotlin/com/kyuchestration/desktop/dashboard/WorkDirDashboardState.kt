@@ -30,11 +30,16 @@ sealed interface WorkDirDashboardState {
      *
      * @param lastRefreshFailure 마지막 재관찰이 실패했으면 그 이유. 스냅샷은 실패 직전의 것
      *   그대로다 — 화면은 목록을 지우지 않고 이 사실만 덧붙여 알린다.
+     * @param planFilePresent 이 워크디렉토리에 계획 파일이 있는지. 없어도 목록은 성립하므로
+     *   (kyu list 는 계획 없이도 답한다) 화면을 막는 조건이 아니라 안내 한 줄을 덧붙일 근거다.
+     *   스냅샷 안이 아니라 여기 있는 이유는 kyu 문서가 실어 오는 사실이 아니기 때문이다 —
+     *   WorkDirSnapshot 은 `kyu list --json` 이 말한 것만 담는다.
      */
     data class WorkDirObserved(
         override val workDirPath: Path,
         val snapshot: WorkDirSnapshot,
         val lastRefreshFailure: WorkDirObservationFailure?,
+        val planFilePresent: Boolean,
     ) : WorkDirDashboardState
 
     /** 한 번도 성공하지 못했다. 보여줄 것이 실패의 이유뿐이다. */

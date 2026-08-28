@@ -1,7 +1,6 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
 import com.kyuchestration.desktop.kyu.findKyuExecutableOnSystemPath
-import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.io.IOException
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
@@ -16,17 +15,20 @@ class ProcessKyuCommandRunner(
     private val fixedKyuExecutablePath: Path? = null,
 ) : KyuCommandRunner {
 
-    override fun run(arguments: List<String>): KyuCommandResult {
+    override fun run(arguments: List<String>, workingDirectory: Path?): KyuCommandResult {
         val executable = fixedKyuExecutablePath
             ?: findKyuExecutableOnSystemPath()
-            ?: throw WorkDirObservationFailure.KyuExecutableNotFound()
+            ?: throw KyuCommandFailure.ExecutableNotFound()
 
         val process = try {
-            ProcessBuilder(listOf(executable.toString()) + arguments).start()
+            ProcessBuilder(listOf(executable.toString()) + arguments)
+                .directory(workingDirectory?.toFile())
+                .start()
         } catch (failure: IOException) {
-            // 파일은 있는데 띄우지 못하는 경우다 — 실행 권한이 없거나, 찾은 뒤 지워졌거나.
-            // 이것을 관찰 실패로 옮겨 두지 않으면 폴링 코루틴이 IOException 째로 죽는다.
-            throw WorkDirObservationFailure.KyuFailedToStart(failure)
+            // 파일은 있는데 띄우지 못하는 경우다 — 실행 권한이 없거나, 찾은 뒤 지워졌거나,
+            // 작업 디렉토리로 준 자리가 없거나. 이것을 실패 타입으로 옮겨 두지 않으면 폴링
+            // 코루틴이 IOException 째로 죽는다.
+            throw KyuCommandFailure.FailedToStart(failure)
         }
 
         // 두 파이프를 순서대로 읽으면, 안 읽는 쪽의 버퍼가 먼저 차는 순간 kyu 가 쓰기에서 멈추고
