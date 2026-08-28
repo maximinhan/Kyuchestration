@@ -176,6 +176,33 @@ func removeTokenProfile(out io.Writer, profileName string, tokenStore secretstor
 	return nil
 }
 
+// accessWithStoredToken 은 이름으로 고른 프로필의 토큰으로 GitHub 에 붙는다.
+//
+// 묻지 않는다는 것이 대화형 인증(authenticateWithTokenProfile)과의 차이 전부다. 저장된 토큰이
+// 거절당하면 대화형 흐름은 그 자리에서 새 토큰을 받지만, 기계용 표면에는 되물을 상대가 없다 —
+// 실패로 끝내야 앱이 자기 화면에서 등록을 이끌 수 있다.
+//
+// 붙은 계정까지 돌려준다. 토큰이 유효한지 확인하려면 어차피 GitHub 에 한 번 물어야 하고,
+// 그 답이 곧 개인 계정이 누구인지다 — 뒤이은 소유자 목록이 같은 것을 다시 묻지 않아도 된다.
+func accessWithStoredToken(profileName string, tokenStore secretstore.TokenStore, newAccess RepositoryAccessFactory) (github.RepositoryAccess, github.Owner, error) {
+	token, err := tokenStore.LoadToken(profileName)
+	if errors.Is(err, secretstore.ErrProfileNotFound) {
+		// 없는 이름으로 끝내지 않고 등록된 이름을 함께 알린다. 앱은 그 목록으로 사용자에게
+		// 무엇을 고르라고 할지 정할 수 있다.
+		return nil, github.Owner{}, unknownProfileError(profileName, tokenStore)
+	}
+	if err != nil {
+		return nil, github.Owner{}, fmt.Errorf("%s 프로필의 토큰을 꺼내지 못했습니다: %w", profileName, err)
+	}
+
+	access := newAccess(token)
+	owner, err := access.AuthenticatedOwner()
+	if err != nil {
+		return nil, github.Owner{}, fmt.Errorf("%s 프로필로 GitHub 에 붙지 못했습니다: %w", profileName, err)
+	}
+	return access, owner, nil
+}
+
 // unknownProfileError 는 없는 이름을 받았을 때 실제로 등록된 이름을 함께 알린다.
 func unknownProfileError(profileName string, tokenStore secretstore.TokenStore) error {
 	profiles, err := tokenStore.Profiles()

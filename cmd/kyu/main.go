@@ -33,6 +33,7 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
+  kyu repos <owners>     GitHub 의 소유자 목록 — 기계용 (--json 전용)
   kyu auth <add|list|remove>
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
@@ -101,6 +102,13 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 			return withTokenStore(func(tokenStore secretstore.TokenStore) error {
 				return cli.CloneRepos(in, out, errOut, commandArgs, newGitHubAccess, tokenStore, backend)
 			})
+		})
+
+	// repos 도 세션 백엔드를 거치지 않는다. GitHub 에 무엇이 있는지 묻기만 하는 명령이라
+	// 워크디렉토리도 tmux 도 보지 않는다 — 앱이 아직 워크디렉토리를 만들기 전에 부르는 자리다.
+	case "repos":
+		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+			return cli.BrowseGitHubRepositories(out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
 	// auth 는 세션 백엔드를 거치지 않는다. 토큰을 등록하고 보고 지우는 일이라 tmux 와 무관하고,

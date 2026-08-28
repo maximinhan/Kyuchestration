@@ -175,27 +175,19 @@ func cancellationOrError(out io.Writer, err error) error {
 }
 
 // chooseRepositoryOwner 는 개인 계정과 소속 조직 중 어느 것의 레포를 볼지 고르게 한다.
+//
+// 목록을 모으는 일은 kyu repos owners 와 같은 함수에 맡긴다. 어느 문으로 들어왔든 사용자가
+// 보게 되는 후보가 같아야 한다 — 특히 fine-grained 토큰의 403 을 통과시키는 규칙이 그렇다.
 func chooseRepositoryOwner(prompt *interactivePrompt, errOut io.Writer, access github.RepositoryAccess, personalOwner github.Owner) (github.Owner, error) {
-	organizations, err := access.Organizations()
-
-	// fine-grained 토큰은 조직 목록에 권한이 없으면 403 으로 답한다. 그것으로 명령을 끝내면
-	// 개인 레포를 클론하려던 사용자가 아무것도 하지 못한다 — 이 실패만 통과시킨다.
-	if errors.Is(err, github.ErrForbidden) {
-		fmt.Fprintf(errOut, "이 토큰으로는 조직 목록을 볼 수 없습니다 — %s 계정의 레포만 보여줍니다.\n", personalOwner.Login)
-		return personalOwner, nil
-	}
+	owners, err := listOwnersTheTokenCanSee(errOut, access, personalOwner)
 	if err != nil {
 		return github.Owner{}, err
 	}
 
 	// 고를 것이 하나뿐인 물음은 묻지 않는다. 물으면 사용자는 매번 1 을 치게 된다.
-	if len(organizations) == 0 {
-		return personalOwner, nil
+	if len(owners) == 1 {
+		return owners[0], nil
 	}
-
-	owners := make([]github.Owner, 0, len(organizations)+1)
-	owners = append(owners, personalOwner)
-	owners = append(owners, organizations...)
 
 	fmt.Fprintf(prompt.out, "\n어느 계정의 레포를 볼까요.\n\n")
 	table := tabwriter.NewWriter(prompt.out, 0, 0, tableColumnPadding, ' ', 0)
