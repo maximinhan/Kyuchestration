@@ -37,11 +37,11 @@ func TestCloneClonesEveryRepositoryTheUserSelectedIntoTheWorkDir(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	pushedAt := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
 	gitHub := newTestGitHubWithRepos(
-		makeRepository("proj-a", true, pushedAt),
-		makeRepository("proj-b", false, pushedAt),
-		makeRepository("proj-c", false, pushedAt),
+		makeRepository("proj-a", true, updatedAt),
+		makeRepository("proj-b", false, updatedAt),
+		makeRepository("proj-c", false, updatedAt),
 	)
 	backend := newRecordingSessionBackend()
 
@@ -96,13 +96,13 @@ func TestCloneMarksAndSkipsRepositoriesThatAreAlreadyInTheWorkDir(t *testing.T) 
 	}
 }
 
-func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWerePushed(t *testing.T) {
+func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWereUpdated(t *testing.T) {
 	// 이름만 나열하면 사용자는 목록에서 자기가 찾는 레포를 고르지 못한다. private 표시는
 	// 화면을 공유한 채 목록을 여는 상황에서도 의미가 있다.
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	// 푸시 시각을 실행 머신의 시간대로 만든다. UTC 로 적으면 목록이 로컬 날짜를 찍는 한
+	// 갱신 시각을 실행 머신의 시간대로 만든다. UTC 로 적으면 목록이 로컬 날짜를 찍는 한
 	// 시간대가 다른 머신에서 하루 어긋난 날짜를 기대하게 되어, CI 에서만 깨지는 테스트가 된다.
 	gitHub := newTestGitHubWithRepos(
 		makeRepository("비공개-레포", true, time.Date(2026, 8, 27, 12, 0, 0, 0, time.Local)),
@@ -121,7 +121,7 @@ func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWerePushed(t *testing.T
 		t.Errorf("출력 = %q, private 표시를 기대", listing)
 	}
 	if !strings.Contains(listing, "2026-08-27") {
-		t.Errorf("출력 = %q, 마지막 푸시 날짜를 기대", listing)
+		t.Errorf("출력 = %q, 마지막 갱신 날짜를 기대", listing)
 	}
 }
 

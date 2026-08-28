@@ -42,14 +42,14 @@ const alreadyInWorkDirNote = "(이미 있음)"
 // 하는 것은 "이 중에 비공개가 무엇인가" 쪽이다.
 const privateRepositoryMark = "private"
 
-// neverPushedMark 는 한 번도 푸시하지 않은 레포의 날짜 자리에 들어간다.
-const neverPushedMark = "-"
+// unknownUpdatedDateMark 는 갱신 시각을 받지 못한 레포의 날짜 자리에 들어간다.
+const unknownUpdatedDateMark = "-"
 
-// pushedDateLayout 은 목록에 찍는 마지막 푸시 날짜의 형식이다.
+// updatedDateLayout 은 목록에 찍는 마지막 갱신 날짜의 형식이다.
 //
 // 시각까지 보여주지 않는다. 목록에서 하는 판단은 "최근에 만졌는가" 이고, 그 판단에 분 단위는
 // 필요 없는데 열은 그만큼 넓어진다.
-const pushedDateLayout = "2006-01-02"
+const updatedDateLayout = "2006-01-02"
 
 // newReposNeedASessionRestartWarning 은 방금 클론한 레포가 떠 있는 메인 세션에 닿지 않는다는 안내다.
 //
@@ -230,7 +230,7 @@ func repositoryRowsFor(repositories []github.Repository, absoluteWorkDirPath str
 // writeRepositoryListing 은 고를 수 있는 레포를 번호와 함께 보여준다.
 func writeRepositoryListing(out io.Writer, owner github.Owner, rows []repositoryRow) error {
 	var rendered bytes.Buffer
-	fmt.Fprintf(&rendered, "\n%s 의 레포 %d 개 — 최근 푸시 순\n\n", owner.Login, len(rows))
+	fmt.Fprintf(&rendered, "\n%s 의 레포 %d 개 — 최근 갱신 순\n\n", owner.Login, len(rows))
 
 	table := tabwriter.NewWriter(&rendered, 0, 0, tableColumnPadding, ' ', 0)
 	for rowIndex, row := range rows {
@@ -238,7 +238,7 @@ func writeRepositoryListing(out io.Writer, owner github.Owner, rows []repository
 			rowIndent, rowIndex+1,
 			row.repository.Name,
 			visibilityMark(row.repository),
-			pushedDate(row.repository),
+			updatedDate(row.repository),
 			alreadyThereNote(row))
 	}
 	if err := table.Flush(); err != nil {
@@ -258,11 +258,11 @@ func visibilityMark(repository github.Repository) string {
 	return ""
 }
 
-func pushedDate(repository github.Repository) string {
-	if repository.LastPushedAt.IsZero() {
-		return neverPushedMark
+func updatedDate(repository github.Repository) string {
+	if repository.LastUpdatedAt.IsZero() {
+		return unknownUpdatedDateMark
 	}
-	return repository.LastPushedAt.Local().Format(pushedDateLayout)
+	return repository.LastUpdatedAt.Local().Format(updatedDateLayout)
 }
 
 func alreadyThereNote(row repositoryRow) string {

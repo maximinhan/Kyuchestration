@@ -54,10 +54,12 @@ type Repository struct {
 	// IsPrivate 는 비공개 레포인지다. 목록에 표시해서, 공개 레포만 있다고 믿고 화면을 공유하는 일을 막는다.
 	IsPrivate bool
 
-	// LastPushedAt 은 마지막 푸시 시각이다. 한 번도 푸시하지 않은 레포에서는 영 값이다.
+	// LastUpdatedAt 은 GitHub 이 이 레포를 마지막으로 갱신한 시각이다. 값이 없으면 영 값이다.
 	//
-	// 목록의 정렬 근거이자 사용자가 "지금 작업하던 그 레포" 를 알아보는 단서다.
-	LastPushedAt time.Time
+	// 목록의 정렬 근거이자 사용자가 "지금 작업하던 그 레포" 를 알아보는 단서다. 푸시 시각이
+	// 아니라 갱신 시각인 이유는 순서 때문이다 — 목록은 github.com 의 repositories 탭과 같은
+	// 순서로 내려오는데(sort=updated), 화면에 다른 시각을 찍으면 정렬이 어긋나 보인다.
+	LastUpdatedAt time.Time
 }
 
 // RepositoryAccess 는 토큰 하나로 GitHub 에 붙어 목록을 읽고 레포를 가져오는 한 벌이다.
@@ -73,7 +75,7 @@ type RepositoryAccess interface {
 	// Organizations 는 이 토큰으로 볼 수 있는 소속 조직 전부를 반환한다.
 	Organizations() ([]Owner, error)
 
-	// Repositories 는 해당 소유자의 레포를 최근 푸시 순으로 반환한다.
+	// Repositories 는 해당 소유자의 레포를 최근 갱신 순으로 반환한다.
 	Repositories(owner Owner) ([]Repository, error)
 
 	// CloneRepository 는 레포를 destinationPath 에 클론한다.

@@ -133,12 +133,12 @@ func (access *fakeRepositoryAccess) CloneRepository(repository github.Repository
 }
 
 // makeRepository 는 목록에 나올 레포 하나를 만든다.
-func makeRepository(name string, isPrivate bool, pushedAt time.Time) github.Repository {
+func makeRepository(name string, isPrivate bool, updatedAt time.Time) github.Repository {
 	return github.Repository{
-		Name:         name,
-		OwnerLogin:   "maximinhan",
-		CloneURL:     "https://github.com/maximinhan/" + name + ".git",
-		IsPrivate:    isPrivate,
-		LastPushedAt: pushedAt,
+		Name:          name,
+		OwnerLogin:    "maximinhan",
+		CloneURL:      "https://github.com/maximinhan/" + name + ".git",
+		IsPrivate:     isPrivate,
+		LastUpdatedAt: updatedAt,
 	}
 }
