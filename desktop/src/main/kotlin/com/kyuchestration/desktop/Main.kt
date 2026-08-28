@@ -15,6 +15,7 @@ import com.kyuchestration.desktop.engine.githubrelease.GitHubReleaseEngineInstal
 import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
+import com.kyuchestration.desktop.kyu.findKyuExecutable
 import com.kyuchestration.desktop.kyu.managedEngineDirectory
 import com.kyuchestration.desktop.kyu.planFileExistsIn
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
@@ -46,6 +47,7 @@ fun main() = application {
     val engineInstallationStateHolder = remember(applicationCoroutineScope) {
         EngineInstallationStateHolder(
             engineInstaller = GitHubReleaseEngineInstaller(),
+            findEngineExecutable = ::findKyuExecutable,
             coroutineScope = applicationCoroutineScope,
         )
     }

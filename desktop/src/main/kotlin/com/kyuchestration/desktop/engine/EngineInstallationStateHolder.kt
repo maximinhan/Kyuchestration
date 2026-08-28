@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop.engine
 
-import com.kyuchestration.desktop.kyu.findKyuExecutable
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -14,13 +13,14 @@ import kotlinx.coroutines.withContext
 /**
  * 엔진이 있는지 보고, 없으면 놓는 걸음을 쥔 자리. Compose 를 모른다.
  *
- * @param findEngineExecutable 지금 부를 수 있는 kyu 가 어디 있는지 답하는 자리. 검사가 진짜
- *   PATH 와 홈 디렉토리를 건드리지 않고 있음과 없음을 만들기 위한 이음매다.
+ * @param findEngineExecutable 지금 부를 수 있는 kyu 가 어디 있는지 답하는 자리. 어디를 어떤
+ *   순서로 뒤지는지는 이 홀더의 앎이 아니라 조립하는 쪽(Main.kt)이 정한다 — 대시보드 홀더가
+ *   계획 파일 유무를 함수로 받는 것과 같은 선이다. 검사는 여기에 있음과 없음을 그대로 준다.
  */
 class EngineInstallationStateHolder(
     private val engineInstaller: EngineInstaller,
     private val coroutineScope: CoroutineScope,
-    private val findEngineExecutable: () -> Path? = { findKyuExecutable() },
+    private val findEngineExecutable: () -> Path?,
     // 받아 오고 프로세스를 띄우는 일이라 화면을 그리는 스레드에서 하면 창이 멎는다.
     private val installationDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
