@@ -38,7 +38,10 @@ const usageText = `사용법: kyu [명령] [인자]
 
 옵션 (kyu, kyu start):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
-  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)`
+  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
+
+옵션 (kyu list):
+  --json                 사람용 표 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {

@@ -8,10 +8,10 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/workdir"
 )
 
-// 이 파일은 계획에 선언된 작업들을 목록 한 칸에 들어갈 한 줄로 줄이는 자리다.
+// 이 파일은 계획에 선언된 작업들을 레포 한 개 분량으로 줄이는 자리다.
 //
 // 무엇을 보여줄지 고르는 일은 표시 계층의 결정이다. 조율 계층은 계획에 적힌 것을 그대로 돌려주고
-// (internal/workdir 의 LoadPlan), 그중 무엇이 화면 한 칸에 값어치가 있는지는 화면을 아는 쪽이 정한다.
+// (internal/workdir 의 LoadPlan), 그중 무엇이 한 줄의 값어치가 있는지는 보여주는 쪽이 정한다.
 
 // taskDisplayPriority 는 한 레포에 작업이 여럿일 때 어느 것을 보여줄지의 순서다.
 //
@@ -29,47 +29,92 @@ var taskDisplayPriority = []workdir.TaskStatus{
 	workdir.TaskStatusBlocked,
 }
 
-// planNoteForRepo 는 레포 한 행의 끝에 붙일 계획 한 줄을 만든다.
+// repoPlanSummary 는 계획에서 레포 하나를 보고 뽑은 결과다.
 //
-// 그 레포를 가리키는 작업이 계획에 없으면 빈 문자열이다. 계획이 아예 없는 워크디렉토리에서는
-// 모든 행이 빈 문자열이 되어 목록이 계획 도입 전과 똑같이 나온다.
-func planNoteForRepo(plan workdir.Plan, repoName string) string {
+// 문구가 아니라 구조로 둔다. 같은 사실을 사람용 표는 한 칸의 문장으로, --json 은 필드 몇 개로
+// 내보내는데, 여기서 문자열로 굳혀 넘기면 JSON 쪽이 그 문장을 되파싱해야 한다. 되파싱하는 순간
+// 표의 문구를 다듬는 일이 곧 계약을 깨는 일이 된다.
+//
+// 어느 작업을 보여줄지 고르는 판단은 이 값을 만들 때 한 번만 한다. 그것을 표의 한 칸으로 옮길지
+// JSON 의 필드로 옮길지는 각 출력이 정한다.
+type repoPlanSummary struct {
+	// taskToShow 는 이 레포에서 지금 볼 작업이다. hasTaskToShow 가 false 면 고를 것이 없었다는 뜻이다.
+	taskToShow workdir.Task
+
+	// hasTaskToShow 는 taskToShow 에 값이 들었는지다. Task 의 영 값은 id 가 빈 작업과 구분되지 않아
+	// 값 자체로는 "없음" 을 나타낼 수 없다.
+	hasTaskToShow bool
+
+	// unfinishedNeeds 는 taskToShow 가 기다리는 선행 중 아직 끝나지 않은 것의 id 다.
+	//
+	// 막힌 작업일 때만 채운다. 다른 상태에서는 이미 손댈 수 있는 작업이라 "무엇을 기다리는가" 가
+	// 다음 행동을 바꾸지 못하고, 채워두면 읽는 쪽이 그것을 막힌 근거로 오해한다.
+	unfinishedNeeds []string
+
+	// doneTaskCount 와 totalTaskCount 는 이 레포를 가리키는 작업 전체의 진척이다.
+	// 보여줄 작업을 하나로 줄인 뒤에도 "그 레포에 작업이 이것뿐인가" 를 알 수 있게 남긴다.
+	doneTaskCount  int
+	totalTaskCount int
+}
+
+// summarizeRepoPlan 은 계획에서 이 레포를 가리키는 작업들을 한 레포 분량으로 줄인다.
+//
+// 그 레포를 가리키는 작업이 계획에 없으면 영 값이다. 계획이 아예 없는 워크디렉토리에서는
+// 모든 레포가 영 값이 되어 목록이 계획 도입 전과 똑같이 나온다.
+func summarizeRepoPlan(plan workdir.Plan, repoName string) repoPlanSummary {
 	repoTasks := tasksOfRepo(plan, repoName)
+
+	summary := repoPlanSummary{totalTaskCount: len(repoTasks)}
 	if len(repoTasks) == 0 {
-		return ""
+		return summary
 	}
 
-	doneCount := 0
 	for _, task := range repoTasks {
 		if task.Status == workdir.TaskStatusDone {
-			doneCount++
+			summary.doneTaskCount++
 		}
 	}
 
 	taskToShow, hasTaskToShow := chooseTaskToShow(repoTasks)
 	if !hasTaskToShow {
-		// 전부 끝났으면 그중 하나를 고르는 것이 의미가 없다. 작업이 하나뿐일 때만 id 를 남긴다 —
-		// 설계 문서 9.3 의 [commons-event] done 이 그 경우이고, 여럿이면 어느 id 를 골라도 자의적이다.
+		// 전부 끝났으면 그중 하나를 고르는 것이 의미가 없다. 작업이 하나뿐일 때만 그것을 남긴다 —
+		// 설계 문서 9.3 의 [commons-event] done 이 그 경우이고, 여럿이면 어느 것을 골라도 자의적이다.
 		if len(repoTasks) == 1 {
-			return fmt.Sprintf("[%s] %s", repoTasks[0].ID, workdir.TaskStatusDone)
+			summary.taskToShow, summary.hasTaskToShow = repoTasks[0], true
 		}
-		return fmt.Sprintf("done %d/%d", doneCount, len(repoTasks))
+		return summary
 	}
 
-	note := fmt.Sprintf("[%s] %s", taskToShow.ID, taskToShow.Status)
+	summary.taskToShow, summary.hasTaskToShow = taskToShow, true
 
 	// 막힌 작업은 "무엇을 기다리는가" 까지 있어야 다음 행동이 정해진다. 그 답이 없으면
 	// 사용자는 계획 파일을 열어 선행 관계를 되짚게 되고, 그러면 목록을 볼 이유가 없다.
 	if taskToShow.Status == workdir.TaskStatusBlocked {
-		if unfinished := unfinishedNeedsOf(plan, taskToShow); len(unfinished) > 0 {
-			note += " ← needs " + strings.Join(unfinished, ", ")
-		}
+		summary.unfinishedNeeds = unfinishedNeedsOf(plan, taskToShow)
+	}
+	return summary
+}
+
+// note 는 요약을 목록의 계획 칸에 들어갈 한 줄로 옮긴다.
+func (summary repoPlanSummary) note() string {
+	if summary.totalTaskCount == 0 {
+		return ""
+	}
+
+	if !summary.hasTaskToShow {
+		return fmt.Sprintf("done %d/%d", summary.doneTaskCount, summary.totalTaskCount)
+	}
+
+	note := fmt.Sprintf("[%s] %s", summary.taskToShow.ID, summary.taskToShow.Status)
+
+	if len(summary.unfinishedNeeds) > 0 {
+		note += " ← needs " + strings.Join(summary.unfinishedNeeds, ", ")
 	}
 
 	// 보여준 것 말고도 작업이 있다는 사실은 숫자 하나로만 알린다. 이것이 없으면 사용자는
 	// 그 레포에 작업이 하나뿐이라고 믿게 된다.
-	if len(repoTasks) > 1 {
-		note += fmt.Sprintf(" (done %d/%d)", doneCount, len(repoTasks))
+	if summary.totalTaskCount > 1 {
+		note += fmt.Sprintf(" (done %d/%d)", summary.doneTaskCount, summary.totalTaskCount)
 	}
 	return note
 }

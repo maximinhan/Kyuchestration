@@ -312,6 +312,9 @@ kyu version            이 바이너리의 버전
 옵션 (kyu, kyu start):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
+
+옵션 (kyu list):
+  --json                 사람용 표 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 ```
 
 ### `kyu`
@@ -521,6 +524,58 @@ kyu attach <repo> 로 진입
 
 계획을 읽지 못했거나 없는 레포를 가리키는 작업이 있으면 **경고를 stderr 로** 내고 목록은 그대로
 보여준다. 계획이 깨져도 도구 전체가 멈추지는 않는다.
+
+#### `kyu list --json`
+
+사람이 읽는 표 대신 기계가 읽는 문서 하나를 낸다. 데스크톱 GUI 나 스크립트가 이 CLI 를 엔진으로
+부를 때 보는 형식이다.
+
+```sh
+kyu list --json
+kyu list ~/work/WorkDir-featureX --json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "workDir": {
+    "name": "WorkDir-featureX",
+    "absolutePath": "/home/me/work/WorkDir-featureX"
+  },
+  "repos": [
+    {
+      "name": "proj-c",
+      "absolutePath": "/home/me/work/WorkDir-featureX/proj-c",
+      "state": "IDLE",
+      "task": {
+        "id": "consume",
+        "status": "blocked",
+        "blockedBy": ["commons-schema"]
+      },
+      "doneTaskCount": 0,
+      "totalTaskCount": 1
+    }
+  ],
+  "mainSession": { "alive": true },
+  "planWarnings": []
+}
+```
+
+**stdout 에는 이 문서 말고 아무것도 나오지 않는다.** 사람용 모드에서 stderr 로 나가던 계획 경고도
+`planWarnings` 필드로 들어온다 — 읽는 쪽은 스트림 하나만 파싱하기 때문이다. 다만 실패는 문서에
+담지 않는다. 워크디렉토리를 읽지 못했으면 이유를 stderr 에 내고 종료 코드 1 로 끝난다.
+
+| 필드 | 뜻 |
+|---|---|
+| `schemaVersion` | 이 문서의 판. 필드가 늘어도 오르지 않고, 필드를 빼거나 뜻을 바꿀 때만 오른다 |
+| `workDir` | 워크디렉토리의 `name` 과 `absolutePath` |
+| `repos[]` | 워크디렉토리 바로 아래의 레포, 이름순. 메인 세션은 여기 없다 |
+| `repos[].state` | `RUNNING` · `DIRTY` · `AHEAD` · `IDLE` (위 표와 같은 어휘) |
+| `repos[].task` | 계획에서 고른 **지금 볼 작업**. 고를 것이 없으면 `null`. 고르는 규칙은 사람용 목록과 같다 |
+| `repos[].task.blockedBy` | 아직 끝나지 않은 선행의 id. `blocked` 가 아니면 빈 배열 |
+| `repos[].doneTaskCount`, `totalTaskCount` | 그 레포 작업의 진척. 표의 `(done 1/2)` 와 같은 사실 |
+| `mainSession.alive` | 메인 세션이 떠 있는지 |
+| `planWarnings[]` | 계획을 그대로 쓰지 못한 이유. 없으면 빈 배열 |
 
 ### `kyu start [repo]`
 
