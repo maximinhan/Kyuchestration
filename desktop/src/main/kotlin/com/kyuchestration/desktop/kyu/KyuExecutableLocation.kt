@@ -23,8 +23,8 @@ import kotlin.io.path.isRegularFile
  * 다른 터미널에서 설치하거나) 그때부터 동작해야 하는데, 시작할 때 한 번 찾아 두면 그 실행은
  * 영영 "kyu 가 없다" 로 남는다.
  *
- * 세 어댑터가 함께 쓴다 — 관찰(kyu list --json) · 세션 진입(kyu attach) · 설치 화면의 재확인.
- * 각자 찾게 두면 찾는 자리가 한쪽에서만 느는 날이 온다.
+ * 세 자리가 함께 쓴다 — 실행기(ProcessKyuCommandRunner) · 세션 진입 어댑터(kyu attach) ·
+ * 설치 화면의 "다시 찾기". 각자 찾게 두면 찾는 자리가 한쪽에서만 느는 날이 온다.
  *
  * @param lookUpEnvironmentVariable 환경 변수를 읽는 자리. 검사가 진짜 PATH 를 건드리지 않고
  *   순서를 확인하기 위한 이음매다.
