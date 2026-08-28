@@ -51,7 +51,7 @@ func (prompt *interactivePrompt) ask(question string) (string, error) {
 		return "", fmt.Errorf("물음 출력 실패: %w", err)
 	}
 
-	line, err := prompt.reader.ReadString('\n')
+	answer, err := prompt.readAnswerLine()
 
 	// 터미널이 아니면 사용자가 친 개행이 화면에 남지 않는다 — 에코해줄 터미널이 없기 때문이다.
 	// 우리가 대신 줄을 바꾸지 않으면 다음 출력이 물음 뒤에 그대로 이어 붙어, 파이프로 넘긴
@@ -59,6 +59,12 @@ func (prompt *interactivePrompt) ask(question string) (string, error) {
 	if prompt.inputFile == nil {
 		fmt.Fprintln(prompt.out)
 	}
+	return answer, err
+}
+
+// readAnswerLine 은 아무것도 찍지 않고 한 줄만 읽는다. 앞뒤 공백은 걷어낸다.
+func (prompt *interactivePrompt) readAnswerLine() (string, error) {
+	line, err := prompt.reader.ReadString('\n')
 
 	if errors.Is(err, io.EOF) {
 		// 마지막 줄에 개행이 없는 입력(파일·테스트)도 답으로 받는다. 정말 아무것도 오지 않았을 때만
@@ -76,11 +82,12 @@ func (prompt *interactivePrompt) ask(question string) (string, error) {
 
 // askHidden 은 화면에 남지 않게 한 줄을 읽는다. 토큰을 받는 자리다.
 //
-// 터미널이 아니면 그냥 읽는다. 파이프로 넘어온 입력에는 감출 에코가 없고, 여기서 거절하면
-// 테스트가 이 흐름을 지나갈 수 없다.
+// 터미널이 아니면 묻지 않고 읽기만 한다. 파이프 너머에는 이 물음에 답할 상대가 없고 — 토큰은
+// 이미 넘어와 있다 — 우리 stderr 를 오류 화면에 그대로 올리는 GUI 에서는, 답할 수 없는 물음이
+// 실패 이유인 것처럼 사용자 앞에 놓인다. 감출 에코가 없다는 것도 같은 자리에서 갈린다.
 func (prompt *interactivePrompt) askHidden(question string) (string, error) {
 	if prompt.inputFile == nil {
-		return prompt.ask(question)
+		return prompt.readAnswerLine()
 	}
 
 	if _, err := fmt.Fprint(prompt.out, question); err != nil {
