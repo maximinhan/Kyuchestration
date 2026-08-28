@@ -5,9 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -71,7 +71,7 @@ private fun StartScreen(versionLabel: String, onOpenWorkDirRequested: () -> Unit
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.width(0.dp))
+        Spacer(Modifier.height(8.dp))
         Button(onClick = onOpenWorkDirRequested) { Text("워크디렉토리 열기") }
         Text(
             text = "레포가 클론된 워크디렉토리를 고르면 각 레포의 상태와 계획을 카드로 보여줍니다.",

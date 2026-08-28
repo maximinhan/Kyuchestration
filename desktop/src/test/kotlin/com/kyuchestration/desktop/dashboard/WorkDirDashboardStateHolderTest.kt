@@ -16,6 +16,10 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
+// 가상 시간을 직접 돌리는 도구(advanceTimeBy · runCurrent · testScheduler · backgroundScope)는
+// 아직 실험 단계로 표시돼 있다. 경고를 하나씩 덮는 대신 이 클래스가 그 사실을 알고 쓴다고
+// 한 번 밝혀 둔다.
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class WorkDirDashboardStateHolderTest {
 
     @Test
