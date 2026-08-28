@@ -1,0 +1,44 @@
+name: Desktop CI
+
+# desktop/ 이 바뀔 때만 돈다. Go 쪽 CI(ci.yml)와 트리거가 겹치면 Go 한 줄만 고쳐도
+# Gradle 이 매번 도는데, 그 빌드는 아무것도 검증하지 않으면서 몇 분을 쓴다.
+# push 는 main 으로 제한한다 — 작업 브랜치는 pull_request 로 이미 검사된다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          # Gradle 의존성과 wrapper 배포판을 캐시한다. Compose 는 스키코 네이티브 바이너리까지
+          # 받아 오기 때문에 캐시 없이는 매번 수백 MB 를 다시 내려받는다.
+          cache: gradle
+          cache-dependency-path: |
+            desktop/gradle/libs.versions.toml
+            desktop/gradle/wrapper/gradle-wrapper.properties
+
+      # wrapper 를 커밋해 둔 이유가 "새 환경에서 Gradle 설치 없이 빌드된다" 이므로,
+      # CI 도 gradle 이 아니라 ./gradlew 로 돈다. 실행 비트가 빠지면 여기서 먼저 걸린다.
+      - name: Gradle wrapper 로 빌드와 테스트
+        run: ./gradlew --no-daemon build

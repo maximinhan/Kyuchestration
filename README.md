@@ -770,10 +770,27 @@ internal/
     github/      # GitHub REST API 조회 + 클론 (kyu clone 이 닿는 유일한 바깥 세계)
     secretstore/ # 토큰 프로필 저장 (키체인 · secret-service · 파일 폴백)
     cli/         # 명령 구현
+desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Gradle 빌드)
 ```
 
 `internal/session` 밖에서는 tmux 를 직접 호출하지 않는다. 이 규칙이 지켜지는 한 새 플랫폼
 지원은 파일 하나를 더하는 것으로 끝난다.
+
+## 데스크톱 앱 (개발 중)
+
+`desktop/` 은 맥 · 윈도우 · 리눅스에서 같은 코드로 도는 GUI 다. [설계 문서
+5.1](workdir-orchestrator-design.md#51-3층-구조)이 표시 계층을 "교체 가능한 껍데기" 라고 부른
+바로 그 자리를 터미널 대신 창으로 채운다. 조율 계층은 그대로 두고 `kyu` 를 엔진으로 호출할
+예정이므로, 지금 있는 것은 창이 뜨는 골격까지다. 저장소 루트의 Go 모듈과는 완전히 분리된 독립
+Gradle 빌드라 서로의 빌드에 끼어들지 않는다.
+
+```sh
+cd desktop
+./gradlew run    # 창 띄우기
+./gradlew build  # 컴파일 + 테스트
+```
+
+JDK 21 만 있으면 되고 Gradle 은 설치하지 않아도 된다 — wrapper 가 저장소에 들어 있다.
 
 ## 개발
 

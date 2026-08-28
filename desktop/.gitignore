@@ -1,0 +1,6 @@
+# Gradle 빌드 산출물과 로컬 데몬 상태
+build/
+.gradle/
+
+# jpackage 가 로컬 JDK 경로를 적어 두는 파일 — 머신마다 달라 공유하면 안 된다.
+local.properties
