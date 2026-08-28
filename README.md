@@ -9,6 +9,7 @@
 - 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md)
 - 핵심 원칙: **프로세스는 격리, 지식은 공유**
 - 스택: Go + tmux 백엔드
+- 터미널 대신 창으로 쓰려면: [데스크톱 앱](#데스크톱-앱)
 
 ## 이 도구가 하는 일
 
@@ -782,7 +783,7 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 `internal/session` 밖에서는 tmux 를 직접 호출하지 않는다. 이 규칙이 지켜지는 한 새 플랫폼
 지원은 파일 하나를 더하는 것으로 끝난다.
 
-## 데스크톱 앱 (개발 중)
+## 데스크톱 앱
 
 `desktop/` 은 맥 · 윈도우 · 리눅스에서 같은 코드로 도는 GUI 다. [설계 문서
 5.1](workdir-orchestrator-design.md#51-3층-구조)이 표시 계층을 "교체 가능한 껍데기" 라고 부른
@@ -790,13 +791,38 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 워크디렉토리 스캔 · 상태 추론 · 계획 파싱을 코틀린으로 한 번 더 옮기면 두 구현이 조용히 갈라진다.
 저장소 루트의 Go 모듈과는 완전히 분리된 독립 Gradle 빌드라 서로의 빌드에 끼어들지 않는다.
 
-```sh
-cd desktop
-./gradlew run    # 창 띄우기
-./gradlew build  # 컴파일 + 테스트
-```
+설치 패키지(dmg/msi/deb)는 아직 없다 — 소스에서 받아 실행한다.
 
-JDK 21 만 있으면 되고 Gradle 은 설치하지 않아도 된다 — wrapper 가 저장소에 들어 있다.
+### 시작하기
+
+| 필요한 것 | 왜 |
+|---|---|
+| JDK 21 | 앱을 빌드하고 실행한다 (Gradle 은 wrapper 가 저장소에 있어 따로 설치하지 않는다) |
+| `PATH` 의 `kyu` | 앱은 스캔·상태 추론을 직접 하지 않고 엔진인 `kyu` 를 부른다 ([설치](#설치)) |
+| tmux | 세션이 실제로 사는 곳 — 앱을 꺼도 세션이 남는 이유다 |
+| claude CLI | 세션 안에서 실제로 돌아가는 명령 |
+
+아무것도 없는 자리에서 시작한다면 이 순서다.
+
+1. **`kyu` 를 설치한다** — [설치](#설치)의 네 방식 중 하나. `kyu version` 이 답하면 됐다.
+2. **워크디렉토리를 만들고 레포를 넣는다** — [`kyu init WorkDir-featureX`](#kyu-init-name) 뒤에
+   [`kyu clone`](#kyu-clone) 으로 고르거나, 그 디렉토리에서 직접 `git clone` 한다.
+3. **앱을 띄운다**
+
+   ```sh
+   cd desktop
+   ./gradlew run
+   ```
+
+4. **워크디렉토리 열기** 로 2 에서 만든 디렉토리를 고른다 — 그 안의 레포가 카드로 깔린다.
+5. **카드를 누른다** — 세션이 없으면 띄우고 들어간다. 열린 터미널에서 Claude 와 대화한다.
+6. **끝낼 때** — 터미널 닫기 · 다른 카드로 옮기기 · 앱 종료는 전부 detach 라 세션은 계속 돈다.
+   세션을 정말 끝내는 것은 [`kyu kill`](#kyu-kill-repo--all) 뿐이다.
+
+앱 자체를 고치는 중이라면 `./gradlew build` 가 컴파일과 테스트를 한 번에 지난다.
+
+터미널이 편하면 앱 없이 같은 자리에 닿는다 — 워크디렉토리에서 [`kyu`](#빠른-시작) 한 번이 3~5 를
+대신하고, 레포별 세션은 [`kyu start`](#kyu-start-repo) · [`kyu attach`](#kyu-attach-repo) 다.
 
 ### 워크디렉토리 대시보드
 
