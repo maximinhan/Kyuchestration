@@ -28,7 +28,7 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-  kyu clone              GitHub 레포 목록에서 골라 이 디렉토리에 클론
+  kyu clone              GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
   kyu list [path]        레포 목록 + 상태
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능

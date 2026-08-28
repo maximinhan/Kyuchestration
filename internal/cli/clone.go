@@ -10,6 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"golang.org/x/term"
+
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
 	"github.com/maximinhan/Kyuchestration/internal/session"
@@ -26,7 +28,7 @@ import (
 
 const cloneUsageText = `사용법: kyu clone
 
-  kyu clone   GitHub 레포 목록에서 골라 이 워크디렉토리에 클론한다
+  kyu clone   GitHub 레포 목록에서 화살표로 골라 이 워크디렉토리에 클론한다
 
 토큰은 처음 실행할 때 물어보고 이 머신에 저장한다 (kyu auth list 로 확인).`
 
@@ -42,14 +44,14 @@ const alreadyInWorkDirNote = "(이미 있음)"
 // 하는 것은 "이 중에 비공개가 무엇인가" 쪽이다.
 const privateRepositoryMark = "private"
 
-// neverPushedMark 는 한 번도 푸시하지 않은 레포의 날짜 자리에 들어간다.
-const neverPushedMark = "-"
+// unknownUpdatedDateMark 는 갱신 시각을 받지 못한 레포의 날짜 자리에 들어간다.
+const unknownUpdatedDateMark = "-"
 
-// pushedDateLayout 은 목록에 찍는 마지막 푸시 날짜의 형식이다.
+// updatedDateLayout 은 목록에 찍는 마지막 갱신 날짜의 형식이다.
 //
 // 시각까지 보여주지 않는다. 목록에서 하는 판단은 "최근에 만졌는가" 이고, 그 판단에 분 단위는
 // 필요 없는데 열은 그만큼 넓어진다.
-const pushedDateLayout = "2006-01-02"
+const updatedDateLayout = "2006-01-02"
 
 // newReposNeedASessionRestartWarning 은 방금 클론한 레포가 떠 있는 메인 세션에 닿지 않는다는 안내다.
 //
@@ -99,17 +101,10 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 	}
 
 	rows := repositoryRowsFor(repositories, location.absolutePath)
-	if err := writeRepositoryListing(out, owner, rows); err != nil {
-		return err
-	}
 
-	answer, err := prompt.ask(repositorySelectionQuestion)
+	selectedIndexes, err := chooseRepositoriesToClone(prompt, out, owner, rows)
 	if err != nil {
 		return cancellationOrError(out, err)
-	}
-	selectedIndexes, err := parseRepositorySelection(answer, len(rows))
-	if err != nil {
-		return err
 	}
 	if len(selectedIndexes) == 0 {
 		fmt.Fprintln(out, "취소했습니다.")
@@ -131,6 +126,40 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 		return fmt.Errorf("클론 실패: %s", strings.Join(result.failedRepositoryNames, ", "))
 	}
 	return nil
+}
+
+// chooseRepositoriesToClone 는 무엇을 클론할지 고르게 하고 고른 줄의 인덱스를 돌려준다.
+//
+// 실제 터미널이면 화살표·검색 화면을, 아니면 번호를 적는 방식을 쓴다. 갈림의 근거는 TUI 가
+// 터미널을 필요로 한다는 것이다 — 화면을 지웠다 다시 그리려면 커서를 옮기는 이스케이프를
+// 내보내고 키를 한 글자씩 받아야 하는데, 파이프로 넘어온 입력에는 그럴 상대가 없고 그 이스케이프는
+// 기록에 그대로 섞인다.
+//
+// 그래서 번호 방식을 지우지 않고 남긴다. 파이프로 답을 넘기는 실행(테스트·스크립트)은 이 명령이
+// 처음부터 지원하던 사용법이고, 화면을 바꿨다고 그것이 사라져서는 안 된다.
+//
+// 입력과 출력을 둘 다 본다. 한쪽만 터미널인 실행(kyu clone > log.txt)에서 화면을 그리면
+// 사용자는 아무것도 못 보고, 파일에는 이스케이프 뭉치만 남는다.
+func chooseRepositoriesToClone(prompt *interactivePrompt, out io.Writer, owner github.Owner, rows []repositoryRow) ([]int, error) {
+	if prompt.inputFile != nil && isTerminalWriter(out) {
+		return pickRepositoriesWithArrowKeys(prompt.inputFile, out, owner, rows)
+	}
+
+	if err := writeRepositoryListing(out, owner, rows); err != nil {
+		return nil, err
+	}
+
+	answer, err := prompt.ask(repositorySelectionQuestion)
+	if err != nil {
+		return nil, err
+	}
+	return parseRepositorySelection(answer, len(rows))
+}
+
+// isTerminalWriter 는 이 출력이 실제 터미널인지다.
+func isTerminalWriter(out io.Writer) bool {
+	outputFile, isFile := out.(*os.File)
+	return isFile && term.IsTerminal(int(outputFile.Fd()))
 }
 
 // cancellationOrError 는 사용자의 취소를 성공으로, 나머지 실패는 그대로 돌려준다.
@@ -230,7 +259,7 @@ func repositoryRowsFor(repositories []github.Repository, absoluteWorkDirPath str
 // writeRepositoryListing 은 고를 수 있는 레포를 번호와 함께 보여준다.
 func writeRepositoryListing(out io.Writer, owner github.Owner, rows []repositoryRow) error {
 	var rendered bytes.Buffer
-	fmt.Fprintf(&rendered, "\n%s 의 레포 %d 개 — 최근 푸시 순\n\n", owner.Login, len(rows))
+	fmt.Fprintf(&rendered, "\n%s 의 레포 %d 개 — 최근 갱신 순\n\n", owner.Login, len(rows))
 
 	table := tabwriter.NewWriter(&rendered, 0, 0, tableColumnPadding, ' ', 0)
 	for rowIndex, row := range rows {
@@ -238,7 +267,7 @@ func writeRepositoryListing(out io.Writer, owner github.Owner, rows []repository
 			rowIndent, rowIndex+1,
 			row.repository.Name,
 			visibilityMark(row.repository),
-			pushedDate(row.repository),
+			updatedDate(row.repository),
 			alreadyThereNote(row))
 	}
 	if err := table.Flush(); err != nil {
@@ -258,11 +287,11 @@ func visibilityMark(repository github.Repository) string {
 	return ""
 }
 
-func pushedDate(repository github.Repository) string {
-	if repository.LastPushedAt.IsZero() {
-		return neverPushedMark
+func updatedDate(repository github.Repository) string {
+	if repository.LastUpdatedAt.IsZero() {
+		return unknownUpdatedDateMark
 	}
-	return repository.LastPushedAt.Local().Format(pushedDateLayout)
+	return repository.LastUpdatedAt.Local().Format(updatedDateLayout)
 }
 
 func alreadyThereNote(row repositoryRow) string {

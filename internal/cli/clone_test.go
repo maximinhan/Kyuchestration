@@ -37,11 +37,11 @@ func TestCloneClonesEveryRepositoryTheUserSelectedIntoTheWorkDir(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	pushedAt := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
 	gitHub := newTestGitHubWithRepos(
-		makeRepository("proj-a", true, pushedAt),
-		makeRepository("proj-b", false, pushedAt),
-		makeRepository("proj-c", false, pushedAt),
+		makeRepository("proj-a", true, updatedAt),
+		makeRepository("proj-b", false, updatedAt),
+		makeRepository("proj-c", false, updatedAt),
 	)
 	backend := newRecordingSessionBackend()
 
@@ -96,13 +96,13 @@ func TestCloneMarksAndSkipsRepositoriesThatAreAlreadyInTheWorkDir(t *testing.T) 
 	}
 }
 
-func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWerePushed(t *testing.T) {
+func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWereUpdated(t *testing.T) {
 	// 이름만 나열하면 사용자는 목록에서 자기가 찾는 레포를 고르지 못한다. private 표시는
 	// 화면을 공유한 채 목록을 여는 상황에서도 의미가 있다.
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
-	// 푸시 시각을 실행 머신의 시간대로 만든다. UTC 로 적으면 목록이 로컬 날짜를 찍는 한
+	// 갱신 시각을 실행 머신의 시간대로 만든다. UTC 로 적으면 목록이 로컬 날짜를 찍는 한
 	// 시간대가 다른 머신에서 하루 어긋난 날짜를 기대하게 되어, CI 에서만 깨지는 테스트가 된다.
 	gitHub := newTestGitHubWithRepos(
 		makeRepository("비공개-레포", true, time.Date(2026, 8, 27, 12, 0, 0, 0, time.Local)),
@@ -121,7 +121,7 @@ func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWerePushed(t *testing.T
 		t.Errorf("출력 = %q, private 표시를 기대", listing)
 	}
 	if !strings.Contains(listing, "2026-08-27") {
-		t.Errorf("출력 = %q, 마지막 푸시 날짜를 기대", listing)
+		t.Errorf("출력 = %q, 마지막 갱신 날짜를 기대", listing)
 	}
 }
 
@@ -316,5 +316,37 @@ func TestCloneWithoutAnyRepositoryToShowSaysSoInsteadOfAskingForANumber(t *testi
 
 	if !strings.Contains(out.String(), "레포가 없습니다") {
 		t.Errorf("출력 = %q, 보여줄 레포가 없다는 안내를 기대", out.String())
+	}
+}
+
+func TestCloneAsksForNumbersInsteadOfDrawingAScreenWhenTheInputIsNotATerminal(t *testing.T) {
+	// 파이프로 답을 넘기는 실행은 이 명령이 처음부터 지원하던 사용법이다. 화면을 화살표 방식으로
+	// 바꿨다고 그것이 사라지면 스크립트가 멈추고, 이 파일의 다른 테스트도 한 줄도 지나갈 수 없다.
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	gitHub := newTestGitHubWithRepos(
+		makeRepository("proj-a", false, time.Now()),
+		makeRepository("proj-b", false, time.Now()),
+	)
+
+	input := strings.NewReader("1\n2\n")
+	var out, errOut bytes.Buffer
+
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+		t.Fatalf("CloneRepos() 실패: %v", err)
+	}
+
+	if !strings.Contains(out.String(), repositorySelectionQuestion) {
+		t.Errorf("출력 = %q, 번호를 묻는 물음을 기대", out.String())
+	}
+
+	// 화면을 그렸다면 커서를 옮기는 이스케이프가 기록에 섞인다. 그 사실은 파이프로 넘긴 실행의
+	// 로그를 열어보기 전까지 드러나지 않으므로 여기서 막는다.
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Errorf("출력 = %q, 터미널이 아닌 곳에 화면 제어 문자를 내보내지 않기를 기대", out.String())
+	}
+	if len(gitHub.clonedRepositories) != 1 || gitHub.clonedRepositories[0].name != "proj-b" {
+		t.Errorf("클론 = %+v, 번호로 고른 proj-b 를 기대", gitHub.clonedRepositories)
 	}
 }

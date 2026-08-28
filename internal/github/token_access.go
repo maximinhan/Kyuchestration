@@ -85,17 +85,17 @@ func (access *TokenAccess) Organizations() ([]Owner, error) {
 	return organizations, nil
 }
 
-// Repositories 는 해당 소유자의 레포를 최근 푸시 순으로 반환한다.
+// Repositories 는 해당 소유자의 레포를 최근 갱신 순으로 반환한다.
 //
 // 정렬을 여기서 하지 않고 API 에 맡긴다. 페이지를 끊어 받는 목록이라, 받아온 뒤에 정렬하면
 // 첫 페이지 안에서만 맞는 순서가 되고 100 개를 넘는 계정에서 조용히 어긋난다.
 func (access *TokenAccess) Repositories(owner Owner) ([]Repository, error) {
 	type repositoryPayload struct {
-		Name     string    `json:"name"`
-		Private  bool      `json:"private"`
-		CloneURL string    `json:"clone_url"`
-		PushedAt time.Time `json:"pushed_at"`
-		Owner    struct {
+		Name      string    `json:"name"`
+		Private   bool      `json:"private"`
+		CloneURL  string    `json:"clone_url"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Owner     struct {
 			Login string `json:"login"`
 		} `json:"owner"`
 	}
@@ -108,11 +108,11 @@ func (access *TokenAccess) Repositories(owner Owner) ([]Repository, error) {
 	repositories := make([]Repository, 0, len(payloads))
 	for _, payload := range payloads {
 		repositories = append(repositories, Repository{
-			Name:         payload.Name,
-			OwnerLogin:   payload.Owner.Login,
-			CloneURL:     payload.CloneURL,
-			IsPrivate:    payload.Private,
-			LastPushedAt: payload.PushedAt,
+			Name:          payload.Name,
+			OwnerLogin:    payload.Owner.Login,
+			CloneURL:      payload.CloneURL,
+			IsPrivate:     payload.Private,
+			LastUpdatedAt: payload.UpdatedAt,
 		})
 	}
 	return repositories, nil
@@ -122,12 +122,17 @@ func (access *TokenAccess) Repositories(owner Owner) ([]Repository, error) {
 //
 // 개인 계정에 affiliation=owner 를 붙이는 이유: 그것이 없으면 남의 레포에 협업자로 붙어 있는 것과
 // 조직 레포까지 섞여 나온다. 워크디렉토리에 클론하려는 것은 내가 고른 소유자의 레포다.
+//
+// sort=updated&direction=desc 는 github.com 의 repositories 탭 기본 순서다. 사용자가 "어떤
+// 레포가 있더라" 를 확인하는 곳이 그 화면이고, 그 화면에서 위에 있던 레포가 여기서도 위에 있어야
+// 목록을 처음부터 다시 훑지 않는다. 방향을 적어 두는 이유는 API 의 기본값에 기대지 않기 위해서다 —
+// 기본값이 바뀌면 목록이 조용히 뒤집힌다.
 func (access *TokenAccess) repositoriesURL(owner Owner) string {
 	if owner.IsOrganization {
-		return fmt.Sprintf("%s/orgs/%s/repos?sort=pushed&per_page=%s",
+		return fmt.Sprintf("%s/orgs/%s/repos?sort=updated&direction=desc&per_page=%s",
 			access.apiBaseURL, url.PathEscape(owner.Login), repositoriesPerPage)
 	}
-	return fmt.Sprintf("%s/user/repos?affiliation=owner&sort=pushed&per_page=%s",
+	return fmt.Sprintf("%s/user/repos?affiliation=owner&sort=updated&direction=desc&per_page=%s",
 		access.apiBaseURL, repositoriesPerPage)
 }
 

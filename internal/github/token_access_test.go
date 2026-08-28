@@ -93,9 +93,10 @@ func TestOrganizationsCollectsEveryPageTheLinkHeaderPointsTo(t *testing.T) {
 	}
 }
 
-func TestRepositoriesOfThePersonalAccountAsksForOwnedReposSortedByPush(t *testing.T) {
-	// 정렬과 소속을 서버에 맡긴다. 최근 푸시 순이 아니면 사용자는 지금 작업할 레포를 찾으러
-	// 목록을 훑어야 하고, affiliation 을 빼면 남의 레포에 협업자로 붙어 있는 것까지 섞여 나온다.
+func TestRepositoriesOfThePersonalAccountAsksForOwnedReposInTheSameOrderAsTheWebRepositoriesTab(t *testing.T) {
+	// 정렬과 소속을 서버에 맡긴다. github.com 의 repositories 탭과 같은 순서가 아니면 사용자는
+	// 웹에서 본 자리를 이 목록에서 다시 찾아야 하고, affiliation 을 빼면 남의 레포에 협업자로
+	// 붙어 있는 것까지 섞여 나온다.
 	access := newStubbedTokenAccess(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/user/repos" {
 			t.Errorf("요청 경로 = %q, want /user/repos", r.URL.Path)
@@ -104,17 +105,20 @@ func TestRepositoriesOfThePersonalAccountAsksForOwnedReposSortedByPush(t *testin
 		if query.Get("affiliation") != "owner" {
 			t.Errorf("affiliation = %q, want owner", query.Get("affiliation"))
 		}
-		if query.Get("sort") != "pushed" {
-			t.Errorf("sort = %q, want pushed", query.Get("sort"))
+		if query.Get("sort") != "updated" {
+			t.Errorf("sort = %q, want updated", query.Get("sort"))
+		}
+		if query.Get("direction") != "desc" {
+			t.Errorf("direction = %q, want desc", query.Get("direction"))
 		}
 		if query.Get("per_page") != "100" {
 			t.Errorf("per_page = %q, want 100", query.Get("per_page"))
 		}
 		fmt.Fprint(w, `[
 			{"name": "Kyuchestration", "private": true, "clone_url": "https://github.com/maximinhan/Kyuchestration.git",
-			 "pushed_at": "2026-08-27T11:22:33Z", "owner": {"login": "maximinhan"}},
+			 "updated_at": "2026-08-27T11:22:33Z", "owner": {"login": "maximinhan"}},
 			{"name": "빈-레포", "private": false, "clone_url": "https://github.com/maximinhan/empty.git",
-			 "pushed_at": null, "owner": {"login": "maximinhan"}}
+			 "updated_at": null, "owner": {"login": "maximinhan"}}
 		]`)
 	})
 
@@ -137,14 +141,14 @@ func TestRepositoriesOfThePersonalAccountAsksForOwnedReposSortedByPush(t *testin
 	if first.CloneURL != "https://github.com/maximinhan/Kyuchestration.git" {
 		t.Errorf("CloneURL = %q, API 가 준 주소를 그대로 쓰기를 기대", first.CloneURL)
 	}
-	if !first.LastPushedAt.Equal(time.Date(2026, 8, 27, 11, 22, 33, 0, time.UTC)) {
-		t.Errorf("LastPushedAt = %v, want 2026-08-27T11:22:33Z", first.LastPushedAt)
+	if !first.LastUpdatedAt.Equal(time.Date(2026, 8, 27, 11, 22, 33, 0, time.UTC)) {
+		t.Errorf("LastUpdatedAt = %v, want 2026-08-27T11:22:33Z", first.LastUpdatedAt)
 	}
 
-	// 한 번도 푸시하지 않은 레포의 pushed_at 은 null 이다. 그것을 읽지 못해 실패하면
-	// 레포 하나 때문에 목록 전체가 뜨지 않는다.
-	if !repositories[1].LastPushedAt.IsZero() {
-		t.Errorf("푸시한 적 없는 레포의 LastPushedAt = %v, 영 값을 기대", repositories[1].LastPushedAt)
+	// updated_at 이 null 로 오는 레포가 있다. 그것을 읽지 못해 실패하면 레포 하나 때문에
+	// 목록 전체가 뜨지 않는다.
+	if !repositories[1].LastUpdatedAt.IsZero() {
+		t.Errorf("갱신 시각이 없는 레포의 LastUpdatedAt = %v, 영 값을 기대", repositories[1].LastUpdatedAt)
 	}
 }
 
@@ -158,7 +162,7 @@ func TestRepositoriesOfAnOrganizationAsksTheOrganizationPath(t *testing.T) {
 			t.Errorf("affiliation = %q, 조직 경로에는 붙이지 않기를 기대", r.URL.Query().Get("affiliation"))
 		}
 		fmt.Fprint(w, `[{"name": "org-repo", "private": false, "clone_url": "https://github.com/some-org/org-repo.git",
-			 "pushed_at": "2026-01-02T03:04:05Z", "owner": {"login": "some-org"}}]`)
+			 "updated_at": "2026-01-02T03:04:05Z", "owner": {"login": "some-org"}}]`)
 	})
 
 	repositories, err := access.Repositories(Owner{Login: "some-org", IsOrganization: true})
