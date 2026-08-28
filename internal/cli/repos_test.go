@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
@@ -151,5 +152,144 @@ func TestReposRefusesAnUnknownSubcommandWithItsUsage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "사용법: kyu repos") {
 		t.Errorf("에러 = %q, 사용법 안내를 기대", err.Error())
+	}
+}
+
+// reposListJSONDocumentForTest 는 kyu repos list --json 이 내보내는 문서를 테스트가 직접 다시 적어둔 모양이다.
+type reposListJSONDocumentForTest struct {
+	SchemaVersion int                        `json:"schemaVersion"`
+	Repos         []reposListJSONRepoForTest `json:"repos"`
+}
+
+type reposListJSONRepoForTest struct {
+	Name      string  `json:"name"`
+	FullName  string  `json:"fullName"`
+	Private   bool    `json:"private"`
+	UpdatedAt *string `json:"updatedAt"`
+}
+
+// runReposListForTest 는 repos list 를 실행하고 stdout 을 문서로 되읽는다.
+func runReposListForTest(t *testing.T, gitHub *fakeGitHub, ownerLogin string) reposListJSONDocumentForTest {
+	t.Helper()
+
+	var out, errOut bytes.Buffer
+	args := []string{"list", profileOptionName, "개인", ownerOptionName, ownerLogin, machineJSONOptionName}
+	if err := BrowseGitHubRepositories(&out, &errOut, args, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
+		t.Fatalf("BrowseGitHubRepositories() 실패: %v", err)
+	}
+
+	var document reposListJSONDocumentForTest
+	decodeMachineJSONForTest(t, out.String(), &document)
+	return document
+}
+
+func TestReposListKeepsTheOrderAndTheFactsGitHubGave(t *testing.T) {
+	// 순서는 계약의 일부다. github.com 의 repositories 탭과 같은 최근 갱신 순으로 내려오는데,
+	// 앱이 자기 마음대로 다시 정렬하지 않으려면 받은 순서 그대로 넘어가야 한다.
+	updatedAt := time.Date(2026, 8, 27, 9, 30, 0, 0, time.UTC)
+	gitHub := newTestGitHubWithRepos(
+		makeRepository("proj-a", true, updatedAt),
+		makeRepository("proj-b", false, updatedAt),
+	)
+
+	document := runReposListForTest(t, gitHub, "maximinhan")
+
+	if document.SchemaVersion != 1 {
+		t.Errorf("schemaVersion = %d, want 1", document.SchemaVersion)
+	}
+	if len(document.Repos) != 2 {
+		t.Fatalf("repos = %+v, 두 개를 기대", document.Repos)
+	}
+
+	first := document.Repos[0]
+	if first.Name != "proj-a" || first.FullName != "maximinhan/proj-a" || !first.Private {
+		t.Errorf("repos[0] = %+v, 이름·전체 이름·공개 여부를 기대", first)
+	}
+	if first.UpdatedAt == nil || *first.UpdatedAt != "2026-08-27T09:30:00Z" {
+		t.Errorf("repos[0].updatedAt = %v, RFC3339 시각을 기대", first.UpdatedAt)
+	}
+	if document.Repos[1].Name != "proj-b" || document.Repos[1].Private {
+		t.Errorf("repos[1] = %+v, 받은 순서와 공개 여부를 기대", document.Repos[1])
+	}
+}
+
+func TestReposListAsksTheOrganizationEndpointForAnOwnerThatIsNotTheTokenOwner(t *testing.T) {
+	// 레포 목록을 묻는 API 경로가 소유자 종류에 따라 갈린다. 종류를 잘못 잡으면 개인 계정의
+	// 레포를 조직 경로로 물어 404 가 나거나, 조직 레포 자리에 내 레포가 나온다.
+	gitHub := newTestGitHub()
+	gitHub.repositoriesByOwnerLogin = map[string][]github.Repository{
+		"acme": {{Name: "platform", OwnerLogin: "acme", CloneURL: "https://github.com/acme/platform.git"}},
+	}
+
+	document := runReposListForTest(t, gitHub, "acme")
+
+	if len(gitHub.repositoriesAskedFor) != 1 {
+		t.Fatalf("레포를 물은 소유자 = %+v, 한 번을 기대", gitHub.repositoriesAskedFor)
+	}
+	askedOwner := gitHub.repositoriesAskedFor[0]
+	if !askedOwner.IsOrganization {
+		t.Errorf("물은 소유자 = %+v, 토큰의 주인이 아닌 이름은 조직으로 묻기를 기대", askedOwner)
+	}
+	if len(document.Repos) != 1 || document.Repos[0].FullName != "acme/platform" {
+		t.Errorf("repos = %+v, 조직의 레포를 기대", document.Repos)
+	}
+}
+
+func TestReposListAsksThePersonalEndpointForTheTokenOwner(t *testing.T) {
+	gitHub := newTestGitHubWithRepos(makeRepository("proj-a", false, time.Now()))
+
+	runReposListForTest(t, gitHub, "maximinhan")
+
+	if len(gitHub.repositoriesAskedFor) != 1 || gitHub.repositoriesAskedFor[0].IsOrganization {
+		t.Errorf("물은 소유자 = %+v, 토큰의 주인은 개인 계정으로 묻기를 기대", gitHub.repositoriesAskedFor)
+	}
+}
+
+func TestReposListLeavesUpdatedAtNullWhenGitHubDidNotGiveOne(t *testing.T) {
+	// 시각이 없는 것과 1970 년은 다른 사실이다. 영 값을 그대로 찍으면 앱은 그 레포를 목록 맨
+	// 아래로 밀어내고, 사용자는 방금 만든 레포가 왜 거기 있는지 알 수 없다.
+	gitHub := newTestGitHubWithRepos(makeRepository("proj-a", false, time.Time{}))
+
+	document := runReposListForTest(t, gitHub, "maximinhan")
+
+	if document.Repos[0].UpdatedAt != nil {
+		t.Errorf("updatedAt = %v, null 을 기대", *document.Repos[0].UpdatedAt)
+	}
+}
+
+func TestReposListGivesAnEmptyArrayWhenTheOwnerHasNoRepository(t *testing.T) {
+	document := runReposListForTest(t, newTestGitHub(), "maximinhan")
+
+	if document.Repos == nil {
+		t.Error("repos = null, 빈 배열을 기대 — 없음을 두 모양으로 다루게 하지 않는다")
+	}
+	if len(document.Repos) != 0 {
+		t.Errorf("repos = %+v, 빈 배열을 기대", document.Repos)
+	}
+}
+
+func TestReposListNeedsToKnowWhoseRepositoriesToShow(t *testing.T) {
+	var out, errOut bytes.Buffer
+	err := BrowseGitHubRepositories(&out, &errOut,
+		[]string{"list", profileOptionName, "개인", machineJSONOptionName}, newTestGitHub().newAccess, storeWithOneProfile(t))
+	if err == nil {
+		t.Fatal("BrowseGitHubRepositories() 가 소유자 없이 성공했습니다")
+	}
+	if !strings.Contains(err.Error(), ownerOptionName) {
+		t.Errorf("에러 = %q, 어느 옵션이 필요한지 알리기를 기대", err.Error())
+	}
+}
+
+func TestReposOwnersRefusesTheOwnerOptionItCannotUse(t *testing.T) {
+	// 조용히 버리면 사용자는 자기가 지정한 소유자로 걸러진 목록을 보고 있다고 착각한다.
+	var out, errOut bytes.Buffer
+	err := BrowseGitHubRepositories(&out, &errOut,
+		[]string{"owners", profileOptionName, "개인", ownerOptionName, "acme", machineJSONOptionName},
+		newTestGitHub().newAccess, storeWithOneProfile(t))
+	if err == nil {
+		t.Fatal("BrowseGitHubRepositories() 가 owners 에 붙은 --owner 를 받아들였습니다")
+	}
+	if !strings.Contains(err.Error(), ownerOptionName) {
+		t.Errorf("에러 = %q, 어느 옵션이 문제인지 알리기를 기대", err.Error())
 	}
 }

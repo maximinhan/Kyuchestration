@@ -33,7 +33,8 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu start [repo]       세션 시작. 인자 없으면 main
   kyu attach <repo>      세션 진입. main 도 가능
   kyu kill [repo|--all]  세션 종료
-  kyu repos <owners>     GitHub 의 소유자 목록 — 기계용 (--json 전용)
+  kyu repos <owners|list>
+                         GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
   kyu auth <add|list|remove>
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
