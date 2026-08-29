@@ -61,6 +61,7 @@ fun main() = application {
     val initializationStateHolder = remember(applicationCoroutineScope) {
         WorkDirInitializationStateHolder(
             workDirInitializer = KyuCliWorkDirInitializer(kyuCommandRunner),
+            planFileExists = ::planFileExistsIn,
             coroutineScope = applicationCoroutineScope,
         )
     }
