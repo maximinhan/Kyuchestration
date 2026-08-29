@@ -21,7 +21,7 @@ jobs:
   # 우분투와 맥 양쪽에서 돈다.
   #
   # 맥을 뒤늦게 들인 이유가 있다. 이 CI 가 우분투 하나였을 때, 맥에서만 깨지는 PTY 시험이
-  # 릴리스 워크플로의 dmg 잡에서야 드러나 v1.0.0 을 통째로 막았다(PR 28). 데스크톱 앱은 맥과
+  # 릴리스 워크플로의 dmg 잡에서야 드러나 릴리스를 통째로 막았다(PR 28). 데스크톱 앱은 맥과
   # 리눅스 둘 다에 설치 패키지를 내는데, 검사가 한쪽에서만 돌면 나머지 한쪽은 태그를 미는
   # 순간에 처음 시험된다 — 가장 늦고 가장 비싼 자리다.
   build-and-test:
@@ -54,19 +54,3 @@ jobs:
       # CI 도 gradle 이 아니라 ./gradlew 로 돈다. 실행 비트가 빠지면 여기서 먼저 걸린다.
       - name: Gradle wrapper 로 빌드와 테스트
         run: ./gradlew --no-daemon build
-
-      # 임시 — 0.x 태그로 맥 dmg 가 실제로 만들어지는지 이 브랜치에서 한 번 실측한다.
-      # dmg 패키징은 릴리스 워크플로에만 있어서 태그를 밀기 전에는 확인할 자리가 없는데,
-      # 태그를 밀어 보는 것은 실패해도 되돌릴 수 없는 방법이다. 확인되면 이 스텝은 걷어낸다.
-      - name: (임시) 0.x 로 dmg 를 만들고 Info.plist 를 읽는다
-        if: runner.os == 'macOS'
-        run: |
-          # createDistributable 을 함께 부른다. packageDmg 만으로는 앱 이미지가 남는다는
-          # 보장이 없는데, Info.plist 는 그 안에 있다.
-          ./gradlew --no-daemon -PdesktopVersion=0.8.0 createDistributable packageDmg
-          ls -l build/compose/binaries/main/dmg
-
-          app=$(find build/compose/binaries/main/app -maxdepth 1 -name '*.app')
-          plist="${app}/Contents/Info.plist"
-          echo "CFBundleShortVersionString: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
-          echo "CFBundleVersion: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
