@@ -61,7 +61,9 @@ jobs:
       - name: (임시) 0.x 로 dmg 를 만들고 Info.plist 를 읽는다
         if: runner.os == 'macOS'
         run: |
-          ./gradlew --no-daemon -PdesktopVersion=0.8.0 packageDmg
+          # createDistributable 을 함께 부른다. packageDmg 만으로는 앱 이미지가 남는다는
+          # 보장이 없는데, Info.plist 는 그 안에 있다.
+          ./gradlew --no-daemon -PdesktopVersion=0.8.0 createDistributable packageDmg
           ls -l build/compose/binaries/main/dmg
 
           app=$(find build/compose/binaries/main/app -maxdepth 1 -name '*.app')
