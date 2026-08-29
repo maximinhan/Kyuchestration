@@ -6,15 +6,24 @@ import kotlin.io.path.isExecutable
 import kotlin.io.path.isRegularFile
 
 /**
- * 부를 kyu 를 세 자리에서 이 순서로 찾는다. 어디에도 없으면 null.
+ * 부를 kyu 를 네 자리에서 이 순서로 찾는다. 어디에도 없으면 null.
  *
- * 1. [PINNED_KYU_EXECUTABLE_VARIABLE] 이 못 박은 파일
- * 2. PATH — 사용자가 자기 손으로 설치한 것
- * 3. 앱이 스스로 받아 둔 것([managedEngineDirectory])
+ * 1. [PINNED_KYU_EXECUTABLE_VARIABLE] 이 가리키는 파일
+ * 2. 앱에 동봉된 엔진을 복사해 둔 자리([bundledEngineCopyPath])
+ * 3. PATH — 사용자가 자기 손으로 설치한 것
+ * 4. 앱이 스스로 받아 둔 것([managedEngineDirectory])
  *
- * 순서가 이 함수의 전부다. 사용자가 놓은 것이 앱이 받아 둔 것을 이겨야 한다 — 반대로 두면
- * 소스에서 빌드해 PATH 에 놓고 엔진을 고치는 중인 사람이 영영 앱이 받아 둔 옛 판을 부르게 되고,
- * 그 사실이 어디에도 드러나지 않는다.
+ * 순서가 이 함수의 전부다.
+ *
+ * 동봉된 엔진이 PATH 보다 앞이다. 설치 패키지가 들고 온 엔진은 이 앱 판과 함께 만들어지고 함께
+ * 시험된 바로 그 엔진이라, 앱이 무엇을 부리고 있는지가 받은 사람의 머신 사정과 무관하게 정해진다.
+ * 뒤로 미루면 "앱만 설치하면 끝난다" 는 말이 PATH 사정에 걸린다 — 언젠가 넣어 둔 낡은 kyu 가
+ * 남아 있는 머신에서, 방금 설치한 앱이 그 옛 엔진을 부르고 그 사실은 어디에도 드러나지 않는다.
+ * 엔진을 고치는 중인 사람에게는 ①이 열려 있어 이 순서가 막다른 길이 되지 않는다.
+ *
+ * PATH 는 앱이 받아 둔 것보다 여전히 앞이다. 사용자가 자기 손으로 놓은 것이 앱이 첫 화면에서
+ * 대신 받아 둔 것을 이겨야 한다 — 반대로 두면 소스에서 빌드해 PATH 에 놓고 엔진을 고치는 중인
+ * 사람이 영영 앱이 받아 둔 옛 판을 부르게 되고, 그 사실이 어디에도 드러나지 않는다.
  *
  * 셸을 거치지 않는다. `sh -c "kyu ..."` 로 부르면 사용자의 셸 설정과 인용 규칙이 끼어들어,
  * 공백이 든 워크디렉토리 경로에서 인자가 쪼개진다.
@@ -28,11 +37,13 @@ import kotlin.io.path.isRegularFile
  *
  * @param lookUpEnvironmentVariable 환경 변수를 읽는 자리. 검사가 진짜 PATH 를 건드리지 않고
  *   순서를 확인하기 위한 이음매다.
+ * @param bundledEngineCopyPath 앱에 동봉된 엔진을 복사해 둔 자리.
  * @param managedEngineExecutablePath 앱이 받아 둔 엔진이 있을 자리.
  * @param isExecutableFile 그 자리에 실행 가능한 파일이 있는지 답하는 자리.
  */
 internal fun findKyuExecutable(
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
+    bundledEngineCopyPath: Path = bundledEngineCopyPath(),
     managedEngineExecutablePath: Path = managedEngineExecutablePath(),
     isExecutableFile: (Path) -> Boolean = ::isExecutableRegularFile,
 ): Path? {
@@ -44,9 +55,53 @@ internal fun findKyuExecutable(
         return Path.of(pinnedPath)
     }
 
-    return findOnSearchPath(lookUpEnvironmentVariable("PATH"), isExecutableFile)
+    return bundledEngineCopyPath.takeIf(isExecutableFile)
+        ?: findOnSearchPath(lookUpEnvironmentVariable("PATH"), isExecutableFile)
         ?: managedEngineExecutablePath.takeIf(isExecutableFile)
 }
+
+/**
+ * 설치 패키지가 앱 안에 함께 넣어 온 엔진. 동봉이 없는 실행에서는 null.
+ *
+ * jpackage 가 앱 리소스를 옮길 때 실행 권한을 떼어 내고 그 자리를 root 소유로 두므로(리눅스
+ * deb 실측: `/opt/kyuchestration/lib/app/resources/kyu` 가 `-rw-r--r-- root/root`), 이 파일은
+ * 읽을 수만 있는 원본이다. 실제로 부르는 것은 이것을 복사해 둔 [bundledEngineCopyPath] 다.
+ *
+ * null 이 되는 실행이 둘이다. IDE 에서 main 을 띄우면 시스템 프로퍼티 자체가 없고,
+ * `./gradlew run` 은 자리를 알려 주지만 아직 `./gradlew buildBundledEngine` 을 부르지 않았으면
+ * 그 자리가 비어 있다. 둘 다 "동봉이 없다" 로 답해야 예전 길(PATH · 첫 화면의 [엔진 설치])이
+ * 그대로 열린다.
+ *
+ * @param lookUpSystemProperty Compose 가 앱 리소스 자리를 알려 주는 프로퍼티를 읽는 자리.
+ * @param isExistingFile 그 자리에 파일이 있는지 답하는 자리.
+ */
+internal fun bundledEngineResourcePath(
+    lookUpSystemProperty: (String) -> String? = System::getProperty,
+    isExistingFile: (Path) -> Boolean = ::isExistingRegularFile,
+): Path? = lookUpSystemProperty(APPLICATION_RESOURCES_DIRECTORY_PROPERTY)
+    ?.takeIf { it.isNotBlank() }
+    ?.let { Path.of(it, "kyu") }
+    ?.takeIf(isExistingFile)
+
+/**
+ * 동봉된 엔진을 실행할 수 있게 복사해 두는 자리.
+ *
+ * 앱이 받아 둔 엔진과 자리를 나눈다. 한 자리를 함께 쓰면 앱을 새 판으로 설치할 때마다 사용자가
+ * [엔진 설치] 로 받으라고 시킨 엔진이 말없이 덮이고, 무엇이 지금 그 자리에 있는지 아무도 모른다.
+ * 두 자리는 각자 자기 주인이 있다 — 이 자리의 주인은 지금 설치된 앱이고, 옆자리의 주인은 받으라고
+ * 누른 사용자다.
+ */
+internal fun bundledEngineCopyPath(engineDirectory: Path = managedEngineDirectory()): Path =
+    engineDirectory.resolve("bundled").resolve("kyu")
+
+/**
+ * Compose 가 앱 리소스 자리를 알려 주는 시스템 프로퍼티.
+ *
+ * 설치한 앱에서는 실행기가 `$APPDIR/resources` 를 넣어 주고(app 이미지의 .cfg),
+ * `./gradlew run` 에서는 Gradle 이 `build/compose/tmp/prepareAppResources` 를 넣어 준다.
+ * 그 자리에 무엇이 들어가는지는 desktop/build.gradle.kts 의 appResourcesRootDir 이 정한다.
+ */
+private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.application.resources.dir"
 
 /**
  * 앱이 자기 손으로 받아 둔 엔진이 사는 자리.
@@ -101,3 +156,9 @@ private fun findOnSearchPath(searchPath: String?, isExecutableFile: (Path) -> Bo
         .firstOrNull(isExecutableFile)
 
 private fun isExecutableRegularFile(path: Path): Boolean = path.isRegularFile() && path.isExecutable()
+
+/**
+ * 동봉된 원본을 볼 때는 실행 권한을 따지지 않는다. jpackage 가 그 권한을 떼어 내는 것이 정상이고,
+ * 그래서 앱이 이 파일을 복사해 자기 자리에 놓는다.
+ */
+private fun isExistingRegularFile(path: Path): Boolean = path.isRegularFile()
