@@ -89,13 +89,7 @@ class WorkDirInitializationStateHolder(
                 is OpeningNeeds.Refusal ->
                     mutableState.value = WorkDirInitializationState.Failed(whatOpeningNeeds.reason)
 
-                OpeningNeeds.Initialization ->
-                    finishInitialization(
-                        result = withContext(initializationDispatcher) {
-                            workDirInitializer.initializeInPlace(workDirPath)
-                        },
-                        onInitialized = onWorkDirReady,
-                    )
+                OpeningNeeds.Initialization -> initializeAndSettle(workDirPath, onWorkDirReady)
             }
         }
     }
@@ -117,15 +111,8 @@ class WorkDirInitializationStateHolder(
         }
         mutableState.value = WorkDirInitializationState.Running
 
-        coroutineScope.launch {
-            finishInitialization(
-                result = withContext(initializationDispatcher) {
-                    workDirInitializer.initializeInPlace(workDirPath)
-                },
-                // 이미 열려 있는 자리라 새로 열 것이 없다.
-                onInitialized = {},
-            )
-        }
+        // 이미 열려 있는 자리라 초기화가 끝나도 새로 열 것이 없다.
+        coroutineScope.launch { initializeAndSettle(workDirPath, onInitialized = {}) }
     }
 
     /**
@@ -144,7 +131,10 @@ class WorkDirInitializationStateHolder(
         }
     }
 
-    private fun finishInitialization(result: WorkDirInitializationResult, onInitialized: (Path) -> Unit) {
+    /** kyu 에게 초기화를 시키고 그 답을 상태로 옮긴다. */
+    private suspend fun initializeAndSettle(workDirPath: Path, onInitialized: (Path) -> Unit) {
+        val result = withContext(initializationDispatcher) { workDirInitializer.initializeInPlace(workDirPath) }
+
         when (result) {
             is WorkDirInitializationResult.Initialized -> {
                 mutableState.value = WorkDirInitializationState.Idle
