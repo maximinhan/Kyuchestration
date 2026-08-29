@@ -54,3 +54,17 @@ jobs:
       # CI 도 gradle 이 아니라 ./gradlew 로 돈다. 실행 비트가 빠지면 여기서 먼저 걸린다.
       - name: Gradle wrapper 로 빌드와 테스트
         run: ./gradlew --no-daemon build
+
+      # 임시 — 0.x 태그로 맥 dmg 가 실제로 만들어지는지 이 브랜치에서 한 번 실측한다.
+      # dmg 패키징은 릴리스 워크플로에만 있어서 태그를 밀기 전에는 확인할 자리가 없는데,
+      # 태그를 밀어 보는 것은 실패해도 되돌릴 수 없는 방법이다. 확인되면 이 스텝은 걷어낸다.
+      - name: (임시) 0.x 로 dmg 를 만들고 Info.plist 를 읽는다
+        if: runner.os == 'macOS'
+        run: |
+          ./gradlew --no-daemon -PdesktopVersion=0.8.0 packageDmg
+          ls -l build/compose/binaries/main/dmg
+
+          app=$(find build/compose/binaries/main/app -maxdepth 1 -name '*.app')
+          plist="${app}/Contents/Info.plist"
+          echo "CFBundleShortVersionString: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+          echo "CFBundleVersion: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
