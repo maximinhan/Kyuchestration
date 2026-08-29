@@ -54,3 +54,41 @@ jobs:
       # CI 도 gradle 이 아니라 ./gradlew 로 돈다. 실행 비트가 빠지면 여기서 먼저 걸린다.
       - name: Gradle wrapper 로 빌드와 테스트
         run: ./gradlew --no-daemon build
+
+      # ── 임시 실측. 이 브랜치에서만 돌고 PR 을 내기 전에 걷어낸다. ──────────────────
+      #
+      # 리눅스에서는 이미 실측했다: jpackage 가 앱 리소스의 실행 권한을 떼어 내고(deb 안에서
+      # -rw-r--r-- root/root), 그래서 앱이 그것을 자기 자리로 복사해 쓴다. 맥에서도 같은지는
+      # 맥 러너에서만 알 수 있는데, 릴리스 워크플로는 태그에서만 도므로 여기서 한 번 본다.
+      - uses: actions/setup-go@v5
+        if: runner.os == 'macOS'
+        with:
+          go-version-file: go.mod
+
+      - name: 임시 — dmg 안 동봉 엔진의 권한과 실행 여부를 실측한다
+        if: runner.os == 'macOS'
+        run: |
+          ./gradlew --no-daemon -PdesktopVersion=0.9.0 buildBundledEngine
+          ./gradlew --no-daemon -PdesktopVersion=0.9.0 packageDmg
+
+          dmg=$(find build/compose/binaries/main/dmg -name '*.dmg')
+          mountPoint=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly "$dmg" -mountpoint "$mountPoint"
+
+          echo "== dmg 안의 배치와 권한 =="
+          engine=$(find "$mountPoint" -type f -name kyu)
+          echo "$engine"
+          ls -l "$engine"
+
+          echo "== 원본을 그대로 실행해 본다 =="
+          "$engine" version || echo "직접 실행 실패 (종료 코드 $?)"
+
+          echo "== 확장 속성(격리 표시) =="
+          xattr -l "$engine" || echo "(없음)"
+
+          echo "== 복사한 뒤 권한을 주고 실행해 본다 — 앱이 실제로 쓰는 길 =="
+          cp "$engine" /tmp/kyu-copy
+          chmod +x /tmp/kyu-copy
+          /tmp/kyu-copy version || echo "복사본 실행 실패 (종료 코드 $?)"
+
+          hdiutil detach "$mountPoint"
