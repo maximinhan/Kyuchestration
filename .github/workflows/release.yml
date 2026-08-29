@@ -149,10 +149,30 @@ jobs:
             desktop/gradle/libs.versions.toml
             desktop/gradle/wrapper/gradle-wrapper.properties
 
+      # 설치 패키지 안에 넣을 엔진을 여기서 만든다. 앱만 설치하면 끝나야 하므로, 데스크톱
+      # 자산에는 kyu 가 함께 들어간다(desktop/build.gradle.kts 의 buildBundledEngine).
+      #
+      # kyu-binaries 잡의 산출물을 가져다 쓰지 않는다. 아티팩트는 실행 권한을 지키지 않아 내려받은
+      # 자리에서 chmod 를 한 번 더 해야 하고, 그러면 이 잡이 "받아서 · 권한을 고쳐서 · 옮기는"
+      # 걸음을 스스로 들고 있게 된다. 만드는 법은 Gradle 태스크 하나에만 두고, 여기서는 그것을
+      # 부르기만 한다 — 로컬에서 패키징할 때와 같은 길이다.
+      - uses: actions/setup-go@v5
+        with:
+          # kyu-binaries 잡과 같은 단일 출처를 본다. 판이 갈리면 동봉된 엔진과 따로 받은 엔진이
+          # 서로 다른 컴파일러의 산출물이 된다.
+          go-version-file: go.mod
+
       # desktop-ci.yml 은 desktop/ 이 바뀔 때만 돈다. 태그가 붙은 커밋이 그 CI 를 한 번도 지나지
       # 않았을 수 있으므로, Go 쪽과 같은 이유로 여기서 다시 지난다.
       - name: 빌드와 테스트
         run: ./gradlew --no-daemon build
+
+      - name: 동봉할 엔진 만들기
+        env:
+          DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
+        # 앱 버전을 함께 넘긴다. 태그 이름이 그대로 엔진의 버전으로 심겨, 설치한 사람이
+        # `kyu version` 으로 "이 앱이 무엇을 부리고 있는가" 를 확인할 수 있다.
+        run: ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" buildBundledEngine
 
       - name: deb 만들기
         env:
@@ -178,6 +198,21 @@ jobs:
           mkdir -p build/release-assets
           mv "$built" "build/release-assets/kyuchestration-desktop_${DESKTOP_VERSION}_amd64.deb"
           ls -l build/release-assets
+
+      # 엔진이 정말 패키지 안에 들어갔는지 나가기 전에 확인한다.
+      #
+      # checkBundledEngine 은 "우리가 만들어 둔 자리에 있는가" 만 본다. 그 자리 이름(linux-x64)이
+      # Compose 가 고르는 이름과 어긋나면 그 검사는 통과한 채로 엔진 없는 deb 가 나가고, 그 사실은
+      # 받은 사람이 설치해 봐야 드러난다. 만든 것을 열어 보는 이 한 걸음이 그 사이를 잇는다.
+      - name: deb 안에 엔진이 들어갔는지 확인
+        run: |
+          deb=$(find build/release-assets -name '*.deb')
+          if ! dpkg -c "$deb" | grep -q '/app/resources/kyu$'; then
+            echo "::error::deb 안에 동봉 엔진이 없다"
+            dpkg -c "$deb" | grep resources || echo "(resources 디렉토리 자체가 없다)"
+            exit 1
+          fi
+          dpkg -c "$deb" | grep '/app/resources/kyu$'
 
       - uses: actions/upload-artifact@v4
         with:
@@ -220,8 +255,19 @@ jobs:
             desktop/gradle/libs.versions.toml
             desktop/gradle/wrapper/gradle-wrapper.properties
 
+      # deb 잡과 같은 이유로 엔진을 함께 만든다. 여기서는 러너의 아키텍처가 곧 대상이라
+      # (arm64 러너 → darwin/arm64), 태스크가 이 머신을 보고 정하는 것으로 충분하다.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: 빌드와 테스트
         run: ./gradlew --no-daemon build
+
+      - name: 동봉할 엔진 만들기
+        env:
+          DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
+        run: ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" buildBundledEngine
 
       - name: dmg 만들기
         env:
@@ -242,6 +288,27 @@ jobs:
           mkdir -p build/release-assets
           mv "$built" "build/release-assets/kyuchestration-desktop_${DESKTOP_VERSION}_${ASSET_ARCH}.dmg"
           ls -l build/release-assets
+
+      # deb 쪽과 같은 이유로 만든 것을 열어 본다. dmg 는 붙여서(mount) 봐야 안이 보인다.
+      #
+      # 앱 안의 경로를 적어 두지 않고 찾는다 — .app 안의 배치는 jpackage 의 것이라 판이 바뀌면
+      # 같이 바뀐다. 권한도 함께 찍는다: 앱은 이 파일을 그대로 부르지 않고 자기 자리로 복사해
+      # 쓰는데(BundledEnginePlacement), 그 판단의 근거가 이 줄이다.
+      - name: dmg 안에 엔진이 들어갔는지 확인
+        run: |
+          dmg=$(find build/release-assets -name '*.dmg')
+          mountPoint=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly "$dmg" -mountpoint "$mountPoint"
+
+          engine=$(find "$mountPoint" -type f -name kyu)
+          if [ "$(printf '%s\n' "$engine" | grep -c .)" -ne 1 ]; then
+            echo "::error::dmg 안의 동봉 엔진이 하나여야 하는데 이렇게 나왔다: ${engine:-없음}"
+            hdiutil detach "$mountPoint"
+            exit 1
+          fi
+          ls -l "$engine"
+
+          hdiutil detach "$mountPoint"
 
       - uses: actions/upload-artifact@v4
         with:
