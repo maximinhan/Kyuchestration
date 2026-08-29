@@ -92,7 +92,7 @@ class WorkDirInitializationStateHolder(
                 OpeningNeeds.Initialization ->
                     finishInitialization(
                         result = withContext(initializationDispatcher) {
-                            workDirInitializer.initializeExistingWorkDir(workDirPath)
+                            workDirInitializer.initializeInPlace(workDirPath)
                         },
                         onInitialized = onWorkDirReady,
                     )
@@ -101,57 +101,15 @@ class WorkDirInitializationStateHolder(
     }
 
     /**
-     * [parentDirectory] 아래에 [newWorkDirName] 이름의 워크디렉토리를 만든다.
+     * 열어 둔 워크디렉토리를 그 자리에서 초기화한다.
      *
-     * @param onWorkDirCreated 다 만든 워크디렉토리의 자리. 만들자마자 그 자리를 여는 것이 이
-     *   화면의 유일한 다음 걸음이지만, 무엇을 "연다" 고 하는지는 대시보드 쪽 일이라 여기서
-     *   정하지 않고 넘겨받는다.
-     */
-    fun createWorkDir(parentDirectory: Path, newWorkDirName: String, onWorkDirCreated: (Path) -> Unit) {
-        val trimmedName = newWorkDirName.trim()
-        if (trimmedName.isEmpty()) {
-            // 빈 이름을 그대로 넘기면 kyu 는 그것도 인자 하나로 세어 부모 디렉토리 자신을
-            // 초기화한다(init.go 의 workDirPathFromInitArgs). 사용자가 고른 것은 "만들 자리" 이지
-            // "초기화할 자리" 가 아니므로, 그 자리에 계획 파일이 생기기 전에 여기서 막는다.
-            mutableState.value = WorkDirInitializationState.Failed("만들 워크디렉토리의 이름을 적어 주세요.")
-            return
-        }
-
-        runInitialization(onInitialized = onWorkDirCreated) {
-            workDirInitializer.createWorkDir(parentDirectory, trimmedName)
-        }
-    }
-
-    /**
-     * 이미 열어 둔 워크디렉토리를 그 자리에서 초기화한다.
+     * 여는 걸음이 이미 초기화까지 하므로, 이 길로 오는 것은 열고 난 뒤에 계획 파일이 사라진
+     * 자리뿐이다 — 대시보드의 배너가 부른다.
      *
      * 끝났다고 따로 알리지 않는다. 대시보드는 3 초마다 다시 관찰하므로 계획 파일이 생긴 사실이
      * 다음 주기에 저절로 실려 온다.
      */
-    fun initializeExistingWorkDir(workDirPath: Path) {
-        runInitialization(onInitialized = {}) { workDirInitializer.initializeExistingWorkDir(workDirPath) }
-    }
-
-    /**
-     * 지난 실패 문구를 거둔다.
-     *
-     * 실패는 그것을 부른 시도에 속한다. 만들기를 그만두거나 다른 워크디렉토리로 옮기면 그 시도는
-     * 끝난 것인데, 문구가 따라가면 엉뚱한 자리의 실패로 읽힌다 — 워크디렉토리 A 의 초기화가
-     * 거절당한 이유가 B 의 배너에 뜨는 식이다.
-     *
-     * 도는 중에는 아무것도 하지 않는다. 진행 표시만 지우면 결과가 돌아왔을 때 기다린 적도 없는
-     * 문구가 튀어나온다.
-     */
-    fun forgetLastFailure() {
-        if (mutableState.value is WorkDirInitializationState.Failed) {
-            mutableState.value = WorkDirInitializationState.Idle
-        }
-    }
-
-    private fun runInitialization(
-        onInitialized: (Path) -> Unit,
-        initialize: () -> WorkDirInitializationResult,
-    ) {
+    fun initializeOpenedWorkDir(workDirPath: Path) {
         // kyu init 은 두 번째 실행을 "이미 계획 파일이 있습니다" 로 거절한다. 도는 동안의 요청을
         // 그대로 흘려보내면, 방금 성공한 사람이 실패 문구를 보게 된다.
         if (mutableState.value == WorkDirInitializationState.Running) {
@@ -160,7 +118,29 @@ class WorkDirInitializationStateHolder(
         mutableState.value = WorkDirInitializationState.Running
 
         coroutineScope.launch {
-            finishInitialization(withContext(initializationDispatcher) { initialize() }, onInitialized)
+            finishInitialization(
+                result = withContext(initializationDispatcher) {
+                    workDirInitializer.initializeInPlace(workDirPath)
+                },
+                // 이미 열려 있는 자리라 새로 열 것이 없다.
+                onInitialized = {},
+            )
+        }
+    }
+
+    /**
+     * 지난 실패 문구를 거둔다.
+     *
+     * 실패는 그것을 부른 시도에 속한다. 다른 워크디렉토리로 옮기면 그 시도는 끝난 것인데, 문구가
+     * 따라가면 엉뚱한 자리의 실패로 읽힌다 — 워크디렉토리 A 의 초기화가 거절당한 이유가 B 의
+     * 배너에 뜨는 식이다.
+     *
+     * 도는 중에는 아무것도 하지 않는다. 진행 표시만 지우면 결과가 돌아왔을 때 기다린 적도 없는
+     * 문구가 튀어나온다.
+     */
+    fun forgetLastFailure() {
+        if (mutableState.value is WorkDirInitializationState.Failed) {
+            mutableState.value = WorkDirInitializationState.Idle
         }
     }
 

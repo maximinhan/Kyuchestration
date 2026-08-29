@@ -13,16 +13,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -60,9 +54,6 @@ fun KyuchestrationDesktopScreen(
     onInstallEngineRequested: () -> Unit,
     onLookForEngineAgainRequested: () -> Unit,
     onOpenWorkDirRequested: () -> Unit,
-    onChooseNewWorkDirParentRequested: () -> Path?,
-    onCreateWorkDirRequested: (Path, String) -> Unit,
-    onCreateWorkDirGivenUp: () -> Unit,
     onInitializeOpenedWorkDirRequested: () -> Unit,
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
@@ -72,9 +63,9 @@ fun KyuchestrationDesktopScreen(
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 만들고 세션에 들어가는
-            // 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는 무엇을
-            // 눌러도 같은 실패를 만난다. 갈림길을 여기 하나 두어 그 자리를 아예 만들지 않는다.
+            // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
+            // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
+            // 무엇을 눌러도 같은 실패를 만난다. 갈림길을 여기 하나 두어 그 자리를 아예 만들지 않는다.
             if (engineInstallationState != EngineInstallationState.EngineReady) {
                 EngineInstallationScreen(
                     versionLabel = versionLabel,
@@ -90,9 +81,6 @@ fun KyuchestrationDesktopScreen(
                             versionLabel = versionLabel,
                             initializationState = initializationState,
                             onOpenWorkDirRequested = onOpenWorkDirRequested,
-                            onChooseNewWorkDirParentRequested = onChooseNewWorkDirParentRequested,
-                            onCreateWorkDirRequested = onCreateWorkDirRequested,
-                            onCreateWorkDirGivenUp = onCreateWorkDirGivenUp,
                         )
 
                     is WorkDirDashboardState.FirstObservationRunning ->
@@ -173,26 +161,18 @@ private fun DashboardWithTerminal(
 }
 
 /**
- * 앱이 시작점이다 — 여기서 워크디렉토리를 열 수도, 새로 만들 수도 있다.
+ * 앱이 시작점이다 — 여기서 워크디렉토리를 고르는 것으로 모든 것이 시작된다.
  *
- * 만들기 폼을 처음부터 펼쳐 두지 않는다. 만들 자리를 고르는 것이 첫 걸음이므로, 자리를 고른
- * 뒤에야 이름을 묻는 칸이 나온다 — 고른 자리가 있다는 것 하나로 폼을 보일지가 정해지니
- * "폼이 펼쳐졌는가" 를 따로 기억할 필요가 없다.
+ * 고를 것이 하나다. 예전에는 "열기" 와 "새로 만들기" 가 나뉘어, 새로 시작하려면 만들 자리를
+ * 고르고 이름을 또 적어야 했다 — 디렉토리를 고르는 창에서 이미 새 폴더를 만들 수 있는데도
+ * 앱이 그 일을 한 번 더 물은 셈이다. 고른 자리가 곧 워크디렉토리라면 물을 것이 없다.
  */
 @Composable
 private fun StartScreen(
     versionLabel: String,
     initializationState: WorkDirInitializationState,
     onOpenWorkDirRequested: () -> Unit,
-    onChooseNewWorkDirParentRequested: () -> Path?,
-    onCreateWorkDirRequested: (Path, String) -> Unit,
-    onCreateWorkDirGivenUp: () -> Unit,
 ) {
-    // 고른 자리와 적어 넣은 이름은 화면이 잠깐 들고 있는 것이지 앱의 상태가 아니다. 창을 닫으면
-    // 함께 사라지는 것이 맞고, 상태 홀더로 올리면 시작 화면을 벗어난 뒤에도 남는다.
-    var newWorkDirParentDirectory by remember { mutableStateOf<Path?>(null) }
-    var newWorkDirName by remember { mutableStateOf("") }
-
     CenteredColumn {
         Text("뀨케스트레이션", style = MaterialTheme.typography.headlineMedium)
         Text(
@@ -202,82 +182,30 @@ private fun StartScreen(
         )
         Spacer(Modifier.height(8.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onOpenWorkDirRequested) { Text("워크디렉토리 열기") }
-            OutlinedButton(
-                onClick = { onChooseNewWorkDirParentRequested()?.let { newWorkDirParentDirectory = it } },
-            ) {
-                Text("새 워크디렉토리 만들기")
-            }
+        Button(
+            onClick = onOpenWorkDirRequested,
+            enabled = initializationState != WorkDirInitializationState.Running,
+        ) {
+            Text("워크디렉토리 열기")
         }
 
-        val parentDirectory = newWorkDirParentDirectory
-        if (parentDirectory == null) {
-            Text(
-                text = "레포가 클론된 워크디렉토리를 고르면 각 레포의 상태와 계획을 카드로 보여줍니다. " +
-                    "아직 없다면 여기서 새로 만듭니다.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-        } else {
-            NewWorkDirForm(
-                parentDirectory = parentDirectory,
-                newWorkDirName = newWorkDirName,
-                initializationState = initializationState,
-                onNewWorkDirNameChanged = { newWorkDirName = it },
-                onCreateRequested = { onCreateWorkDirRequested(parentDirectory, newWorkDirName) },
-                onCancelRequested = {
-                    newWorkDirParentDirectory = null
-                    newWorkDirName = ""
-                    onCreateWorkDirGivenUp()
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun NewWorkDirForm(
-    parentDirectory: Path,
-    newWorkDirName: String,
-    initializationState: WorkDirInitializationState,
-    onNewWorkDirNameChanged: (String) -> Unit,
-    onCreateRequested: () -> Unit,
-    onCancelRequested: () -> Unit,
-) {
-    val creating = initializationState == WorkDirInitializationState.Running
-
-    Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
         Text(
-            text = "만들 자리: $parentDirectory",
+            text = "고른 디렉토리가 곧 워크디렉토리입니다. 그 안의 레포를 카드로 보여주고, " +
+                "계획 파일(.coord/plan.md)이 없으면 그 자리에 만들어 둡니다. " +
+                "빈 자리에서 시작하려면 선택창의 새 폴더 버튼으로 만들어 고르세요.",
             style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
-        OutlinedTextField(
-            value = newWorkDirName,
-            onValueChange = onNewWorkDirNameChanged,
-            label = { Text("새 워크디렉토리 이름") },
-            placeholder = { Text("WorkDir-featureX") },
-            singleLine = true,
-            enabled = !creating,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onCreateRequested, enabled = !creating) { Text("만들기") }
-            TextButton(onClick = onCancelRequested, enabled = !creating) { Text("취소") }
-        }
 
         InitializationProgressOrFailure(
             initializationState = initializationState,
-            runningLabel = "kyu init 으로 만드는 중입니다",
+            // 계획 파일을 보는 것부터 kyu init 까지가 다 여는 걸음이라, 그중 어디를 지나는
+            // 중인지로 문구를 가르지 않는다.
+            runningLabel = "고른 자리를 워크디렉토리로 여는 중입니다",
         )
     }
 }
-
 
 @Composable
 private fun FirstObservationRunningScreen(workDirPath: Path, onCancelRequested: () -> Unit) {

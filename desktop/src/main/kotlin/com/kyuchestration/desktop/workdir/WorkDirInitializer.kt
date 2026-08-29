@@ -3,26 +3,22 @@ package com.kyuchestration.desktop.workdir
 import java.nio.file.Path
 
 /**
- * 워크디렉토리를 만들고 조율할 수 있는 상태로 만드는 자리.
+ * 이미 있는 디렉토리를 조율할 수 있는 상태로 만드는 자리.
  *
- * 관찰 포트와 갈라 둔다. 관찰은 3 초마다 저절로 일어나는 읽기이고 이쪽은 사람이 눌러야만
- * 일어나는 쓰기다 — 한 인터페이스에 묶으면 "저절로 도는 것" 과 "사람이 시키는 것" 이 같은
+ * 관찰 포트와 갈라 둔다. 관찰은 3 초마다 저절로 일어나는 읽기이고 이쪽은 사람이 고른 자리에
+ * 파일을 남기는 쓰기다 — 한 인터페이스에 묶으면 "저절로 도는 것" 과 "사람이 시키는 것" 이 같은
  * 이름 아래에 놓인다.
  *
- * 만드는 일과 제자리 초기화를 한 포트에 둔 것은 둘이 같은 명령(kyu init)이기 때문이다. 앱에서
- * 새로 만들 때와, 아직 초기화하지 않은 디렉토리를 열었을 때가 다를 이유가 없다.
+ * 이름을 받아 새 디렉토리를 만드는 갈래는 두지 않는다. 앱에서 워크디렉토리가 정해지는 길은
+ * "사용자가 디렉토리를 고른다" 하나이고, 새 자리는 시스템 선택창의 새 폴더가 만든다 — 앱이
+ * 이름을 또 받으면 같은 일을 두 방식으로 하게 된다. 터미널의 `kyu init <이름>` 은 그대로다.
  */
 interface WorkDirInitializer {
 
     /**
-     * [parentDirectory] 아래에 [newWorkDirName] 이름의 워크디렉토리를 만들고 초기화한다.
+     * [workDirPath] 를 그 자리에서 초기화한다.
      */
-    fun createWorkDir(parentDirectory: Path, newWorkDirName: String): WorkDirInitializationResult
-
-    /**
-     * 이미 있는 디렉토리를 그 자리에서 초기화한다.
-     */
-    fun initializeExistingWorkDir(workDirPath: Path): WorkDirInitializationResult
+    fun initializeInPlace(workDirPath: Path): WorkDirInitializationResult
 }
 
 /**

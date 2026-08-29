@@ -30,7 +30,7 @@ import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
 /**
  * 조립이 일어나는 유일한 자리.
  *
- * 화면은 상태 홀더만, 상태 홀더는 자기 포트만 안다 — 목록은 관찰 포트를, 만들기는 초기화
+ * 화면은 상태 홀더만, 상태 홀더는 자기 포트만 안다 — 목록은 관찰 포트를, 여는 걸음은 초기화
  * 포트를, 터미널은 진입 포트를. "그 포트 뒤에 kyu 프로세스가 있다" 는 사실을 아는 파일이 여기
  * 하나뿐이라, 엔진을 바꿔 끼울 때 고칠 곳도 여기 하나다.
  *
@@ -114,26 +114,18 @@ fun main() = application {
             onInstallEngineRequested = engineInstallationStateHolder::installEngine,
             onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
             onOpenWorkDirRequested = {
-                chooseWorkDirDirectory(ownerWindow)?.let {
-                    // 만들다 실패한 문구를 여기서 거둔다. 그대로 두면 방금 연 워크디렉토리의
-                    // 배너에 다른 자리의 거절 이유가 뜬다.
-                    initializationStateHolder.forgetLastFailure()
-                    dashboardStateHolder.openWorkDir(it)
+                chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory ->
+                    // 여는 일과 초기화하는 일이 홀더 둘로 나뉘어 있어 여기서 이어 붙인다. 초기화
+                    // 쪽이 고른 자리를 조율할 수 있게 만들어 놓고, 그때 무엇을 "연다" 고 하는지는
+                    // 대시보드 쪽이 정한다.
+                    initializationStateHolder.openChosenDirectoryAsWorkDir(
+                        workDirPath = chosenDirectory,
+                        onWorkDirReady = dashboardStateHolder::openWorkDir,
+                    )
                 }
             },
-            onChooseNewWorkDirParentRequested = { chooseNewWorkDirParentDirectory(ownerWindow) },
-            onCreateWorkDirRequested = { parentDirectory, newWorkDirName ->
-                // 다 만들면 그 자리를 곧바로 연다. 만들어 놓고 다시 "열기" 로 찾아 들어가게 하면,
-                // 앱이 시작점이 된 뜻이 반쯤만 산다.
-                initializationStateHolder.createWorkDir(
-                    parentDirectory = parentDirectory,
-                    newWorkDirName = newWorkDirName,
-                    onWorkDirCreated = dashboardStateHolder::openWorkDir,
-                )
-            },
-            onCreateWorkDirGivenUp = initializationStateHolder::forgetLastFailure,
             onInitializeOpenedWorkDirRequested = {
-                dashboardState.workDirPath?.let(initializationStateHolder::initializeExistingWorkDir)
+                dashboardState.workDirPath?.let(initializationStateHolder::initializeOpenedWorkDir)
             },
             onCloneRepositoriesRequested = {
                 // 무엇을 이미 받아 뒀는지는 방금 관찰한 목록이 알고 있다. 대화상자가 그것을 다시
