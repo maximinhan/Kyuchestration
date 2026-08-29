@@ -1,3 +1,5 @@
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -82,6 +84,222 @@ dependencies {
     testImplementation(libs.kotlinxCoroutinesTest)
 }
 
+// 엔진(kyu)을 설치 패키지 안에 함께 넣는다. 앱만 설치하면 끝나야 하기 때문이다 — 화면이
+// 하는 모든 일이 엔진을 부르는 일인데, 그 엔진을 사용자가 따로 구해 와야 한다면 설치는 한
+// 걸음에 끝나지 않는다.
+//
+// 동봉이 CLI 단독 설치를 대신하지 않는다. 터미널에서만 쓰는 사람은 install.sh 로 바이너리
+// 하나를 넣으면 되고(README 설치 절), 그 길은 그대로다.
+//
+// build/ 아래에 둔다. 저장소에 적어 두는 것이 아니라 만들어지는 12MB 바이너리라, 소스 트리에
+// 두면 .gitignore 한 줄을 더 얹어야 하고 clean 이 치우지도 못한다.
+val bundledEngineRootDirectory: Provider<Directory> = layout.buildDirectory.dir("engineResources")
+
+/**
+ * 설치 패키지에 넣을 엔진의 대상.
+ *
+ * Compose 가 플랫폼별 리소스를 고르는 디렉토리 이름과 Go 가 대상을 부르는 철자를 한 자리에서
+ * 정한다. 둘이 갈라지면 linux-x64 디렉토리에 darwin 바이너리가 놓이고, 그 사실은 받은 사람이
+ * 앱을 띄워 엔진을 부를 때에야 드러난다.
+ */
+data class BundledEngineTarget(
+    val resourceDirectoryName: String,
+    val goOperatingSystem: String,
+    val goArchitecture: String,
+)
+
+/**
+ * 이 머신이 만들 동봉 엔진의 대상. 설치 패키지를 내지 않는 호스트에서는 안내와 함께 멈춘다.
+ *
+ * Provider 로 감싸 늦게 편다. 구성 단계에서 곧바로 정하면 이 값을 쓰지도 않는
+ * `./gradlew build` 까지 윈도우에서 통째로 끊긴다 — 윈도우 네이티브는 설치 패키지의 대상이
+ * 아니지만(msi 를 내지 않는다), 그 머신에서 컴파일과 테스트까지 막을 이유는 없다.
+ */
+val hostBundledEngineTarget: Provider<BundledEngineTarget> = providers.provider {
+    val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
+    val hostArchitecture = System.getProperty("os.arch").orEmpty()
+
+    val (resourceOperatingSystemName, goOperatingSystem) = when {
+        hostOperatingSystemName.startsWith("Mac", ignoreCase = true) -> "macos" to "darwin"
+        hostOperatingSystemName.startsWith("Linux", ignoreCase = true) -> "linux" to "linux"
+        else -> throw GradleException(
+            "이 호스트($hostOperatingSystemName)에서는 엔진을 동봉하지 않습니다. " +
+                "설치 패키지를 내는 것은 맥과 리눅스뿐이고, 윈도우 사용자는 WSL 안에서 리눅스 패키지를 씁니다.",
+        )
+    }
+    val (resourceArchitecture, goArchitecture) = when (hostArchitecture) {
+        "amd64", "x86_64" -> "x64" to "amd64"
+        "aarch64", "arm64" -> "arm64" to "arm64"
+        else -> throw GradleException(
+            "이 아키텍처($hostArchitecture)용 엔진은 만들지 않습니다 — x86-64 와 arm64 만 냅니다.",
+        )
+    }
+
+    BundledEngineTarget(
+        resourceDirectoryName = "$resourceOperatingSystemName-$resourceArchitecture",
+        goOperatingSystem = goOperatingSystem,
+        goArchitecture = goArchitecture,
+    )
+}
+
+/** 패키징이 집어 갈 엔진 파일. 이름은 PATH 에 두는 것과 같은 `kyu` 다. */
+val bundledEngineExecutableFile: Provider<RegularFile> = hostBundledEngineTarget.flatMap { target ->
+    bundledEngineRootDirectory.map { it.dir(target.resourceDirectoryName).file("kyu") }
+}
+
+/**
+ * 저장소 루트의 Go 모듈에서 이 머신용 kyu 를 만들어 동봉 자리에 놓는다.
+ *
+ * 모노레포의 이점을 그대로 쓴다. 엔진 소스가 옆에 있으므로 앱을 패키징하는 사람이 엔진 릴리스를
+ * 기다리거나 어딘가에서 받아 올 이유가 없다.
+ *
+ * 산출물을 Gradle 의 입출력으로 선언하지 않는다. 선언하면 그 자리를 읽는 prepareAppResources 가
+ * "의존을 선언하지 않고 남의 산출물을 읽는다" 로 걸리는데, 그 의존을 선언하는 순간
+ * `./gradlew run` 까지 Go 를 요구하게 된다(run 이 prepareAppResources 를 거친다). 소스에서
+ * 띄우는 흐름은 동봉 없이도 돌아야 하므로, 대신 이 태스크는 부를 때마다 실제로 만든다 —
+ * go 자신의 빌드 캐시가 있어 두 번째부터는 몇 초다.
+ */
+abstract class BuildBundledEngine @Inject constructor(
+    private val execOperations: ExecOperations,
+) : DefaultTask() {
+
+    @get:Internal
+    abstract val goModuleDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val bundledEngineExecutable: RegularFileProperty
+
+    @get:Internal
+    abstract val goOperatingSystem: Property<String>
+
+    @get:Internal
+    abstract val goArchitecture: Property<String>
+
+    /**
+     * 링커로 엔진에 심을 버전. 비어 있으면 심지 않는다 — 그때 엔진은 빌드에 쓰인 커밋으로
+     * 자기를 말한다(internal/cli.versionName).
+     */
+    @get:Internal
+    abstract val engineVersion: Property<String>
+
+    @TaskAction
+    fun buildEngine() {
+        requireGoOnSearchPath()
+
+        val engineFile = bundledEngineExecutable.get().asFile
+        engineFile.parentFile.mkdirs()
+
+        execOperations.exec {
+            executable = "go"
+            workingDir = goModuleDirectory.get().asFile
+            args = buildList {
+                add("build")
+                // -trimpath 와 CGO_ENABLED=0 은 릴리스가 내는 kyu 와 같은 조건이다
+                // (release.yml 의 크로스 컴파일). 조건이 갈라지면 동봉된 엔진과 따로 받은
+                // 엔진이 같은 태그에서도 다르게 동작할 수 있다.
+                add("-trimpath")
+                engineVersion.orNull?.takeIf { it.isNotBlank() }?.let { version ->
+                    add("-ldflags")
+                    add("-X $VERSION_LDFLAGS_SYMBOL_ASSIGNMENT$version")
+                }
+                add("-o")
+                add(engineFile.absolutePath)
+                add("./cmd/kyu")
+            }
+            environment("GOOS", goOperatingSystem.get())
+            environment("GOARCH", goArchitecture.get())
+            environment("CGO_ENABLED", "0")
+        }
+    }
+
+    /**
+     * go 가 없는 것을 먼저 끊는다.
+     *
+     * 그러지 않으면 Gradle 이 내는 말은 "A problem occurred starting process 'command go'" 뿐이라,
+     * 이 저장소를 처음 여는 사람은 무엇을 설치해야 하는지 알 수 없다.
+     */
+    private fun requireGoOnSearchPath() {
+        val goIsOnSearchPath = System.getenv("PATH").orEmpty()
+            .split(File.pathSeparatorChar)
+            .filter { it.isNotBlank() }
+            .any { directory -> File(directory, "go").let { it.isFile && it.canExecute() } }
+
+        if (!goIsOnSearchPath) {
+            throw GradleException(
+                "엔진을 만들 Go 를 PATH 에서 찾지 못했습니다. " +
+                    "저장소 루트의 go.mod 가 요구하는 판을 설치하거나(https://go.dev/dl), " +
+                    "이미 만들어 둔 kyu 를 ${bundledEngineExecutable.get().asFile} 에 직접 놓으세요.",
+            )
+        }
+    }
+
+    private companion object {
+        /**
+         * 링커가 버전을 심는 심볼. 뒤의 `=` 까지 한 문자열로 적는다.
+         *
+         * 링커는 없는 심볼을 조용히 무시한다 — 경로를 한 글자 틀려도 빌드는 성공하고, 동봉된
+         * 엔진만 자기를 dev 라고 답한다. cmd/kyu/main_test.go 가 이 파일에서 이 모양을 찾아
+         * 그 오타를 잡으므로, 경로와 `=` 를 쪼개 적으면 그 그물이 헐거워진다.
+         */
+        const val VERSION_LDFLAGS_SYMBOL_ASSIGNMENT =
+            "github.com/maximinhan/Kyuchestration/internal/cli.injectedVersion="
+    }
+}
+
+val buildBundledEngine = tasks.register<BuildBundledEngine>("buildBundledEngine") {
+    group = "compose desktop"
+    description = "저장소 루트의 Go 모듈에서 이 머신용 kyu 를 만들어 설치 패키지에 넣을 자리에 놓는다"
+
+    goModuleDirectory.set(layout.projectDirectory.dir(".."))
+    bundledEngineExecutable.set(bundledEngineExecutableFile)
+    goOperatingSystem.set(hostBundledEngineTarget.map { it.goOperatingSystem })
+    goArchitecture.set(hostBundledEngineTarget.map { it.goArchitecture })
+
+    // 앱 버전을 받은 빌드는 엔진에도 같은 태그를 심는다. 동봉된 엔진의 버전이 앱 버전과
+    // 다를 수 있으면 `kyu version` 의 답이 "이 앱이 무엇을 부리고 있는가" 를 말하지 못한다.
+    // 아무것도 넘기지 않는 로컬 빌드에서는 심지 않는다 — 개발 중인 빌드에 v0.1.0 이라고
+    // 적어 두면 그 숫자가 릴리스와 같은 뜻으로 읽힌다.
+    engineVersion.set(providers.gradleProperty("desktopVersion").map { "v${it.trim()}" })
+}
+
+val checkBundledEngine = tasks.register("checkBundledEngine") {
+    group = "verification"
+    description = "설치 패키지에 넣을 엔진이 자리에 있는지 확인한다"
+
+    doLast {
+        val engineFile = bundledEngineExecutableFile.get().asFile
+        if (!engineFile.isFile) {
+            throw GradleException(
+                "설치 패키지에 넣을 엔진이 없습니다: $engineFile\n" +
+                    "./gradlew buildBundledEngine 으로 만든 뒤 다시 패키징하세요. " +
+                    "엔진 없이 만든 패키지는 설치해도 첫 화면에서 엔진부터 받아야 합니다.",
+            )
+        }
+    }
+}
+
+// 엔진이 빠진 설치 패키지가 나가지 않게 막는다. 빠져도 빌드는 끝까지 성공하므로, 받아서
+// 설치해 보기 전에는 아무도 모른다.
+//
+// run 은 걸지 않는다. 소스에서 띄우는 흐름은 엔진을 PATH 에 두거나 첫 화면에서 받는 예전
+// 길이 그대로 열려 있어야 한다.
+//
+// packageRelease* 갈래는 걸지 않는다. 프로가드가 pty4j 를 깨서 이 저장소가 쓰지 않는
+// 태스크들이다(위 application 블록의 주석).
+//
+// named 가 아니라 matching 으로 잡는다 — 이 태스크들은 Compose 플러그인이 프로젝트 평가가
+// 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
+val packagingTaskNames = setOf("createDistributable", "packageDeb", "packageDmg")
+tasks.matching { it.name in packagingTaskNames }.configureEach {
+    dependsOn(checkBundledEngine)
+}
+
+// 한 번의 실행에서 둘 다 부를 때(./gradlew buildBundledEngine packageDeb) 리소스를 옮기는
+// 쪽이 나중에 오게 한다. 의존이 아니라 순서만 건다 — 의존으로 걸면 run 까지 Go 를 요구한다.
+tasks.matching { it.name == "prepareAppResources" }.configureEach {
+    mustRunAfter(buildBundledEngine)
+}
+
 compose.desktop {
     application {
         // Kotlin 최상위 함수는 파일 이름에 Kt 가 붙은 클래스로 컴파일된다. Main.kt 의 main() 이라
@@ -114,6 +332,12 @@ compose.desktop {
             packageVersion = project.version.toString()
             description = "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
             vendor = "maximinhan"
+
+            // 엔진(kyu)을 앱 패키지 안에 함께 넣는 자리. Compose 는 이 디렉토리 아래에서 이
+            // 플랫폼의 하위 디렉토리(linux-x64 · macos-arm64 · macos-x64)를 골라 앱 이미지의
+            // resources 로 옮기고, 앱은 실행 시점에 compose.application.resources.dir 시스템
+            // 프로퍼티로 그 자리를 받는다.
+            appResourcesRootDir.set(bundledEngineRootDirectory)
 
             macOS {
                 bundleID = "com.kyuchestration.desktop"

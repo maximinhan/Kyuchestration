@@ -62,23 +62,33 @@ func TestVersionReportsTheVersionInjectedByTheReleaseBuild(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflowInjectsTheVersionSymbolThisTestPins(t *testing.T) {
-	// 위 테스트는 "이 테스트가 적은 경로" 로 주입해 볼 뿐이다. 릴리스 워크플로가 다른 경로를
-	// 적고 있으면 테스트도 CI 도 초록인 채로 릴리스 바이너리만 버전을 잃는다 — 링커가 없는
-	// 심볼을 조용히 무시하기 때문이다. 실제로 나가는 명령이 같은 경로를 쓰는지를 여기서 잇는다.
-	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
-
-	workflow, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatalf("릴리스 워크플로를 읽지 못했습니다 (%s): %v", workflowPath, err)
+func TestEveryBuildThatInjectsTheVersionUsesTheSymbolThisTestPins(t *testing.T) {
+	// 위 테스트는 "이 테스트가 적은 경로" 로 주입해 볼 뿐이다. 실제로 바이너리를 만드는 쪽이
+	// 다른 경로를 적고 있으면 테스트도 CI 도 초록인 채로 그 바이너리만 버전을 잃는다 —
+	// 링커가 없는 심볼을 조용히 무시하기 때문이다. 실제로 나가는 명령들을 여기서 잇는다.
+	//
+	// 주입하는 자리가 둘이다. 릴리스 워크플로가 만드는 CLI 바이너리 셋과, 데스크톱 빌드가
+	// 설치 패키지 안에 동봉하는 엔진이다. 뒤엣것이 버전을 잃으면 앱 안의 엔진만 자기를
+	// dev 라고 답하는데, 그 사실은 설치한 사람이 kyu version 을 쳐 보기 전에는 드러나지 않는다.
+	buildFilePaths := []string{
+		filepath.Join("..", "..", ".github", "workflows", "release.yml"),
+		filepath.Join("..", "..", "desktop", "build.gradle.kts"),
 	}
 
 	// 뒤의 = 까지 함께 본다. 경로만 찾으면 injectedVersionTYPO 처럼 뒤에 덧붙은 오타가
 	// 부분 문자열로 걸려 그대로 통과한다 — 링커는 그 오타 심볼을 조용히 무시할 텐데도.
 	symbolAssignment := versionLdflagsSymbolPath + "="
-	if !strings.Contains(string(workflow), symbolAssignment) {
-		t.Errorf("%s 가 심볼 %s 에 주입하고 있지 않습니다 — 릴리스 바이너리가 버전을 잃습니다",
-			workflowPath, versionLdflagsSymbolPath)
+
+	for _, buildFilePath := range buildFilePaths {
+		buildFile, err := os.ReadFile(buildFilePath)
+		if err != nil {
+			t.Fatalf("빌드 파일을 읽지 못했습니다 (%s): %v", buildFilePath, err)
+		}
+
+		if !strings.Contains(string(buildFile), symbolAssignment) {
+			t.Errorf("%s 가 심볼 %s 에 주입하고 있지 않습니다 — 그 빌드가 낸 바이너리는 버전을 잃습니다",
+				buildFilePath, versionLdflagsSymbolPath)
+		}
 	}
 }
 

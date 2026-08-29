@@ -26,6 +26,10 @@ import com.kyuchestration.desktop.engine.EngineInstallationState
 /**
  * 엔진이 없는 채로 앱을 띄웠을 때 가장 먼저 뜨는 화면.
  *
+ * 설치 패키지에는 엔진이 함께 들어 있으므로(desktop/build.gradle.kts 의 appResourcesRootDir),
+ * 이 화면을 보는 사람은 소스에서 띄웠거나 동봉된 엔진을 쓸 수 없는 경우다. 그래서 이 화면은
+ * 사라지지 않고 남는다 — 동봉이 닿지 않는 자리가 있는 한, 앱 안에서 엔진을 놓는 길도 있어야 한다.
+ *
  * 여기서 막는 것이 아니라 여기서 끝낸다. 앱이 시작점이라면 "터미널을 열어 kyu 를 먼저 설치하고
  * 오라" 는 안내는 시작점을 터미널로 되돌리는 말이다. 그래서 이 화면의 중심은 설명이 아니라
  * 버튼 하나다.
@@ -64,6 +68,14 @@ internal fun EngineInstallationScreen(
             text = "이 앱은 워크디렉토리 스캔 · 세션 생성 · 레포 클론을 직접 하지 않고 엔진인 kyu 에게 " +
                 "시킵니다. 최신 릴리스에서 이 머신에 맞는 것을 받아 놓겠습니다.",
             style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = EXPLANATION_MAX_WIDTH),
+        )
+        Text(
+            text = "설치 패키지(dmg · deb)로 받은 앱에는 엔진이 함께 들어 있습니다. " +
+                "이 화면은 소스에서 띄웠거나 동봉된 엔진을 쓸 수 없을 때 뜹니다.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = EXPLANATION_MAX_WIDTH),
         )

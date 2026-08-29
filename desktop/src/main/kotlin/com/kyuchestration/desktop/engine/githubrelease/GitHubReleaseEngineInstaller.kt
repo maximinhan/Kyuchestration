@@ -2,8 +2,7 @@ package com.kyuchestration.desktop.engine.githubrelease
 
 import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.engine.EngineInstaller
-import com.kyuchestration.desktop.kyu.KyuCommandFailure
-import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
+import com.kyuchestration.desktop.engine.reasonEngineDoesNotRun
 import com.kyuchestration.desktop.kyu.managedEngineDirectory
 import java.io.IOException
 import java.net.URI
@@ -80,7 +79,11 @@ class GitHubReleaseEngineInstaller(
         try {
             downloadInto(assetDownloadUrl, downloadPath)
             Files.setPosixFilePermissions(downloadPath, PosixFilePermissions.fromString("rwxr-xr-x"))
-            verifyEngineRuns(downloadPath)
+            // 옮기기 전에 확인한다. 다른 플랫폼의 바이너리도 실행 가능한 파일이긴 하므로, 자리를
+            // 먼저 내주면 돌지 않는 엔진이 설치된 것으로 남는다.
+            reasonEngineDoesNotRun(downloadPath)?.let {
+                throw EngineInstallationFailure.DownloadedEngineDidNotRun(it)
+            }
 
             Files.move(
                 downloadPath,
@@ -113,26 +116,6 @@ class GitHubReleaseEngineInstaller(
 
         if (response.statusCode() != HTTP_OK) {
             throw EngineInstallationFailure.ReleaseRequestRejected(response.statusCode())
-        }
-    }
-
-    /**
-     * 받아 온 것이 정말 kyu 인지 그 자리에서 물어본다.
-     *
-     * 실행기를 그대로 쓴다. "kyu 를 어떻게 띄우고 두 스트림을 어떻게 읽는가" 는 이미 한 곳에
-     * 있고, 여기서 ProcessBuilder 를 다시 쓰면 그 앎이 둘로 갈라진다.
-     */
-    private fun verifyEngineRuns(downloadPath: Path) {
-        val versionResult = try {
-            ProcessKyuCommandRunner(downloadPath).run(listOf("version"))
-        } catch (failure: KyuCommandFailure) {
-            throw EngineInstallationFailure.DownloadedEngineDidNotRun(failure.message.orEmpty())
-        }
-
-        if (versionResult.exitCode != 0) {
-            throw EngineInstallationFailure.DownloadedEngineDidNotRun(
-                versionResult.standardError.trim().ifBlank { "종료 코드 ${versionResult.exitCode}" },
-            )
         }
     }
 }

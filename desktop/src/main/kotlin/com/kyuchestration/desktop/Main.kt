@@ -11,6 +11,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
 import com.kyuchestration.desktop.engine.EngineInstallationStateHolder
+import com.kyuchestration.desktop.engine.bundled.placeBundledEngineWhereItCanRun
 import com.kyuchestration.desktop.engine.githubrelease.GitHubReleaseEngineInstaller
 import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
@@ -48,6 +49,7 @@ fun main() = application {
         EngineInstallationStateHolder(
             engineInstaller = GitHubReleaseEngineInstaller(),
             findEngineExecutable = ::findKyuExecutable,
+            placeBundledEngine = ::placeBundledEngineWhereItCanRun,
             coroutineScope = applicationCoroutineScope,
         )
     }

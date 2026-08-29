@@ -27,6 +27,61 @@ class EngineInstallationStateHolderTest {
     }
 
     @Test
+    fun `동봉된 엔진을 놓은 뒤에 찾는다`() = runTest {
+        var bundledEnginePlaced = false
+        val holder = EngineInstallationStateHolder(
+            engineInstaller = RecordingEngineInstaller(),
+            coroutineScope = backgroundScope,
+            // 동봉된 엔진은 놓이고 나서야 탐색에 걸린다. 순서가 뒤집히면 설치 패키지로 받은 앱이
+            // 첫 실행마다 "엔진이 없다" 는 화면을 한 번씩 띄운다.
+            findEngineExecutable = { INSTALLED_ENGINE_PATH.takeIf { bundledEnginePlaced } },
+            placeBundledEngine = { bundledEnginePlaced = true },
+            installationDispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        assertEquals(EngineInstallationState.EngineReady, holder.state.value)
+    }
+
+    @Test
+    fun `동봉된 엔진을 놓지 못하면 그 이유를 들고 있는다`() = runTest {
+        val holder = stateHolder(
+            RecordingEngineInstaller(),
+            placeBundledEngine = { throw EngineInstallationFailure.BundledEngineDidNotRun("종료 코드 42") },
+        )
+
+        // 엔진을 들고 있으면서 "없다" 고만 말하면, 사용자는 자기가 방금 설치한 앱이 왜 자기
+        // 엔진을 못 쓰는지 알 길이 없다.
+        val failed = assertIs<EngineInstallationState.InstallationFailed>(holder.state.value)
+        assertIs<EngineInstallationFailure.BundledEngineDidNotRun>(failed.failure)
+    }
+
+    @Test
+    fun `동봉을 놓지 못해도 다른 자리에 엔진이 있으면 그대로 시작한다`() = runTest {
+        val holder = stateHolder(
+            RecordingEngineInstaller(),
+            engineExecutablePath = INSTALLED_ENGINE_PATH,
+            placeBundledEngine = { throw EngineInstallationFailure.BundledEngineDidNotRun("종료 코드 42") },
+        )
+
+        // 부를 수 있는 엔진이 있는데 실패 화면을 띄우면, 할 수 있는 일을 막고 이유만 보여주는 꼴이다.
+        assertEquals(EngineInstallationState.EngineReady, holder.state.value)
+    }
+
+    @Test
+    fun `다시 찾기는 동봉 엔진을 다시 놓아 본다`() = runTest {
+        var placementCount = 0
+        val holder = stateHolder(
+            RecordingEngineInstaller(),
+            placeBundledEngine = { placementCount++ },
+        )
+
+        holder.lookForEngineAgain()
+
+        // 놓지 못한 이유가 디스크가 찬 것이었다면, 자리를 비운 사람은 앱을 다시 띄우지 않아도 된다.
+        assertEquals(2, placementCount)
+    }
+
+    @Test
     fun `받는 동안은 진행 중으로 둔다`() = runTest {
         val holder = stateHolder(RecordingEngineInstaller())
 
@@ -95,6 +150,7 @@ class EngineInstallationStateHolderTest {
             engineInstaller = RecordingEngineInstaller(),
             coroutineScope = backgroundScope,
             findEngineExecutable = { engineExecutablePath },
+            placeBundledEngine = {},
             installationDispatcher = StandardTestDispatcher(testScheduler),
         )
 
@@ -136,10 +192,12 @@ class EngineInstallationStateHolderTest {
     private fun TestScope.stateHolder(
         engineInstaller: EngineInstaller,
         engineExecutablePath: Path? = null,
+        placeBundledEngine: () -> Unit = {},
     ) = EngineInstallationStateHolder(
         engineInstaller = engineInstaller,
         coroutineScope = backgroundScope,
         findEngineExecutable = { engineExecutablePath },
+        placeBundledEngine = placeBundledEngine,
         // 받아 오는 일도 앱에서는 IO 디스패처로 나간다. 여기서는 가상 시간을 쓰는 디스패처로 바꿔
         // 받는 중인 한순간을 붙잡아 볼 수 있게 한다.
         installationDispatcher = StandardTestDispatcher(testScheduler),
