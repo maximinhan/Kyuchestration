@@ -16,11 +16,14 @@ import kotlinx.coroutines.withContext
  * @param findEngineExecutable 지금 부를 수 있는 kyu 가 어디 있는지 답하는 자리. 어디를 어떤
  *   순서로 뒤지는지는 이 홀더의 앎이 아니라 조립하는 쪽(Main.kt)이 정한다 — 대시보드 홀더가
  *   계획 파일 유무를 함수로 받는 것과 같은 선이다. 검사는 여기에 있음과 없음을 그대로 준다.
+ * @param placeBundledEngine 설치 패키지가 들고 온 엔진을 부를 수 있는 자리에 놓는 걸음. 찾기
+ *   전에 지난다 — 동봉된 엔진은 놓이고 나서야 탐색에 걸린다.
  */
 class EngineInstallationStateHolder(
     private val engineInstaller: EngineInstaller,
     private val coroutineScope: CoroutineScope,
     private val findEngineExecutable: () -> Path?,
+    private val placeBundledEngine: () -> Unit,
     // 받아 오고 프로세스를 띄우는 일이라 화면을 그리는 스레드에서 하면 창이 멎는다.
     private val installationDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -29,8 +32,11 @@ class EngineInstallationStateHolder(
      * 첫 답을 생성자에서 곧바로 낸다.
      *
      * 코루틴으로 미루면 "찾는 중" 이라는 상태가 하나 더 필요하고, 엔진이 이미 있는 사람은 앱을
-     * 띄울 때마다 그 화면이 한 번 번쩍이는 것을 보게 된다. 찾는 일은 PATH 의 디렉토리마다 파일
-     * 하나를 확인하는 것뿐이라 화면을 그리기 전에 끝난다.
+     * 띄울 때마다 그 화면이 한 번 번쩍이는 것을 보게 된다.
+     *
+     * 여기서 하는 일이 화면을 그리기 전에 끝난다. 찾는 것은 디렉토리마다 파일 하나를 확인하는
+     * 일이고, 동봉된 엔진을 놓는 것은 바이트가 같으면 견주기만 하고 끝난다 — 실제로 옮기는 것은
+     * 앱을 새로 설치한 다음 첫 실행 한 번뿐이다.
      */
     private val mutableState = MutableStateFlow(stateFromWhatIsInstalled())
 
@@ -75,10 +81,23 @@ class EngineInstallationStateHolder(
         mutableState.value = stateFromWhatIsInstalled()
     }
 
-    private fun stateFromWhatIsInstalled(): EngineInstallationState =
-        if (findEngineExecutable() == null) {
-            EngineInstallationState.EngineMissing
-        } else {
-            EngineInstallationState.EngineReady
+    private fun stateFromWhatIsInstalled(): EngineInstallationState {
+        val bundledEngineFailure = try {
+            placeBundledEngine()
+            null
+        } catch (failure: EngineInstallationFailure) {
+            failure
         }
+
+        return when {
+            findEngineExecutable() != null -> EngineInstallationState.EngineReady
+
+            // 동봉된 엔진을 들고 있으면서 "엔진이 없다" 고만 말하면, 사용자는 자기가 방금 설치한
+            // 앱이 왜 자기 엔진을 못 쓰는지 알 길이 없다. 그 이유를 들고 설치 화면으로 간다 —
+            // 거기서 [엔진 설치] 로 받아 오는 길은 그대로 열려 있다.
+            bundledEngineFailure != null -> EngineInstallationState.InstallationFailed(bundledEngineFailure)
+
+            else -> EngineInstallationState.EngineMissing
+        }
+    }
 }
