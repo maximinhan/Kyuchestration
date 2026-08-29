@@ -26,6 +26,31 @@ require(Regex("""\d+\.\d+\.\d+""").matches(desktopVersion)) {
 }
 version = desktopVersion
 
+// 맥 설치 패키지에만 넘기는 버전. 위의 제품 버전과 일부러 다르다.
+//
+// jpackage 는 맥 앱을 만들 때 --app-version 을 애플의 CFBundleVersion 규약으로 검사하고, 첫
+// 숫자가 0 이면 거절한다(OpenJDK jdk.jpackage.internal.MacAppBundler.doValidate → CFBundleVersion.of
+// — "first number in a CFBundleVersion cannot be zero"). 애플의 규약에서 0.x 는 아직 내놓은 적
+// 없는 빌드라는 뜻이라서다.
+//
+// 그렇다고 제품 버전을 1.0.0 으로 올리지는 않는다. 1.0.0 은 기능 · 테스트 · 지원 플랫폼이
+// 기준을 충족했을 때 선언하는 것이지 jpackage 가 요구해서 붙이는 숫자가 아니다. 도구 제약에
+// 제품 버전을 맞추면 그 뒤로 버전이 뜻하는 바가 사라진다. 그래서 제품 버전은 0.x 로 두고,
+// jpackage 가 보는 값만 여기서 앞자리를 올려 넘긴다.
+//
+// 앞자리만 바꾸고 나머지는 그대로 둔다(0.8.0 → 1.8.0). 되짚어 읽을 수 있고, 0.x 를 내는 동안은
+// 값이 계속 커진다. 앞자리가 이미 1 이상이면 그대로 통과하므로 진짜 1.0.0 부터는 이 매핑이
+// 사라진다.
+//
+// 대가가 둘 있고 둘 다 감수한다.
+//   - 맥 Finder 정보창에는 이 매핑된 숫자가 보인다. 제품 버전은 앱 화면(jar 매니페스트의
+//     Implementation-Version)과 릴리스 자산 이름에 있다 — README 데스크톱 절에 적어 뒀다.
+//   - 진짜 1.0.0 을 낼 때 이 값이 한 번 내려간다(0.10.0 → 1.10.0 다음이 1.0.0). 0.x 를 1 이상으로
+//     올리는 어떤 매핑을 써도 피할 수 없는 자리인데, 이 앱에는 자동 업데이트가 없어
+//     CFBundleVersion 을 견주는 쪽이 없다.
+val macPackageVersion =
+    if (desktopVersion.startsWith("0.")) "1." + desktopVersion.removePrefix("0.") else desktopVersion
+
 kotlin {
     // 툴체인을 못 박아 두면 개발자 머신의 기본 JDK 가 무엇이든 같은 바이트코드가 나온다.
     jvmToolchain(21)
@@ -92,6 +117,13 @@ compose.desktop {
 
             macOS {
                 bundleID = "com.kyuchestration.desktop"
+
+                // 맥 형식(app-image · dmg)만 이 값을 쓴다 — deb 는 위의 packageVersion 그대로
+                // 제품 버전이다. Compose 플러그인은 이것을 jpackage 의 --app-version 으로 넘기고
+                // Info.plist 의 CFBundleShortVersionString 에 적으며, CFBundleVersion 은 따로
+                // 주지 않으면 같은 값을 따라간다(packageVersionFor·packageBuildVersionFor).
+                // 두 값이 같아도 되는 자리라 packageBuildVersion 은 두지 않는다.
+                packageVersion = macPackageVersion
             }
         }
     }
