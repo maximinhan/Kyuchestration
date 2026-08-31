@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -46,6 +48,23 @@ const insideSupervisorSessionEnvName = "KYU_SESSION"
 // 비어 올 수 있다 — GUI 런처에서 앱을 띄운 경우가 그렇다(설계 문서 5.3).
 const fallbackTerm = "xterm-256color"
 
+// sessionOutputChunkSize 는 PTY 마스터에서 한 번에 읽어 나르는 크기다.
+//
+// 붙어 있는 클라이언트에게 가는 OUTPUT 프레임 하나의 최대 크기이기도 하다. 크게 잡으면 프레임
+// 수가 줄지만 사람이 타이핑하는 지연이 보이는 경로라 응답이 늦어 보이고, 작게 잡으면 빌드 로그
+// 같은 쏟아지는 출력에서 프레임 머리말만 늘어난다.
+const sessionOutputChunkSize = 32 * 1024
+
+// 붙은 클라이언트가 없는 동안 세션이 갖는 화면 크기다.
+//
+// 크기가 0 이면 화면을 다 쓰는 프로그램이 그릴 자리가 없다고 보고 아무것도 그리지 않거나 0 으로
+// 나눈다. tmux 도 떨어져 있는 세션에 80x24 를 주므로 그대로 따른다 — 의미론을 새로 정하지
+// 않는다(설계 원칙 8).
+const (
+	defaultSessionColumns = 80
+	defaultSessionRows    = 24
+)
+
 // sessionTerminationGracePeriod 는 SIGHUP 을 보내고 SIGKILL 까지 기다리는 유예다.
 const sessionTerminationGracePeriod = 3 * time.Second
 
@@ -59,6 +78,9 @@ const socketProbeTimeout = 2 * time.Second
 // 제어 요청은 한 줄 주고받고 끝나므로 동시성을 들이지 않고 하나씩 처리한다. 대신 답하지 않는
 // 클라이언트가 감독을 붙잡지 못하도록 마감 시각을 둔다. kill 은 자식이 끝나기를 기다린 뒤에
 // 답하므로 유예보다 넉넉해야 한다.
+//
+// attach 연결도 첫 프레임까지는 이 마감 시각을 쓴다. 붙고 나면 푼다 — 사람이 다음 키를 누를
+// 때까지의 사이는 얼마든 길 수 있다.
 const controlConnectionDeadline = sessionTerminationGracePeriod + 7*time.Second
 
 // errSessionNameAlreadyHeld 는 그 이름을 이미 다른 감독이 쥐고 있을 때다.
@@ -170,6 +192,17 @@ type supervisorProcess struct {
 	ptyMaster    *os.File
 	events       *log.Logger
 
+	// scrollback 은 세션 출력이 지나는 유일한 길이다. 붙어 있는 클라이언트도 여기서 읽는다.
+	scrollback *sessionScrollback
+
+	// attachMutex 는 지금 붙어 있는 클라이언트를 지킨다. 한 번에 하나만 붙는다(설계 문서 5.6).
+	attachMutex    sync.Mutex
+	attachedClient *attachedClient
+
+	// attachHandlers 는 붙어 있는 연결을 맡은 고루틴들이다. 세션이 끝날 때 그들이 EXIT 를
+	// 전할 때까지 기다린다.
+	attachHandlers sync.WaitGroup
+
 	// childExited 는 자식을 거두면 닫힌다. childExitCode 는 그 뒤에만 읽는다.
 	childExited   chan struct{}
 	childExitCode int
@@ -217,6 +250,7 @@ func startSupervisor(args []string, events *log.Logger) (*supervisorProcess, err
 		childCommand: childCommand,
 		ptyMaster:    ptyMaster,
 		events:       events,
+		scrollback:   newSessionScrollback(scrollbackRingCapacity),
 		childExited:  make(chan struct{}),
 	}, nil
 }
@@ -330,10 +364,16 @@ func startSessionChild(options superviseOptions) (*exec.Cmd, *os.File, error) {
 	childCommand.Dir = options.workingDir
 	childCommand.Env = sessionChildEnvironment(options.sessionName)
 
-	// pty.Start 는 자식을 setsid + setctty 로 띄우고 PTY 슬레이브를 그 제어 터미널로 삼는다.
-	// 그래서 자식의 프로세스 그룹 번호가 자기 pid 와 같아지고, 종료할 때 그룹 전체에 신호를
-	// 보낼 수 있다(설계 문서 5.3).
-	ptyMaster, err := pty.Start(childCommand)
+	// pty.StartWithSize 는 자식을 setsid + setctty 로 띄우고 PTY 슬레이브를 그 제어 터미널로
+	// 삼는다. 그래서 자식의 프로세스 그룹 번호가 자기 pid 와 같아지고, 종료할 때 그룹 전체에
+	// 신호를 보낼 수 있다(설계 문서 5.3).
+	//
+	// 크기를 함께 준다. 아무도 붙지 않은 채로 뜨는 세션이라 크기를 정해주지 않으면 0x0 이 되고,
+	// 화면을 다 쓰는 프로그램은 그 크기로는 그리지 못한다.
+	ptyMaster, err := pty.StartWithSize(childCommand, &pty.Winsize{
+		Cols: defaultSessionColumns,
+		Rows: defaultSessionRows,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w (%s): %w", errCommandStartFailed, options.command[0], err)
 	}
@@ -358,9 +398,13 @@ func (s *supervisorProcess) serve() error {
 	// 잠금을 잡은 순간 그 이름 자리에 남의 소켓이 없다.
 	defer s.nameLock.Close()
 	defer s.ptyMaster.Close()
+	// 붙어 있는 클라이언트가 EXIT 를 전해 받을 때까지 기다린다(가장 먼저 도는 defer 다).
+	// 기다리지 않으면 세션이 끝났다는 사실이 프로세스 종료에 잘려 클라이언트는 "연결이 끊겼다"
+	// 만 보게 된다 — 그 둘은 사용자에게 다른 말을 해야 하는 사건이다(설계 문서 5.6).
+	defer s.attachHandlers.Wait()
 
 	go s.watchChild()
-	go s.drainSessionOutput()
+	go s.pumpSessionOutputIntoScrollback()
 
 	for {
 		connection, err := s.listener.Accept()
@@ -371,15 +415,56 @@ func (s *supervisorProcess) serve() error {
 				s.events.Printf("세션 종료 (종료 코드 %d)", s.childExitCode)
 				return nil
 			default:
-				return fmt.Errorf("제어 연결 수신 실패 (세션 %s): %w", s.sessionName, err)
+				return fmt.Errorf("연결 수신 실패 (세션 %s): %w", s.sessionName, err)
 			}
 		}
 
-		if killRequested := s.handleControlConnection(connection); killRequested {
+		if killRequested := s.handleAcceptedConnection(connection); killRequested {
 			s.events.Printf("세션 종료 (kill 요청, 종료 코드 %d)", s.childExitCode)
 			return nil
 		}
 	}
+}
+
+// handleAcceptedConnection 은 받은 연결이 제어인지 attach 인지 가른다.
+//
+// 첫 바이트 하나로 갈린다 — ATTACH 프레임의 종류 바이트(0x01)이면 그 연결은 그때부터 그 세션의
+// 스트림이고(설계 문서 5.6), 아니면 NDJSON 제어 요청이다(`{` 는 0x7b). 엿보기만 하므로 그
+// 바이트는 소비되지 않고 뒤쪽 해석기가 처음부터 읽는다.
+//
+// 제어 연결은 여기서 하나씩 처리하고 attach 만 고루틴으로 넘긴다. attach 는 세션이 사는 내내
+// 유지되는 연결이라 이 루프에 두면 그 뒤로 아무 조회도 받지 못한다.
+func (s *supervisorProcess) handleAcceptedConnection(connection net.Conn) bool {
+	if err := connection.SetDeadline(time.Now().Add(controlConnectionDeadline)); err != nil {
+		s.events.Printf("연결 마감 시각 설정 실패: %v", err)
+		connection.Close()
+		return false
+	}
+
+	reader := bufio.NewReader(connection)
+	firstByte, err := reader.Peek(1)
+	if err != nil {
+		// 한 바이트도 오지 않은 채 끝난 연결은 임자가 있는지 붙어본 것이다. 죽은 소켓과 살아있는
+		// 감독을 가르는 그 판정이 정확히 이 모양이라(bindSessionSocket 의 isSocketBound) 실패로
+		// 적지 않는다.
+		if !errors.Is(err, io.EOF) {
+			s.events.Printf("연결의 첫 바이트 읽기 실패: %v", err)
+		}
+		connection.Close()
+		return false
+	}
+
+	if firstByte[0] == attachFrameType {
+		s.attachHandlers.Add(1)
+		go func() {
+			defer s.attachHandlers.Done()
+			s.serveAttachConnection(connection, reader)
+		}()
+		return false
+	}
+
+	defer connection.Close()
+	return s.handleControlRequest(connection, reader)
 }
 
 // watchChild 는 자식을 거두고, 거둔 사실로 감독의 삶을 끝낸다.
@@ -396,34 +481,39 @@ func (s *supervisorProcess) watchChild() {
 	s.listener.Close()
 }
 
-// drainSessionOutput 은 PTY 마스터에 쌓이는 세션 출력을 계속 읽어 버린다.
+// pumpSessionOutputIntoScrollback 은 PTY 마스터에 쌓이는 세션 출력을 링으로 옮긴다.
 //
-// 아직 attach 가 없어 읽어갈 사람이 없다. 그렇다고 두면 커널 버퍼가 차는 순간 세션 안 프로그램의
+// 붙어 있는 사람이 없어도 계속 읽어야 한다. 그대로 두면 커널 버퍼가 차는 순간 세션 안 프로그램의
 // 쓰기가 막혀 세션이 통째로 멈춘다 — 조금 떠들썩한 명령 하나에 걸릴 함정이다.
 //
-// 이 자리가 나중에 스크롤백 링에 적으면서 붙어 있는 클라이언트에게 보내는 곳이 된다(설계 문서 5.7).
-func (s *supervisorProcess) drainSessionOutput() {
-	io.Copy(io.Discard, s.ptyMaster)
+// 붙어 있는 클라이언트에게 여기서 직접 보내지 않는다. 클라이언트도 같은 링에서 읽으므로 재생과
+// 실시간이 한 경로가 되고, 그 둘이 만나는 경계 자체가 없어진다(설계 문서 5.7).
+func (s *supervisorProcess) pumpSessionOutputIntoScrollback() {
+	// 마스터가 EOF 를 주면 더 올 바이트가 없다. 링에서 기다리는 클라이언트를 깨워 끝을 알린다.
+	defer s.scrollback.finish()
+
+	buffer := make([]byte, sessionOutputChunkSize)
+	for {
+		read, err := s.ptyMaster.Read(buffer)
+		if read > 0 {
+			s.scrollback.append(buffer[:read])
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
-// handleControlConnection 은 요청 한 줄을 받아 한 줄로 답한다. kill 이었으면 true 를 돌려준다.
-func (s *supervisorProcess) handleControlConnection(connection net.Conn) bool {
-	defer connection.Close()
-
-	if err := connection.SetDeadline(time.Now().Add(controlConnectionDeadline)); err != nil {
-		s.events.Printf("제어 연결 마감 시각 설정 실패: %v", err)
-		return false
-	}
-
+// handleControlRequest 는 요청 한 줄을 받아 한 줄로 답한다. kill 이었으면 true 를 돌려준다.
+//
+// 연결의 마감 시각과 닫기는 부르는 쪽이 맡는다 — 그쪽이 이 연결이 제어인지 attach 인지 가르는
+// 자리라 두 갈래에 같은 규칙을 한 번만 적을 수 있다.
+func (s *supervisorProcess) handleControlRequest(connection net.Conn, reader io.Reader) bool {
 	var request controlRequest
-	if err := json.NewDecoder(connection).Decode(&request); err != nil {
-		// 한 바이트도 오지 않은 채 끝난 연결은 임자가 있는지 붙어본 것이다. 죽은 소켓과
-		// 살아있는 감독을 가르는 그 판정이 정확히 이 모양이고(bindSessionSocket 의 isSocketBound),
-		// 세션을 하나 더 만들려 할 때마다 벌어지는 정상적인 일이라 실패로 적지 않는다.
-		// 요청을 쓰다 만 연결은 io.ErrUnexpectedEOF 라 여기 걸리지 않는다.
-		if !errors.Is(err, io.EOF) {
-			s.events.Printf("제어 요청 해석 실패: %v", err)
-		}
+	if err := json.NewDecoder(reader).Decode(&request); err != nil {
+		// 요청을 쓰다 만 연결이다. 한 바이트도 보내지 않은 임자 확인 연결은 첫 바이트를 엿보는
+		// 자리에서 이미 갈렸으므로 여기 오지 않는다.
+		s.events.Printf("제어 요청 해석 실패: %v", err)
 		return false
 	}
 
