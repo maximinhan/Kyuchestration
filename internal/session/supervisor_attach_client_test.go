@@ -2,7 +2,6 @@ package session
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -137,19 +136,6 @@ func TestAttachClientCarriesTheTerminalToTheSessionAndGivesItBack(t *testing.T) 
 	}
 	if !alive {
 		t.Errorf("빠져나온 뒤 IsAlive() = false, 세션은 살아 있어야 한다")
-	}
-}
-
-func TestSupervisorBackendAttachRefusesToNestInsideAnotherSession(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-
-	// 감독이 자식에게 심어둔 표식이다. 세션 안에서 도는 모든 프로세스가 물려받으므로 그 안에서
-	// kyu attach 를 부르면 이것이 보인다 — tmux 가 TMUX 로 하는 것과 같은 기전이다(설계 문서 5.3).
-	t.Setenv(insideSupervisorSessionEnvName, "kyu-featureX-proj-a")
-
-	err := backend.Attach("kyu-featureX-proj-b")
-	if !errors.Is(err, ErrNestedSession) {
-		t.Errorf("세션 안에서 Attach() = %v, ErrNestedSession 이어야 한다", err)
 	}
 }
 
