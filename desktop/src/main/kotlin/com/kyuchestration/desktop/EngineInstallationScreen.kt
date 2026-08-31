@@ -101,18 +101,11 @@ internal fun EngineInstallationScreen(
         Spacer(Modifier.height(8.dp))
         HorizontalDivider(modifier = Modifier.widthIn(max = EXPLANATION_MAX_WIDTH))
 
+        // tmux 안내가 여기 있었다. 앱이 부르는 엔진 명령 가운데 세션 백엔드를 요구하는 것이
+        // 하나도 남지 않아 지웠다 — 목록도 백엔드 없이 답한다(app-owned-sessions-design.md 8절 5번).
+        // 첫 화면에서 필요하지도 않은 것을 요구사항처럼 읽히게 두지 않는다.
         Text(
-            text = "앱이 여는 세션에는 tmux 가 필요 없습니다. 다만 kyu 가 워크디렉토리 목록을 낼 때 " +
-                "CLI 세션의 생존을 tmux 에게 물으므로, 없으면 대시보드가 서 있습니다 — " +
-                "WSL · 리눅스는 sudo apt install tmux, 맥은 brew install tmux 입니다. " +
-                "앱이 대신 넣지 않습니다: 시스템 패키지라 관리자 권한이 필요합니다.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = EXPLANATION_MAX_WIDTH),
-        )
-        Text(
-            text = "터미널이 편하면 이 한 줄로도 넣을 수 있습니다:",
+            text = "터미널이 편하면 엔진을 이 한 줄로 넣을 수도 있습니다:",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

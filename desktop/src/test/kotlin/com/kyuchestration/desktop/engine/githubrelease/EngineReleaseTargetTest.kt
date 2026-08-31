@@ -34,7 +34,7 @@ class EngineReleaseTargetTest {
 
     @Test
     fun `윈도우 네이티브는 자산이 아니라 WSL 로 가는 갈래다`() {
-        // 엔진은 목록을 낼 때 tmux 를 찾는다. 바이너리를 받아 놓아도 그 자리에서는 답하지 못하므로
+        // 릴리스가 윈도우 엔진 바이너리를 내지 않으므로 받아 올 자산이 애초에 없다.
         // 받기 전에 갈라야 한다 — 받고 나서 실패하면 사용자는 다운로드를 의심하게 된다.
         assertEquals(
             EngineReleaseTarget.WindowsNeedsWsl,

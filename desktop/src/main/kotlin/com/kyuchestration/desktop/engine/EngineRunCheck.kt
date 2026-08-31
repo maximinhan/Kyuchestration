@@ -13,8 +13,9 @@ import java.nio.file.Path
  * 실행기를 그대로 쓴다. kyu 를 어떻게 띄우고 두 스트림을 어떻게 읽는지는 이미 한 곳에 있고,
  * 여기서 ProcessBuilder 를 다시 쓰면 그 앎이 둘로 갈라진다.
  *
- * `version` 을 묻는 이유는 그것이 tmux 도 워크디렉토리도 보지 않는 유일한 명령이기 때문이다.
- * 다른 명령으로 물으면 "엔진이 아니다" 와 "이 머신에 tmux 가 없다" 가 한 답으로 섞인다.
+ * `version` 을 묻는 이유는 그것이 이 바이너리 자신에 대한 질문이라 바깥을 하나도 보지 않기
+ * 때문이다 — 워크디렉토리도, git 도, 세션 백엔드도. 다른 명령으로 물으면 "엔진이 아니다" 와
+ * "여기가 워크디렉토리가 아니다" 가 한 답으로 섞인다.
  */
 internal fun reasonEngineDoesNotRun(enginePath: Path): String? {
     val versionResult = try {

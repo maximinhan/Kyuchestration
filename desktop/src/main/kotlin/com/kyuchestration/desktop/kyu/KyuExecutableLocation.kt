@@ -120,9 +120,9 @@ private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.applicatio
  * 환경 변수를 보면 설치할 때와 다음에 띄울 때의 셸 설정이 다른 것만으로 받아 둔 엔진이 통째로
  * 안 보이게 되고, 그 엔진은 지워지지도 않은 채 어디에도 뜨지 않는다.
  *
- * 윈도우 갈래를 따로 두지 않는다. 엔진이 목록을 낼 때 tmux 를 찾으므로 윈도우 네이티브에서는
- * 설치 화면이 받기 전에 거절하고(EngineReleaseTarget), 이 자리는 그쪽에서 쓰이지 않는다. 쓰지도 않을
- * AppData 갈래를 미리 두면 시험할 수 없는 코드가 하나 생긴다.
+ * 윈도우 갈래를 따로 두지 않는다. 릴리스가 윈도우 엔진 바이너리를 내지 않아 설치 화면이 받기 전에
+ * 거절하고(EngineReleaseTarget), 이 자리는 그쪽에서 쓰이지 않는다. 쓰지도 않을 AppData 갈래를
+ * 미리 두면 시험할 수 없는 코드가 하나 생긴다.
  */
 internal fun managedEngineDirectory(
     osName: String = System.getProperty("os.name").orEmpty(),
@@ -153,8 +153,8 @@ internal const val PINNED_KYU_EXECUTABLE_VARIABLE = "KYU_BINARY_PATH"
  * 확장자가 붙은 이름(kyu.exe)은 찾지 않는다.
  *
  * 릴리스가 윈도우 바이너리를 내지 않고(release.yml 의 크로스 컴파일 목록), 설치 패키지에서도
- * msi 가 빠졌다(build.gradle.kts 의 targetFormats). 엔진이 목록을 낼 때 tmux 를 찾는 한 윈도우
- * 네이티브는 대상이 아니므로, 그 이름으로 찾아질 파일이 이 프로젝트에는 없다. 찾는 시늉만 하면 윈도우에서
+ * msi 가 빠졌다(build.gradle.kts 의 targetFormats). 그 둘이 그대로인 한 윈도우 네이티브는 대상이
+ * 아니므로, 그 이름으로 찾아질 파일이 이 프로젝트에는 없다. 찾는 시늉만 하면 윈도우에서
  * 띄운 사람이 받게 될 답이 "WSL 에서 띄우세요" 가 아니라 침묵이 된다.
  */
 private fun findOnSearchPath(searchPath: String?, isExecutableFile: (Path) -> Boolean): Path? =
