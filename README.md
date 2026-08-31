@@ -284,6 +284,12 @@ kyu version            이 바이너리의 버전
 
 옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
+
+환경변수:
+  KYU_SESSION_BACKEND    세션 백엔드 — tmux(기본) | supervisor(진행 중)
+
+start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유하는 세션은 앱의 PTY 안에 있어
+이 명령들에 보이지 않고, 반대로 앱도 CLI 세션에 붙지 못한다 — app-owned-sessions-design.md.
 ```
 
 ### 기계용 표면

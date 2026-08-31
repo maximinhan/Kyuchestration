@@ -30,9 +30,9 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
   kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
   kyu list [path]        레포 목록 + 상태
-  kyu start [repo]       세션 시작. 인자 없으면 main
-  kyu attach <repo>      세션 진입. main 도 가능
-  kyu kill [repo|--all]  세션 종료
+  kyu start [repo]       세션 시작. 인자 없으면 main — CLI 세션이라 tmux 가 필요하다
+  kyu attach <repo>      세션 진입. main 도 가능 — CLI 세션 전용
+  kyu kill [repo|--all]  세션 종료 — CLI 세션 전용
   kyu repos <owners|list>
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
   kyu session-command [repo]
@@ -53,7 +53,10 @@ const usageText = `사용법: kyu [명령] [인자]
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
 환경변수:
-  ` + session.BackendSelectionEnvName + `    세션 백엔드 — tmux(기본) | supervisor(진행 중)`
+  ` + session.BackendSelectionEnvName + `    세션 백엔드 — tmux(기본) | supervisor(진행 중)
+
+start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유하는 세션은 앱의 PTY 안에 있어
+이 명령들에 보이지 않고, 반대로 앱도 CLI 세션에 붙지 못한다 — app-owned-sessions-design.md.`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
