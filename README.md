@@ -255,19 +255,21 @@ kyu attach <repo>      세션 진입. main 도 가능
 kyu kill [repo|--all]  세션 종료
 kyu repos <owners|list>
                        GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
+kyu session-command [repo]
+                       세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
 kyu auth <add|list|remove>
                        저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
 kyu version            이 바이너리의 버전
 
-옵션 (kyu, kyu start):
+옵션 (kyu, kyu start, kyu session-command):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
-  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
+  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (메인 세션 전용)
 
 옵션 (kyu clone):
   --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
   --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
 
-옵션 (kyu list, kyu clone, kyu repos, kyu auth add, kyu auth list):
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 ```
 
@@ -284,6 +286,7 @@ kyu version            이 바이너리의 버전
 | `kyu repos list --profile <이름> --owner <로그인> --json` | 그 계정의 레포 | `{schemaVersion, repos[]}` |
 | `kyu clone --profile <이름> --repo <owner/name> --json` | 묻지 않고 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
+| `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env}` |
 
 공통 규칙이 다섯 가지다.
 
