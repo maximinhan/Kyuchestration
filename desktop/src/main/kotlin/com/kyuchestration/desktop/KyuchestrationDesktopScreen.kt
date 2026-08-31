@@ -59,7 +59,7 @@ fun KyuchestrationDesktopScreen(
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
-    onCloseTerminalRequested: () -> Unit,
+    onEndSessionRequested: () -> Unit,
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -96,7 +96,7 @@ fun KyuchestrationDesktopScreen(
                             onRefreshRequested = onRefreshRequested,
                             onCloseWorkDirRequested = onCloseWorkDirRequested,
                             onEnterSessionRequested = onEnterSessionRequested,
-                            onCloseTerminalRequested = onCloseTerminalRequested,
+                            onEndSessionRequested = onEndSessionRequested,
                         )
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
@@ -133,7 +133,7 @@ private fun DashboardWithTerminal(
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
-    onCloseTerminalRequested: () -> Unit,
+    onEndSessionRequested: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(DASHBOARD_HEIGHT_WEIGHT)) {
@@ -153,7 +153,7 @@ private fun DashboardWithTerminal(
             HorizontalDivider()
             EmbeddedTerminalPane(
                 terminalState = terminalState,
-                onCloseTerminalRequested = onCloseTerminalRequested,
+                onEndSessionRequested = onEndSessionRequested,
                 modifier = Modifier.weight(TERMINAL_HEIGHT_WEIGHT),
             )
         }

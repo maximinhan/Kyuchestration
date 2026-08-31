@@ -10,25 +10,25 @@ import com.jediterm.terminal.TtyConnector
  */
 sealed interface EmbeddedTerminalState {
 
-    /** 지금 붙어 있는 세션. 아무 터미널도 열지 않았으면 null. */
+    /** 지금 보고 있는 세션. 아무 터미널도 열지 않았으면 null. */
     val target: SessionTarget?
 
     data object NoTerminalOpen : EmbeddedTerminalState {
         override val target: SessionTarget? = null
     }
 
-    /** 세션을 띄우고 PTY 를 여는 중이다. 첫 진입이든 다른 세션으로 옮겨가는 중이든 여기다. */
+    /** 무엇을 띄울지 묻고 PTY 를 여는 중이다. 첫 진입이든 다른 세션으로 옮겨가는 중이든 여기다. */
     data class SessionEntryRunning(
         override val target: SessionTarget,
     ) : EmbeddedTerminalState
 
     /**
-     * 붙었다.
+     * 세션이 화면에 떠 있다.
      *
-     * @param ttyConnector JediTerm 이 이 통로로 읽고 쓴다. 닫으면 PTY 가 끝나고 tmux 클라이언트가
-     *   떨어진다 — 세션은 그대로 살아 있다(설계 원칙 5).
+     * @param ttyConnector JediTerm 이 이 통로로 읽고 쓴다. 닫으면 PTY 안의 `claude` 가 끝난다 —
+     *   앱이 그 프로세스를 보유하고 있으므로 detach 라는 중간 상태가 없다(설계 문서 5.3).
      */
-    data class TerminalAttached(
+    data class SessionOnScreen(
         override val target: SessionTarget,
         val ttyConnector: TtyConnector,
     ) : EmbeddedTerminalState

@@ -36,11 +36,11 @@ import javax.swing.SwingUtilities
 @Composable
 fun EmbeddedTerminalPane(
     terminalState: EmbeddedTerminalState,
-    onCloseTerminalRequested: () -> Unit,
+    onEndSessionRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        EmbeddedTerminalHeader(terminalState, onCloseTerminalRequested)
+        EmbeddedTerminalHeader(terminalState, onEndSessionRequested)
 
         when (terminalState) {
             // 이 자리가 그려지는 것은 화면이 터미널을 보여주기로 한 뒤다. 그 판단은 상태 홀더가
@@ -51,14 +51,14 @@ fun EmbeddedTerminalPane(
                 CenteredNotice {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     Text(
-                        text = "${terminalState.target.label} 세션을 띄우고 들어가는 중입니다",
+                        text = "${terminalState.target.label} 세션을 띄우는 중입니다",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
-            is EmbeddedTerminalState.TerminalAttached ->
-                AttachedTerminal(terminalState.ttyConnector)
+            is EmbeddedTerminalState.SessionOnScreen ->
+                SessionTerminal(terminalState.ttyConnector)
 
             is EmbeddedTerminalState.SessionEntryFailed ->
                 SessionEntryFailureNotice(terminalState.failure)
@@ -69,7 +69,7 @@ fun EmbeddedTerminalPane(
 @Composable
 private fun EmbeddedTerminalHeader(
     terminalState: EmbeddedTerminalState,
-    onCloseTerminalRequested: () -> Unit,
+    onEndSessionRequested: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
@@ -80,14 +80,15 @@ private fun EmbeddedTerminalHeader(
             style = MaterialTheme.typography.titleSmall,
             fontFamily = FontFamily.Monospace,
         )
-        // tmux 를 몰라도 되지만 이 한 가지는 알아야 한다 — 닫는 것이 끝내는 것이 아니라는 사실.
+        // 두 가지를 버튼을 누르기 전에 말한다 — 이 세션은 앱이 보유하므로 끝내는 길이 여기뿐이고,
+        // 그래서 터미널에서 kyu list 를 쳐도 이 세션은 보이지 않는다(설계 원칙 12).
         //
-        // 붙어 있을 때만 말한다. 진입에 실패한 자리에서는 계속 돌 세션이 아예 없을 수도 있어서,
+        // 세션이 떠 있을 때만 말한다. 진입에 실패한 자리에서는 끝낼 세션이 아예 없어서,
         // 그때도 같은 문구를 띄우면 없는 것을 있다고 말하게 된다.
-        if (terminalState is EmbeddedTerminalState.TerminalAttached) {
+        if (terminalState is EmbeddedTerminalState.SessionOnScreen) {
             Spacer(Modifier.width(12.dp))
             Text(
-                text = "닫아도 세션은 계속 돕니다",
+                text = "이 세션은 앱이 보유합니다 — 끝내면 되돌릴 수 없고, kyu list 에는 보이지 않습니다",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -95,7 +96,7 @@ private fun EmbeddedTerminalHeader(
 
         Spacer(Modifier.weight(1f))
 
-        TextButton(onClick = onCloseTerminalRequested) { Text("닫기") }
+        TextButton(onClick = onEndSessionRequested) { Text("세션 끝내기") }
     }
 }
 
@@ -109,7 +110,7 @@ private fun EmbeddedTerminalHeader(
  * 통로가 바뀌고, 그때 위젯도 새로 만들어야 이전 세션의 화면이 남지 않는다.
  */
 @Composable
-private fun AttachedTerminal(ttyConnector: TtyConnector) {
+private fun SessionTerminal(ttyConnector: TtyConnector) {
     val terminalWidget = remember(ttyConnector) {
         JediTermWidget(DefaultSettingsProvider()).apply { setTtyConnector(ttyConnector) }
     }
@@ -126,7 +127,7 @@ private fun AttachedTerminal(ttyConnector: TtyConnector) {
         SwingUtilities.invokeLater { terminalWidget.requestFocusInWindow() }
 
         onDispose {
-            // 위젯이 화면에서 사라진다는 것은 이 터미널을 놓는다는 뜻이다. 상태 홀더가 이미
+            // 위젯이 화면에서 사라진다는 것은 이 세션을 더 보지 않는다는 뜻이다. 상태 홀더가 이미
             // 통로를 닫았더라도 여기서 한 번 더 닫는 것은 해가 없다 — 프로세스 종료는 멱등이다.
             terminalWidget.close()
         }

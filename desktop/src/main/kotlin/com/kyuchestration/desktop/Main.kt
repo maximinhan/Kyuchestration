@@ -24,7 +24,8 @@ import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
-import com.kyuchestration.desktop.terminal.pty.PtyKyuSessionTerminalAttacher
+import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
+import com.kyuchestration.desktop.terminal.pty.PtySessionTerminalOpener
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
 
@@ -78,7 +79,9 @@ fun main() = application {
     }
     val terminalStateHolder = remember(applicationCoroutineScope) {
         EmbeddedTerminalStateHolder(
-            sessionTerminalAttacher = PtyKyuSessionTerminalAttacher(),
+            // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11). 그 답을 실행하는 것이
+            // PTY 어댑터의 일이라, 두 어댑터가 여기서 만난다.
+            sessionTerminalOpener = PtySessionTerminalOpener(KyuCliSessionCommandSource(kyuCommandRunner)),
             coroutineScope = applicationCoroutineScope,
         )
     }
@@ -92,9 +95,11 @@ fun main() = application {
 
     Window(
         onCloseRequest = {
-            // 창을 닫는 것도 세션을 놓는 일이다. JVM 이 끝나면 PTY 도 닫혀 어차피 detach 되지만,
-            // 그 정리를 프로세스 종료에 맡기지 않고 여기서 뜻으로 밝힌다.
-            terminalStateHolder.closeTerminal()
+            // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
+            // 같이한다(설계 원칙 5 개정). JVM 이 끝나면 PTY 가 닫혀 자식에게 SIGHUP 이 가지만,
+            // 그것을 무시하는 프로그램은 살아남아 kyu list 에도 앱에도 보이지 않는 고아가 된다 —
+            // 그래서 정리를 프로세스 종료에 맡기지 않고 여기서 명시적으로 끝낸다.
+            terminalStateHolder.endSession()
             exitApplication()
         },
         title = "뀨케스트레이션",
@@ -142,9 +147,9 @@ fun main() = application {
             },
             onRefreshRequested = dashboardStateHolder::refreshNow,
             onCloseWorkDirRequested = {
-                // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 놓지 않으면 다른
+                // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 끝내지 않으면 다른
                 // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 터미널이 남는다.
-                terminalStateHolder.closeTerminal()
+                terminalStateHolder.endSession()
                 // 초기화 실패 문구도, 고르던 레포도 그 워크디렉토리의 것이다. 같은 이유로 여기서
                 // 함께 놓는다 — 다른 워크디렉토리를 연 채로 앞 워크디렉토리에 받을 레포를 고르고
                 // 있으면, 받아 온 것이 화면에 없는 자리에 떨어진다.
@@ -155,7 +160,7 @@ fun main() = application {
             onEnterSessionRequested = { target ->
                 dashboardState.workDirPath?.let { terminalStateHolder.enterSession(it, target) }
             },
-            onCloseTerminalRequested = terminalStateHolder::closeTerminal,
+            onEndSessionRequested = terminalStateHolder::endSession,
         )
     }
 }

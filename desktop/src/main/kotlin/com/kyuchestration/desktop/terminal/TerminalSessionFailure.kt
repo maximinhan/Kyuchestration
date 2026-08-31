@@ -16,7 +16,7 @@ sealed class TerminalSessionFailure(
 
     class KyuExecutableNotFound : TerminalSessionFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",
-        guidance = "세션을 띄우고 진입하는 일은 전부 kyu 가 합니다. " +
+        guidance = "세션이 무엇을 띄우는지는 kyu 가 답합니다 — 앱은 그 답을 실행할 뿐입니다. " +
             "앱을 다시 띄우면 엔진 설치 화면이 뜹니다.",
     )
 
@@ -24,25 +24,6 @@ sealed class TerminalSessionFailure(
         message = "kyu 를 실행하지 못했습니다.",
         guidance = "실행 권한이 있는지, 파일이 온전한지 확인하세요. 원인: ${cause.message}",
         cause = cause,
-    )
-
-    /**
-     * kyu start 가 세션을 띄우지 못했다.
-     *
-     * 붙기 전에 걸린 실패라 터미널을 열 이유가 없다. 조용히 넘어가면 사용자는 빈 터미널이
-     * 곧바로 닫히는 것만 보게 되고, 이유(tmux 미설치·없는 레포)는 어디에도 남지 않는다.
-     */
-    class SessionStartRejected(
-        val targetLabel: String,
-        val exitCode: Int,
-        standardError: String,
-    ) : TerminalSessionFailure(
-        message = "$targetLabel 세션을 띄우지 못했습니다 (kyu start 가 종료 코드 $exitCode 로 끝남).",
-        // kyu 는 거절 이유를 stderr 에 사람 말로 적는다. 그것을 그대로 올리는 편이 이쪽에서
-        // 다시 지어낸 문구보다 정확하다.
-        guidance = standardError.ifBlank {
-            "워크디렉토리에서 kyu start $targetLabel 을 직접 실행해 이유를 확인하세요."
-        },
     )
 
     /**
@@ -101,7 +82,7 @@ sealed class TerminalSessionFailure(
      */
     class PtyFailedToOpen(cause: Throwable) : TerminalSessionFailure(
         message = "앱 안에 터미널을 열지 못했습니다.",
-        guidance = "터미널에서 kyu attach 를 직접 실행하면 세션에는 들어갈 수 있습니다. " +
+        guidance = "터미널에서 그 디렉토리로 가 claude 를 직접 띄우면 작업은 이어갈 수 있습니다. " +
             "원인: ${cause.message}",
         cause = cause,
     )

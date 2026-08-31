@@ -13,10 +13,10 @@ import kotlin.test.assertTrue
  * JediTermWidget 은 세우지 않는다. 그쪽은 Swing 이라 화면 없는 곳에서는 폰트 계측부터 걸리고,
  * 여기서 확인하려는 것은 화면이 아니라 그 아래의 통로다. 화면이 정말 뜨는지는 사람이 창을 열어 본다.
  *
- * 붙는 상대도 kyu 가 아니라 sh 다. PTY 가 이 환경에서 실제로 열리는지, 우리가 재정의한 resize 가
- * 자식에게 닿는지를 보는 데에 세션이나 tmux 는 필요 없다.
+ * PTY 안에서 도는 것도 claude 가 아니라 sh 다. 우리가 재정의한 resize 가 자식에게 닿는지를 보는
+ * 데에 그 자식이 무엇인지는 상관이 없고, claude 를 요구하면 이 검증이 CI 에서 돌지 못한다.
  */
-class KyuAttachTtyConnectorTest {
+class SessionTtyConnectorTest {
 
     @Test
     fun `PTY 안에서 실행한 명령의 출력을 읽어 온다`() {
@@ -39,7 +39,8 @@ class KyuAttachTtyConnectorTest {
         val connector = shellInPty()
 
         // 화면이 자리를 잡을 때 JediTerm 이 부르는 것이 바로 이 메서드다. 여기가 끊기면 창만
-        // 커지고 세션 안의 화면은 처음 크기에 갇힌다.
+        // 커지고 세션 안의 화면은 처음 크기에 갇힌다. 이제 이 한 줄이 홉 없이 세션 안의
+        // 프로그램에게 바로 닿는다 — 사이에 kyu attach 도 tmux 도 없다.
         connector.resize(TermSize(120, 40))
 
         connector.write("stty size; exit\n")
@@ -52,7 +53,7 @@ class KyuAttachTtyConnectorTest {
         )
     }
 
-    private fun shellInPty(): KyuAttachTtyConnector {
+    private fun shellInPty(): SessionTtyConnector {
         val ptyProcess = PtyProcessBuilder(arrayOf("sh"))
             .setEnvironment(
                 mapOf(
@@ -60,7 +61,7 @@ class KyuAttachTtyConnectorTest {
                     "PATH" to System.getenv("PATH"),
                     // 터미널을 여는 쪽은 자식에게 두 가지를 말해 줘야 한다 — 어떤 화면인가(TERM)와
                     // 어떤 글자인가(LANG). 커넥터는 자기 쪽 인코딩을 UTF-8 로 못 박아 두는데
-                    // (KyuAttachTtyConnector 가 ProcessTtyConnector 에 넘기는 Charsets.UTF_8),
+                    // (SessionTtyConnector 가 ProcessTtyConnector 에 넘기는 Charsets.UTF_8),
                     // 자식에게 같은 말을 하지 않으면 맥의 /bin/sh(bash 3.2)가 C 로케일로 뜬다.
                     // 그 readline 은 8 비트 바이트를 글자가 아니라 Meta 키 조합으로 읽어서, 한글
                     // 한 글자가 편집 명령 여럿이 된다 — 우리가 쓴 줄 대신 히스토리에서 끌려 나온
@@ -73,7 +74,7 @@ class KyuAttachTtyConnectorTest {
             .setInitialRows(24)
             .start()
 
-        return KyuAttachTtyConnector(ptyProcess, SessionTarget.Repo("proj-a"))
+        return SessionTtyConnector(ptyProcess, SessionTarget.Repo("proj-a"))
     }
 
     /**
@@ -82,7 +83,7 @@ class KyuAttachTtyConnectorTest {
      * PTY 는 파이프와 달리 자식이 끝나도 읽기가 곧바로 EOF 가 되지 않고 I/O 오류로 끊기기도 한다.
      * 이 시험이 보려는 것은 "무엇이 나왔는가" 라, 끊긴 방식은 여기서 가리지 않는다.
      */
-    private fun KyuAttachTtyConnector.readUntilClosed(): String {
+    private fun SessionTtyConnector.readUntilClosed(): String {
         val output = StringBuilder()
         val buffer = CharArray(1024)
         while (true) {
