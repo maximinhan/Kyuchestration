@@ -62,6 +62,10 @@ class HeldSessionTerminalWidgets {
             terminalContainer.remove(card.widget)
             card.widget.close()
         }
+        if (droppedConnectors.isNotEmpty()) {
+            terminalContainer.revalidate()
+            terminalContainer.repaint()
+        }
     }
 
     private fun addCardFor(ttyConnector: TtyConnector): SessionCard {
@@ -73,6 +77,9 @@ class HeldSessionTerminalWidgets {
 
         val card = SessionCard(name = (nextCardNumber++).toString(), widget = widget)
         terminalContainer.add(widget, card.name)
+        // 이미 창에 붙어 있는 컨테이너에 카드를 더하는 길이 있다 — 두 번째 세션부터가 그렇다.
+        // 다시 재라고 말하지 않으면 Swing 이 옛 배치를 그대로 들고 있어 새 카드가 크기 0 으로 남는다.
+        terminalContainer.revalidate()
         return card
     }
 
