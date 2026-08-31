@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -414,5 +416,171 @@ func TestSupervisorBackendListNamesStillAnswerToTheWorkDirPrefixFilter(t *testin
 	slices.Sort(inThisWorkDir)
 	if !slices.Equal(got, inThisWorkDir) {
 		t.Errorf("접두사로 거른 세션 = %v, want %v", got, inThisWorkDir)
+	}
+}
+
+// createSessionRecordingItsSupervisorPid 는 세션을 만들고 그 감독의 pid 를 돌려준다.
+//
+// 감독의 pid 는 세션 안 프로그램의 부모 pid 다 — 감독이 자식을 직접 띄우므로 $PPID 가 곧
+// 그것이다. 이 방법이면 pid 를 알아내려고 프로토콜에 연산을 하나 더 만들지 않아도 된다.
+func createSessionRecordingItsSupervisorPid(t *testing.T, backend *SupervisorBackend, name string) int {
+	t.Helper()
+
+	workingDirectory := t.TempDir()
+	if err := backend.Create(name, workingDirectory, []string{
+		"sh", "-c", `printf "%s" "$PPID" > ppid.txt; sleep 60`,
+	}); err != nil {
+		t.Fatalf("Create(%q) 실패: %v", name, err)
+	}
+
+	raw := waitForFileContent(t, filepath.Join(workingDirectory, "ppid.txt"))
+	supervisorPid, err := strconv.Atoi(raw)
+	if err != nil {
+		t.Fatalf("감독 pid 를 해석하지 못했습니다 (%q): %v", raw, err)
+	}
+	return supervisorPid
+}
+
+// killSupervisorAbruptly 는 감독을 SIGKILL 한다 — 소켓을 지울 틈을 주지 않는 종료다.
+func killSupervisorAbruptly(t *testing.T, backend *SupervisorBackend, name string, supervisorPid int) {
+	t.Helper()
+
+	if err := syscall.Kill(supervisorPid, syscall.SIGKILL); err != nil {
+		t.Fatalf("감독(pid %d) SIGKILL 실패: %v", supervisorPid, err)
+	}
+	waitUntil(t, fmt.Sprintf("SIGKILL 한 감독의 세션 %s 이 죽은 것으로 보이기", name), func() bool {
+		alive, err := backend.IsAlive(name)
+		return err == nil && !alive
+	})
+}
+
+func TestSupervisorBackendListLeavesTheSocketOfAKilledSupervisorInPlace(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-dead-socket"
+
+	supervisorPid := createSessionRecordingItsSupervisorPid(t, backend, sessionName)
+	killSupervisorAbruptly(t, backend, sessionName, supervisorPid)
+
+	names, err := backend.List()
+	if err != nil {
+		t.Fatalf("List() 실패: %v", err)
+	}
+	if slices.Contains(names, sessionName) {
+		t.Errorf("List() = %v, 죽은 감독의 세션이 들어 있으면 안 된다", names)
+	}
+
+	// 읽기 연산은 파일을 지우지 않는다. 치우는 시점은 그 이름으로 다시 Create 할 때다(설계 문서 5.4).
+	if _, err := os.Stat(socketPathFor(t, sessionName)); err != nil {
+		t.Errorf("죽은 소켓 파일 stat = %v, List() 는 파일을 지우지 않아야 한다", err)
+	}
+}
+
+func TestSupervisorBackendCreateReclaimsTheNameLeftByAKilledSupervisor(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-reclaim"
+
+	supervisorPid := createSessionRecordingItsSupervisorPid(t, backend, sessionName)
+	killSupervisorAbruptly(t, backend, sessionName, supervisorPid)
+
+	// 남은 소켓 파일 때문에 바인딩은 실패한다. 그것이 살아있는 감독 때문인지 죽은 감독이 남긴
+	// 파일 때문인지는 붙어봐야 알고, 죽은 것이면 치우고 다시 잡아야 한다(설계 문서 5.3).
+	// macOS 폴백 경로에서는 재부팅도 이 파일을 치우지 않으므로 드문 경우가 아니다.
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
+		t.Fatalf("죽은 소켓이 남은 이름으로 Create() 실패: %v", err)
+	}
+
+	alive, err := backend.IsAlive(sessionName)
+	if err != nil {
+		t.Fatalf("IsAlive() 실패: %v", err)
+	}
+	if !alive {
+		t.Errorf("다시 만든 세션의 IsAlive() = false, 살아있어야 한다")
+	}
+}
+
+func TestKillingOneSupervisorLeavesTheOtherSessionsRunning(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const (
+		firstSession  = "kyu-test-sv-iso-a"
+		middleSession = "kyu-test-sv-iso-b"
+		lastSession   = "kyu-test-sv-iso-c"
+	)
+
+	// 이 설계를 고른 이유가 실제로 성립하는지를 가장 먼저 확인한다(설계 문서 9절 1 단계).
+	// 중앙 데몬이었다면 하나가 죽을 때 셋이 함께 죽는다 — 세션별 감독은 반경을 하나로 만든다.
+	for _, name := range []string{firstSession, lastSession} {
+		if err := backend.Create(name, t.TempDir(), []string{"sleep", "60"}); err != nil {
+			t.Fatalf("Create(%q) 실패: %v", name, err)
+		}
+	}
+	middleSupervisorPid := createSessionRecordingItsSupervisorPid(t, backend, middleSession)
+
+	killSupervisorAbruptly(t, backend, middleSession, middleSupervisorPid)
+	t.Logf("가운데 세션 %s 의 감독(pid %d)을 SIGKILL 했다", middleSession, middleSupervisorPid)
+
+	names, err := backend.List()
+	if err != nil {
+		t.Fatalf("List() 실패: %v", err)
+	}
+	slices.Sort(names)
+	t.Logf("남은 세션: %v", names)
+
+	want := []string{firstSession, lastSession}
+	if !slices.Equal(names, want) {
+		t.Fatalf("List() = %v, want %v", names, want)
+	}
+
+	for _, name := range want {
+		alive, err := backend.IsAlive(name)
+		if err != nil {
+			t.Fatalf("IsAlive(%q) 실패: %v", name, err)
+		}
+		if !alive {
+			t.Errorf("IsAlive(%q) = false, 남의 감독이 죽어도 이 세션은 살아 있어야 한다", name)
+		}
+	}
+}
+
+func TestConcurrentCreateOfTheSameNameLeavesExactlyOneSession(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-concurrent"
+	const attempts = 4
+
+	// 바인딩이 곧 배타성이라는 주장을 실제로 겨뤄본다. tmux 는 has-session 으로 먼저 묻고
+	// 만들었으므로 그 둘 사이에 틈이 있었는데, 여기서는 판정과 획득이 같은 한 번의
+	// 연산이라 그 틈이 없다(설계 문서 5.3·5.9).
+	workingDirectories := make([]string, attempts)
+	for i := range workingDirectories {
+		workingDirectories[i] = t.TempDir()
+	}
+
+	results := make(chan error, attempts)
+	for i := range attempts {
+		go func() {
+			results <- backend.Create(sessionName, workingDirectories[i], []string{"sleep", "60"})
+		}()
+	}
+
+	created := 0
+	for range attempts {
+		switch err := <-results; {
+		case err == nil:
+			created++
+		case errors.Is(err, ErrSessionExists):
+		default:
+			t.Errorf("Create() = %v, nil 이거나 ErrSessionExists 여야 한다", err)
+		}
+	}
+
+	if created != 1 {
+		t.Errorf("성공한 Create() = %d 개, 정확히 1 개여야 한다", created)
+	}
+
+	names, err := backend.List()
+	if err != nil {
+		t.Fatalf("List() 실패: %v", err)
+	}
+	if !slices.Equal(names, []string{sessionName}) {
+		t.Errorf("List() = %v, want [%s]", names, sessionName)
 	}
 }

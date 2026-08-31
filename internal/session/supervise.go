@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -47,6 +48,11 @@ const fallbackTerm = "xterm-256color"
 
 // sessionTerminationGracePeriod 는 SIGHUP 을 보내고 SIGKILL 까지 기다리는 유예다.
 const sessionTerminationGracePeriod = 3 * time.Second
+
+// socketProbeTimeout 은 소켓에 임자가 있는지 붙어보는 데 허용하는 시간이다.
+//
+// 붙는 데 성공하느냐만 보므로 짧다. 이 연결은 요청을 한 줄도 보내지 않는다.
+const socketProbeTimeout = 2 * time.Second
 
 // controlConnectionDeadline 은 감독이 제어 연결 하나에 쓰는 최대 시간이다.
 //
@@ -206,12 +212,92 @@ func startSupervisor(args []string, events *log.Logger) (*supervisorProcess, err
 }
 
 // bindSessionSocket 은 세션 소켓을 바인딩한다. 이 함수의 성공이 곧 "이 이름의 세션은 내 것" 이다.
+//
+// 소켓 파일이 아예 없는 흔한 경우에는 바인딩 한 번이 전부다. 잠금이 드는 것은 죽은 소켓을
+// 치우는 좁은 경로 하나뿐이고, 그마저 세션 이름별이라 서로 다른 세션의 생성이 서로를 기다리지
+// 않는다 — 중앙 데몬이었다면 모든 생성이 전역 잠금 하나를 지났다(설계 문서 5.3).
 func bindSessionSocket(paths sessionRuntimePaths) (*net.UnixListener, error) {
 	listener, err := listenOnSessionSocket(paths.socket)
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		return listener, err
+	}
+
+	// 파일이 이미 있다. 그것이 살아있는 감독 때문인지 죽은 감독이 남긴 파일 때문인지는
+	// 붙어봐야 안다 — 연결되면 살아있고, 거절되면 죽은 소켓이다.
+	bound, err := isSocketBound(paths.socket)
+	if err != nil {
+		return nil, err
+	}
+	if bound {
+		return nil, fmt.Errorf("%w: %s", errSessionSocketAlreadyBound, paths.socket)
+	}
+
+	// 죽은 소켓이다. 지우기와 다시 바인딩하기 사이에 남이 바인딩하면 남의 소켓을 지우게 되므로,
+	// 이 구간만 세션 이름별 잠금으로 감싼다.
+	unlock, err := lockSessionName(paths.lock)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	// 잠금을 기다리는 동안 남이 치우고 떴을 수 있다. 지우기 전에 다시 확인한다.
+	bound, err = isSocketBound(paths.socket)
+	if err != nil {
+		return nil, err
+	}
+	if bound {
+		return nil, fmt.Errorf("%w: %s", errSessionSocketAlreadyBound, paths.socket)
+	}
+
+	if err := os.Remove(paths.socket); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("죽은 세션 소켓 정리 실패 (%s): %w", paths.socket, err)
+	}
+
+	listener, err = listenOnSessionSocket(paths.socket)
 	if errors.Is(err, syscall.EADDRINUSE) {
+		// 소켓 파일이 없는 흔한 경로로 들어온 감독과 겹쳤다. 그쪽은 잠금을 지나지 않으므로
+		// 이 경합이 실제로 가능하다 — 먼저 잡은 쪽이 임자다.
 		return nil, fmt.Errorf("%w: %s", errSessionSocketAlreadyBound, paths.socket)
 	}
 	return listener, err
+}
+
+// isSocketBound 는 그 경로의 소켓을 지금 누군가 듣고 있는지 본다.
+//
+// 연결이 되면 살아있는 감독이 있는 것이고, ECONNREFUSED 면 임자 없는 파일만 남은 것이다.
+// 파일이 아예 없으면(ENOENT) 그 사이에 누가 치운 것이라 역시 임자가 없다.
+func isSocketBound(socketPath string) (bool, error) {
+	connection, err := net.DialTimeout("unix", socketPath, socketProbeTimeout)
+	if err == nil {
+		connection.Close()
+		return true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+		return false, nil
+	}
+	return false, fmt.Errorf("세션 소켓 상태 확인 실패 (%s): %w", socketPath, err)
+}
+
+// lockSessionName 은 세션 이름 하나에 대한 배타 잠금을 잡는다.
+//
+// 잠금 파일을 지우지 않는다. 잠금을 쥔 채로 파일을 지우면 다음 사람이 같은 경로에 새로 만든
+// 다른 inode 를 잠그게 되어, 둘이 서로 다른 잠금을 쥐고 같은 소켓을 만진다. 0 바이트 파일
+// 하나가 남는 값으로 그 어긋남을 없앤다.
+func lockSessionName(lockPath string) (func(), error) {
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, sessionFilePermission)
+	if err != nil {
+		return nil, fmt.Errorf("세션 잠금 파일 열기 실패 (%s): %w", lockPath, err)
+	}
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("세션 잠금 실패 (%s): %w", lockPath, err)
+	}
+
+	return func() {
+		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+	}, nil
 }
 
 // listenOnSessionSocket 은 소켓을 바인딩하고 권한을 사용자 전용으로 좁힌다.
