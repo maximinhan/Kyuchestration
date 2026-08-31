@@ -6,9 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
-	"time"
 )
 
 // newIsolatedTmuxBackend 는 사용자의 tmux 서버와 완전히 분리된 서버에 붙는 백엔드를 만든다.
@@ -234,23 +232,6 @@ func TestTmuxBackendListReturnsCreatedSessionNames(t *testing.T) {
 //
 // Attach 는 명령 한 줄에 stdin/stdout/stderr 를 그대로 연결하는 것이 전부이며,
 // 설계 문서 9.2 의 5단계(`kyu attach`)에서 손으로 확인한다.
-
-// waitForFileContent 는 세션 안에서 실행된 명령이 파일을 남길 때까지 기다린다.
-// `tmux new-session -d` 는 명령의 완료를 기다리지 않고 곧바로 반환하므로 폴링이 필요하다.
-func waitForFileContent(t *testing.T, path string) string {
-	t.Helper()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		content, err := os.ReadFile(path)
-		if err == nil && len(content) > 0 {
-			return strings.TrimSpace(string(content))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("%s 가 5초 안에 생성되지 않았습니다", path)
-	return ""
-}
 
 func TestTmuxBackendAttachRefusesToNestInsideAnotherSession(t *testing.T) {
 	backend := newIsolatedTmuxBackend(t)
