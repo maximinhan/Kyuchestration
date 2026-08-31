@@ -100,7 +100,13 @@ jobs:
           xattr -l "/tmp/quarantined-${asset}"
 
       # 실측 ③ — 스크립트가 처음부터 끝까지 도는가(내려받기 · 마운트 · 복사).
+      #
+      # 토큰을 넘긴다. 러너들은 IP 를 나눠 쓰므로 무인증 GitHub API 호출이 남의 호출과 합쳐져
+      # 레이트리밋에 걸린다(arm64 러너 실측: 403). 자기 IP 를 쓰는 사용자 머신에서는 걸리지
+      # 않는 자리라, 여기서만 토큰을 준다 — 스크립트의 토큰 폴백이 도는지도 함께 보게 된다.
       - name: install-app.sh 를 그대로 실행
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           bash install-app.sh
           ls -ld /Applications/Kyuchestration.app
@@ -141,6 +147,8 @@ jobs:
 
       # 실측 ⑥ — 실행 중인 앱을 덮어쓰지 않고 멈추는가.
       - name: 실행 중일 때의 안내
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           bash install-app.sh && echo "!! 실행 중인데도 그냥 설치했다" || echo "(멈췄다 — 기대한 결과)"
 
