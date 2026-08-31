@@ -293,11 +293,20 @@ download_latest_package() {
 # 찾게 된다. 원인이 설치였다는 것을 그때는 알 수 없으므로 여기서 끊는다.
 fail_if_app_is_running() {
     local destination_path="$1"
+    local running_commands
 
-    # pgrep -f 는 패턴을 정규식으로 읽어 경로 안의 문자가 뜻을 갖는다. 글자 그대로 찾으려고
-    # 명령줄 목록을 grep -F 로 본다 — shellcheck 가 권하는 pgrep 을 쓰지 않는 이유가 그것이다.
+    # 명령줄 목록을 먼저 변수에 담고 나서 찾는다. ps 의 출력을 grep 에 곧바로 이어 붙이면
+    # ps 가 찍는 그 순간에 grep 도 이미 떠 있어서, grep 이 자기 명령줄에 있는 찾는 문자열을
+    # 보고 "돌고 있다" 고 답한다. 담아 두면 ps 가 도는 시점에 grep 이 아직 없다.
+    # (맥 러너 실측: 앱이 설치도 되지 않은 자리에서 이 검사가 걸렸다.)
+    #
+    # pgrep 을 쓰지 않는 이유는 따로 있다 — pgrep -f 는 패턴을 정규식으로 읽어서 경로 안의
+    # 문자가 뜻을 갖는다. 설치 자리는 KYU_APP_INSTALL_DIR 로 바뀔 수 있으므로 글자 그대로 찾는다.
     # shellcheck disable=SC2009
-    if ps -A -o command= 2>/dev/null | grep -qF -- "${destination_path}/Contents/MacOS/"; then
+    running_commands=$(ps -A -o command=) \
+        || fail "실행 중인 프로세스 목록을 읽지 못했습니다 (ps)."
+
+    if printf '%s\n' "$running_commands" | grep -qF -- "${destination_path}/Contents/MacOS/"; then
         fail "앱이 실행 중입니다: ${destination_path}" \
              "끝낸 뒤 다시 실행하세요 (⌘Q 또는 Dock 에서 종료)."
     fi
