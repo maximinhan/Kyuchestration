@@ -129,7 +129,10 @@ jobs:
       # 화면이 없어 죽었는지는 로그로 갈린다.
       - name: 앱을 열어 본다
         run: |
-          open -a Kyuchestration 2>&1 || echo "(open 실패 — 아래 프로세스 목록으로 판단)"
+          echo "== 이름으로 열기 (open -a) =="
+          open -a Kyuchestration 2>&1 || echo "(이름으로는 실패)"
+          echo "== 경로로 열기 (open <경로>) =="
+          open /Applications/Kyuchestration.app 2>&1 || echo "(경로로도 실패)"
           sleep 10
           echo "== 프로세스 목록 =="
           ps -A -o command= | grep -F "Kyuchestration.app/Contents/MacOS" || echo "(떠 있지 않음)"

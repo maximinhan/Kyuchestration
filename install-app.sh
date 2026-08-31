@@ -375,8 +375,12 @@ install_app_from_dmg() {
         report "설치 완료: ${destination_path}"
     fi
     report ""
+    # 이름(open -a Kyuchestration)이 아니라 경로로 안내한다. 방금 복사해 놓은 앱은
+    # LaunchServices 에 아직 등록되지 않아 이름으로는 찾지 못할 수 있다 — 맥 인텔 러너에서
+    # 그 자리를 실측했다("Unable to find application named 'Kyuchestration'"). 경로는 등록과
+    # 무관하게 언제나 통한다.
     report "여는 법 — Finder 의 응용 프로그램에서 두 번 누르거나:"
-    report "  open -a \"${app_name%.app}\""
+    report "  open \"${destination_path}\""
     report ""
     report "curl 로 받은 파일에는 격리 속성이 붙지 않아 경고 없이 열립니다."
     report "업데이트는 같은 명령을 다시 실행하면 됩니다 — 항상 최신 릴리스로 덮어씁니다."
