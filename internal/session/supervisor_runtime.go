@@ -37,6 +37,15 @@ const (
 	sessionLogExtension    = ".log"
 )
 
+// runtimeDirPermission 은 런타임 디렉토리의 권한이다.
+//
+// 유닉스 소켓의 접근 제어는 파일 권한으로 이뤄지고, 이 소켓에 연결할 수 있다는 것은 그 세션에
+// 키를 보낼 수 있다는 뜻이다. 같은 머신의 다른 사용자에게 열어줄 이유가 없다(설계 문서 5.2).
+const runtimeDirPermission = 0o700
+
+// sessionFilePermission 은 소켓·잠금·기록 파일의 권한이다. 디렉토리와 같은 이유로 사용자 전용이다.
+const sessionFilePermission = 0o600
+
 // ErrSocketPathTooLong 은 세션 소켓 경로가 sun_path 한도를 넘을 때 반환한다.
 //
 // 유닉스 도메인 소켓의 경로는 sockaddr_un.sun_path 에 통째로 들어가고 그 크기가
@@ -161,4 +170,15 @@ func maxSessionSocketPathLength() int {
 	// macOS 는 104 바이트다. 대상 플랫폼 밖의 OS 도 더 좁은 이쪽으로 재 둔다 —
 	// 넉넉히 잡아 커널에게 거절당하는 것보다 좁게 잡아 우리가 설명하는 편이 낫다.
 	return 103
+}
+
+// ensureSessionsDir 은 세션 디렉토리를 만든다. 이미 있으면 아무것도 하지 않는다.
+//
+// 감독과 클라이언트가 둘 다 부른다. 세션을 한 번도 만들지 않은 사용자에게는 이 디렉토리가
+// 아직 없고, 그 상태가 오류가 아니라 세션 0 개의 정상적인 표현이다(설계 문서 5.4).
+func ensureSessionsDir(sessionsDir string) error {
+	if err := os.MkdirAll(sessionsDir, runtimeDirPermission); err != nil {
+		return fmt.Errorf("세션 디렉토리 생성 실패 (%s): %w", sessionsDir, err)
+	}
+	return nil
 }
