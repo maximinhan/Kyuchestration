@@ -33,11 +33,19 @@ const bypassPermissionsOptionName = "--bypass-permissions"
 // skipPermissionsFlagName 은 위 옵션이 claude 에게 전달되는 플래그다.
 const skipPermissionsFlagName = "--dangerously-skip-permissions"
 
-// repoClaudeMdEnvAssignment 는 추가 디렉토리의 CLAUDE.md 와 .claude/rules/ 를 로드시키는 환경변수다.
+// repoClaudeMdEnvName 과 repoClaudeMdEnvValue 는 추가 디렉토리의 CLAUDE.md 와 .claude/rules/ 를
+// 로드시키는 환경변수다.
 //
 // 기본으로 켜지 않는다. 붙인 레포 수만큼 컨텍스트가 늘어나므로, 계획이 레포 컨벤션과 어긋나는
 // 문제가 실제로 생겼을 때만 켜는 것이 설계의 판단이다(설계 문서 5.4).
-const repoClaudeMdEnvAssignment = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1"
+//
+// 이름과 값을 갈라 둔다. 이것을 얹는 두 자리가 서로 다른 모양을 요구하기 때문이다 — CLI 는
+// 명령을 env NAME=VALUE 로 감싸고, kyu session-command 는 환경을 객체로 답한다(설계 문서 5.2).
+// 붙여둔 한 문자열로 두면 뒤엣것이 = 를 다시 쪼개야 하고, 그 쪼개기가 이름에 = 가 없다는 전제를 또 만든다.
+const (
+	repoClaudeMdEnvName  = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
+	repoClaudeMdEnvValue = "1"
+)
 
 // envCommandName 은 환경변수를 얹어 다른 명령을 실행하는 POSIX 표준 명령이다.
 //
@@ -86,8 +94,11 @@ func StartSession(out, errOut io.Writer, args []string, backend session.SessionB
 	return startRepoSession(out, errOut, location, repos, request, backend)
 }
 
-// startRequest 는 파싱이 끝난 kyu start 요청이다.
-type startRequest struct {
+// sessionRequest 는 파싱이 끝난 세션 요청이다 — 어느 세션을 어떤 옵션으로 여는가.
+//
+// 이름에 start 가 없는 이유는 이 요청을 만드는 명령이 둘이기 때문이다. kyu start 는 세션을
+// 띄우려고, kyu session-command 는 앱이 띄울 것을 답하려고 같은 것을 묻는다(설계 문서 5.2).
+type sessionRequest struct {
 	// repoName 이 비어 있으면 메인 세션 요청이다(설계 문서 9.3 의 "인자 없으면 main").
 	repoName string
 
@@ -98,8 +109,8 @@ type startRequest struct {
 	bypassPermissions bool
 }
 
-func parseStartArgs(args []string) (startRequest, error) {
-	var request startRequest
+func parseStartArgs(args []string) (sessionRequest, error) {
+	var request sessionRequest
 
 	for _, arg := range args {
 		switch {
@@ -111,10 +122,10 @@ func parseStartArgs(args []string) (startRequest, error) {
 
 		// 모르는 옵션을 레포 이름으로 흘려보내면 "없는 레포입니다: --typo" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
-			return startRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, startUsageText)
+			return sessionRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, startUsageText)
 
 		case request.repoName != "":
-			return startRequest{}, fmt.Errorf("start 는 레포 이름 하나만 받습니다 (인자 %d 개를 받음)\n\n%s", len(args), startUsageText)
+			return sessionRequest{}, fmt.Errorf("start 는 레포 이름 하나만 받습니다 (인자 %d 개를 받음)\n\n%s", len(args), startUsageText)
 
 		default:
 			request.repoName = arg
@@ -124,17 +135,19 @@ func parseStartArgs(args []string) (startRequest, error) {
 	// 레포 세션은 자기 디렉토리에서 뜨므로 그 레포의 CLAUDE.md 를 이미 읽는다. 조용히 무시하면
 	// 사용자는 무언가 켜졌다고 믿고, 그 믿음은 세션이 지침을 어길 때까지 드러나지 않는다.
 	if request.loadRepoClaudeMd && request.repoName != "" {
-		return startRequest{}, fmt.Errorf("%s 는 메인 세션 전용입니다 — 레포 세션은 자기 디렉토리의 CLAUDE.md 를 이미 읽습니다", repoClaudeMdOptionName)
+		return sessionRequest{}, fmt.Errorf("%s 는 메인 세션 전용입니다 — 레포 세션은 자기 디렉토리의 CLAUDE.md 를 이미 읽습니다", repoClaudeMdOptionName)
 	}
 
 	return request, nil
 }
 
 // startMainSession 은 워크디렉토리 최상위에서 조율용 세션을 띄운다(설계 문서 5.4).
-func startMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request startRequest, backend session.SessionBackend) error {
+func startMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionRequest, backend session.SessionBackend) error {
 	return createSession(out, errOut, backend,
 		session.MainSessionName(location.name), mainRowLabel,
-		location.absolutePath, mainSessionCommand(repos, request), request.bypassPermissions)
+		location.absolutePath,
+		envWrappedCommand(sessionEnvironment(request), mainSessionCommand(repos, request, nil)),
+		request.bypassPermissions)
 }
 
 // mainSessionCommand 는 메인 세션이 실행할 명령을 조립한다: claude --add-dir <레포 절대경로>...
@@ -144,43 +157,106 @@ func startMainSession(out, errOut io.Writer, location workDirLocation, repos []w
 //
 // 절대경로로 넘기는 이유: 세션의 cwd 가 워크디렉토리라 상대경로도 당장은 맞지만, 서로 다른
 // 워크디렉토리에 같은 이름의 레포가 있을 수 있어 이름과 상대경로는 레포를 특정하지 못한다(설계 문서 11절 4번).
-func mainSessionCommand(repos []workdir.Repo, request startRequest) []string {
-	command := make([]string, 0, 4+2*len(repos))
-	if request.loadRepoClaudeMd {
-		command = append(command, envCommandName, repoClaudeMdEnvAssignment)
-	}
-	command = append(command, claudeCommand(request.bypassPermissions)...)
+func mainSessionCommand(repos []workdir.Repo, request sessionRequest, conversationFlags []string) []string {
+	command := claudeCommand(request.bypassPermissions, conversationFlags)
+
+	// 붙일 레포 수만큼 미리 늘린다. 아래 반복이 레포마다 두 자리씩 더하는데,
+	// 그때마다 슬라이스가 자라면 레포가 많은 워크디렉토리에서 같은 목록을 여러 번 복사하게 된다.
+	command = slices.Grow(command, 2*len(repos))
+
 	for _, repo := range repos {
 		command = append(command, addDirFlagName, repo.AbsolutePath)
 	}
 	return command
 }
 
-// claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 켜져 있다면 권한 확인 생략 플래그.
+// claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 이 세션이 이어갈 대화를
+// 가리키는 플래그와, 켜져 있다면 권한 확인 생략 플래그.
 //
 // 메인 세션은 뒤에 --add-dir 을 잇고 레포 세션은 여기서 끝난다. 공통부를 한 곳에 두는 이유는
 // 두 세션이 같은 옵션에 다르게 반응하면 사용자가 그 차이를 세션 안에서야 발견하기 때문이다.
-func claudeCommand(bypassPermissions bool) []string {
+//
+// conversationFlags 는 앱이 물을 때만 채워진다. kyu start 는 빈 것을 넘긴다 — CLI 세션은
+// detach 로 살아남으므로 이어갈 필요가 없고, 통일하면 CLI 세션과 앱 세션이 같은 대화 ID 를
+// 다투게 된다(설계 문서 5.5.5 다).
+func claudeCommand(bypassPermissions bool, conversationFlags []string) []string {
+	command := make([]string, 0, 2+len(conversationFlags))
+	command = append(command, sessionCommandName)
+	command = append(command, conversationFlags...)
 	if bypassPermissions {
-		return []string{sessionCommandName, skipPermissionsFlagName}
+		command = append(command, skipPermissionsFlagName)
 	}
-	return []string{sessionCommandName}
+	return command
+}
+
+// sessionEnvironmentEntry 는 세션이 자기 바탕 환경에 얹어야 하는 환경변수 하나다.
+type sessionEnvironmentEntry struct {
+	name  string
+	value string
+}
+
+// sessionEnvironment 는 이번 요청이 세션에 더할 환경변수를 정한다. 더할 것이 없으면 비어 있다.
+//
+// "무엇을 얹는가" 를 "어떻게 얹는가" 에서 갈라낸 자리다. 얹는 방법은 부르는 쪽마다 다르지만
+// (envWrappedCommand 와 kyu session-command 의 env 객체), 무엇을 얹는지는 요청 하나가 정한다.
+// 두 곳이 각자 정하면 새 환경변수가 한쪽에만 생기고, 사용자는 그 차이를 세션 안에서야 발견한다.
+//
+// 순서 있는 목록으로 답하는 이유는 감싸는 쪽 때문이다. Go 의 map 은 순회 순서가 매번 달라서,
+// 환경변수가 둘이 되는 날 env 로 감싼 명령의 인자 순서가 실행마다 흔들린다 — 세션이 실행할
+// 명령은 그 세션이 사는 동안 사람이 ps 로 들여다보는 값이다.
+func sessionEnvironment(request sessionRequest) []sessionEnvironmentEntry {
+	if request.loadRepoClaudeMd {
+		return []sessionEnvironmentEntry{{name: repoClaudeMdEnvName, value: repoClaudeMdEnvValue}}
+	}
+	return nil
+}
+
+// envWrappedCommand 는 환경변수를 얹어 실행하도록 명령을 env 로 감싼다. 얹을 것이 없으면 그대로 둔다.
+//
+// SessionBackend.Create 에 환경 인자가 없어서 쓰는 수법이다. 인터페이스를 좁게 유지하려고 고른
+// 것이고(envCommandName 의 주석), 프로세스를 직접 띄우는 쪽은 이 제약 아래 있지 않다 —
+// kyu session-command 가 환경을 환경으로 답하는 근거가 그것이다(설계 문서 5.2).
+func envWrappedCommand(environment []sessionEnvironmentEntry, command []string) []string {
+	if len(environment) == 0 {
+		return command
+	}
+
+	wrapped := make([]string, 0, 1+len(environment)+len(command))
+	wrapped = append(wrapped, envCommandName)
+	for _, entry := range environment {
+		wrapped = append(wrapped, entry.name+"="+entry.value)
+	}
+	return append(wrapped, command...)
 }
 
 // startRepoSession 은 레포 디렉토리에서 작업용 세션을 띄운다.
-func startRepoSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request startRequest, backend session.SessionBackend) error {
-	repoIndex := slices.IndexFunc(repos, func(repo workdir.Repo) bool { return repo.Name == request.repoName })
-	if repoIndex < 0 {
-		return unknownRepoError(request.repoName, repos)
+func startRepoSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionRequest, backend session.SessionBackend) error {
+	repo, err := repoNamed(repos, request.repoName)
+	if err != nil {
+		return err
 	}
-	repo := repos[repoIndex]
 
 	// cwd 를 레포 디렉토리로 주는 이 한 줄이 그 레포의 MCP 설정·지침·에이전트를 살린다.
 	// 설정은 오직 세션을 시작한 디렉토리에서만 오기 때문이다(설계 문서 1.3).
 	// 같은 레포를 --add-dir 로 붙이면 파일만 보이고 설정은 죽는다 — 그 차이가 이 도구의 존재 이유다.
 	return createSession(out, errOut, backend,
 		session.RepoSessionName(location.name, repo.Name), repo.Name,
-		repo.AbsolutePath, claudeCommand(request.bypassPermissions), request.bypassPermissions)
+		repo.AbsolutePath,
+		envWrappedCommand(sessionEnvironment(request), claudeCommand(request.bypassPermissions, nil)),
+		request.bypassPermissions)
+}
+
+// repoNamed 는 스캔 결과에서 이름으로 레포 하나를 찾는다.
+//
+// 세션을 띄우는 쪽과 앱에게 답하는 쪽이 같은 거절을 해야 해서 한 곳에 둔다. 두 곳이 각자
+// 찾으면 한쪽만 "찾은 레포 목록" 을 함께 알리게 되고, 사용자는 어느 문으로 들어왔는지에 따라
+// 다른 도움을 받는다.
+func repoNamed(repos []workdir.Repo, repoName string) (workdir.Repo, error) {
+	repoIndex := slices.IndexFunc(repos, func(repo workdir.Repo) bool { return repo.Name == repoName })
+	if repoIndex < 0 {
+		return workdir.Repo{}, unknownRepoError(repoName, repos)
+	}
+	return repos[repoIndex], nil
 }
 
 // createSession 은 세션을 만들고 그 결과를 사람이 읽을 안내로 옮긴다.

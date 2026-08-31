@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -338,6 +339,56 @@ func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "kyu clone") {
 		t.Errorf("stdout = %q, 등록이 일어나는 자리를 알리기를 기대", stdout.String())
+	}
+}
+
+func TestSessionCommandAnswersOnAMachineWithoutTmux(t *testing.T) {
+	// 앱은 claude 를 자기 PTY 에서 직접 띄운다 — 이 명령이 세션 백엔드를 거치면 tmux 가 없는
+	// 머신에서 앱이 세션을 열지 못한다. GUI 에서 tmux 의존이 빠지는 것이 이 전환의 보상 중
+	// 하나이므로(설계 문서 5.7), 그 사실을 라우팅 자리에서 고정한다.
+	//
+	// PATH 를 비워 실행한다. tmux 도 git 도 없는 상태이고, 그래도 답이 나와야 한다.
+	workDirPath := t.TempDir()
+
+	command := exec.Command(buildKyuBinary(t), "session-command", "--json")
+	command.Dir = workDirPath
+	command.Env = append(os.Environ(), "PATH=")
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		t.Fatalf("kyu session-command 실행 실패: %v (%s)", err, stderr.String())
+	}
+
+	// 앱이 하는 일이 이것이다 — stdout 을 통째로 JSON 으로 읽는다.
+	var answer struct {
+		SchemaVersion int      `json:"schemaVersion"`
+		Command       []string `json:"command"`
+		Cwd           string   `json:"cwd"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &answer); err != nil {
+		t.Fatalf("stdout 을 JSON 으로 읽지 못했습니다: %v\n--- stdout ---\n%s", err, stdout.String())
+	}
+	if answer.SchemaVersion != 1 {
+		t.Errorf("schemaVersion = %d, want 1", answer.SchemaVersion)
+	}
+	if len(answer.Command) == 0 || answer.Command[0] != "claude" {
+		t.Errorf("command = %q, claude 로 시작하기를 기대", answer.Command)
+	}
+
+	// 임시 디렉토리 경로는 심볼릭 링크를 거쳐 올 수 있어(macOS 의 /var) 문자열로 비교하지 않는다.
+	answeredCwd, err := filepath.EvalSymlinks(answer.Cwd)
+	if err != nil {
+		t.Fatalf("답한 cwd 를 확인하지 못했습니다: %v", err)
+	}
+	expectedCwd, err := filepath.EvalSymlinks(workDirPath)
+	if err != nil {
+		t.Fatalf("워크디렉토리 경로를 확인하지 못했습니다: %v", err)
+	}
+	if answeredCwd != expectedCwd {
+		t.Errorf("cwd = %q, want %q", answeredCwd, expectedCwd)
 	}
 }
 

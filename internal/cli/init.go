@@ -67,12 +67,12 @@ tasks:
 어느 작업이 먼저여야 하는지, 어느 작업이 병렬로 가능한지와 그 근거.
 `
 
-// coordDirectoryPermission 과 planFilePermission 은 만들어지는 조율 디렉토리와 계획 파일의 권한이다.
+// planFilePermission 은 만들어지는 계획 파일의 권한이다.
 // 사람이 자기 에디터로 여는 파일이라 소유자 쓰기가 필요하고, 비밀이 아니므로 읽기는 열어둔다.
-const (
-	coordDirectoryPermission = 0o755
-	planFilePermission       = 0o644
-)
+//
+// 조율 디렉토리의 권한은 여기 없다. 그 디렉토리를 만드는 자리가 둘이 됐고(대화 기록도 만든다)
+// 두 곳이 각자 정하면 어느 문으로 들어왔는지에 따라 다른 권한의 .coord 가 생긴다.
+const planFilePermission = 0o644
 
 // InitWorkDir 는 kyu init 을 실행한다. 워크디렉토리에 .coord/plan.md 템플릿을 만든다.
 //
@@ -112,7 +112,7 @@ func createWorkDirPlanFile(absoluteWorkDirPath string) (string, error) {
 	// MkdirAll 이 워크디렉토리와 .coord 를 한 번에 만든다. 이미 있으면 그대로 두므로,
 	// 레포를 먼저 클론해두고 나중에 초기화하는 순서에서도 있던 것이 지워지지 않는다.
 	coordDirectoryPath := filepath.Dir(planFilePath)
-	if err := os.MkdirAll(coordDirectoryPath, coordDirectoryPermission); err != nil {
+	if err := os.MkdirAll(coordDirectoryPath, workdir.CoordDirectoryPermission); err != nil {
 		return "", fmt.Errorf("조율 디렉토리 생성 실패 (%s): %w", coordDirectoryPath, err)
 	}
 

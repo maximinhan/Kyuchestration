@@ -3,7 +3,7 @@
 // 이 파일은 얇게 유지한다 — 인자를 명령으로 가르고, 세션 백엔드를 조립하고, 종료 코드를 정하는 것까지다.
 // 명령이 실제로 하는 일은 internal/cli 에 있다(설계 문서 9.1).
 //
-// 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 여덟 개뿐이라 switch 한 번이면 끝나고,
+// 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 열 개 남짓이라 switch 한 번이면 끝나고,
 // 파싱 프레임워크를 들이지 않는 한 릴리스는 새 머신에서 바이너리 하나 복사로 끝난다(설계 문서 8.1).
 package main
 
@@ -35,19 +35,21 @@ const usageText = `사용법: kyu [명령] [인자]
   kyu kill [repo|--all]  세션 종료
   kyu repos <owners|list>
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
+  kyu session-command [repo]
+                         세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
   kyu auth <add|list|remove>
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
 
-옵션 (kyu, kyu start):
+옵션 (kyu, kyu start, kyu session-command):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
-  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (kyu start 전용)
+  --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (메인 세션 전용)
 
 옵션 (kyu clone):
   --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
   --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
 
-옵션 (kyu list, kyu clone, kyu repos, kyu auth add, kyu auth list):
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
 환경변수:
@@ -118,6 +120,13 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
 			return cli.BrowseGitHubRepositories(out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
+
+	// session-command 도 세션 백엔드를 거치지 않는다. 앱이 보유할 세션은 tmux 세션도 감독 세션도
+	// 아니라 엔진이 그것을 만들거나 죽이거나 셀 수단이 없고(설계 문서 5.1), 백엔드를 먼저 조립하면
+	// tmux 없는 머신에서 앱이 세션을 열지 못한다 — GUI 에서 tmux 의존이 빠지는 것이 이 전환의
+	// 보상 중 하나다(설계 문서 5.7).
+	case "session-command":
+		return cli.AnswerSessionCommand(out, errOut, commandArgs)
 
 	// auth 는 세션 백엔드를 거치지 않는다. 토큰을 등록하고 보고 지우는 일이라 tmux 와 무관하고,
 	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
