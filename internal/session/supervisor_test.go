@@ -142,7 +142,13 @@ func TestSupervisorBackendSocketIsReadableOnlyByItsOwner(t *testing.T) {
 	}
 }
 
-func TestSupervisorBackendSessionEndsWhenItsCommandEnds(t *testing.T) {
+// 세션이 끝나면 소켓 파일도 사라진다.
+//
+// 세션이 죽었다는 사실 자체는 매트릭스가 두 백엔드에 함께 묻는다(backend_parity_test.go).
+// 여기서 보는 것은 감독만의 뒷정리다 — 정상 종료 경로가 자기 소켓을 지워야 남아 있는 죽은
+// 소켓이 "비정상 종료" 하나만 뜻하게 된다(설계 문서 5.3). 이 규칙이 깨지면 재사용 경로가
+// 살아있는 감독의 소켓과 죽은 감독이 남긴 파일을 구별할 근거를 잃는다.
+func TestSupervisorRemovesItsSocketWhenTheSessionCommandEnds(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
 	const sessionName = "kyu-test-sv-natural-exit"
 
@@ -151,13 +157,68 @@ func TestSupervisorBackendSessionEndsWhenItsCommandEnds(t *testing.T) {
 		t.Fatalf("Create() 실패: %v", err)
 	}
 
-	waitUntil(t, "명령이 끝난 세션이 목록에서 사라지기", func() bool {
-		alive, err := backend.IsAlive(sessionName)
-		return err == nil && !alive
+	waitUntil(t, "명령이 끝난 세션의 소켓 파일이 사라지기", func() bool {
+		_, err := os.Stat(socketPathFor(t, sessionName))
+		return errors.Is(err, os.ErrNotExist)
+	})
+}
+
+func TestSupervisorRemovesItsSocketWhenKillEndsTheSession(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-kill-socket"
+
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
+		t.Fatalf("Create() 실패: %v", err)
+	}
+	if err := backend.Kill(sessionName); err != nil {
+		t.Fatalf("Kill() 실패: %v", err)
+	}
+
+	// Kill 은 감독이 답한 뒤에 돌아오므로 여기서는 기다리지 않는다.
+	if _, err := os.Stat(socketPathFor(t, sessionName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Kill() 후 소켓 파일 stat = %v, 파일이 사라져 있어야 한다", err)
+	}
+}
+
+// 죽은 감독이 남긴 소켓 앞에서도 IsAlive 는 판정으로 답한다.
+//
+// 조율 계층은 IsAlive 의 에러를 판정 불가로 보고 그대로 올린다(internal/workdir/state.go:59) —
+// 그 자리에서 에러가 나면 `kyu list` 는 한 줄도 찍지 못한다. tmux 백엔드에서는 이런 흔적이
+// 남을 수 없어(서버가 죽으면 세션도 함께 사라진다) 이 위험은 감독 쪽에만 있고, macOS 폴백
+// 경로에서는 재부팅도 이 파일을 치우지 않아 드문 경우도 아니다(설계 문서 5.2).
+//
+// 매트릭스가 "세션이 없으면 false" 를 두 백엔드에 묻는 것과 같은 성질을, 감독에게만 있는
+// 상태에서 한 번 더 묻는 셈이다.
+func TestSupervisorIsAliveAnswersFalseForTheSocketLeftByAKilledSupervisor(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-dead-socket-alive"
+
+	supervisorPid := createSessionRecordingItsSupervisorPid(t, backend, sessionName)
+	if err := syscall.Kill(supervisorPid, syscall.SIGKILL); err != nil {
+		t.Fatalf("감독(pid %d) SIGKILL 실패: %v", supervisorPid, err)
+	}
+
+	// IsAlive 로 기다리지 않는다 — 그것이 지금 시험하려는 것이라, 그것으로 기다리면 실패가
+	// 5 초 뒤의 시간 초과로만 드러나고 무엇이 잘못됐는지는 가려진다.
+	waitUntil(t, "SIGKILL 한 감독의 소켓이 연결을 거절하기", func() bool {
+		connection, err := net.DialTimeout("unix", socketPathFor(t, sessionName), socketProbeTimeout)
+		if err != nil {
+			return true
+		}
+		connection.Close()
+		return false
 	})
 
-	if _, err := os.Stat(socketPathFor(t, sessionName)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("자연사 후 소켓 파일 stat = %v, 파일이 사라져 있어야 한다", err)
+	if _, err := os.Stat(socketPathFor(t, sessionName)); err != nil {
+		t.Fatalf("죽은 소켓 파일 stat = %v, 파일은 그 자리에 남아 있어야 한다", err)
+	}
+
+	alive, err := backend.IsAlive(sessionName)
+	if err != nil {
+		t.Fatalf("죽은 소켓 앞에서 IsAlive() 가 에러를 반환했다: %v", err)
+	}
+	if alive {
+		t.Errorf("IsAlive() = true, 감독이 죽었으면 false 여야 한다")
 	}
 }
 
