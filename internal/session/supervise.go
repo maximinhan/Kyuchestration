@@ -422,7 +422,13 @@ func (s *supervisorProcess) handleControlConnection(connection net.Conn) bool {
 
 	var request controlRequest
 	if err := json.NewDecoder(connection).Decode(&request); err != nil {
-		s.events.Printf("제어 요청 해석 실패: %v", err)
+		// 한 바이트도 오지 않은 채 끝난 연결은 임자가 있는지 붙어본 것이다. 죽은 소켓과
+		// 살아있는 감독을 가르는 그 판정이 정확히 이 모양이고(bindSessionSocket 의 isSocketBound),
+		// 세션을 하나 더 만들려 할 때마다 벌어지는 정상적인 일이라 실패로 적지 않는다.
+		// 요청을 쓰다 만 연결은 io.ErrUnexpectedEOF 라 여기 걸리지 않는다.
+		if !errors.Is(err, io.EOF) {
+			s.events.Printf("제어 요청 해석 실패: %v", err)
+		}
 		return false
 	}
 

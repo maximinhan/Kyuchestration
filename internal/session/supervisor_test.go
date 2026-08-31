@@ -584,3 +584,39 @@ func TestConcurrentCreateOfTheSameNameLeavesExactlyOneSession(t *testing.T) {
 		t.Errorf("List() = %v, want [%s]", names, sessionName)
 	}
 }
+
+func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-probe-log"
+
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
+		t.Fatalf("Create() 실패: %v", err)
+	}
+
+	// 같은 이름으로 한 번 더 만들려 하면 두 번째 감독이 임자가 있는지 붙어보고 물러난다.
+	// 그 탐지 연결은 요청을 한 줄도 보내지 않고 끊는 모양이라, 첫 감독이 그것을 요청 해석
+	// 실패로 적으면 정상적인 일이 기록에 오류로 쌓인다.
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); !errors.Is(err, ErrSessionExists) {
+		t.Fatalf("두 번째 Create() = %v, ErrSessionExists 여야 한다", err)
+	}
+
+	// 첫 감독은 연결을 하나씩 처리한다. 이 조회에 답했다는 것은 앞의 탐지 연결을 이미
+	// 끝냈다는 뜻이므로, 기록을 읽는 시점이 그 뒤임이 보장된다.
+	if _, err := backend.IsAlive(sessionName); err != nil {
+		t.Fatalf("IsAlive() 실패: %v", err)
+	}
+
+	paths, err := newSessionRuntimePaths(sessionName)
+	if err != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	}
+	recorded, err := os.ReadFile(paths.log)
+	if err != nil {
+		t.Fatalf("세션 기록 읽기 실패: %v", err)
+	}
+
+	// 기록은 세션 하나의 일생 몇 줄이라, 무엇이 잘못됐는지 찾는 사람이 읽는 곳이다.
+	if strings.Contains(string(recorded), "제어 요청 해석 실패") {
+		t.Errorf("세션 기록 = %q, 탐지 연결이 실패로 남아 있다", recorded)
+	}
+}
