@@ -284,3 +284,82 @@ func TestAssignConversationStopsWhenTheRecordFileIsThereButUnreadable(t *testing
 		t.Fatal("AssignConversation() 가 읽을 수 없는 기록 파일에서 성공했습니다")
 	}
 }
+
+func TestLabelsWithRecordedConversationAnswersWhatTheNextCallWillResume(t *testing.T) {
+	// 카드가 "이어갈 대화 있음" 이라고 말한 자리에서 --session-id 가 나가면, 사용자는 이어진다고
+	// 믿은 대화를 잃는다. 두 함수가 같은 판단을 쓰는지를 여기서 고정한다.
+	workDirPath := t.TempDir()
+	if _, err := AssignConversation(workDirPath, "main"); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	if _, err := AssignConversation(workDirPath, "proj-a"); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	labels, err := LabelsWithRecordedConversation(workDirPath)
+	if err != nil {
+		t.Fatalf("LabelsWithRecordedConversation() 실패: %v", err)
+	}
+
+	if !labels["main"] || !labels["proj-a"] {
+		t.Errorf("라벨 = %v, 적어둔 두 라벨 모두를 기대", labels)
+	}
+	if labels["proj-b"] {
+		t.Errorf("라벨 = %v, 적은 적 없는 라벨은 없기를 기대", labels)
+	}
+}
+
+func TestLabelsWithRecordedConversationRecordsNothingItself(t *testing.T) {
+	// 목록은 워크디렉토리를 열어둔 동안 3 초마다 도는 물음이다. 여기에 부작용이 있으면 화면을
+	// 켜둔 것만으로 대화가 만들어지고, 그 대화는 아무도 연 적이 없다.
+	workDirPath := t.TempDir()
+
+	labels, err := LabelsWithRecordedConversation(workDirPath)
+	if err != nil {
+		t.Fatalf("LabelsWithRecordedConversation() 실패: %v", err)
+	}
+
+	if len(labels) != 0 {
+		t.Errorf("라벨 = %v, 기록이 없으면 비어 있기를 기대", labels)
+	}
+	if _, statErr := os.Stat(conversationsFilePathForTest(workDirPath)); statErr == nil {
+		t.Error("조회가 기록 파일을 만들었습니다")
+	}
+}
+
+func TestLabelsWithRecordedConversationTreatsARecordItCannotUseAsNothingToResume(t *testing.T) {
+	// 읽지 못한 기록으로는 어떤 대화도 이어갈 수 없다 — "이어갈 대화 없음" 은 그 자체로 참인 답이다.
+	// 버렸다는 말은 AssignConversation 이 카드를 누른 그 자리에서 한다.
+	for testName, fileContent := range map[string]string{
+		"깨진 기록":   "{ 이건 JSON 이 아니다",
+		"모르는 판":   `{"schemaVersion": 99, "conversations": {"main": "이 판의 뜻을 모른다"}}`,
+		"빈 값의 대화": `{"schemaVersion": 1, "conversations": {"main": "   "}}`,
+	} {
+		t.Run(testName, func(t *testing.T) {
+			workDirPath := t.TempDir()
+			writeConversationsFileForTest(t, workDirPath, fileContent)
+
+			labels, err := LabelsWithRecordedConversation(workDirPath)
+			if err != nil {
+				t.Fatalf("LabelsWithRecordedConversation() 실패: %v", err)
+			}
+
+			if labels["main"] {
+				t.Errorf("라벨 = %v, 이어갈 수 없는 기록은 없는 것으로 보기를 기대", labels)
+			}
+		})
+	}
+}
+
+func TestLabelsWithRecordedConversationStopsWhenTheRecordFileIsThereButUnreadable(t *testing.T) {
+	// 파일이 거기 있는데 읽지 못한 것은 기록 없음과 다른 사실이다. 없는 기록으로 뭉뚱그리면
+	// 카드가 "이어갈 대화 없음" 이라고 말하고, 사용자는 대화가 왜 사라졌는지 알 길이 없다.
+	workDirPath := t.TempDir()
+	if err := os.MkdirAll(conversationsFilePathForTest(workDirPath), 0o755); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	if _, err := LabelsWithRecordedConversation(workDirPath); err == nil {
+		t.Fatal("LabelsWithRecordedConversation() 이 읽을 수 없는 기록 파일에서 성공했습니다")
+	}
+}

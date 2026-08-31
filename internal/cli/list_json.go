@@ -33,10 +33,11 @@ import (
 //	        "blockedBy": ["publish"]               // 아직 끝나지 않은 선행. blocked 가 아니면 빈 배열
 //	      },
 //	      "doneTaskCount": 1,                      // 이 레포를 가리키는 작업 중 끝난 것
-//	      "totalTaskCount": 3                      // 이 레포를 가리키는 작업 전체
+//	      "totalTaskCount": 3,                     // 이 레포를 가리키는 작업 전체
+//	      "hasRecordedConversation": true          // 이 레포의 세션이 이어갈 대화가 적혀 있다
 //	    }
 //	  ],
-//	  "mainSession": { "alive": false },
+//	  "mainSession": { "alive": false, "hasRecordedConversation": true },
 //	  "planWarnings": []                           // 사람용 모드에서 stderr 로 나가던 경고
 //	}
 //
@@ -75,6 +76,15 @@ type listJSONRepo struct {
 
 	DoneTaskCount  int `json:"doneTaskCount"`
 	TotalTaskCount int `json:"totalTaskCount"`
+
+	// HasRecordedConversation 은 이 레포의 세션이 이어갈 대화가 적혀 있는지다
+	// (.coord/conversations.json — 설계 문서 5.5.2).
+	//
+	// 사람용 표에는 없는 사실이다. 이어가기는 앱 세션의 것이고 CLI 세션은 대화 ID 를 갖지
+	// 않으므로(설계 문서 5.5.5 다), 터미널에서 목록을 보는 사람이 이 값으로 할 일이 없다.
+	// State 와 다른 축이라는 것도 적어둔다 — State 는 지금 돌고 있는가이고 이것은 다음에
+	// 열면 이어갈 것이 있는가다.
+	HasRecordedConversation bool `json:"hasRecordedConversation"`
 }
 
 type listJSONTask struct {
@@ -91,6 +101,10 @@ type listJSONTask struct {
 // (설계 문서 5.4), 최상위에 alive 라는 낱말만 놓으면 그것이 무엇의 생존인지가 이름에서 사라진다.
 type listJSONMainSession struct {
 	Alive bool `json:"alive"`
+
+	// HasRecordedConversation 은 메인 세션이 이어갈 대화가 적혀 있는지다. 레포의 같은 이름
+	// 필드와 같은 사실을 메인 라벨에 대해 답한 것이다.
+	HasRecordedConversation bool `json:"hasRecordedConversation"`
 }
 
 // writeWorkDirListingAsJSON 은 관찰 결과를 기계가 읽는 문서 하나로 내보낸다.
@@ -106,12 +120,13 @@ func newListJSONDocument(listing workDirListing) listJSONDocument {
 	repos := make([]listJSONRepo, 0, len(listing.repos))
 	for _, repo := range listing.repos {
 		repos = append(repos, listJSONRepo{
-			Name:           repo.name,
-			AbsolutePath:   repo.absolutePath,
-			State:          string(repo.state),
-			Task:           newListJSONTask(repo.planSummary),
-			DoneTaskCount:  repo.planSummary.doneTaskCount,
-			TotalTaskCount: repo.planSummary.totalTaskCount,
+			Name:                    repo.name,
+			AbsolutePath:            repo.absolutePath,
+			State:                   string(repo.state),
+			Task:                    newListJSONTask(repo.planSummary),
+			DoneTaskCount:           repo.planSummary.doneTaskCount,
+			TotalTaskCount:          repo.planSummary.totalTaskCount,
+			HasRecordedConversation: repo.hasRecordedConversation,
 		})
 	}
 
@@ -121,8 +136,11 @@ func newListJSONDocument(listing workDirListing) listJSONDocument {
 			Name:         listing.workDirName,
 			AbsolutePath: listing.workDirAbsolutePath,
 		},
-		Repos:        repos,
-		MainSession:  listJSONMainSession{Alive: listing.mainSessionAlive},
+		Repos: repos,
+		MainSession: listJSONMainSession{
+			Alive:                   listing.mainSessionAlive,
+			HasRecordedConversation: listing.mainHasRecordedConversation,
+		},
 		PlanWarnings: alwaysAnArray(listing.planWarnings),
 	}
 }
