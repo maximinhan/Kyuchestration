@@ -18,9 +18,18 @@ import java.nio.file.Path
  *   자식에게 물려줄 바탕 환경([com.kyuchestration.desktop.platform.childProcessEnvironment])을
  *   모른다. [SessionEntryPlan] 과 담는 것이 닮았어도 뜻이 다른 자리가 여기라, 두 타입을 하나로
  *   합치지 않는다 — 합치면 "더할 환경" 과 "물려줄 환경 전부" 를 같은 필드가 가리키게 된다.
+ * @param resumedConversationId 이 명령이 이어가는 대화의 ID. 새 대화면 null.
+ *
+ *   **앱이 이어가기 실패를 가려내는 근거가 이것 하나다**(설계 문서 5.5.4). 적혀 있던 대화의
+ *   전사가 사라졌으면 `claude` 는 즉시 종료 코드 1 로 끝나는데, 앱이 보는 것은 곧바로 닫힌
+ *   PTY 뿐이라 사용자가 `/exit` 한 것과 구분되지 않는다.
+ *
+ *   명령 안에도 같은 값이 있지만 argv 를 되읽지 않는다. 그러면 앱이 `--resume` 뒤의 자리를
+ *   아는 셈이 되고, 그 앎은 엔진에만 있어야 한다(설계 원칙 11).
  */
 data class SessionCommandAnswer(
     val command: List<String>,
     val workingDirectory: Path,
     val environmentToAdd: Map<String, String>,
+    val resumedConversationId: String?,
 )

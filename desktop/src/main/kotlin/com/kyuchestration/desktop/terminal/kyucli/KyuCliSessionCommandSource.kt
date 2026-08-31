@@ -4,6 +4,7 @@ import com.kyuchestration.desktop.kyu.KyuCommandFailure
 import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
@@ -16,8 +17,12 @@ import java.nio.file.Path
  */
 class KyuCliSessionCommandSource(private val kyuCommandRunner: KyuCommandRunner) : SessionCommandSource {
 
-    override fun sessionCommandFor(workDirPath: Path, target: SessionTarget): SessionCommandAnswer {
-        val arguments = sessionCommandArguments(target)
+    override fun sessionCommandFor(
+        workDirPath: Path,
+        target: SessionTarget,
+        conversationChoice: SessionConversationChoice,
+    ): SessionCommandAnswer {
+        val arguments = sessionCommandArguments(target, conversationChoice)
 
         val result = try {
             // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
@@ -53,10 +58,29 @@ class KyuCliSessionCommandSource(private val kyuCommandRunner: KyuCommandRunner)
  * `kyu start` 와 같은 규칙이다 — 인자 없는 실행을 메인 세션으로 읽는다(session_command.go 의
  * parseSessionCommandArgs). when 으로 가르면 세션 종류가 하나 늘 때 이 파일이 컴파일되지 않는다.
  */
-private fun sessionCommandArguments(target: SessionTarget): List<String> {
+private fun sessionCommandArguments(
+    target: SessionTarget,
+    conversationChoice: SessionConversationChoice,
+): List<String> {
     val repoArgument = when (target) {
         is SessionTarget.Main -> emptyList()
         is SessionTarget.Repo -> listOf(target.repoName)
     }
-    return listOf("session-command") + repoArgument + "--json"
+
+    // 이어가기에는 옵션이 붙지 않는다. 그것이 이 표면의 기본이고, 앱이 매번 "이어가라" 고
+    // 말해야 한다면 그 말을 빠뜨린 자리에서 대화가 조용히 새로 열린다.
+    val conversationOption = when (conversationChoice) {
+        SessionConversationChoice.ContinueRecordedConversation -> emptyList()
+        SessionConversationChoice.StartNewConversation -> listOf(FORGET_CONVERSATION_OPTION)
+    }
+
+    return listOf("session-command") + repoArgument + conversationOption + "--json"
 }
+
+/**
+ * 적혀 있는 대화를 버리고 새 대화로 답하라는 옵션(session_command.go 의 forgetConversationOptionName).
+ *
+ * 화면의 낱말("새 대화로 시작")과 다른 이름인 것을 짚어둔다. 앱이 사용자에게 말하는 것은 바라는
+ * 것 쪽이고, 엔진에게 말하는 것은 되돌릴 수 없는 일 쪽이다 — 그 옮김이 이 어댑터의 몫이다.
+ */
+private const val FORGET_CONVERSATION_OPTION = "--forget-conversation"

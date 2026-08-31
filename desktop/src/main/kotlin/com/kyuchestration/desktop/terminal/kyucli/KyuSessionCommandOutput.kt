@@ -46,6 +46,7 @@ internal fun parseKyuSessionCommandOutput(rawJson: String): SessionCommandAnswer
         command = document.command,
         workingDirectory = Path.of(document.cwd),
         environmentToAdd = document.env,
+        resumedConversationId = document.resumedConversationId,
     )
 }
 
@@ -55,4 +56,13 @@ private data class KyuSessionCommandDocument(
     val cwd: String,
     /** 더할 것이 없어도 엔진은 null 이 아니라 빈 객체로 답한다 — "없음" 이 한 모양이다. */
     val env: Map<String, String>,
+    /**
+     * 이어간 대화의 ID. 새 대화면 엔진이 null 로 답한다.
+     *
+     * 기본값을 두는 이유는 뒤처진 엔진이다. 계약은 필드가 늘어도 판을 올리지 않으므로, 이 필드를
+     * 내지 않는 kyu 와 만나는 일이 실제로 있다 — 그때 세션이 아예 열리지 않으면 안 된다.
+     * 그 앱이 잃는 것은 이어가기 실패를 가려내는 눈 하나뿐이고, 그것은 이 필드가 생기기 전의
+     * 처지와 같다.
+     */
+    val resumedConversationId: String? = null,
 )

@@ -27,8 +27,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.CardSessionFacts
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.dashboard.mergeMainCardSessionFacts
 import com.kyuchestration.desktop.dashboard.mergeRepoCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.RepoSnapshot
 import com.kyuchestration.desktop.workdir.RepoState
@@ -50,7 +52,11 @@ fun WorkDirDashboardContent(
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget) -> Unit,
+    /**
+     * 카드를 눌러 세션에 들어간다. 어느 대화를 쓸지는 누른 자리가 정한다 — 카드 자체는 이어가기,
+     * 카드의 새 대화 버튼은 새로 시작.
+     */
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -140,6 +146,11 @@ private fun PlanFileMissingBanner(
  * 감추면 사용자는 터미널에서 `kyu list` 를 쳤을 때, 또는 `kyu kill` 이 듣지 않을 때 그것을 알게
  * 된다. 그때는 이미 "앱이 고장났다" 로 읽힌다.
  *
+ * **앱을 끌 때 할 말도 여기서 미리 한다.** 끄는 순간에 확인 창을 띄우지 않는 것이 결정이고
+ * (설계 문서 8 절 4 번), 그렇다면 그 사실은 끄기 전에 이미 화면에 있어야 한다 — 세션이 도는 동안
+ * 계속 보이는 이 배너가 그 자리다. 물을 것이 없는 이유도 함께 적는다: 끄는 것은 대화를 버리는
+ * 일이 아니라 진행 중이던 턴 하나를 잃는 일이다.
+ *
  * 보유한 세션이 하나라도 있을 때만 뜬다. 없는 사람에게는 아직 일어나지 않은 일이다.
  */
 @Composable
@@ -150,8 +161,8 @@ private fun AppSessionBanner(appSessionCount: Int) {
         lines = listOf(
             "터미널에서 kyu list 를 쳐도 이 세션들은 보이지 않고, kyu kill 로 끝낼 수 없습니다. " +
                 "끝내는 길은 터미널의 세션 끝내기 버튼이나 앱 종료입니다.",
-            "앱을 끄면 함께 끝납니다. 잃는 것은 진행 중이던 턴이고, 다음에 카드를 누르면 " +
-                "그 대화를 이어서 새 세션을 엽니다.",
+            "앱을 끄면 함께 끝나지만 대화는 워크디렉토리에 남습니다(.coord/conversations.json). " +
+                "잃는 것은 진행 중이던 턴이고, 다음에 앱을 켜서 그 카드를 누르면 대화가 이어집니다.",
         ),
     )
 }
@@ -202,7 +213,7 @@ private fun WorkDirHeader(
 private fun RepoCardList(
     snapshot: WorkDirSnapshot,
     heldSessionTargets: Set<SessionTarget>,
-    onEnterSessionRequested: (SessionTarget) -> Unit,
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
 ) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (snapshot.repos.isEmpty()) {
@@ -222,20 +233,38 @@ private fun RepoCardList(
                 repo = repo,
                 sessionFacts = mergeRepoCardSessionFacts(
                     engineReportedState = repo.state,
+                    hasRecordedConversation = repo.hasRecordedConversation,
                     appSessionHeld = SessionTarget.Repo(repo.name) in heldSessionTargets,
                 ),
-            ) { onEnterSessionRequested(SessionTarget.Repo(repo.name)) }
+                onEnterSessionRequested = {
+                    onEnterSessionRequested(
+                        SessionTarget.Repo(repo.name),
+                        SessionConversationChoice.ContinueRecordedConversation,
+                    )
+                },
+                onStartNewConversationRequested = {
+                    onEnterSessionRequested(
+                        SessionTarget.Repo(repo.name),
+                        SessionConversationChoice.StartNewConversation,
+                    )
+                },
+            )
         }
 
         item {
             MainSessionRow(
-                // 메인 세션은 git 상태가 없다 — 워크디렉토리 최상위는 레포가 아니다.
-                sessionFacts = CardSessionFacts(
+                sessionFacts = mergeMainCardSessionFacts(
+                    mainSessionAlive = snapshot.mainSessionAlive,
+                    hasRecordedConversation = snapshot.mainSessionHasRecordedConversation,
                     appSessionHeld = SessionTarget.Main in heldSessionTargets,
-                    cliSessionRunning = snapshot.mainSessionAlive,
-                    gitState = null,
                 ),
-            ) { onEnterSessionRequested(SessionTarget.Main) }
+                onEnterSessionRequested = {
+                    onEnterSessionRequested(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+                },
+                onStartNewConversationRequested = {
+                    onEnterSessionRequested(SessionTarget.Main, SessionConversationChoice.StartNewConversation)
+                },
+            )
         }
     }
 }
@@ -243,14 +272,19 @@ private fun RepoCardList(
 /**
  * 카드 한 장을 누르는 것이 곧 그 레포의 세션에 들어가는 일이다.
  *
- * 카드 안에 "열기" 버튼을 따로 두지 않는다. 카드가 가리키는 것이 레포 하나뿐이라 누를 곳마다
- * 뜻이 갈릴 여지가 없고, 버튼을 두면 카드의 나머지 자리가 눌러도 아무 일이 없는 죽은 면이 된다.
+ * **"열기" 버튼은 여전히 두지 않는다.** 카드가 가리키는 것이 레포 하나뿐이라 카드 전체가 그 뜻이고,
+ * 같은 뜻의 버튼을 두면 카드의 나머지 자리가 눌러도 아무 일이 없는 죽은 면이 된다.
+ *
+ * **새 대화 버튼은 다르다.** 그것은 카드와 다른 일을 한다 — 카드는 이어가고 버튼은 앞 대화를
+ * 버린다. 이어갈 대화가 있는 카드에서만 뜨는 이유가 그것이다: 기록이 없으면 두 자리가 같은 일을
+ * 하게 되고, 그때 이 버튼은 다시 죽은 면이 된다.
  */
 @Composable
 private fun RepoCard(
     repo: RepoSnapshot,
     sessionFacts: CardSessionFacts,
     onEnterSessionRequested: () -> Unit,
+    onStartNewConversationRequested: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEnterSessionRequested)) {
         Column(
@@ -269,6 +303,10 @@ private fun RepoCard(
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (sessionFacts.conversationToResume) {
+                    Spacer(Modifier.width(8.dp))
+                    StartNewConversationButton(onStartNewConversationRequested)
                 }
             }
 
@@ -304,6 +342,11 @@ private fun SessionChips(sessionFacts: CardSessionFacts) {
         }
         if (sessionFacts.cliSessionRunning) {
             SessionChip("CLI 세션", CLI_SESSION_COLOR)
+        }
+        // 돌고 있는 세션 칩보다 뒤에 둔다. 앞의 둘은 지금 일어나고 있는 일이고 이것은 누르면
+        // 일어날 일이라, 눈이 급한 것부터 읽게 한다.
+        if (sessionFacts.conversationToResume) {
+            SessionChip("이어갈 대화", RESUMABLE_CONVERSATION_COLOR)
         }
         sessionFacts.gitState?.let { SessionChip(it.rawValue, it.chipColor) }
     }
@@ -356,7 +399,11 @@ private fun SessionChip(label: String, color: Color) {
 }
 
 @Composable
-private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequested: () -> Unit) {
+private fun MainSessionRow(
+    sessionFacts: CardSessionFacts,
+    onEnterSessionRequested: () -> Unit,
+    onStartNewConversationRequested: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -366,7 +413,8 @@ private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequest
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SessionChips(sessionFacts)
-            if (sessionFacts.appSessionHeld || sessionFacts.cliSessionRunning) {
+            // 칩이 하나도 없는 줄에서는 간격만 남아 이름이 밀려 보인다.
+            if (sessionFacts.anyChipShown) {
                 Spacer(Modifier.width(10.dp))
             }
             Text("main", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace)
@@ -380,6 +428,10 @@ private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequest
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (sessionFacts.conversationToResume) {
+                Spacer(Modifier.weight(1f))
+                StartNewConversationButton(onStartNewConversationRequested)
+            }
         }
 
         if (sessionFacts.cliSessionRunning) {
@@ -387,6 +439,25 @@ private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequest
         }
     }
 }
+
+/**
+ * 이어가는 대신 새로 시작하는 자리.
+ *
+ * 문구가 "새 대화" 가 아니라 "새 대화로 시작" 인 것은, 이 버튼이 대화를 만드는 것이 아니라
+ * **세션을 여는** 것이어서다 — 누르면 그 자리에서 터미널이 열린다.
+ */
+@Composable
+private fun StartNewConversationButton(onStartNewConversationRequested: () -> Unit) {
+    TextButton(onClick = onStartNewConversationRequested) {
+        Text("새 대화로 시작", style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+/**
+ * 이 줄에 그려질 칩이 하나라도 있는가. 메인 세션에는 git 상태가 없으므로 셋 중 하나다.
+ */
+private val CardSessionFacts.anyChipShown: Boolean
+    get() = appSessionHeld || cliSessionRunning || conversationToResume
 
 /**
  * @param trailingContent 배너 아래에 붙는 것. 안내만 하는 배너는 비워 두고, 사람이 그 자리에서
@@ -442,6 +513,14 @@ private val NEUTRAL_COLOR = Color(0xFF6B6B6B)
  */
 private val APP_SESSION_COLOR = Color(0xFF2E7D32)
 private val CLI_SESSION_COLOR = Color(0xFF6A1B9A)
+
+/**
+ * 이어갈 대화가 있다는 표시.
+ *
+ * 두 세션 칩과 다른 계열로 둔다. 저 둘은 지금 `claude` 가 돌고 있다는 뜻이고 이것은 아직 아무것도
+ * 돌고 있지 않다는 뜻이라, 같은 계열로 두면 카드를 훑는 사람이 세션 수를 잘못 센다.
+ */
+private val RESUMABLE_CONVERSATION_COLOR = Color(0xFF00695C)
 private val PLAN_WARNING_COLOR = Color(0xFFB26A00)
 private val REFRESH_FAILURE_COLOR = Color(0xFFB3261E)
 

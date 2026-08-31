@@ -155,6 +155,14 @@ type observedRepo struct {
 
 	// planSummary 는 계획에서 이 레포를 보고 뽑은 것이다. 계획이 없으면 영 값이다.
 	planSummary repoPlanSummary
+
+	// hasRecordedConversation 은 이 레포의 세션이 이어갈 대화가 적혀 있는지다.
+	//
+	// state 와 다른 축의 사실이다 — state 는 지금 세션이 돌고 있는가이고, 이것은 다음에 열면
+	// 이어갈 것이 있는가다. 앱이 워크디렉토리를 연 자리에서 카드에 표시를 내는 근거이고
+	// (설계 문서 5.5.3), 앱은 그것을 알려고 session-command 를 미리 부를 수 없다 —
+	// 묻는 것이 곧 기록하는 것이라 화면을 그리려던 물음이 대화를 만들어 버린다.
+	hasRecordedConversation bool
 }
 
 // workDirListing 은 출력에 옮기기 직전의 관찰 결과다.
@@ -172,6 +180,10 @@ type workDirListing struct {
 	// mainSessionAlive 는 메인 세션이 떠 있는지다. 레포처럼 상태 어휘를 쓰지 않는다 —
 	// 판정 근거가 세션 생존 하나뿐이라(inspectWorkDir 아래 isMainSessionAlive) 참·거짓이 그 사실 전부다.
 	mainSessionAlive bool
+
+	// mainHasRecordedConversation 은 메인 세션이 이어갈 대화가 적혀 있는지다.
+	// 레포와 같은 사실을 메인 라벨에 대해 답한 것이다.
+	mainHasRecordedConversation bool
 
 	// planWarnings 는 계획을 그대로 쓰지 못한 이유들이다. 사람용 모드에서는 stderr 로 나가고,
 	// JSON 모드에서는 문서의 한 필드로 들어간다.
@@ -237,6 +249,13 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 		return workDirListing{}, err
 	}
 
+	// 대화 기록도 계획과 같은 자세로 읽는다 — 읽지 못한 기록은 "이어갈 대화 없음" 이고,
+	// 파일이 거기 있는데 읽지 못한 것만 에러로 올라온다(workdir.LabelsWithRecordedConversation).
+	labelsWithRecordedConversation, err := workdir.LabelsWithRecordedConversation(absoluteWorkDirPath)
+	if err != nil {
+		return workDirListing{}, err
+	}
+
 	observedRepos := make([]observedRepo, 0, len(repos))
 	for _, repo := range repos {
 		repoSessionName := session.RepoSessionName(workDirName, repo.Name)
@@ -249,10 +268,11 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 		}
 
 		observedRepos = append(observedRepos, observedRepo{
-			name:         repo.Name,
-			absolutePath: repo.AbsolutePath,
-			state:        state,
-			planSummary:  summarizeRepoPlan(plan, repo.Name),
+			name:                    repo.Name,
+			absolutePath:            repo.AbsolutePath,
+			state:                   state,
+			planSummary:             summarizeRepoPlan(plan, repo.Name),
+			hasRecordedConversation: labelsWithRecordedConversation[repo.Name],
 		})
 	}
 
@@ -264,11 +284,12 @@ func inspectWorkDir(workDirPath string, backend session.SessionBackend) (workDir
 	planWarnings := append(plan.Warnings, missingRepoWarnings(plan, repos, workdir.PlanFilePath(absoluteWorkDirPath))...)
 
 	return workDirListing{
-		workDirName:         workDirName,
-		workDirAbsolutePath: absoluteWorkDirPath,
-		repos:               observedRepos,
-		mainSessionAlive:    mainSessionAlive,
-		planWarnings:        planWarnings,
+		workDirName:                 workDirName,
+		workDirAbsolutePath:         absoluteWorkDirPath,
+		repos:                       observedRepos,
+		mainSessionAlive:            mainSessionAlive,
+		mainHasRecordedConversation: labelsWithRecordedConversation[mainRowLabel],
+		planWarnings:                planWarnings,
 	}, nil
 }
 

@@ -55,11 +55,19 @@ class EmbeddedTerminalStateHolder(
      */
     private var latestSessionEntryRequestId = 0L
 
-    fun enterSession(workDirPath: Path, target: SessionTarget) {
+    /**
+     * @param conversationChoice 이 세션이 쓸 대화를 어느 쪽으로 정할지. 카드를 그냥 누르면
+     *   이어가기이고, 새로 시작은 사용자가 일부러 고른 자리에서만 온다.
+     */
+    fun enterSession(workDirPath: Path, target: SessionTarget, conversationChoice: SessionConversationChoice) {
         latestSessionEntryRequestId++
 
         // 이미 보유 중이면 다시 띄우지 않는다. 화면만 그쪽으로 옮기면 그 세션의 위젯이 그동안
         // 쥐고 있던 화면이 그대로 돌아온다.
+        //
+        // 새로 시작을 골랐어도 같다. 화면은 보유 중인 대상에 그 길을 내지 않으므로(카드의
+        // 새 대화 버튼은 앱 세션이 없을 때만 뜬다) 여기 닿는 것은 카드를 다시 누른 사람뿐이고,
+        // 그 사람이 잃어서는 안 되는 것이 돌고 있는 세션이다.
         val alreadyHeld = mutableHeldSessions.value.firstOrNull { it.target == target }
         if (alreadyHeld != null) {
             mutableState.value = EmbeddedTerminalState.SessionOnScreen(target, alreadyHeld.ttyConnector)
@@ -71,7 +79,7 @@ class EmbeddedTerminalStateHolder(
 
         coroutineScope.launch {
             val opened = withContext(sessionEntryDispatcher) {
-                runCatching { sessionTerminalOpener.openSessionIn(workDirPath, target) }
+                runCatching { sessionTerminalOpener.openSessionIn(workDirPath, target, conversationChoice) }
             }
 
             // 기다리는 동안 사용자가 다른 카드를 눌렀거나 터미널을 닫았다.
@@ -123,7 +131,7 @@ class EmbeddedTerminalStateHolder(
     }
 
     private fun holdAndShow(target: SessionTarget, opened: OpenedSessionTerminal) {
-        val heldSession = HeldSession(target, opened.ttyConnector)
+        val heldSession = HeldSession(target, opened.ttyConnector, opened.resumedConversationId)
         mutableHeldSessions.value = mutableHeldSessions.value + heldSession
         mutableState.value = EmbeddedTerminalState.SessionOnScreen(target, opened.ttyConnector)
 
@@ -140,6 +148,9 @@ class EmbeddedTerminalStateHolder(
      * 보유 목록에서 빼되 화면에서는 내리지 않는다. 마지막 화면이 남아 있어야 사용자가 왜 끝났는지
      * (전사가 없다는 `claude` 의 한 줄까지) 읽을 수 있고, 그 자리에서 카드를 다시 누르면 새 세션이
      * 열린다.
+     *
+     * 이어가던 대화를 함께 넘긴다. 그 둘(이어가기였는가 · 어떤 코드로 끝났는가)이 만나야 화면이
+     * "이어갈 대화를 찾지 못한 것 같다" 를 말할 수 있다(설계 문서 5.5.4).
      */
     private fun markSessionEnded(heldSession: HeldSession, exitCode: Int?) {
         if (heldSession !in mutableHeldSessions.value) {
@@ -154,6 +165,7 @@ class EmbeddedTerminalStateHolder(
                 target = heldSession.target,
                 ttyConnector = heldSession.ttyConnector,
                 exitCode = exitCode,
+                resumedConversationId = heldSession.resumedConversationId,
             )
         }
     }

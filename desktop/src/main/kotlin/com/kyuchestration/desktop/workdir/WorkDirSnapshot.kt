@@ -13,6 +13,13 @@ data class WorkDirSnapshot(
     /** 워크디렉토리 바로 아래의 레포, 이름순. 메인 세션은 여기 없다. */
     val repos: List<RepoSnapshot>,
     val mainSessionAlive: Boolean,
+    /**
+     * 메인 세션이 이어갈 대화가 적혀 있는지(`.coord/conversations.json`).
+     *
+     * 생존과 다른 축의 사실이라 따로 싣는다 — 생존은 지금 돌고 있는가이고, 이것은 다음에 열면
+     * 이어갈 것이 있는가다. 앱을 껐다 켠 사용자에게는 뒤쪽이 남는다.
+     */
+    val mainSessionHasRecordedConversation: Boolean,
     /** 계획을 그대로 쓰지 못한 이유. 계획이 깨져도 목록 자체는 성립하므로 실패가 아니라 곁들이는 말이다. */
     val planWarnings: List<String>,
 ) {
@@ -38,6 +45,13 @@ data class RepoSnapshot(
     val task: RepoTask?,
     val doneTaskCount: Int,
     val totalTaskCount: Int,
+    /**
+     * 이 레포의 세션이 이어갈 대화가 적혀 있는지.
+     *
+     * 앱이 이 사실을 알려고 `kyu session-command` 를 미리 부를 수는 없다 — 묻는 것이 곧 기록하는
+     * 것이라, 카드를 그리려던 물음이 대화를 만들어 버린다(설계 문서 5.5.3). 그래서 목록이 답한다.
+     */
+    val hasRecordedConversation: Boolean,
 )
 
 data class RepoTask(

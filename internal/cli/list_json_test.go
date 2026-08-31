@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -32,12 +33,13 @@ type listJSONWorkDirForTest struct {
 }
 
 type listJSONRepoForTest struct {
-	Name           string               `json:"name"`
-	AbsolutePath   string               `json:"absolutePath"`
-	State          string               `json:"state"`
-	Task           *listJSONTaskForTest `json:"task"`
-	DoneTaskCount  int                  `json:"doneTaskCount"`
-	TotalTaskCount int                  `json:"totalTaskCount"`
+	Name                    string               `json:"name"`
+	AbsolutePath            string               `json:"absolutePath"`
+	State                   string               `json:"state"`
+	Task                    *listJSONTaskForTest `json:"task"`
+	DoneTaskCount           int                  `json:"doneTaskCount"`
+	TotalTaskCount          int                  `json:"totalTaskCount"`
+	HasRecordedConversation bool                 `json:"hasRecordedConversation"`
 }
 
 type listJSONTaskForTest struct {
@@ -47,7 +49,8 @@ type listJSONTaskForTest struct {
 }
 
 type listJSONMainSessionForTest struct {
-	Alive bool `json:"alive"`
+	Alive                   bool `json:"alive"`
+	HasRecordedConversation bool `json:"hasRecordedConversation"`
 }
 
 // listJSONRunForTest 는 --json 한 번의 실행 결과다. 되읽은 문서와 두 스트림의 원문을 함께 들고 있다.
@@ -411,5 +414,51 @@ func TestListWorkDirRejectsAnUnknownOption(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("ListWorkDir() 가 %q 를 출력, 인자가 잘못됐으면 아무것도 쓰지 않기를 기대", out.String())
+	}
+}
+
+func TestListWorkDirAsJSONTellsWhichLabelsHaveAConversationToResume(t *testing.T) {
+	// 워크디렉토리를 연 자리에서 앱이 "이어갈 대화 있음" 을 카드에 낼 근거가 이 필드다
+	// (설계 문서 5.5.3). 앱은 그 사실을 알려고 session-command 를 미리 부를 수 없다 —
+	// 묻는 것이 곧 기록하는 것이라, 화면을 그리려던 물음이 대화를 만들어 버린다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	makeCleanRepo(t, workDirPath, "beta-gateway")
+	t.Chdir(workDirPath)
+
+	// 카드를 한 번씩 누른 것과 같다. 대화를 적는 자리를 테스트가 따로 흉내 내지 않는 이유는,
+	// 목록이 답하는 사실과 session-command 가 --resume 을 답하는 사실이 같아야 하기 때문이다.
+	runSessionCommandForTest(t, "alpha-commons")
+	runSessionCommandForTest(t)
+
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+
+	if !repoInDocument(t, run.document, "alpha-commons").HasRecordedConversation {
+		t.Error("alpha-commons 의 hasRecordedConversation = false, 대화를 배정받은 레포이므로 true 를 기대")
+	}
+	if repoInDocument(t, run.document, "beta-gateway").HasRecordedConversation {
+		t.Error("beta-gateway 의 hasRecordedConversation = true, 아직 연 적 없는 레포이므로 false 를 기대")
+	}
+	if !run.document.MainSession.HasRecordedConversation {
+		t.Error("mainSession.hasRecordedConversation = false, 메인 세션도 대화를 배정받았으므로 true 를 기대")
+	}
+}
+
+func TestListWorkDirAsJSONRecordsNoConversationOfItsOwn(t *testing.T) {
+	// 목록은 워크디렉토리를 열어둔 동안 3 초마다 도는 물음이다. 여기에 부작용이 있으면 화면을
+	// 켜둔 것만으로 아무도 연 적 없는 대화가 워크디렉토리에 쌓인다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+
+	if repoInDocument(t, run.document, "alpha-commons").HasRecordedConversation {
+		t.Error("alpha-commons 의 hasRecordedConversation = true, 기록이 없으므로 false 를 기대")
+	}
+	if run.document.MainSession.HasRecordedConversation {
+		t.Error("mainSession.hasRecordedConversation = true, 기록이 없으므로 false 를 기대")
+	}
+	if _, err := os.Stat(filepath.Join(workDirPath, ".coord", "conversations.json")); err == nil {
+		t.Error("목록이 대화 기록 파일을 만들었습니다")
 	}
 }

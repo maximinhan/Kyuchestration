@@ -4,6 +4,7 @@ import com.jediterm.terminal.ProcessTtyConnector
 import com.jediterm.terminal.TtyConnector
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import kotlin.io.path.createDirectories
@@ -45,6 +46,7 @@ class PtySessionTerminalOpenerTest {
                 command = recordAndStayAliveCommand(reportPath),
                 workingDirectory = sessionDirectory,
                 environmentToAdd = mapOf("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" to "1"),
+                resumedConversationId = null,
             ),
             baseEnvironment = mapOf("PATH" to System.getenv("PATH"), "TERM" to "dumb"),
         )
@@ -68,6 +70,7 @@ class PtySessionTerminalOpenerTest {
                 command = recordAndStayAliveCommand(reportPath),
                 workingDirectory = temporaryDirectory,
                 environmentToAdd = emptyMap(),
+                resumedConversationId = null,
             ),
         )
         val sessionProcessId = waitForSessionReport(reportPath).processId
@@ -83,14 +86,44 @@ class PtySessionTerminalOpenerTest {
     }
 
     @Test
+    fun `엔진이 답한 이어간 대화를 앱이 그대로 들고 간다`() {
+        val reportPath = temporaryDirectory.resolve("세션이-받은-것.txt")
+        val opener = PtySessionTerminalOpener(
+            sessionCommandSource = SessionCommandSource { _, _, _ ->
+                SessionCommandAnswer(
+                    command = recordAndStayAliveCommand(reportPath),
+                    workingDirectory = temporaryDirectory,
+                    environmentToAdd = emptyMap(),
+                    resumedConversationId = "211f6974-88a8-4453-9248-a02b0d6febae",
+                )
+            },
+            baseEnvironment = mapOf("PATH" to System.getenv("PATH")),
+        )
+
+        val opened = opener.openSessionIn(
+            temporaryDirectory,
+            SessionTarget.Repo("proj-a"),
+            SessionConversationChoice.ContinueRecordedConversation,
+        )
+        openedConnectors.add(opened.ttyConnector)
+
+        // 이 값이 여기서 끊기면 세션이 끝났을 때 화면이 실패를 가려낼 근거를 잃는다.
+        assertEquals("211f6974-88a8-4453-9248-a02b0d6febae", opened.resumedConversationId)
+    }
+
+    @Test
     fun `무엇을 띄울지 묻는 데 실패하면 PTY 를 열지 않는다`() {
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = { _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
+            sessionCommandSource = { _, _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
             baseEnvironment = emptyMap(),
         )
 
         assertFailsWith<TerminalSessionFailure.KyuExecutableNotFound> {
-            opener.openSessionIn(temporaryDirectory, SessionTarget.Repo("proj-a"))
+            opener.openSessionIn(
+                temporaryDirectory,
+                SessionTarget.Repo("proj-a"),
+                SessionConversationChoice.ContinueRecordedConversation,
+            )
         }
     }
 
@@ -100,10 +133,13 @@ class PtySessionTerminalOpenerTest {
         target: SessionTarget = SessionTarget.Repo("proj-a"),
     ): TtyConnector {
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = SessionCommandSource { _, _ -> answer },
+            sessionCommandSource = SessionCommandSource { _, _, _ -> answer },
             baseEnvironment = baseEnvironment,
         )
-        return opener.openSessionIn(temporaryDirectory, target).ttyConnector.also(openedConnectors::add)
+        return opener
+            .openSessionIn(temporaryDirectory, target, SessionConversationChoice.ContinueRecordedConversation)
+            .ttyConnector
+            .also(openedConnectors::add)
     }
 
     private fun ProcessTtyConnector.waitForWithin(timeoutMillis: Long) {

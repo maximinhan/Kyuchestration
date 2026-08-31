@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.terminal.pty
 import com.kyuchestration.desktop.platform.childProcessEnvironment
 import com.kyuchestration.desktop.terminal.OpenedSessionTerminal
 import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.SessionTerminalOpener
@@ -33,8 +34,12 @@ class PtySessionTerminalOpener(
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
 ) : SessionTerminalOpener {
 
-    override fun openSessionIn(workDirPath: Path, target: SessionTarget): OpenedSessionTerminal {
-        val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(workDirPath, target)
+    override fun openSessionIn(
+        workDirPath: Path,
+        target: SessionTarget,
+        conversationChoice: SessionConversationChoice,
+    ): OpenedSessionTerminal {
+        val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(workDirPath, target, conversationChoice)
 
         val plan = planSessionEntry(
             sessionCommandAnswer = sessionCommandAnswer,
@@ -43,10 +48,14 @@ class PtySessionTerminalOpener(
             target = target,
         )
 
-        return openPtyRunningSession(plan, target)
+        return openPtyRunningSession(plan, target, sessionCommandAnswer.resumedConversationId)
     }
 
-    private fun openPtyRunningSession(plan: SessionEntryPlan, target: SessionTarget): OpenedSessionTerminal {
+    private fun openPtyRunningSession(
+        plan: SessionEntryPlan,
+        target: SessionTarget,
+        resumedConversationId: String?,
+    ): OpenedSessionTerminal {
         val ptyProcess = try {
             PtyProcessBuilder(plan.command.toTypedArray())
                 .setDirectory(plan.workingDirectory.toString())
@@ -65,6 +74,8 @@ class PtySessionTerminalOpener(
             // pty4j 의 PtyProcess 는 java.lang.Process 다 — 끝을 기다리는 일은 JDK 가 이미 안다.
             // 스레드를 세션마다 붙잡지 않고 끝을 알 수 있는 것이 이 한 줄이다.
             sessionExit = ptyProcess.onExit().thenApply { it.exitValue() },
+            // 엔진이 답한 것을 그대로 들고 간다. 이 값이 쓰이는 자리는 이 세션이 끝났을 때다.
+            resumedConversationId = resumedConversationId,
         )
     }
 }

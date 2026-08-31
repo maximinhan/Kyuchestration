@@ -14,7 +14,14 @@ import java.nio.file.Path
 fun interface SessionCommandSource {
 
     /**
+     * @param conversationChoice 이 세션이 쓸 대화를 어느 쪽으로 정할지. 묻는 것이 곧 기록하는
+     *   것이라(설계 문서 5.5.3) 이 값이 워크디렉토리의 대화 기록을 바꾼다 — 화면을 그리려고
+     *   부를 수 있는 자리가 아니다.
      * @throws TerminalSessionFailure 묻지 못했거나, kyu 가 답하기를 거절했거나, 답을 읽지 못했을 때.
      */
-    fun sessionCommandFor(workDirPath: Path, target: SessionTarget): SessionCommandAnswer
+    fun sessionCommandFor(
+        workDirPath: Path,
+        target: SessionTarget,
+        conversationChoice: SessionConversationChoice,
+    ): SessionCommandAnswer
 }

@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.kyucli
 
 import com.kyuchestration.desktop.kyu.realKyuCommandRunnerOrSkip
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
@@ -12,6 +13,9 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -40,7 +44,7 @@ class KyuCliSessionCommandSourceIntegrationTest {
         val source = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
         val workDirPath = workDirWithRepos("proj-a", "proj-b")
 
-        val answer = source.sessionCommandFor(workDirPath, SessionTarget.Main)
+        val answer = source.sessionCommandFor(workDirPath, SessionTarget.Main, CONTINUE)
 
         // 조립 지식은 엔진의 것이다. 이 시험은 그 지식을 코틀린에 옮겨 적은 것이 아니라,
         // 앱이 그것을 그대로 받아 실행할 수 있는 모양인지를 확인한다.
@@ -57,7 +61,7 @@ class KyuCliSessionCommandSourceIntegrationTest {
         val source = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
         val workDirPath = workDirWithRepos("proj-a", "proj-b")
 
-        val answer = source.sessionCommandFor(workDirPath, SessionTarget.Repo("proj-a"))
+        val answer = source.sessionCommandFor(workDirPath, SessionTarget.Repo("proj-a"), CONTINUE)
 
         // 이 한 줄이 그 레포의 .mcp.json·CLAUDE.md·에이전트를 살린다 — 이 도구의 존재 이유다.
         assertEquals(workDirPath.resolve("proj-a"), answer.workingDirectory)
@@ -69,13 +73,17 @@ class KyuCliSessionCommandSourceIntegrationTest {
         val source = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
         val workDirPath = workDirWithRepos("proj-a")
 
-        val firstAnswer = source.sessionCommandFor(workDirPath, SessionTarget.Repo("proj-a"))
-        val secondAnswer = source.sessionCommandFor(workDirPath, SessionTarget.Repo("proj-a"))
+        val firstAnswer = source.sessionCommandFor(workDirPath, SessionTarget.Repo("proj-a"), CONTINUE)
+        val secondAnswer = source.sessionCommandFor(workDirPath, SessionTarget.Repo("proj-a"), CONTINUE)
 
         // 앱을 껐다 켠 뒤 같은 카드를 누르는 것이 두 번째 물음이다. 3 단계가 복구 화면을 더하기
         // 전에도 이 성질만으로 대화는 이어진다 — 그래서 2 단계 검증에 이 항목이 있다.
         val newConversationId = firstAnswer.command.flagValue("--session-id")
         assertEquals(listOf("--resume", newConversationId), secondAnswer.command.windowed(2).first { it.first() == "--resume" })
+
+        // 앱이 실패를 가려내는 근거도 같은 답에 실려 온다(설계 문서 5.5.4).
+        assertNull(firstAnswer.resumedConversationId, "새 대화를 연 답은 이어간 것이 없다")
+        assertEquals(newConversationId, secondAnswer.resumedConversationId)
 
         // 기록은 워크디렉토리 안에 사람이 읽을 수 있는 모양으로 남는다.
         val conversationsJson = workDirPath.resolve(".coord/conversations.json").readText()
@@ -88,11 +96,33 @@ class KyuCliSessionCommandSourceIntegrationTest {
         val workDirPath = workDirWithRepos("proj-a")
 
         val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
-            source.sessionCommandFor(workDirPath, SessionTarget.Repo("있지도-않은-레포"))
+            source.sessionCommandFor(workDirPath, SessionTarget.Repo("있지도-않은-레포"), CONTINUE)
         }
 
         assertEquals(1, failure.exitCode)
         assertTrue(failure.guidance.isNotBlank(), "kyu 가 stderr 로 남긴 이유가 안내 문구가 되어야 한다")
+    }
+
+    @Test
+    fun `새로 시작을 고르면 적혀 있던 대화가 기록에서 교체된다`() {
+        val source = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
+        val workDirPath = workDirWithRepos("proj-a")
+        val target = SessionTarget.Repo("proj-a")
+        val recordedConversationId = source.sessionCommandFor(workDirPath, target, CONTINUE)
+            .command.flagValue("--session-id")
+
+        val freshAnswer = source.sessionCommandFor(workDirPath, target, SessionConversationChoice.StartNewConversation)
+
+        val freshConversationId = freshAnswer.command.flagValue("--session-id")
+        assertNotEquals(recordedConversationId, freshConversationId, "적혀 있던 대화를 그대로 쓰면 새로 시작이 아니다")
+
+        // 교체되지 않으면 다음에 카드를 누른 사용자가 방금 버린 대화로 되돌아간다.
+        val conversationsJson = workDirPath.resolve(".coord/conversations.json").readText()
+        assertContains(conversationsJson, freshConversationId)
+        assertFalse(recordedConversationId in conversationsJson, "버린 대화가 기록에 남아 있습니다")
+
+        val nextAnswer = source.sessionCommandFor(workDirPath, target, CONTINUE)
+        assertEquals(freshConversationId, nextAnswer.command.flagValue("--resume"))
     }
 
     private fun List<String>.flagValue(flagName: String): String =
@@ -102,6 +132,11 @@ class KyuCliSessionCommandSourceIntegrationTest {
         val workDirPath = temporaryDirectory.resolve("WorkDir-featureX").createDirectories()
         repoNames.forEach { gitRepository(workDirPath.resolve(it)) }
         return workDirPath
+    }
+
+    private companion object {
+        /** 카드를 그냥 누른 자리. 옵션이 붙지 않는 쪽이 이 표면의 기본이다. */
+        val CONTINUE = SessionConversationChoice.ContinueRecordedConversation
     }
 
     private fun gitRepository(repositoryPath: Path): Path {
