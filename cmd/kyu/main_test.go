@@ -291,15 +291,13 @@ func TestCloneRefusesArgumentsWithItsOwnUsageAndExitsWithCodeOne(t *testing.T) {
 	// 라우팅이 실제로 이어졌는지는 "명령이 자기 사용법으로 거절하는가" 로 드러난다.
 	// 인자를 붙여 부르면 GitHub 에 붙기 전에 끝나므로, 이 테스트는 네트워크도 토큰도 쓰지 않는다.
 	//
-	// 진입점이 세션 백엔드를 먼저 조립하므로 tmux 가 없으면 인자를 보기도 전에 그쪽으로 끝난다.
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux 가 PATH 에 없어 라우팅 테스트를 건너뜁니다")
-	}
-
+	// tmux 없이 실행한다. 클론이 세션에게 묻는 것은 "떠 있는 메인 세션이 새 레포를 놓치는가"
+	// 한 줄뿐이라, 백엔드를 세우지 못한 것이 클론 전체를 막아서는 안 된다.
 	command := exec.Command(buildKyuBinary(t), "clone", "maximinhan")
 	command.Dir = t.TempDir()
 	// 저장소를 뒤지더라도 사용자의 실제 설정 디렉토리를 건드리지 않게 홈을 옮긴다.
-	command.Env = append(os.Environ(), "HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir())
+	command.Env = append(os.Environ(),
+		"HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir(), searchPathWithoutTmux(t))
 
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -467,5 +465,167 @@ func TestSupervisorBackendIsChosenByEnvironmentAndDoesNotAskForTmux(t *testing.T
 	if strings.Contains(stderr.String(), "tmux") || strings.Contains(stdout.String(), "tmux") {
 		t.Errorf("stdout = %q, stderr = %q, 감독 백엔드는 tmux 를 요구하지 않아야 한다",
 			stdout.String(), stderr.String())
+	}
+}
+
+// searchPathWithoutTmux 는 tmux 만 빠진 PATH 를 만든다.
+//
+// 다른 시험들처럼 PATH 를 통째로 비우면 tmux 와 함께 git 도 사라져서, "목록이 tmux 없이
+// 답하는가" 를 묻던 시험이 "git 을 찾을 수 없습니다" 로 끝난다. 그러면 무엇을 증명한 것인지
+// 알 수 없으므로, 필요한 명령만 심볼릭 링크로 모은 디렉토리 하나를 PATH 로 준다 —
+// tmux 가 없다는 것 하나만 실제 머신과 다른 환경이 된다.
+func searchPathWithoutTmux(t *testing.T, requiredCommands ...string) string {
+	t.Helper()
+
+	searchDirectoryPath := t.TempDir()
+	for _, commandName := range requiredCommands {
+		commandPath, err := exec.LookPath(commandName)
+		if err != nil {
+			t.Skipf("%s 를 PATH 에서 찾을 수 없어 건너뜁니다: %v", commandName, err)
+		}
+		if err := os.Symlink(commandPath, filepath.Join(searchDirectoryPath, commandName)); err != nil {
+			t.Fatalf("%s 링크 생성 실패: %v", commandName, err)
+		}
+	}
+	return "PATH=" + searchDirectoryPath
+}
+
+// initGitRepoForListing 은 목록이 상태를 판정할 수 있는 최소한의 레포를 만든다.
+//
+// 커밋을 남기지 않는다. 커밋이 없어도 git status 와 업스트림 확인은 답하고(IDLE),
+// 이 시험이 묻는 것은 상태 낱말이 무엇인가가 아니라 세션 백엔드 없이 판정까지 가는가다.
+func initGitRepoForListing(t *testing.T, repoAbsolutePath string) {
+	t.Helper()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git 이 PATH 에 없어 목록 시험을 건너뜁니다")
+	}
+	if err := os.MkdirAll(repoAbsolutePath, 0o755); err != nil {
+		t.Fatalf("레포 디렉토리 생성 실패: %v", err)
+	}
+
+	initialize := exec.Command("git", "init", "--quiet")
+	initialize.Dir = repoAbsolutePath
+	if output, err := initialize.CombinedOutput(); err != nil {
+		t.Fatalf("git init 실패: %v (%s)", err, output)
+	}
+}
+
+func TestListAnswersOnAMachineWithoutTmux(t *testing.T) {
+	// 대시보드가 3 초마다 부르는 명령이다. 이 자리가 종료 코드 1 로 끝나면 tmux 없는 머신에서
+	// 앱은 목록을 통째로 잃는다 — 앱 세션에는 tmux 가 필요 없어진 뒤에도 남아 있던 구멍이고,
+	// 4 단계의 완료 확인이 걸려 있던 자리다(설계 문서 5.7 · 7.0 · 8절 5번 (가)).
+	workDirPath := t.TempDir()
+	initGitRepoForListing(t, filepath.Join(workDirPath, "proj-a"))
+
+	command := exec.Command(buildKyuBinary(t), "list", "--json")
+	command.Dir = workDirPath
+	command.Env = append(os.Environ(), searchPathWithoutTmux(t, "git"))
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		t.Fatalf("kyu list --json 실행 실패: %v (%s)", err, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "tmux") {
+		t.Errorf("stderr = %q, 목록은 tmux 를 화제로 삼지 않아야 한다", stderr.String())
+	}
+
+	// 앱이 하는 일이 이것이다 — stdout 을 통째로 JSON 으로 읽는다.
+	var answer struct {
+		SchemaVersion int `json:"schemaVersion"`
+		Repos         []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"repos"`
+		MainSession struct {
+			Alive bool `json:"alive"`
+		} `json:"mainSession"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &answer); err != nil {
+		t.Fatalf("stdout 을 JSON 으로 읽지 못했습니다: %v\n--- stdout ---\n%s", err, stdout.String())
+	}
+	if answer.SchemaVersion != 1 {
+		t.Errorf("schemaVersion = %d, want 1", answer.SchemaVersion)
+	}
+	if len(answer.Repos) != 1 || answer.Repos[0].Name != "proj-a" {
+		t.Fatalf("repos = %+v, proj-a 하나를 기대", answer.Repos)
+	}
+
+	// 세션을 만들 수단이 없는 머신에는 CLI 세션이 있을 수 없다. 그 사실이 상태로 나와야 한다.
+	if answer.Repos[0].State == "RUNNING" {
+		t.Errorf("proj-a 의 state = %q, 세션 없음을 기준으로 판정하기를 기대", answer.Repos[0].State)
+	}
+	if answer.MainSession.Alive {
+		t.Error("mainSession.alive = true, false 를 기대")
+	}
+}
+
+func TestSessionCommandsStillAskForTmuxOnAMachineWithoutIt(t *testing.T) {
+	// "세션 없음" 을 답으로 받아야 하는 것은 묻기만 하는 명령들이다. 세션을 만지는 셋에까지
+	// 그 답을 주면 attach 는 "kyu start 로 시작하세요" 라는 못 지킬 안내로 끝나고, kill 은
+	// 죽인 것 없이 성공으로 끝난다 — 사용자가 다음에 할 일은 그것이 아니라 tmux 설치다.
+	binaryPath := buildKyuBinary(t)
+	searchPathEntry := searchPathWithoutTmux(t)
+
+	for _, sessionCommandArgs := range [][]string{{"start"}, {"attach", "main"}, {"kill", "--all"}} {
+		t.Run(strings.Join(sessionCommandArgs, " "), func(t *testing.T) {
+			command := exec.Command(binaryPath, sessionCommandArgs...)
+			command.Dir = t.TempDir()
+			command.Env = append(os.Environ(), searchPathEntry)
+
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+
+			err := command.Run()
+
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("실행 결과 = %v, 종료 코드로 끝나기를 기대 (stdout %q)", err, stdout.String())
+			}
+			if exitErr.ExitCode() != 1 {
+				t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+			}
+			if !strings.Contains(stderr.String(), "tmux") {
+				t.Errorf("stderr = %q, tmux 설치 안내를 기대", stderr.String())
+			}
+		})
+	}
+}
+
+func TestEntryFlowInitializesWithoutTmuxAndThenAsksForItToCreateTheSession(t *testing.T) {
+	// 인자 없는 kyu 는 묻기만 하는 명령이 아니다 — 초기화하고, 세션을 만들고, 들어간다.
+	// 그래서 백엔드가 없는 자리에서도 초기화까지는 가고, 정말 세션을 만들어야 하는 걸음에서
+	// 설치 안내로 끝난다. 세션 생존을 묻는 걸음이 그 앞을 막지 않는다는 것이 이 시험의 요점이다.
+	workDirPath := t.TempDir()
+
+	command := exec.Command(buildKyuBinary(t))
+	command.Dir = workDirPath
+	// 홈을 옮긴다. 워크디렉토리가 홈이 아니어야 자동 초기화 거절에 걸리지 않는다.
+	command.Env = append(os.Environ(), "HOME="+t.TempDir(), searchPathWithoutTmux(t))
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("kyu 실행 결과 = %v, 종료 코드로 끝나기를 기대 (stdout %q)", err, stdout.String())
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), "tmux") {
+		t.Errorf("stderr = %q, 세션을 만들지 못한 까닭으로 tmux 안내를 기대", stderr.String())
+	}
+
+	// 세션 생존을 묻는 걸음에서 끝났다면 초기화는 일어나지 않는다.
+	if _, statErr := os.Stat(filepath.Join(workDirPath, ".coord", "plan.md")); statErr != nil {
+		t.Errorf("계획 파일이 만들어지지 않았습니다: %v", statErr)
 	}
 }
