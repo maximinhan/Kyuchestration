@@ -32,12 +32,12 @@ func NewNoSessionsBackend(backendAbsenceReason error) *NoSessionsBackend {
 
 // Create 는 세션을 만들지 못한다는 사실을 까닭과 함께 알린다.
 func (b *NoSessionsBackend) Create(name, cwd string, cmd []string) error {
-	return b.refuseBecauseThereIsNoBackend("세션 생성", name)
+	return b.refuseBecauseThereIsNoBackend(name)
 }
 
 // Attach 는 붙을 세션이 없다는 사실을 까닭과 함께 알린다.
 func (b *NoSessionsBackend) Attach(name string) error {
-	return b.refuseBecauseThereIsNoBackend("세션 진입", name)
+	return b.refuseBecauseThereIsNoBackend(name)
 }
 
 // Kill 은 세션을 종료하지 못한다는 사실을 까닭과 함께 알린다.
@@ -46,7 +46,7 @@ func (b *NoSessionsBackend) Attach(name string) error {
 // 그 조항은 "찾아보니 없더라" 를 위한 것이고, 여기는 찾을 수단 자체가 없는 자리다.
 // 성공으로 끝내면 정리 스크립트가 아무것도 지우지 못한 채 다음 걸음으로 넘어간다.
 func (b *NoSessionsBackend) Kill(name string) error {
-	return b.refuseBecauseThereIsNoBackend("세션 종료", name)
+	return b.refuseBecauseThereIsNoBackend(name)
 }
 
 // List 는 빈 목록을 답한다. 백엔드가 없는 머신에는 CLI 세션이 하나도 없다.
@@ -72,9 +72,9 @@ func (b *NoSessionsBackend) DetachKey() string {
 
 // refuseBecauseThereIsNoBackend 는 세션을 만지는 요청을 까닭과 함께 거절한다.
 //
-// 세션 이름을 함께 적는다. 거절이 여러 명령에서 같은 문장으로 나오면 사용자는 어느 세션을
-// 두고 하는 말인지 알 수 없고, 그 정보는 이 계층에만 있다.
-func (b *NoSessionsBackend) refuseBecauseThereIsNoBackend(attemptedAction, name string) error {
-	return fmt.Errorf("%s 불가 (세션 %s) — 이 머신에는 세션 백엔드가 없습니다: %w",
-		attemptedAction, name, b.backendAbsenceReason)
+// 무엇을 하려던 참인지는 적지 않는다. 부르는 쪽이 이미 "main 세션 생성 실패" 처럼 감싸므로,
+// 여기서 또 적으면 사용자는 같은 말을 두 번 듣는다. 이 계층에만 있는 사실은 두 가지다 —
+// 어느 세션이었는가, 그리고 백엔드가 왜 없는가.
+func (b *NoSessionsBackend) refuseBecauseThereIsNoBackend(name string) error {
+	return fmt.Errorf("이 머신에는 세션 백엔드가 없습니다 (세션 %s): %w", name, b.backendAbsenceReason)
 }
