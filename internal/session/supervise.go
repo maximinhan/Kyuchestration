@@ -61,11 +61,12 @@ const socketProbeTimeout = 2 * time.Second
 // 답하므로 유예보다 넉넉해야 한다.
 const controlConnectionDeadline = sessionTerminationGracePeriod + 7*time.Second
 
-// errSessionSocketAlreadyBound 는 그 이름의 소켓을 이미 누군가 쥐고 있을 때다.
+// errSessionNameAlreadyHeld 는 그 이름을 이미 다른 감독이 쥐고 있을 때다.
 //
-// 유닉스 도메인 소켓은 파일이 이미 있으면 바인딩에 실패한다. 그 실패가 곧 "같은 이름의 세션이
-// 이미 있다" 이므로, 판정과 획득이 같은 한 번의 연산이라 그 사이에 낄 틈이 없다(설계 문서 5.3).
-var errSessionSocketAlreadyBound = errors.New("이미 그 이름의 감독이 소켓을 쥐고 있습니다")
+// 이름의 임자는 소켓 파일이 아니라 <이름>.lock 의 flock 이다. 잠금 획득이 곧 "같은 이름의
+// 세션이 이미 있는가" 의 답이므로, 판정과 획득이 같은 한 번의 연산이라 그 사이에 낄 틈이
+// 없다(설계 문서 5.3).
+var errSessionNameAlreadyHeld = errors.New("이미 그 이름을 쥐고 있는 감독이 있습니다")
 
 // errWorkingDirMissing 은 세션을 띄울 디렉토리가 없을 때다.
 var errWorkingDirMissing = errors.New("세션의 작업 디렉토리가 없습니다")
@@ -86,15 +87,15 @@ type superviseOptions struct {
 //
 // 순서가 중요하다(설계 문서 5.3).
 //
-//  1. 소켓을 바인딩한다  ← 이것이 배타성 판정이다
-//  2. PTY 쌍을 연다
-//  3. 자식을 실행한다
+//  1. 이름 잠금을 잡는다  ← 이것이 배타성 판정이다
+//  2. 소켓을 바인딩한다 (죽은 소켓은 잠금 아래에서 치운다)
+//  3. PTY 쌍을 열고 자식을 실행한다
 //  4. 준비 신호를 부모에게 보낸다
 //  5. 서빙을 시작한다
 //
-// 1 번이 먼저인 이유는 바인딩이 곧 "이 이름의 세션은 내 것" 이라는 선언이기 때문이다. 실패하면
-// 자식을 띄우기 전에 끝내야 한다 — 순서가 뒤집히면 중복 생성이 세션 안 프로그램을 하나 띄웠다
-// 죽이는 일이 된다.
+// 1 번이 먼저인 이유는 잠금을 잡는 것이 곧 "이 이름의 세션은 내 것" 이라는 선언이기 때문이다.
+// 실패하면 자식을 띄우기 전에 끝내야 한다 — 순서가 뒤집히면 중복 생성이 세션 안 프로그램을
+// 하나 띄웠다 죽이는 일이 된다.
 func RunSupervisor(args []string) error {
 	// 감독의 표준 출력은 부모가 그 세션의 기록 파일로 돌려두었다. 생명주기 사건만 적는다 —
 	// 입출력 바이트는 절대 적지 않는다. 세션의 내용은 사용자의 작업이고 도구의 관심사가
@@ -146,7 +147,7 @@ func writeReadySignal(readyPipe *os.File, signal readySignal, events *log.Logger
 func failureSignalFor(err error) readySignal {
 	signal := readySignal{Version: controlProtocolVersion, OK: false, Message: err.Error()}
 	switch {
-	case errors.Is(err, errSessionSocketAlreadyBound):
+	case errors.Is(err, errSessionNameAlreadyHeld):
 		signal.Code = sessionExistsCode
 	case errors.Is(err, errWorkingDirMissing):
 		signal.Code = workingDirMissingCode
@@ -163,6 +164,7 @@ func failureSignalFor(err error) readySignal {
 // supervisorProcess 는 서빙에 들어간 감독이다.
 type supervisorProcess struct {
 	sessionName  string
+	nameLock     *os.File
 	listener     *net.UnixListener
 	childCommand *exec.Cmd
 	ptyMaster    *os.File
@@ -173,7 +175,7 @@ type supervisorProcess struct {
 	childExitCode int
 }
 
-// startSupervisor 는 소켓을 잡고 PTY 를 열고 자식을 띄운다 — 준비 신호 직전까지다.
+// startSupervisor 는 이름을 잡고 소켓을 열고 자식을 띄운다 — 준비 신호 직전까지다.
 func startSupervisor(args []string, events *log.Logger) (*supervisorProcess, error) {
 	options, err := parseSuperviseArguments(args)
 	if err != nil {
@@ -188,8 +190,14 @@ func startSupervisor(args []string, events *log.Logger) (*supervisorProcess, err
 		return nil, err
 	}
 
+	nameLock, err := holdSessionNameLock(paths.lock)
+	if err != nil {
+		return nil, err
+	}
+
 	listener, err := bindSessionSocket(paths)
 	if err != nil {
+		nameLock.Close()
 		return nil, err
 	}
 
@@ -198,11 +206,13 @@ func startSupervisor(args []string, events *log.Logger) (*supervisorProcess, err
 		// 리스너를 닫으면 소켓 파일도 함께 지워진다. 자식을 못 띄운 이름이 죽은 소켓으로 남으면,
 		// 다음 Create 가 그것을 치우기 전까지 없는 세션이 있는 것처럼 보인다.
 		listener.Close()
+		nameLock.Close()
 		return nil, err
 	}
 
 	return &supervisorProcess{
 		sessionName:  options.sessionName,
+		nameLock:     nameLock,
 		listener:     listener,
 		childCommand: childCommand,
 		ptyMaster:    ptyMaster,
@@ -211,61 +221,65 @@ func startSupervisor(args []string, events *log.Logger) (*supervisorProcess, err
 	}, nil
 }
 
-// bindSessionSocket 은 세션 소켓을 바인딩한다. 이 함수의 성공이 곧 "이 이름의 세션은 내 것" 이다.
+// holdSessionNameLock 은 세션 이름의 배타 잠금을 잡는다. 이 함수의 성공이 곧 "이 이름의 세션은 내 것" 이다.
 //
-// 소켓 파일이 아예 없는 흔한 경우에는 바인딩 한 번이 전부다. 잠금이 드는 것은 죽은 소켓을
-// 치우는 좁은 경로 하나뿐이고, 그마저 세션 이름별이라 서로 다른 세션의 생성이 서로를 기다리지
-// 않는다 — 중앙 데몬이었다면 모든 생성이 전역 잠금 하나를 지났다(설계 문서 5.3).
-func bindSessionSocket(paths sessionRuntimePaths) (*net.UnixListener, error) {
-	listener, err := listenOnSessionSocket(paths.socket)
-	if !errors.Is(err, syscall.EADDRINUSE) {
-		return listener, err
+// 감독은 이 잠금을 수명 내내 쥔다. 잠깐 쥐었다 놓으면 소켓이 아직 답하지 않는 기동 도중의
+// 순간에 남이 그 이름을 죽은 것으로 보고 가져간다 — 붙어보는 것으로는 "아직 안 뜬 감독" 과
+// "죽은 감독" 을 가를 수 없기 때문이다(설계 문서 5.3).
+//
+// 잠금은 열린 파일과 함께 살고 프로세스가 죽으면 커널이 푼다. 그래서 감독을 SIGKILL 해도
+// 그 이름은 곧바로 다시 쓸 수 있고, 되돌리는 절차가 따로 필요 없다.
+//
+// 기다리지 않는다(LOCK_NB). 기다리면 중복 생성이 앞 세션이 끝날 때까지 멈춰 서고, 그것은
+// ErrSessionExists 로 곧바로 답해야 하는 자리다.
+//
+// 잠금 파일을 지우지 않는다. 잠금을 쥔 채로 파일을 지우면 다음 사람이 같은 경로에 새로 만든
+// 다른 inode 를 잠그게 되어, 둘이 서로 다른 잠금을 쥐고 같은 이름을 만진다. 0 바이트 파일
+// 하나가 남는 값으로 그 어긋남을 없앤다.
+func holdSessionNameLock(lockPath string) (*os.File, error) {
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, sessionFilePermission)
+	if err != nil {
+		return nil, fmt.Errorf("세션 잠금 파일 열기 실패 (%s): %w", lockPath, err)
 	}
 
-	// 파일이 이미 있다. 그것이 살아있는 감독 때문인지 죽은 감독이 남긴 파일 때문인지는
-	// 붙어봐야 안다 — 연결되면 살아있고, 거절되면 죽은 소켓이다.
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lockFile.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("%w: %s", errSessionNameAlreadyHeld, lockPath)
+		}
+		return nil, fmt.Errorf("세션 잠금 실패 (%s): %w", lockPath, err)
+	}
+	return lockFile, nil
+}
+
+// bindSessionSocket 은 세션 소켓을 바인딩한다. 이름 잠금을 쥔 채로만 부른다.
+//
+// 잠금을 쥐고 있으므로 이 이름의 감독은 나뿐이다. 그러면 남아 있는 소켓 파일은 죽은 감독이
+// 남긴 것이라, 치우기와 다시 바인딩하기 사이에 남이 끼어들 수 없다 — 잠금이 그 구간을
+// 통째로 덮는다(설계 문서 5.3).
+func bindSessionSocket(paths sessionRuntimePaths) (*net.UnixListener, error) {
+	// 잠금을 쥐지 않는 옛 판 감독이 아직 이 이름으로 돌고 있을 수 있다. 그쪽은 소켓으로만
+	// 자기 존재를 말하므로, 지우기 전에 임자가 있는지 한 번 붙어본다. 새 판끼리는 잠금에서
+	// 이미 갈렸으니 이 확인에 걸리는 것은 옛 판뿐이다.
 	bound, err := isSocketBound(paths.socket)
 	if err != nil {
 		return nil, err
 	}
 	if bound {
-		return nil, fmt.Errorf("%w: %s", errSessionSocketAlreadyBound, paths.socket)
-	}
-
-	// 죽은 소켓이다. 지우기와 다시 바인딩하기 사이에 남이 바인딩하면 남의 소켓을 지우게 되므로,
-	// 이 구간만 세션 이름별 잠금으로 감싼다.
-	unlock, err := lockSessionName(paths.lock)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-
-	// 잠금을 기다리는 동안 남이 치우고 떴을 수 있다. 지우기 전에 다시 확인한다.
-	bound, err = isSocketBound(paths.socket)
-	if err != nil {
-		return nil, err
-	}
-	if bound {
-		return nil, fmt.Errorf("%w: %s", errSessionSocketAlreadyBound, paths.socket)
+		return nil, fmt.Errorf("%w: %s", errSessionNameAlreadyHeld, paths.socket)
 	}
 
 	if err := os.Remove(paths.socket); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("죽은 세션 소켓 정리 실패 (%s): %w", paths.socket, err)
 	}
 
-	listener, err = listenOnSessionSocket(paths.socket)
-	if errors.Is(err, syscall.EADDRINUSE) {
-		// 소켓 파일이 없는 흔한 경로로 들어온 감독과 겹쳤다. 그쪽은 잠금을 지나지 않으므로
-		// 이 경합이 실제로 가능하다 — 먼저 잡은 쪽이 임자다.
-		return nil, fmt.Errorf("%w: %s", errSessionSocketAlreadyBound, paths.socket)
-	}
-	return listener, err
+	return listenOnSessionSocket(paths.socket)
 }
 
 // isSocketBound 는 그 경로의 소켓을 지금 누군가 듣고 있는지 본다.
 //
-// 연결이 되면 살아있는 감독이 있는 것이고, ECONNREFUSED 면 임자 없는 파일만 남은 것이다.
-// 파일이 아예 없으면(ENOENT) 그 사이에 누가 치운 것이라 역시 임자가 없다.
+// 연결이 되면 임자가 있는 것이고, ECONNREFUSED 면 임자 없는 파일만 남은 것이다.
+// 파일이 아예 없으면(ENOENT) 역시 임자가 없다.
 func isSocketBound(socketPath string) (bool, error) {
 	connection, err := net.DialTimeout("unix", socketPath, socketProbeTimeout)
 	if err == nil {
@@ -276,28 +290,6 @@ func isSocketBound(socketPath string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("세션 소켓 상태 확인 실패 (%s): %w", socketPath, err)
-}
-
-// lockSessionName 은 세션 이름 하나에 대한 배타 잠금을 잡는다.
-//
-// 잠금 파일을 지우지 않는다. 잠금을 쥔 채로 파일을 지우면 다음 사람이 같은 경로에 새로 만든
-// 다른 inode 를 잠그게 되어, 둘이 서로 다른 잠금을 쥐고 같은 소켓을 만진다. 0 바이트 파일
-// 하나가 남는 값으로 그 어긋남을 없앤다.
-func lockSessionName(lockPath string) (func(), error) {
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, sessionFilePermission)
-	if err != nil {
-		return nil, fmt.Errorf("세션 잠금 파일 열기 실패 (%s): %w", lockPath, err)
-	}
-
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		lockFile.Close()
-		return nil, fmt.Errorf("세션 잠금 실패 (%s): %w", lockPath, err)
-	}
-
-	return func() {
-		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
-	}, nil
 }
 
 // listenOnSessionSocket 은 소켓을 바인딩하고 권한을 사용자 전용으로 좁힌다.
@@ -362,6 +354,9 @@ func sessionChildEnvironment(sessionName string) []string {
 
 // serve 는 제어 연결을 받는다. 자식이 끝나거나 kill 을 받으면 돌아온다.
 func (s *supervisorProcess) serve() error {
+	// 이름 잠금을 가장 나중에 놓는다(defer 는 역순이다). 소켓이 사라진 뒤에 놓아야, 다음 감독이
+	// 잠금을 잡은 순간 그 이름 자리에 남의 소켓이 없다.
+	defer s.nameLock.Close()
 	defer s.ptyMaster.Close()
 
 	go s.watchChild()

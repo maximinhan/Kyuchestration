@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -149,7 +150,7 @@ func TestSupervisorBackendCreateRejectsDuplicateName(t *testing.T) {
 		t.Fatalf("첫 Create() 실패: %v", err)
 	}
 
-	// 소켓 바인딩 실패가 곧 중복 판정이다 — 판정과 획득이 같은 한 번의 연산이라
+	// 이름 잠금 획득 실패가 곧 중복 판정이다 — 판정과 획득이 같은 한 번의 연산이라
 	// 그 사이에 낄 틈이 없다(설계 문서 5.3).
 	err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"})
 	if !errors.Is(err, ErrSessionExists) {
@@ -593,12 +594,14 @@ func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
 		t.Fatalf("Create() 실패: %v", err)
 	}
 
-	// 같은 이름으로 한 번 더 만들려 하면 두 번째 감독이 임자가 있는지 붙어보고 물러난다.
-	// 그 탐지 연결은 요청을 한 줄도 보내지 않고 끊는 모양이라, 첫 감독이 그것을 요청 해석
-	// 실패로 적으면 정상적인 일이 기록에 오류로 쌓인다.
-	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); !errors.Is(err, ErrSessionExists) {
-		t.Fatalf("두 번째 Create() = %v, ErrSessionExists 여야 한다", err)
+	// 감독은 잠금을 쥐지 않는 옛 판 감독이 그 이름으로 도는지 붙어보고 판정한다(bindSessionSocket).
+	// 그 탐지 연결은 요청을 한 줄도 보내지 않고 끊는 모양이라, 감독이 그것을 요청 해석 실패로
+	// 적으면 정상적인 일이 기록에 오류로 쌓인다. 같은 모양을 여기서 그대로 만든다.
+	probe, err := net.DialTimeout("unix", socketPathFor(t, sessionName), socketProbeTimeout)
+	if err != nil {
+		t.Fatalf("탐지 연결 실패: %v", err)
 	}
+	probe.Close()
 
 	// 첫 감독은 연결을 하나씩 처리한다. 이 조회에 답했다는 것은 앞의 탐지 연결을 이미
 	// 끝냈다는 뜻이므로, 기록을 읽는 시점이 그 뒤임이 보장된다.
@@ -606,9 +609,9 @@ func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
 		t.Fatalf("IsAlive() 실패: %v", err)
 	}
 
-	paths, err := newSessionRuntimePaths(sessionName)
-	if err != nil {
-		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	paths, pathsErr := newSessionRuntimePaths(sessionName)
+	if pathsErr != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", pathsErr)
 	}
 	recorded, err := os.ReadFile(paths.log)
 	if err != nil {
@@ -635,5 +638,136 @@ func TestSupervisorBackendAttachSaysItIsNotThereYetAndPointsAtTheFallback(t *tes
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("Attach() 에러 = %q, %q 를 포함하기를 기대", err, expected)
 		}
+	}
+}
+
+// bindSocketWithoutListening 은 bind 는 마쳤지만 아직 listen 하지 않은 소켓을 남긴다.
+//
+// 감독이 기동 도중 잠깐 지나는 상태를 실제 커널 상태로 만든다 — 이 소켓 파일에 붙으면
+// ECONNREFUSED 로 끝난다. 즉 "죽은 소켓" 과 겉모습이 같다.
+func bindSocketWithoutListening(t *testing.T, socketPath string) {
+	t.Helper()
+
+	fileDescriptor, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("소켓 생성 실패: %v", err)
+	}
+	t.Cleanup(func() {
+		syscall.Close(fileDescriptor)
+		os.Remove(socketPath)
+	})
+
+	if err := syscall.Bind(fileDescriptor, &syscall.SockaddrUnix{Name: socketPath}); err != nil {
+		t.Fatalf("소켓 바인딩 실패 (%s): %v", socketPath, err)
+	}
+}
+
+// holdSessionNameLockForTest 는 감독이 하듯 세션 이름 잠금을 잡고 테스트가 끝날 때까지 쥔다.
+func holdSessionNameLockForTest(t *testing.T, lockPath string) {
+	t.Helper()
+
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, sessionFilePermission)
+	if err != nil {
+		t.Fatalf("잠금 파일 열기 실패 (%s): %v", lockPath, err)
+	}
+	t.Cleanup(func() { lockFile.Close() })
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("세션 이름 잠금 실패 (%s): %v", lockPath, err)
+	}
+}
+
+func TestSupervisorHoldsItsSessionNameLockForAsLongAsItLives(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-name-lock"
+
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
+		t.Fatalf("Create() 실패: %v", err)
+	}
+
+	paths, err := newSessionRuntimePaths(sessionName)
+	if err != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	}
+
+	// 이름의 임자는 소켓 파일이 아니라 이 잠금이다. 감독이 사는 내내 쥐고 있어야 "소켓이 아직
+	// 답하지 않는 순간" 에도 남이 그 이름을 가져가지 못한다.
+	lockFile, err := os.OpenFile(paths.lock, os.O_CREATE|os.O_RDWR, sessionFilePermission)
+	if err != nil {
+		t.Fatalf("잠금 파일 열기 실패: %v", err)
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		t.Errorf("살아있는 감독의 세션 이름 잠금을 잡을 수 있었다 — 감독이 수명 내내 쥐고 있어야 한다")
+	}
+}
+
+func TestCreateRefusesAHeldSessionNameEvenWhileItsSocketStillRefusesConnections(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-bind-listen-race"
+
+	paths, err := newSessionRuntimePaths(sessionName)
+	if err != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	}
+	if err := ensureSessionsDir(paths.sessionsDir); err != nil {
+		t.Fatalf("ensureSessionsDir() 실패: %v", err)
+	}
+
+	// 감독이 이름을 잡고 소켓을 바인딩했지만 아직 듣지는 않는 순간을 그대로 만든다.
+	// 지연을 주입해 그 순간을 노리는 대신 그 순간의 상태를 만든다 — 겨루기가 아니라 판정이므로
+	// 이 시험은 언제 돌려도 같은 답을 낸다.
+	//
+	// 이 상태에서 소켓에 붙으면 죽은 소켓과 똑같이 ECONNREFUSED 다. 붙어보는 것으로 임자를
+	// 판정하면 남의 소켓을 지우고 같은 이름의 감독이 둘이 된다.
+	holdSessionNameLockForTest(t, paths.lock)
+	bindSocketWithoutListening(t, paths.socket)
+
+	err = backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"})
+	if !errors.Is(err, ErrSessionExists) {
+		t.Fatalf("이름이 잡혀 있을 때 Create() = %v, ErrSessionExists 여야 한다", err)
+	}
+
+	if _, statErr := os.Stat(paths.socket); statErr != nil {
+		t.Errorf("남의 소켓 파일 stat = %v, 임자가 있는 소켓을 지우면 안 된다", statErr)
+	}
+}
+
+func TestConcurrentCreateOfTheSameNameStartsTheSessionCommandExactlyOnce(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-one-child"
+	const attempts = 4
+
+	// 감독이 둘이 되면 세션 안 프로그램도 둘이 뜬다. 목록은 소켓 하나만 보므로 그 사실을
+	// 드러내지 못한다 — 시도마다 작업 디렉토리를 갈라 두고, 흔적이 몇 개 남는지로 센다.
+	workingDirectories := make([]string, attempts)
+	for i := range workingDirectories {
+		workingDirectories[i] = t.TempDir()
+	}
+
+	results := make(chan error, attempts)
+	for i := range attempts {
+		go func() {
+			results <- backend.Create(sessionName, workingDirectories[i], []string{
+				"sh", "-c", `printf started > started.txt; sleep 60`,
+			})
+		}()
+	}
+	for range attempts {
+		if err := <-results; err != nil && !errors.Is(err, ErrSessionExists) {
+			t.Errorf("Create() = %v, nil 이거나 ErrSessionExists 여야 한다", err)
+		}
+	}
+
+	started := 0
+	for _, workingDirectory := range workingDirectories {
+		if _, err := os.Stat(filepath.Join(workingDirectory, "started.txt")); err == nil {
+			started++
+		}
+	}
+	if started != 1 {
+		t.Errorf("실행된 세션 명령 = %d 개, 정확히 1 개여야 한다", started)
 	}
 }
