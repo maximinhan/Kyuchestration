@@ -148,6 +148,43 @@ val bundledEngineExecutableFile: Provider<RegularFile> = hostBundledEngineTarget
 }
 
 /**
+ * 엔진을 만들 go 실행 파일. 이 머신에 Go 가 없으면 null.
+ *
+ * PATH 만 보지 않는 이유가 둘이다. 하나는 Go 를 tarball 로 넣으면 그 bin 을 PATH 에 넣는 것이
+ * 사용자 몫이라 넣지 않은 머신이 흔해서고, 다른 하나는 IDE 나 편집기가 띄운 Gradle 이 로그인
+ * 셸의 PATH 를 물려받지 못하는 자리가 있어서다. 둘 다 Go 가 설치되어 있는데 "없다" 로 읽힌다.
+ *
+ * 찾은 자리를 그대로 실행 파일로 넘긴다(아래 goExecutablePath). "있다고 본 자리" 와 "실제로
+ * 부르는 자리" 가 갈라지면 탐지는 성공하고 빌드만 "command go 를 띄우지 못했다" 로 깨진다 —
+ * 이 저장소에서 실제로 났던 일이다: go 가 `~/.local/go/bin` 에 있는 머신에서 buildBundledEngine
+ * 이 "PATH 에서 찾지 못했습니다" 로 멈췄다.
+ */
+fun findGoExecutable(): File? {
+    val goRootBinDirectory = System.getenv("GOROOT")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { File(it, "bin") }
+
+    val searchPathDirectories = System.getenv("PATH").orEmpty()
+        .split(File.pathSeparatorChar)
+        .filter { it.isNotBlank() }
+        .map(::File)
+
+    // Go 를 넣는 흔한 자리들. tarball 을 푼 자리 둘(go.dev/doc/install 이 안내하는
+    // /usr/local/go 와, 관리자 권한 없이 넣을 때 쓰는 홈 아래)과 애플 실리콘 맥의 Homebrew 다.
+    val commonInstallationDirectories = listOf(
+        File(System.getProperty("user.home").orEmpty(), ".local/go/bin"),
+        File("/usr/local/go/bin"),
+        File("/opt/homebrew/bin"),
+    )
+
+    return (listOfNotNull(goRootBinDirectory) + searchPathDirectories + commonInstallationDirectories)
+        .map { File(it, "go") }
+        .firstOrNull { it.isFile && it.canExecute() }
+}
+
+val goExecutable: File? = findGoExecutable()
+
+/**
  * 저장소 루트의 Go 모듈에서 이 머신용 kyu 를 만들어 동봉 자리에 놓는다.
  *
  * 모노레포의 이점을 그대로 쓴다. 엔진 소스가 옆에 있으므로 앱을 패키징하는 사람이 엔진 릴리스를
@@ -162,6 +199,15 @@ val bundledEngineExecutableFile: Provider<RegularFile> = hostBundledEngineTarget
 abstract class BuildBundledEngine @Inject constructor(
     private val execOperations: ExecOperations,
 ) : DefaultTask() {
+
+    /**
+     * 부를 go 실행 파일의 절대 경로. 비어 있으면 이 머신에 Go 가 없다.
+     *
+     * 이름("go")이 아니라 경로를 받는다. 이름으로 부르면 PATH 에 있는 것만 걸려, 찾을 때 본
+     * 자리와 부를 때 보는 자리가 갈라진다.
+     */
+    @get:Internal
+    abstract val goExecutablePath: Property<String>
 
     @get:Internal
     abstract val goModuleDirectory: DirectoryProperty
@@ -184,13 +230,13 @@ abstract class BuildBundledEngine @Inject constructor(
 
     @TaskAction
     fun buildEngine() {
-        requireGoOnSearchPath()
+        val goExecutable = requireGoIsInstalled()
 
         val engineFile = bundledEngineExecutable.get().asFile
         engineFile.parentFile.mkdirs()
 
         execOperations.exec {
-            executable = "go"
+            executable = goExecutable
             workingDir = goModuleDirectory.get().asFile
             args = buildList {
                 add("build")
@@ -218,20 +264,11 @@ abstract class BuildBundledEngine @Inject constructor(
      * 그러지 않으면 Gradle 이 내는 말은 "A problem occurred starting process 'command go'" 뿐이라,
      * 이 저장소를 처음 여는 사람은 무엇을 설치해야 하는지 알 수 없다.
      */
-    private fun requireGoOnSearchPath() {
-        val goIsOnSearchPath = System.getenv("PATH").orEmpty()
-            .split(File.pathSeparatorChar)
-            .filter { it.isNotBlank() }
-            .any { directory -> File(directory, "go").let { it.isFile && it.canExecute() } }
-
-        if (!goIsOnSearchPath) {
-            throw GradleException(
-                "엔진을 만들 Go 를 PATH 에서 찾지 못했습니다. " +
-                    "저장소 루트의 go.mod 가 요구하는 판을 설치하거나(https://go.dev/dl), " +
-                    "이미 만들어 둔 kyu 를 ${bundledEngineExecutable.get().asFile} 에 직접 놓으세요.",
-            )
-        }
-    }
+    private fun requireGoIsInstalled(): String = goExecutablePath.orNull ?: throw GradleException(
+        "엔진을 만들 Go 를 찾지 못했습니다. " +
+            "저장소 루트의 go.mod 가 요구하는 판을 설치하거나(https://go.dev/dl), " +
+            "이미 만들어 둔 kyu 를 ${bundledEngineExecutable.get().asFile} 에 직접 놓으세요.",
+    )
 
     private companion object {
         /**
@@ -250,6 +287,7 @@ val buildBundledEngine = tasks.register<BuildBundledEngine>("buildBundledEngine"
     group = "compose desktop"
     description = "저장소 루트의 Go 모듈에서 이 머신용 kyu 를 만들어 설치 패키지에 넣을 자리에 놓는다"
 
+    goExecutablePath.set(goExecutable?.absolutePath)
     goModuleDirectory.set(layout.projectDirectory.dir(".."))
     bundledEngineExecutable.set(bundledEngineExecutableFile)
     goOperatingSystem.set(hostBundledEngineTarget.map { it.goOperatingSystem })
@@ -295,9 +333,59 @@ tasks.matching { it.name in packagingTaskNames }.configureEach {
 }
 
 // 한 번의 실행에서 둘 다 부를 때(./gradlew buildBundledEngine packageDeb) 리소스를 옮기는
-// 쪽이 나중에 오게 한다. 의존이 아니라 순서만 건다 — 의존으로 걸면 run 까지 Go 를 요구한다.
+// 쪽이 나중에 오게 한다. 의존이 아니라 순서만 건다 — 의존으로 걸면 Go 가 없는 머신에서
+// packageDeb 뿐 아니라 run 까지 통째로 멈춘다. run 쪽 의존은 아래에서 Go 가 있을 때만 건다.
 tasks.matching { it.name == "prepareAppResources" }.configureEach {
     mustRunAfter(buildBundledEngine)
+}
+
+// 엔진을 새로 만들지 않고 앱만 띄우고 싶을 때 끈다: ./gradlew run -PbundledEngineForRun=false
+//
+// 화면만 손보는 중이면 go 빌드가 매번 앞에 얹힌다. 그 몇 초를 아끼려고 사람들이 각자 다른
+// 우회를 찾아내게 두느니 끄는 자리를 하나 열어 둔다.
+//
+// toBooleanStrict 라 오타(-PbundledEngineForRun=yes)는 조용히 참으로 읽히지 않고 여기서 걸린다.
+val bundledEngineForRun = providers.gradleProperty("bundledEngineForRun")
+    .map { it.trim().toBooleanStrict() }
+    .getOrElse(true)
+
+/**
+ * 소스에서 띄우는 흐름도 엔진을 스스로 갖춘다.
+ *
+ * 모노레포에 엔진 소스가 옆에 있는데도 `./gradlew run` 이 그것을 쓰지 않으면, 소스를 받아 처음
+ * 띄운 사람은 앱이 아니라 "엔진이 없다" 는 화면부터 만난다(실제로 맥에서 그렇게 됐다). 여기서
+ * 함께 만들어 두면 그 사람이 부리는 것은 **자기가 지금 가진 소스와 정확히 같은 판의 엔진** 이다 —
+ * 릴리스에서 받아 온 엔진으로 시험하면 앱 쪽 변경과 엔진 쪽 변경이 서로 다른 판에서 만나고,
+ * 그때 나는 어긋남은 어느 쪽 것인지 가려지지 않는다.
+ *
+ * Go 가 없는 머신에는 걸지 않는다. 화면만 고치려는 사람에게 Go 설치를 요구하는 것은 지나치고,
+ * 그때는 앱이 첫 화면에서 최신 릴리스를 받아 온다.
+ *
+ * `build` · `test` 는 그대로 Go 와 무관하다 — 여기서 거는 것은 run 하나뿐이다.
+ *
+ * 윈도우 네이티브에서 Go 를 가진 채로 run 하면 buildBundledEngine 이 "이 호스트에서는 엔진을
+ * 동봉하지 않습니다 — WSL 안에서 쓰세요" 로 멈춘다. 감수하는 쪽을 골랐다: 그 머신에서는 엔진이
+ * tmux 위에서 돌지 않아 앱이 떠도 아무것도 되지 않으므로, 조용히 뜨는 것보다 그 자리에서
+ * 이유를 듣는 편이 낫다.
+ */
+tasks.matching { it.name == "run" }.configureEach {
+    when {
+        !bundledEngineForRun -> doFirst {
+            logger.lifecycle(
+                "동봉 엔진 없이 실행 — -PbundledEngineForRun=false 로 껐습니다. " +
+                    "부를 kyu 가 없으면 앱이 첫 화면에서 최신 릴리스를 받아 옵니다.",
+            )
+        }
+
+        goExecutable == null -> doFirst {
+            logger.lifecycle(
+                "동봉 엔진 없이 실행 — Go 를 찾지 못했습니다. " +
+                    "부를 kyu 가 없으면 앱이 첫 화면에서 최신 릴리스를 받아 옵니다.",
+            )
+        }
+
+        else -> dependsOn(buildBundledEngine)
+    }
 }
 
 compose.desktop {

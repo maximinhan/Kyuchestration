@@ -61,7 +61,7 @@ internal fun placeBundledEngineWhereItCanRun(
  *
  * 지우지 못한 것으로 앱을 세우지는 않는다. 남아 있는 것은 한 판 전의 엔진이라 부를 수는 있고
  * 무엇인지는 `kyu version` 이 답하는데, 여기서 끊으면 지울 수 없는 파일 하나 때문에 앱이 통째로
- * 뜨지 않는다. 이 자리에 쓸 수 없는 머신이라면 다음 걸음인 [엔진 설치] 도 같은 이유로 실패하고,
+ * 뜨지 않는다. 이 자리에 쓸 수 없는 머신이라면 다음 걸음인 자동 설치도 같은 이유로 실패하고,
  * 그때는 진짜 이유가 화면에 뜬다.
  */
 private fun removeCopyLeftByAnEarlierInstallation(copyPath: Path) {

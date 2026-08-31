@@ -51,7 +51,7 @@ fun KyuchestrationDesktopScreen(
      * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
      */
     repositoryCloneStateHolder: RepositoryCloneStateHolder,
-    onInstallEngineRequested: () -> Unit,
+    onRetryEngineInstallationRequested: () -> Unit,
     onLookForEngineAgainRequested: () -> Unit,
     onOpenWorkDirRequested: () -> Unit,
     onInitializeOpenedWorkDirRequested: () -> Unit,
@@ -71,7 +71,7 @@ fun KyuchestrationDesktopScreen(
                     versionLabel = versionLabel,
                     engineDirectoryLabel = engineDirectoryLabel,
                     engineInstallationState = engineInstallationState,
-                    onInstallEngineRequested = onInstallEngineRequested,
+                    onRetryEngineInstallationRequested = onRetryEngineInstallationRequested,
                     onLookForEngineAgainRequested = onLookForEngineAgainRequested,
                 )
             } else {

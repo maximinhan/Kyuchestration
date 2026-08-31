@@ -43,6 +43,26 @@ class EngineInstallationStateHolder(
     val state: StateFlow<EngineInstallationState> = mutableState.asStateFlow()
 
     /**
+     * 어디에도 엔진이 없으면 누르기를 기다리지 않고 곧바로 받는다.
+     *
+     * 앱이 시작점이라면, 시작점에 선 사람에게 남는 걸음이 있어서는 안 된다. 버튼 하나를 누르는
+     * 일이라 해도 그것은 "앱만 설치하면 끝" 이 아니라 "앱을 설치하고 버튼을 누르면 끝" 이고,
+     * 소스에서 띄운 사람은 그 자리에서 자기가 무엇을 잘못했는지부터 의심한다.
+     *
+     * 어디에도 없을 때만이다. 동봉을 놓지 못한 이유를 들고 있는 상태에서 곧바로 받아 버리면, 그
+     * 이유가 화면에 뜨기도 전에 진행 표시로 덮여 못 쓰는 설치 패키지가 나갔다는 사실이 묻힌다.
+     *
+     * 실패하면 여기서 멈춘다. 스스로 다시 받지 않는 것이 뜻이다 — 망이 막힌 자리에서 되풀이하면
+     * 화면은 영영 진행 중이고 왜 안 되는지는 끝내 뜨지 않는다. 다시 받는 것은 [다시 시도] 를
+     * 누른 사람의 뜻이다.
+     */
+    init {
+        if (mutableState.value == EngineInstallationState.EngineMissing) {
+            installEngine()
+        }
+    }
+
+    /**
      * 최신 릴리스에서 엔진을 받아 놓는다. 성공하면 곧바로 앱의 나머지로 들어간다.
      */
     fun installEngine() {
@@ -94,7 +114,7 @@ class EngineInstallationStateHolder(
 
             // 동봉된 엔진을 들고 있으면서 "엔진이 없다" 고만 말하면, 사용자는 자기가 방금 설치한
             // 앱이 왜 자기 엔진을 못 쓰는지 알 길이 없다. 그 이유를 들고 설치 화면으로 간다 —
-            // 거기서 [엔진 설치] 로 받아 오는 길은 그대로 열려 있다.
+            // 거기서 [다시 시도] 로 받아 오는 길은 그대로 열려 있다.
             bundledEngineFailure != null -> EngineInstallationState.InstallationFailed(bundledEngineFailure)
 
             else -> EngineInstallationState.EngineMissing
