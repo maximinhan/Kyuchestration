@@ -21,14 +21,15 @@ sealed class EngineInstallationFailure(
     /**
      * 윈도우 네이티브 JVM 에서 눌렀다.
      *
-     * 바이너리를 받아 놓아도 소용이 없다. 앱 세션은 이제 tmux 없이 뜨지만, 엔진은 워크디렉토리
-     * 목록을 낼 때 여전히 CLI 세션의 생존을 tmux 에게 묻는다 — 그 tmux 가 윈도우 네이티브에 없다.
+     * 막고 있던 것이 tmux 이던 시절은 끝났다 — 엔진은 이제 목록을 낼 때도 세션 백엔드를
+     * 요구하지 않는다(app-owned-sessions-design.md 8절 5번). 남은 것은 받을 것이 없다는 사실이다:
+     * 릴리스가 윈도우 엔진 바이너리를 내지 않는다(release.yml 의 크로스 컴파일 목록).
      * 받기 전에 여기서 끊어야 사용자가 다운로드를 의심하지 않는다.
      */
     class WindowsNeedsWsl : EngineInstallationFailure(
         message = "윈도우 네이티브에서는 엔진이 돌지 않습니다.",
-        guidance = "WSL 안에서 앱을 띄우세요. 엔진이 워크디렉토리 목록을 낼 때 tmux 에게 " +
-            "세션 생존을 묻는데, tmux 는 윈도우 네이티브에 없습니다.",
+        guidance = "WSL 안에서 앱을 띄우세요. 릴리스가 윈도우용 엔진 바이너리를 내지 않아 " +
+            "받아 놓을 것이 없습니다.",
     )
 
     class PlatformNotReleased(osName: String, osArchitecture: String) : EngineInstallationFailure(

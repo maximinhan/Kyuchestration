@@ -8,6 +8,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -82,7 +83,7 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// - 로 시작하는 실행이 "알 수 없는 명령: --bypass-permissions" 로 끝나서는 안 된다.
 	// 서브커맨드 이름은 - 로 시작하지 않으므로 이 갈림에 걸릴 명령은 없다.
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return withSessionBackend(func(backend session.SessionBackend) error {
+		return withSessionBackendOrNoSessions(func(backend session.SessionBackend) error {
 			return cli.EnterWorkDir(out, errOut, args, backend)
 		})
 	}
@@ -90,8 +91,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	commandName, commandArgs := args[0], args[1:]
 
 	switch commandName {
+	// list 는 백엔드를 세우지 못해도 답한다. 물은 것이 "지금 무엇이 떠 있는가" 이고, 백엔드가
+	// 없는 머신에서 그 답은 "아무것도 떠 있지 않다" 이지 실패가 아니다(설계 문서 8절 5번 (가)).
+	// 대시보드가 3 초마다 부르는 명령이라, 여기가 서면 앱이 tmux 없는 머신에서 목록을 통째로 잃는다.
 	case "list":
-		return withSessionBackend(func(backend session.SessionBackend) error {
+		return withSessionBackendOrNoSessions(func(backend session.SessionBackend) error {
 			return cli.ListWorkDir(out, errOut, commandArgs, backend)
 		})
 	case "start":
@@ -108,10 +112,10 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 		})
 
 	// clone 은 세션 백엔드를 거친다. 클론이 끝난 뒤 "떠 있는 메인 세션은 새 레포를 보지 못한다" 를
-	// 알리려면 세션 생존을 물어야 하기 때문이다. tmux 가 없으면 애초에 그 세션도 없지만, 그 사실을
-	// 알기 위해 빈 백엔드 구현을 하나 더 두는 것은 이 안내 한 줄에 비해 큰 장치다.
+	// 알리려면 세션 생존을 물어야 하기 때문이다. 다만 그 물음 하나 때문에 클론 자체가 막히지는
+	// 않는다 — 백엔드가 없는 머신에는 그 안내를 받을 세션도 없다.
 	case "clone":
-		return withSessionBackend(func(backend session.SessionBackend) error {
+		return withSessionBackendOrNoSessions(func(backend session.SessionBackend) error {
 			return withTokenStore(func(tokenStore secretstore.TokenStore) error {
 				return cli.CloneRepos(in, out, errOut, commandArgs, newGitHubAccess, tokenStore, backend)
 			})
@@ -172,6 +176,31 @@ func withSessionBackend(command func(session.SessionBackend) error) error {
 	backend, err := newSessionBackend()
 	if err != nil {
 		return err
+	}
+	return command(backend)
+}
+
+// withSessionBackendOrNoSessions 는 백엔드를 세울 수 없는 머신에서도 명령을 서게 두지 않는다.
+//
+// 세울 수 없다는 사실을 실패가 아니라 답으로 바꿔 넘긴다. 세션은 백엔드를 거쳐야만 생기므로
+// 백엔드가 없는 머신에 CLI 세션이 없다는 것은 참인 답이고, 그것이 곧 이 명령들이 물은 것에 대한
+// 대답이다(설계 문서 5.7 의 구멍 · 8절 5번 (가)).
+//
+// 왜 모든 명령이 아니라 묻는 쪽만인가: start · attach · kill 은 백엔드 없이 할 일이 아예 없다.
+// 그쪽에 "세션 없음" 을 답으로 주면 attach 는 "kyu start 로 시작하세요" 라는 못 지킬 안내로
+// 끝나고, kill 은 죽인 것 없이 성공으로 끝난다 — 사용자가 다음에 할 일은 그것이 아니다.
+// 반대로 list · clone · 진입은 백엔드 없이도 할 일이 남아 있다. 진입은 그 남은 일을 다 한 뒤
+// 정말 세션을 만들어야 하는 걸음에서 같은 설치 안내로 끝난다.
+//
+// 백엔드가 아예 없는 경우에만 갈아탄다. 이름 오타나 감독 조립 실패는 "세션 없음" 이 아니라
+// 잘못된 실행이라, 그것까지 답으로 바꾸면 사용자는 자기 실수를 알아챌 자리를 잃는다.
+func withSessionBackendOrNoSessions(command func(session.SessionBackend) error) error {
+	backend, err := newSessionBackend()
+	if err != nil {
+		if !errors.Is(err, session.ErrTmuxNotInstalled) {
+			return err
+		}
+		backend = session.NewNoSessionsBackend(err)
 	}
 	return command(backend)
 }
