@@ -1,5 +1,8 @@
 package com.kyuchestration.desktop
 
+import com.kyuchestration.desktop.platform.runningOnMac
+import java.awt.FileDialog
+import java.awt.Frame
 import java.awt.Window
 import java.io.File
 import java.nio.file.Path
@@ -9,17 +12,70 @@ import kotlin.io.path.isDirectory
 /**
  * 워크디렉토리로 삼을 디렉토리를 고르는 시스템 대화상자를 띄운다. 고르지 않고 닫으면 null.
  *
- * 새 자리를 만드는 길도 여기 있다. 대화상자의 새 폴더 버튼이 하는 일이라, 앱이 만들 자리와
+ * 새 자리를 만드는 길도 여기 있다. 두 대화상자 모두 새 폴더를 만들 수 있어서, 앱이 만들 자리와
  * 이름을 따로 묻는 폼을 들 이유가 없다.
  *
- * Compose 의 FileDialog(AWT) 대신 Swing 의 JFileChooser 를 쓴다. AWT 쪽은 디렉토리를 고르는
- * 방법이 플랫폼마다 다르고(맥은 시스템 속성, 윈도우는 아예 불가) JFileChooser 만 세 플랫폼에서
- * 같은 방식으로 디렉토리를 고른다.
+ * **맥과 리눅스가 서로 다른 대화상자를 쓴다.** 처음에는 JFileChooser 하나로 두었다 — AWT 의
+ * FileDialog 는 디렉토리를 고르는 방법이 플랫폼마다 다르고(맥은 시스템 속성, 윈도우는 아예 불가)
+ * JFileChooser 만 세 플랫폼에서 같은 방식으로 디렉토리를 고르기 때문이다. 그 근거가 지금은
+ * 약하다. 윈도우 네이티브는 이 앱의 대상이 아니고(엔진이 tmux 위에서 돈다 — 윈도우 사용자는 WSL
+ * 안에서 리눅스 앱을 쓴다), 그러면 갈라지는 것은 맥과 리눅스 둘뿐이라 "아예 불가" 인 자리가 없다.
+ *
+ * 맥에서 네이티브 창을 쓰는 값은 둘이다. 하나는 그 창이 맥 사용자가 다른 앱에서 늘 보는 창이라는
+ * 것(사이드바 · 최근 자리 · ⌘⇧G)이고, 다른 하나는 아래 [directoryTheFileChooserMeant] 가 되돌리는
+ * 그 어긋남이 애초에 없다는 것이다.
  *
  * 모달 대화상자는 자기 이벤트 루프를 돌린다. Compose Desktop 도 같은 AWT 이벤트 스레드에서
  * 그리므로, 대화상자가 떠 있는 동안에도 뒤의 창은 계속 그려진다.
  */
-fun chooseWorkDirDirectory(ownerWindow: Window?): Path? {
+fun chooseWorkDirDirectory(ownerWindow: Window?): Path? =
+    if (runningOnMac()) {
+        chooseDirectoryWithMacNativeDialog(ownerWindow)
+    } else {
+        chooseDirectoryWithFileChooser(ownerWindow)
+    }
+
+/**
+ * 맥의 네이티브 폴더 선택창(NSOpenPanel)을 띄운다.
+ *
+ * AWT 의 FileDialog 는 기본적으로 파일을 고르는 창이다. 맥 툴킷만 이 시스템 속성을 보고 그 창을
+ * 디렉토리를 고르는 창으로 바꾼다 — 다른 플랫폼에서는 아무 뜻이 없어서, 이 갈래가 맥에만 있는
+ * 이유가 그대로 여기다.
+ *
+ * 속성은 창을 닫자마자 되돌린다. 프로세스 전체가 함께 보는 값이라, 켜 둔 채로 두면 나중에 이 앱이
+ * 다른 목적으로 여는 FileDialog 까지 디렉토리만 고르게 된다.
+ */
+private fun chooseDirectoryWithMacNativeDialog(ownerWindow: Window?): Path? {
+    val settingBeforeDialog = System.getProperty(MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY)
+    System.setProperty(MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY, "true")
+
+    // FileDialog 의 주인은 Frame 또는 Dialog 다. 앱의 창은 Frame 이고, 주인이 없으면 AWT 가
+    // 숨은 프레임을 대신 쓴다 — 그때는 창이 앱과 따로 뜬다.
+    val dialog = FileDialog(ownerWindow as? Frame, "워크디렉토리 선택", FileDialog.LOAD)
+    try {
+        dialog.directory = System.getProperty("user.home")
+        dialog.isMultipleMode = false
+        // FileDialog 는 언제나 모달이라 이 줄이 창을 닫을 때까지 돌아오지 않는다.
+        dialog.isVisible = true
+    } finally {
+        restoreMacFileDialogSetting(settingBeforeDialog)
+    }
+
+    // 고르지 않고 닫으면 이름이 비어 있다. 디렉토리를 고르는 창에서는 이름이 고른 디렉토리의
+    // 이름이고, directory 가 그 자리의 부모다.
+    val chosenDirectoryName = dialog.file ?: return null
+    return Path.of(dialog.directory, chosenDirectoryName)
+}
+
+private fun restoreMacFileDialogSetting(settingBeforeDialog: String?) {
+    if (settingBeforeDialog == null) {
+        System.clearProperty(MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY)
+    } else {
+        System.setProperty(MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY, settingBeforeDialog)
+    }
+}
+
+private fun chooseDirectoryWithFileChooser(ownerWindow: Window?): Path? {
     val chooser = JFileChooser(File(System.getProperty("user.home"))).apply {
         dialogTitle = "워크디렉토리 선택"
         // 워크디렉토리는 디렉토리다. 파일까지 고를 수 있게 두면 고른 것이 무엇인지 매번 되물어야 한다.
@@ -70,3 +126,11 @@ internal fun directoryTheFileChooserMeant(
 
     return if (currentDirectoryNameRepeated) currentDirectory else selectedPath
 }
+
+/**
+ * 맥 툴킷이 FileDialog 를 디렉토리 선택창으로 바꿀 때 보는 속성.
+ *
+ * 애플의 자바 시절부터 이어진 이름이라 apple 로 시작한다(JDK 의 CFileDialog 가 이 값을 읽어
+ * NSOpenPanel 의 canChooseDirectories 로 넘긴다).
+ */
+private const val MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY = "apple.awt.fileDialogForDirectories"

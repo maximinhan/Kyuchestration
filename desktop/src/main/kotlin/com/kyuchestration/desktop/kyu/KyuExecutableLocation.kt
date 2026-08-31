@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.kyu
 
+import com.kyuchestration.desktop.platform.runningOnMac
 import java.io.File
 import java.nio.file.Path
 import kotlin.io.path.isExecutable
@@ -118,7 +119,7 @@ private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.applicatio
 internal fun managedEngineDirectory(
     osName: String = System.getProperty("os.name").orEmpty(),
     userHomeDirectory: Path = Path.of(System.getProperty("user.home").orEmpty()),
-): Path = if (osName.startsWith("Mac", ignoreCase = true)) {
+): Path = if (runningOnMac(osName)) {
     userHomeDirectory.resolve("Library/Application Support/Kyuchestration/engine")
 } else {
     userHomeDirectory.resolve(".local/share/kyuchestration/engine")
