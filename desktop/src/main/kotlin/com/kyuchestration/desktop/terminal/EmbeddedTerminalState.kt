@@ -33,6 +33,21 @@ sealed interface EmbeddedTerminalState {
         val ttyConnector: TtyConnector,
     ) : EmbeddedTerminalState
 
+    /**
+     * 세션이 스스로 끝났고, 마지막 화면이 아직 남아 있다.
+     *
+     * 화면에서 곧바로 내리지 않는 이유가 이 갈래의 전부다. `claude` 가 마지막으로 남긴 줄이
+     * 사용자가 왜 끝났는지 아는 유일한 자리이고 — 이어갈 대화가 없어 즉시 죽은 경우가 특히
+     * 그렇다 — 그것을 치우면 사용자는 터미널이 깜빡였다는 것만 보게 된다(설계 문서 8 절 9 번).
+     *
+     * @param exitCode 세션이 남긴 종료 코드. 예외로 끝나 알 수 없으면 null.
+     */
+    data class SessionEndedOnScreen(
+        override val target: SessionTarget,
+        val ttyConnector: TtyConnector,
+        val exitCode: Int?,
+    ) : EmbeddedTerminalState
+
     data class SessionEntryFailed(
         override val target: SessionTarget,
         val failure: TerminalSessionFailure,

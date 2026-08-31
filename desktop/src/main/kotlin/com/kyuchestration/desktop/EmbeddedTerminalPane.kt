@@ -16,7 +16,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
@@ -24,18 +23,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.jediterm.terminal.TtyConnector
-import com.jediterm.terminal.ui.JediTermWidget
-import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
-import javax.swing.SwingUtilities
 
 /**
- * 세션 하나가 앱 안에서 보이는 자리.
+ * 앱이 보유한 세션 중 지금 보고 있는 하나가 앱 안에서 보이는 자리.
  */
 @Composable
 fun EmbeddedTerminalPane(
     terminalState: EmbeddedTerminalState,
+    heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
     onEndSessionRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -58,7 +55,12 @@ fun EmbeddedTerminalPane(
                 }
 
             is EmbeddedTerminalState.SessionOnScreen ->
-                SessionTerminal(terminalState.ttyConnector)
+                SessionTerminal(terminalState.ttyConnector, heldSessionTerminalWidgets)
+
+            // 끝난 세션도 같은 위젯으로 그린다. 마지막 화면이 사용자가 왜 끝났는지 아는 유일한
+            // 자리이고, 머리말이 그 위에 한 줄을 덧붙인다.
+            is EmbeddedTerminalState.SessionEndedOnScreen ->
+                SessionTerminal(terminalState.ttyConnector, heldSessionTerminalWidgets)
 
             is EmbeddedTerminalState.SessionEntryFailed ->
                 SessionEntryFailureNotice(terminalState.failure)
@@ -80,15 +82,11 @@ private fun EmbeddedTerminalHeader(
             style = MaterialTheme.typography.titleSmall,
             fontFamily = FontFamily.Monospace,
         )
-        // 두 가지를 버튼을 누르기 전에 말한다 — 이 세션은 앱이 보유하므로 끝내는 길이 여기뿐이고,
-        // 그래서 터미널에서 kyu list 를 쳐도 이 세션은 보이지 않는다(설계 원칙 12).
-        //
-        // 세션이 떠 있을 때만 말한다. 진입에 실패한 자리에서는 끝낼 세션이 아예 없어서,
-        // 그때도 같은 문구를 띄우면 없는 것을 있다고 말하게 된다.
-        if (terminalState is EmbeddedTerminalState.SessionOnScreen) {
+
+        headerNotice(terminalState)?.let { notice ->
             Spacer(Modifier.width(12.dp))
             Text(
-                text = "이 세션은 앱이 보유합니다 — 끝내면 되돌릴 수 없고, kyu list 에는 보이지 않습니다",
+                text = notice,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -101,40 +99,52 @@ private fun EmbeddedTerminalHeader(
 }
 
 /**
+ * 머리말이 세션에 대해 하는 말.
+ *
+ * 세션이 실제로 있을 때만 말한다. 진입에 실패한 자리에서는 끝낼 세션이 아예 없어서, 그때도 같은
+ * 문구를 띄우면 없는 것을 있다고 말하게 된다.
+ */
+private fun headerNotice(terminalState: EmbeddedTerminalState): String? = when (terminalState) {
+    // 버튼을 누르기 전에 두 가지를 말한다 — 이 세션은 앱이 보유하므로 끝내는 길이 여기뿐이고,
+    // 그래서 터미널에서 kyu list 를 쳐도 이 세션은 보이지 않는다(설계 원칙 12).
+    is EmbeddedTerminalState.SessionOnScreen ->
+        "이 세션은 앱이 보유합니다 — 끝내면 되돌릴 수 없고, kyu list 에는 보이지 않습니다"
+
+    is EmbeddedTerminalState.SessionEndedOnScreen ->
+        "세션이 끝났습니다${terminalState.exitCode?.let { " (종료 코드 $it)" }.orEmpty()} — " +
+            "카드를 다시 누르면 그 대화를 이어서 새로 엽니다"
+
+    is EmbeddedTerminalState.NoTerminalOpen,
+    is EmbeddedTerminalState.SessionEntryRunning,
+    is EmbeddedTerminalState.SessionEntryFailed,
+    -> null
+}
+
+/**
  * JediTerm 의 터미널 위젯을 Compose 안에 끼운다.
  *
  * 위젯은 Swing 컴포넌트라 Compose 가 직접 그리지 못한다. SwingPanel 이 그 자리를 비워 두고 실제
  * 컴포넌트를 그 위에 얹는다.
  *
- * 통로 하나에 위젯 하나다. remember 의 키가 통로인 이유가 그것이다 — 다른 세션으로 옮겨가면
- * 통로가 바뀌고, 그때 위젯도 새로 만들어야 이전 세션의 화면이 남지 않는다.
+ * **위젯을 여기서 만들지도 닫지도 않는다.** 위젯의 수명은 화면에 보이는 동안이 아니라 앱이 그
+ * 세션을 보유하는 동안이고(HeldSessionTerminalWidgets), 여기서 닫으면 카드를 옮겼다 돌아왔을 때
+ * 화면이 비어 있다.
  */
 @Composable
-private fun SessionTerminal(ttyConnector: TtyConnector) {
-    val terminalWidget = remember(ttyConnector) {
-        JediTermWidget(DefaultSettingsProvider()).apply { setTtyConnector(ttyConnector) }
-    }
-
-    DisposableEffect(terminalWidget) {
-        // 읽기 스레드를 띄운다. 이것을 부르기 전까지 화면은 통로에서 아무것도 읽지 않는다.
-        terminalWidget.start()
-
-        // 키를 받을 자리를 이 터미널로 옮긴다. 카드를 누른 사람이 바라는 다음 동작은 타이핑이지
-        // 터미널을 한 번 더 누르는 것이 아니다.
-        //
-        // 지금 부르면 아무 일도 일어나지 않는다 — SwingPanel 이 이 컴포넌트를 창에 붙이는 것은
-        // 이 합성이 끝난 뒤이고, 창에 붙지 않은 컴포넌트는 포커스를 받지 못한다.
-        SwingUtilities.invokeLater { terminalWidget.requestFocusInWindow() }
-
-        onDispose {
-            // 위젯이 화면에서 사라진다는 것은 이 세션을 더 보지 않는다는 뜻이다. 상태 홀더가 이미
-            // 통로를 닫았더라도 여기서 한 번 더 닫는 것은 해가 없다 — 프로세스 종료는 멱등이다.
-            terminalWidget.close()
-        }
+private fun SessionTerminal(
+    ttyConnector: TtyConnector,
+    heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
+) {
+    DisposableEffect(ttyConnector) {
+        heldSessionTerminalWidgets.showSession(ttyConnector)
+        // 화면에서 내려가는 것은 이 세션을 끝낸다는 뜻이 아니다. 치울 것이 없다.
+        onDispose { }
     }
 
     SwingPanel(
-        factory = { terminalWidget },
+        // 컨테이너는 늘 같은 것 하나다. 보이는 카드가 바뀌어도 Swing 컴포넌트가 부모를 옮겨
+        // 다니지 않는다.
+        factory = { heldSessionTerminalWidgets.terminalContainer },
         modifier = Modifier.fillMaxSize(),
     )
 }

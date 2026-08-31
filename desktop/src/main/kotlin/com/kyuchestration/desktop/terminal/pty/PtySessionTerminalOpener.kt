@@ -1,7 +1,7 @@
 package com.kyuchestration.desktop.terminal.pty
 
-import com.jediterm.terminal.TtyConnector
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.terminal.OpenedSessionTerminal
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -33,7 +33,7 @@ class PtySessionTerminalOpener(
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
 ) : SessionTerminalOpener {
 
-    override fun openSessionIn(workDirPath: Path, target: SessionTarget): TtyConnector {
+    override fun openSessionIn(workDirPath: Path, target: SessionTarget): OpenedSessionTerminal {
         val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(workDirPath, target)
 
         val plan = planSessionEntry(
@@ -46,7 +46,7 @@ class PtySessionTerminalOpener(
         return openPtyRunningSession(plan, target)
     }
 
-    private fun openPtyRunningSession(plan: SessionEntryPlan, target: SessionTarget): TtyConnector {
+    private fun openPtyRunningSession(plan: SessionEntryPlan, target: SessionTarget): OpenedSessionTerminal {
         val ptyProcess = try {
             PtyProcessBuilder(plan.command.toTypedArray())
                 .setDirectory(plan.workingDirectory.toString())
@@ -60,7 +60,12 @@ class PtySessionTerminalOpener(
             throw TerminalSessionFailure.PtyFailedToOpen(failure)
         }
 
-        return SessionTtyConnector(ptyProcess, target)
+        return OpenedSessionTerminal(
+            ttyConnector = SessionTtyConnector(ptyProcess, target),
+            // pty4j 의 PtyProcess 는 java.lang.Process 다 — 끝을 기다리는 일은 JDK 가 이미 안다.
+            // 스레드를 세션마다 붙잡지 않고 끝을 알 수 있는 것이 이 한 줄이다.
+            sessionExit = ptyProcess.onExit().thenApply { it.exitValue() },
+        )
     }
 }
 
