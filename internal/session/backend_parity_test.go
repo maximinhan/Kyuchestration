@@ -187,7 +187,7 @@ func TestBackendParityConcurrentCreateOfTheSameNameLeavesOneSession(t *testing.T
 		//
 		// 진 쪽이 받는 에러의 종류는 여기서 묻지 않는다. 감독은 늘 ErrSessionExists 지만
 		// tmux 는 선조회를 통과한 뒤 tmux 자신에게 거절당하면 그 실패를 그대로 감싸 올린다
-		// (tmux.go:57 · 실측 5/5). 그 차이는 감독 쪽 시험이 더 센 주장으로 따로 고정한다
+		// (tmux.go:51 의 선조회와 tmux.go:62 의 생성 사이 · 실측 5/5). 그 차이는 감독 쪽 시험이 더 센 주장으로 따로 고정한다
 		// (supervisor_test.go 의 TestConcurrentCreateOfTheSameNameLeavesExactlyOneSession).
 		workingDirectories := make([]string, attempts)
 		for i := range workingDirectories {
@@ -359,7 +359,7 @@ func TestBackendParityCreateInAWorkingDirectoryThatDoesNotExist(t *testing.T) {
 		//
 		// 어느 쪽도 고치지 않고 여기에 적어 고정한다. tmux 를 감독에 맞추려면 tmux 백엔드를
 		// 손대야 하는데 그쪽은 검증된 폴백으로 남겨둔 코드이고(설계 원칙 7), 감독을 tmux 에
-		// 맞추는 것은 "cwd 에서 cmd 를 실행한다" 는 Create 의 계약문(backend.go:44)을 스스로
+		// 맞추는 것은 "cwd 에서 cmd 를 실행한다" 는 Create 의 계약문(backend.go:43)을 스스로
 		// 어기게 만드는 일이다 — 사용자가 보게 되는 것은 엉뚱한 디렉토리에서 뜬 세션이다.
 		// 고정해두면 어느 한쪽이 바뀌는 날 이 시험이 먼저 말한다.
 		if !backendCase.reportsMissingWorkingDirectory {
