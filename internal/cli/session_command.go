@@ -33,7 +33,8 @@ const sessionIDFlagName = "--session-id"
 // resumeFlagName 은 이미 있는 대화를 이어가는 플래그다.
 //
 // 그 대화의 전사가 사라졌으면 claude 는 네트워크 왕복 없이 즉시 종료 코드 1 로 끝난다(실측).
-// 앱 안에서는 PTY 가 곧바로 닫히고, 그것을 가려내는 일은 3 단계가 맡는다(설계 문서 5.5.4).
+// 앱 안에서는 PTY 가 곧바로 닫히는데, 그것을 사용자의 /exit 과 가르는 근거를 답 문서의
+// resumedConversationId 가 준다(session_command_json.go · 설계 문서 5.5.4).
 const resumeFlagName = "--resume"
 
 // forgetConversationOptionName 은 적혀 있는 대화를 버리고 새 대화로 답하라는 뜻이다 —
@@ -154,15 +155,16 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 
 // answerForMainSession 은 워크디렉토리 최상위에서 열 조율용 세션을 답한다(설계 문서 5.4).
 func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
-	conversationFlags, err := conversationFlagsForLabel(errOut, location.absolutePath, mainRowLabel, request)
+	conversation, err := conversationForLabel(errOut, location.absolutePath, mainRowLabel, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		mainSessionCommand(repos, request.session, conversationFlags),
+		mainSessionCommand(repos, request.session, conversation.flags),
 		location.absolutePath,
-		sessionEnvironment(request.session))
+		sessionEnvironment(request.session),
+		conversation)
 }
 
 // answerForRepoSession 은 레포 디렉토리에서 열 작업용 세션을 답한다.
@@ -175,18 +177,32 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 		return err
 	}
 
-	conversationFlags, err := conversationFlagsForLabel(errOut, location.absolutePath, repo.Name, request)
+	conversation, err := conversationForLabel(errOut, location.absolutePath, repo.Name, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		claudeCommand(request.session.bypassPermissions, conversationFlags),
+		claudeCommand(request.session.bypassPermissions, conversation.flags),
 		repo.AbsolutePath,
-		sessionEnvironment(request.session))
+		sessionEnvironment(request.session),
+		conversation)
 }
 
-// conversationFlagsForLabel 은 이 라벨이 쓸 대화를 정해 claude 에게 가리키는 플래그로 옮긴다.
+// sessionConversation 은 이 세션이 쓸 대화 하나다 — claude 에게 그것을 가리키는 플래그와,
+// 그것이 이어가기였는지.
+//
+// 플래그만 돌려주던 자리다. 답 문서가 "이어간 대화" 를 함께 실어야 하는데(설계 문서 5.5.4),
+// 그 사실을 argv 에서 되읽게 하면 앱이 아니라 이 파일 안에서 조립 규칙을 두 번 알게 된다.
+type sessionConversation struct {
+	// flags 는 명령에 그대로 실릴 두 자리다 — --session-id <새 ID> 또는 --resume <적혀 있던 ID>.
+	flags []string
+
+	// resumedConversationID 는 이어가기로 연 대화의 ID 다. 새 대화면 비어 있다.
+	resumedConversationID string
+}
+
+// conversationForLabel 은 이 라벨이 쓸 대화를 정해 claude 에게 가리키는 플래그로 옮긴다.
 //
 // 정하는 것이 곧 기록하는 것이다(설계 문서 5.5.3) — 조회처럼 보이는 이 걸음이
 // .coord/conversations.json 을 쓴다. 만들어 놓고 적지 않으면 다음 물음이 다른 ID 를 만들고,
@@ -195,26 +211,29 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 // 대화 기록을 읽지 못한 것은 실패가 아니라 경고다. 앞선 대화를 잃을 뿐 새 대화는 열 수 있고,
 // 여기서 실패로 끝내면 사용자는 자기가 쓴 적도 없는 파일을 손으로 지우기 전까지 앱에서
 // 어떤 세션도 열지 못한다.
-func conversationFlagsForLabel(
+func conversationForLabel(
 	errOut io.Writer,
 	workDirPath, label string,
 	request sessionCommandRequest,
-) ([]string, error) {
+) (sessionConversation, error) {
 	assignment, err := assignConversation(workDirPath, label, request)
 	if err != nil {
-		return nil, err
+		return sessionConversation{}, err
 	}
 
 	for _, warning := range assignment.Warnings {
 		if _, err := fmt.Fprintln(errOut, warning); err != nil {
-			return nil, fmt.Errorf("대화 기록 경고 출력 실패: %w", err)
+			return sessionConversation{}, fmt.Errorf("대화 기록 경고 출력 실패: %w", err)
 		}
 	}
 
 	if assignment.IsNewConversation {
-		return []string{sessionIDFlagName, assignment.ConversationID}, nil
+		return sessionConversation{flags: []string{sessionIDFlagName, assignment.ConversationID}}, nil
 	}
-	return []string{resumeFlagName, assignment.ConversationID}, nil
+	return sessionConversation{
+		flags:                 []string{resumeFlagName, assignment.ConversationID},
+		resumedConversationID: assignment.ConversationID,
+	}, nil
 }
 
 // assignConversation 은 요청이 고른 길로 대화를 정한다 — 이어가기가 기본이고, 새로 시작이 선택이다.
