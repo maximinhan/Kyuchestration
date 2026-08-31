@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -344,5 +345,74 @@ func TestSupervisorBackendIsAliveRequiresExactName(t *testing.T) {
 	}
 	if alive {
 		t.Errorf(`IsAlive("kyu-test-sv-exact") = true, 접두사가 일치할 뿐인 세션에 걸리면 안 된다`)
+	}
+}
+
+func TestSupervisorBackendListIsEmptyWhenNothingWasEverCreated(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+
+	// 세션 디렉토리가 아직 없다. 그것이 세션 0 개의 정상적인 표현이므로 오류가 아니다 —
+	// tmux 백엔드가 "서버 없음" 을 그렇게 다루는 것과 같은 규칙이다(tmux.go:119).
+	names, err := backend.List()
+	if err != nil {
+		t.Fatalf("세션 디렉토리가 없을 때 List() 가 에러를 반환했다: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("List() = %v, 빈 목록이어야 한다", names)
+	}
+}
+
+func TestSupervisorBackendListReturnsCreatedSessionNames(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	want := []string{"kyu-test-sv-list-a", "kyu-test-sv-list-b"}
+
+	for _, name := range want {
+		if err := backend.Create(name, t.TempDir(), []string{"sleep", "60"}); err != nil {
+			t.Fatalf("Create(%q) 실패: %v", name, err)
+		}
+	}
+
+	got, err := backend.List()
+	if err != nil {
+		t.Fatalf("List() 실패: %v", err)
+	}
+
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("List() = %v, want %v", got, want)
+	}
+}
+
+func TestSupervisorBackendListNamesStillAnswerToTheWorkDirPrefixFilter(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+
+	// 조율 계층은 List() 결과를 WorkDirSessionPrefix 로 거른다 — kill --all 이 그렇게 돈다.
+	// 백엔드가 바뀌어도 그 코드가 손대지 않고 돌아야 한다(설계 문서 5.9).
+	inThisWorkDir := []string{
+		MainSessionName("featureX"),
+		RepoSessionName("featureX", "proj-a"),
+	}
+	for _, name := range append(inThisWorkDir, RepoSessionName("otherWorkDir", "proj-a")) {
+		if err := backend.Create(name, t.TempDir(), []string{"sleep", "60"}); err != nil {
+			t.Fatalf("Create(%q) 실패: %v", name, err)
+		}
+	}
+
+	names, err := backend.List()
+	if err != nil {
+		t.Fatalf("List() 실패: %v", err)
+	}
+
+	var got []string
+	for _, name := range names {
+		if strings.HasPrefix(name, WorkDirSessionPrefix("featureX")) {
+			got = append(got, name)
+		}
+	}
+
+	slices.Sort(got)
+	slices.Sort(inThisWorkDir)
+	if !slices.Equal(got, inThisWorkDir) {
+		t.Errorf("접두사로 거른 세션 = %v, want %v", got, inThisWorkDir)
 	}
 }

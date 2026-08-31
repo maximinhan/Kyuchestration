@@ -10,6 +10,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -148,6 +150,61 @@ func (b *SupervisorBackend) Kill(name string) error {
 		return controlFailureError(name, response.Code, response.Message)
 	}
 	return nil
+}
+
+// List 는 이 백엔드가 관리하는 세션 이름 전체를 반환한다.
+//
+// 세션 목록이라는 사실을 어느 프로세스도 소유하지 않는다. 파일 시스템이 갖는다(설계 원칙 10).
+// 손으로 유지하는 목록은 한 번 잊는 순간 조용히 어긋나므로, 조율 계층이 워크디렉토리의 레포
+// 목록을 스캔으로 얻는 것과 같은 자세로 소켓 디렉토리를 훑는다.
+func (b *SupervisorBackend) List() ([]string, error) {
+	sessionsDir, err := resolveSessionsDir()
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		// 디렉토리가 없으면 빈 목록이다. 세션을 한 번도 만들지 않은 상태의 정상적인 표현이라
+		// 오류가 아니다 — tmux 백엔드가 "서버 없음" 을 그렇게 다루는 것과 같다(tmux.go:119).
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("세션 디렉토리 읽기 실패 (%s): %w", sessionsDir, err)
+	}
+
+	var names []string
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), sessionSocketExtension) {
+			continue
+		}
+		socketPath := filepath.Join(sessionsDir, entry.Name())
+
+		response, err := sendControlRequest(socketPath, aliveOperation, aliveRequestDeadline)
+		if err != nil {
+			// 답하지 않는 소켓은 목록에서 빠질 뿐 그 자리에 남는다. 읽기 연산이 파일을 지우면
+			// 안 된다 — 3 초마다 도는 대시보드 조회가 파일을 치우는 것은 놀랄 일이고, 막 뜨는
+			// 중인 감독의 소켓과도 경쟁한다. 치우는 시점은 그 이름으로 다시 Create 할
+			// 때다(설계 문서 5.4).
+			if errors.Is(err, errSessionSocketNotAnswering) {
+				continue
+			}
+			// 그 밖의 실패는 "없다" 가 아니라 "묻지 못했다" 이므로 삼키지 않는다.
+			// 조용히 빼면 사용자는 살아 있는 세션을 사라진 것으로 본다.
+			return nil, err
+		}
+		if !response.OK {
+			// 다른 판의 감독이 거절한 경우다. 이런 세션을 목록에 어떻게 드러낼지는 아직
+			// 정해지지 않았다(설계 문서 10절 4번).
+			continue
+		}
+		if !response.Alive {
+			continue
+		}
+
+		names = append(names, strings.TrimSuffix(entry.Name(), sessionSocketExtension))
+	}
+	return names, nil
 }
 
 // IsAlive 는 세션의 생존 여부를 반환한다.
