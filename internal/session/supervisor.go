@@ -55,6 +55,10 @@ type SupervisorBackend struct {
 	executablePath string
 }
 
+// 인터페이스 충족 여부를 컴파일 시점에 확인한다.
+// 메서드 시그니처가 어긋나면 실제 사용처가 생기기 전에 빌드가 깨진다.
+var _ SessionBackend = (*SupervisorBackend)(nil)
+
 // NewSupervisorBackend 는 감독 백엔드를 만든다.
 func NewSupervisorBackend() (*SupervisorBackend, error) {
 	executablePath, err := os.Executable()
@@ -119,6 +123,17 @@ func (b *SupervisorBackend) Create(name, cwd string, cmd []string) error {
 	// 이 명령이 세션이 끝날 때까지 돌아오지 않는다는 뜻이 된다. kyu 가 끝나면 감독은 init 에
 	// 재부모되어 계속 산다.
 	return awaitReadySignal(readyReader, name, paths.log)
+}
+
+// Attach 는 호출한 터미널을 해당 세션에 연결한다.
+//
+// 아직 없다. attach 는 프레임 프로토콜·스크롤백 재생·raw 모드 클라이언트·SIGWINCH 핸들러를
+// 함께 요구하고, 그것은 설계 문서 9절의 2 단계다. 그때까지 이 자리는 "안 된다" 를 분명히 말하고
+// 돌아갈 자리를 함께 일러준다 — 세션을 띄우고 목록에서 보는 것까지는 지금도 되므로, 붙는 일만
+// tmux 백엔드로 하면 된다.
+func (b *SupervisorBackend) Attach(name string) error {
+	return fmt.Errorf("감독 백엔드는 아직 세션 진입을 지원하지 않습니다 (세션 %s)\n지금 진입하려면 %s=%s 로 실행하세요",
+		name, BackendSelectionEnvName, TmuxBackendName)
 }
 
 // Kill 은 세션을 종료한다. 없으면 nil 을 반환한다(멱등).

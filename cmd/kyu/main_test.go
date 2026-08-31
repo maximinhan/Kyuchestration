@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
 // 라우팅은 함수 호출로 검증하지 않고 바이너리를 띄워서 확인한다.
@@ -336,5 +338,83 @@ func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "kyu clone") {
 		t.Errorf("stdout = %q, 등록이 일어나는 자리를 알리기를 기대", stdout.String())
+	}
+}
+
+func TestUsageDoesNotAdvertiseTheHiddenSuperviseCommand(t *testing.T) {
+	// 감독을 띄우는 하위 명령은 사용자가 부를 것이 아니다 — 기동은 세션 생성이 알아서 한다.
+	// 사용법에 실리면 사용자가 그것을 직접 부르는 길이 생기고, 그 길에는 준비 파이프도
+	// 부모도 없다(설계 문서 5.1).
+	if strings.Contains(usageText, session.SuperviseCommandName) {
+		t.Errorf("사용법에 숨은 하위 명령 %s 가 실려 있습니다", session.SuperviseCommandName)
+	}
+}
+
+func TestSuperviseCommandIsRoutedToTheSupervisorInsteadOfBeingUnknown(t *testing.T) {
+	// 감독은 이 바이너리 자신을 다시 실행한 것이다. 라우팅이 없으면 세션 생성이 "알 수 없는
+	// 명령" 으로 끝나는데, 그 실패는 감독의 기록 파일 안에만 남아 찾기 어렵다.
+	command := exec.Command(buildKyuBinary(t), session.SuperviseCommandName)
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("kyu %s 실행 결과 = %v, 종료 코드로 끝나기를 기대", session.SuperviseCommandName, err)
+	}
+	if strings.Contains(stderr.String(), "알 수 없는 명령") {
+		t.Errorf("stderr = %q, 라우팅이 이어지지 않았습니다", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--name") {
+		t.Errorf("stderr = %q, 인자가 없다는 감독의 거절을 기대", stderr.String())
+	}
+}
+
+func TestUnknownSessionBackendNamesTheChoicesInsteadOfFallingBackQuietly(t *testing.T) {
+	command := exec.Command(buildKyuBinary(t), "list")
+	command.Dir = t.TempDir()
+	command.Env = append(os.Environ(), session.BackendSelectionEnvName+"=오타난이름")
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("kyu list 실행 결과 = %v, 종료 코드로 끝나기를 기대", err)
+	}
+	// 조용히 기본값으로 돌아가면 사용자는 자기가 고른 줄 알았던 백엔드가 아닌 것으로 세션을
+	// 만들고, 그 사실을 세션이 안 보일 때 알게 된다.
+	for _, expected := range []string{session.TmuxBackendName, session.SupervisorBackendName} {
+		if !strings.Contains(stderr.String(), expected) {
+			t.Errorf("stderr = %q, 고를 수 있는 이름 %q 를 포함하기를 기대", stderr.String(), expected)
+		}
+	}
+}
+
+func TestSupervisorBackendIsChosenByEnvironmentAndDoesNotAskForTmux(t *testing.T) {
+	// tmux 를 걷어내는 것이 이 작업의 목적이므로, 감독 백엔드를 고른 실행은 tmux 가 없는
+	// 머신에서도 그 사실을 화제로 삼지 않아야 한다(설계 문서 1.2).
+	command := exec.Command(buildKyuBinary(t), "list")
+	command.Dir = t.TempDir()
+	command.Env = append(os.Environ(),
+		"PATH=",
+		session.BackendSelectionEnvName+"="+session.SupervisorBackendName,
+		"KYU_RUNTIME_DIR="+t.TempDir(),
+	)
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	command.Run()
+
+	if strings.Contains(stderr.String(), "tmux") || strings.Contains(stdout.String(), "tmux") {
+		t.Errorf("stdout = %q, stderr = %q, 감독 백엔드는 tmux 를 요구하지 않아야 한다",
+			stdout.String(), stderr.String())
 	}
 }

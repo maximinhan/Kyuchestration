@@ -48,7 +48,10 @@ const usageText = `사용법: kyu [명령] [인자]
   --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
 
 옵션 (kyu list, kyu clone, kyu repos, kyu auth add, kyu auth list):
-  --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)`
+  --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
+
+환경변수:
+  ` + session.BackendSelectionEnvName + `    세션 백엔드 — tmux(기본) | supervisor(진행 중, 진입은 아직 tmux)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -133,6 +136,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	case "version":
 		return cli.PrintVersion(out, commandArgs)
 
+	// 감독 프로세스의 본문이다. 세션 백엔드를 조립하지 않는다 — 이 프로세스가 그 백엔드가
+	// 말을 거는 상대이지 그것을 쓰는 쪽이 아니다. 사용자가 부를 명령이 아니라 usage 에도 없다.
+	case session.SuperviseCommandName:
+		return session.RunSupervisor(commandArgs)
+
 	default:
 		return fmt.Errorf("알 수 없는 명령: %s\n\n%s", commandName, usageText)
 	}
@@ -149,11 +157,29 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 // 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. 진입·list·start 는 stderr 까지 쓰지만
 // attach·kill 은 그렇지 않은데, 공통 시그니처를 강요하면 두 명령이 쓰지도 않는 인자를 받게 된다.
 func withSessionBackend(command func(session.SessionBackend) error) error {
-	backend, err := session.NewTmuxBackend()
+	backend, err := newSessionBackend()
 	if err != nil {
 		return err
 	}
 	return command(backend)
+}
+
+// newSessionBackend 는 이 실행에서 쓸 세션 백엔드를 고른다.
+//
+// 기본값은 아직 tmux 다. 감독 백엔드는 세션을 띄우고 목록에 보이고 죽이는 데까지 왔을 뿐
+// 진입이 아직 없어서, 동등성이 증명되기 전까지 환경변수로만 켠다(설계 문서 6절).
+func newSessionBackend() (session.SessionBackend, error) {
+	switch name := os.Getenv(session.BackendSelectionEnvName); name {
+	case "", session.TmuxBackendName:
+		return session.NewTmuxBackend()
+	case session.SupervisorBackendName:
+		return session.NewSupervisorBackend()
+	default:
+		// 모르는 이름을 조용히 기본값으로 흘리지 않는다. 오타를 알아채지 못하면 사용자는 자기가
+		// 고른 줄 알았던 백엔드가 아닌 것으로 세션을 만들고, 그 사실을 세션이 안 보일 때 알게 된다.
+		return nil, fmt.Errorf("모르는 세션 백엔드입니다: %s=%s (%s 또는 %s)",
+			session.BackendSelectionEnvName, name, session.TmuxBackendName, session.SupervisorBackendName)
+	}
 }
 
 // withTokenStore 는 명령에 토큰 저장소를 조립해 넘긴다.
