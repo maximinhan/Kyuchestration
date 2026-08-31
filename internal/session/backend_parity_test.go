@@ -56,6 +56,10 @@ type backendUnderTest struct {
 //
 // 새 백엔드(윈도우 — 설계 문서 8절)가 생기면 여기에 한 줄을 더하는 것으로 계약 시험 전부가
 // 그 백엔드에 적용된다.
+//
+// NoSessionsBackend 는 여기 없다. 이 매트릭스의 본문들은 세션을 하나 만들어 놓고 그것에 대해
+// 묻는데, 그 백엔드는 세션을 만들지 못하는 것이 곧 계약이라 첫 걸음부터 답할 것이 없다.
+// 그것이 답해야 하는 것은 no_sessions_test.go 에서 따로 묻는다.
 func backendsUnderTest() []backendUnderTest {
 	return []backendUnderTest{
 		{
