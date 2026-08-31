@@ -2,6 +2,8 @@ package com.kyuchestration.desktop.terminal.pty
 
 import com.jediterm.terminal.TtyConnector
 import com.kyuchestration.desktop.kyu.findKyuExecutable
+import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.platform.withEnvironment
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.SessionTerminalAttacher
@@ -20,14 +22,16 @@ import java.nio.file.Path
  * PTY 는 커널이 만든 진짜 터미널 장치라 그 요구가 그대로 충족되고, 그래서 앱 안의 창 하나가
  * 터미널 창과 같은 자격으로 세션에 들어간다.
  *
- * @param fixedKyuExecutablePath 부를 실행 파일을 못 박는다. 통합 테스트가 설치 여부와 무관하게
+ * @param fixedKyuExecutablePath 부를 실행 파일을 고정한다. 통합 테스트가 설치 여부와 무관하게
  *   자기가 빌드한 바이너리를 겨누기 위한 것이고, 앱은 이 값을 주지 않는다.
- * @param parentEnvironment 자식에게 물려줄 바탕 환경. 통합 테스트가 사용자의 기본 tmux 서버 대신
- *   격리된 서버(TMUX_TMPDIR)를 겨누기 위한 것이고, 앱은 이 값을 주지 않는다.
+ * @param baseEnvironment 자식에게 물려줄 바탕 환경. 기본값이 앱이 한 자리에서 정해 둔 환경이라
+ *   (ChildProcessEnvironment) 여기서 PATH 를 따로 손보지 않는다 — tmux 를 실제로 부르는 것은 이
+ *   PTY 안의 kyu 다. 통합 테스트는 사용자의 기본 tmux 서버 대신 격리된 서버(TMUX_TMPDIR)를
+ *   겨누려고 이 값을 준다.
  */
 class PtyKyuSessionTerminalAttacher(
     private val fixedKyuExecutablePath: Path? = null,
-    private val parentEnvironment: Map<String, String> = System.getenv(),
+    private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
 ) : SessionTerminalAttacher {
 
     override fun attachTo(workDirPath: Path, target: SessionTarget): TtyConnector {
@@ -39,7 +43,7 @@ class PtyKyuSessionTerminalAttacher(
             kyuExecutablePath = executable,
             workDirPath = workDirPath,
             target = target,
-            parentEnvironment = parentEnvironment,
+            baseEnvironment = baseEnvironment,
         )
 
         startSessionBeforeAttaching(plan, target)
@@ -92,17 +96,6 @@ class PtyKyuSessionTerminalAttacher(
 
         return KyuAttachTtyConnector(ptyProcess, target)
     }
-}
-
-/**
- * 환경을 통째로 갈아 끼운다.
- *
- * ProcessBuilder 는 기본으로 부모 환경을 물려주는데, 진입 계획이 정한 환경은 그 부모 환경에서
- * TMUX 를 덜어낸 것이다. 덧씌우기만 하면 덜어낸 것이 도로 살아난다.
- */
-private fun ProcessBuilder.withEnvironment(replacement: Map<String, String>): ProcessBuilder = apply {
-    environment().clear()
-    environment().putAll(replacement)
 }
 
 private const val INITIAL_COLUMNS = 80

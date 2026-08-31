@@ -130,6 +130,28 @@ class ProcessKyuCommandRunnerTest {
         assertEquals("입력이 끝났다\n", result.standardOutput)
     }
 
+    @Test
+    fun `자식은 앱이 정한 환경만 물려받는다`() {
+        // kyu 는 자기 자식으로 tmux 와 git 을 부른다. 그 둘을 찾는 PATH 가 이 자리에서 정해지므로
+        // (Finder 로 띄운 맥 앱은 로그인 셸의 PATH 를 물려받지 못한다) 실제로 실려 가는지 본다.
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo "PATH=${'$'}PATH"
+            echo "HOME=${'$'}{HOME-물려받지 않음}"
+            """.trimIndent(),
+        )
+
+        val result = ProcessKyuCommandRunner(
+            executable,
+            childProcessEnvironment = mapOf("PATH" to "/opt/homebrew/bin:/usr/bin"),
+        ).run(emptyList())
+
+        // 덧씌우는 것이 아니라 갈아 끼운다. HOME 은 이 검사를 돌리는 JVM 에 늘 있는 값이라,
+        // 그것이 빈 채로 오는 것이 "부모 환경이 딸려 오지 않았다" 의 증거다.
+        assertEquals("PATH=/opt/homebrew/bin:/usr/bin\nHOME=물려받지 않음\n", result.standardOutput)
+    }
+
     private fun executableScript(source: String): Path =
         temporaryDirectory.resolve("kyu").apply {
             writeText(source + "\n")

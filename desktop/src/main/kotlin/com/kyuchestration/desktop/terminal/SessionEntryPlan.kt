@@ -26,13 +26,14 @@ data class SessionEntryPlan(
  * "세션이 없습니다" 뿐이다. kyu start 는 이미 떠 있는 세션을 실패로 보지 않고 안내만 하고
  * 끝내도록 만들어져 있으므로(start.go 의 createSession), 두 번 불러도 상태가 달라지지 않는다.
  *
- * @param parentEnvironment 이 앱이 물려받은 환경. 자식에게 그대로 물려주되 두 가지만 손본다.
+ * @param baseEnvironment 자식에게 물려줄 바탕 환경(ChildProcessEnvironment 가 정한다). 그대로
+ *   물려주되 두 가지만 손본다.
  */
 internal fun planSessionEntry(
     kyuExecutablePath: Path,
     workDirPath: Path,
     target: SessionTarget,
-    parentEnvironment: Map<String, String>,
+    baseEnvironment: Map<String, String>,
 ): SessionEntryPlan {
     val kyu = kyuExecutablePath.toString()
 
@@ -49,12 +50,12 @@ internal fun planSessionEntry(
         attachCommand = listOf(kyu, "attach", target.label),
         // 두 명령 모두 경로 인자가 없다. 실행된 디렉토리가 곧 워크디렉토리다.
         workingDirectory = workDirPath,
-        environment = sessionEnvironment(parentEnvironment),
+        environment = sessionEnvironment(baseEnvironment),
     )
 }
 
-private fun sessionEnvironment(parentEnvironment: Map<String, String>): Map<String, String> {
-    val environment = parentEnvironment.toMutableMap()
+private fun sessionEnvironment(baseEnvironment: Map<String, String>): Map<String, String> {
+    val environment = baseEnvironment.toMutableMap()
 
     // 이 앱을 tmux 안에서 띄웠으면 TMUX 가 딸려 온다. 그 값은 이 GUI 프로세스의 사실이지
     // 앱 안에서 새로 연 PTY 의 사실이 아니다. 그대로 넘기면 kyu attach 가 중첩으로 보고

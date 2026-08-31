@@ -117,7 +117,7 @@ class PtyKyuSessionTerminalAttacherIntegrationTest {
         // kyu attach 가 중첩으로 보고 거절하므로, 진입 계획이 이것을 덜어낸다.
         val attacherLaunchedInsideTmux = PtyKyuSessionTerminalAttacher(
             fixedKyuExecutablePath = kyuExecutablePath,
-            parentEnvironment = isolatedEnvironment + mapOf("TMUX" to "/tmp/tmux-1000/default,1234,0"),
+            baseEnvironment = isolatedEnvironment + mapOf("TMUX" to "/tmp/tmux-1000/default,1234,0"),
         )
 
         openedConnector = attacherLaunchedInsideTmux.attachTo(workDirPath, SessionTarget.Repo(REPO_NAME))
@@ -131,7 +131,7 @@ class PtyKyuSessionTerminalAttacherIntegrationTest {
 
     private fun attacher() = PtyKyuSessionTerminalAttacher(
         fixedKyuExecutablePath = kyuExecutablePath,
-        parentEnvironment = isolatedEnvironment,
+        baseEnvironment = isolatedEnvironment,
     )
 
     /**

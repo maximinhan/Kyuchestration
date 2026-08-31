@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.kyu
 
+import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.platform.withEnvironment
 import java.io.IOException
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
@@ -7,11 +9,15 @@ import java.util.concurrent.CompletableFuture
 /**
  * kyu 를 진짜 자식 프로세스로 띄우는 실행기.
  *
- * @param fixedKyuExecutablePath 부를 실행 파일을 못 박는다. 통합 테스트가 설치 여부와 무관하게
+ * @param fixedKyuExecutablePath 부를 실행 파일을 고정한다. 통합 테스트가 설치 여부와 무관하게
  *   자기가 빌드한 바이너리를 겨누기 위한 것이고, 앱은 이 값을 주지 않는다.
+ * @param childProcessEnvironment kyu 에게 물려줄 환경. 기본값이 앱이 한 자리에서 정해 둔 환경이라
+ *   (ChildProcessEnvironment) 부르는 쪽이 PATH 를 따로 손볼 일이 없다. 검사가 실제로 실려 가는지
+ *   확인하기 위한 이음매이기도 하다.
  */
 class ProcessKyuCommandRunner(
     private val fixedKyuExecutablePath: Path? = null,
+    private val childProcessEnvironment: Map<String, String> = childProcessEnvironment(),
 ) : KyuCommandRunner {
 
     override fun run(
@@ -26,6 +32,10 @@ class ProcessKyuCommandRunner(
         val process = try {
             ProcessBuilder(listOf(executable.toString()) + arguments)
                 .directory(workingDirectory?.toFile())
+                // kyu 는 자기 자식으로 tmux 와 git 을 부른다. 그 둘을 찾는 PATH 가 여기서
+                // 정해진다 — Finder 로 띄운 맥 앱이 물려받은 PATH 를 그대로 넘기면 brew 로 넣은
+                // tmux 가 없는 것이 된다.
+                .withEnvironment(childProcessEnvironment)
                 .start()
         } catch (failure: IOException) {
             // 파일은 있는데 띄우지 못하는 경우다 — 실행 권한이 없거나, 찾은 뒤 지워졌거나,
