@@ -4,7 +4,8 @@ package com.kyuchestration.desktop.engine.githubrelease
  * 이 머신이 릴리스에서 받아야 할 것.
  *
  * 받을 수 없는 두 갈래를 하나로 뭉치지 않는다. 윈도우 네이티브에서 없는 것은 바이너리가 아니라
- * tmux 이므로 사람이 할 일이 "다른 아키텍처를 기다린다" 가 아니라 "WSL 안에서 앱을 띄운다" 다.
+ * 엔진이 목록을 낼 때 묻는 tmux 이므로, 사람이 할 일이 "다른 아키텍처를 기다린다" 가 아니라
+ * "WSL 안에서 앱을 띄운다" 다.
  * 한 갈래로 묶으면 그 사람에게 기다리라고 말하게 된다.
  */
 sealed interface EngineReleaseTarget {
