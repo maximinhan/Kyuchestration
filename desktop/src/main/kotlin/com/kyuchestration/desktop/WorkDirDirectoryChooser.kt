@@ -42,29 +42,31 @@ fun chooseWorkDirDirectory(ownerWindow: Window?): Path? =
  * 디렉토리를 고르는 창으로 바꾼다 — 다른 플랫폼에서는 아무 뜻이 없어서, 이 갈래가 맥에만 있는
  * 이유가 그대로 여기다.
  *
- * 속성은 창을 닫자마자 되돌린다. 프로세스 전체가 함께 보는 값이라, 켜 둔 채로 두면 나중에 이 앱이
- * 다른 목적으로 여는 FileDialog 까지 디렉토리만 고르게 된다.
+ * 속성은 창을 닫자마자 되돌린다 — 아래 finally 가 그 자리다.
  */
 private fun chooseDirectoryWithMacNativeDialog(ownerWindow: Window?): Path? {
     val settingBeforeDialog = System.getProperty(MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY)
     System.setProperty(MAC_FILE_DIALOG_FOR_DIRECTORIES_PROPERTY, "true")
 
-    // FileDialog 의 주인은 Frame 또는 Dialog 다. 앱의 창은 Frame 이고, 주인이 없으면 AWT 가
-    // 숨은 프레임을 대신 쓴다 — 그때는 창이 앱과 따로 뜬다.
-    val dialog = FileDialog(ownerWindow as? Frame, "워크디렉토리 선택", FileDialog.LOAD)
     try {
+        // FileDialog 의 주인은 Frame 또는 Dialog 다. 앱의 창은 Frame 이고, 주인이 없으면 AWT 가
+        // 숨은 프레임을 대신 쓴다 — 그때는 창이 앱과 따로 뜬다.
+        val dialog = FileDialog(ownerWindow as? Frame, "워크디렉토리 선택", FileDialog.LOAD)
         dialog.directory = System.getProperty("user.home")
         dialog.isMultipleMode = false
         // FileDialog 는 언제나 모달이라 이 줄이 창을 닫을 때까지 돌아오지 않는다.
         dialog.isVisible = true
+
+        // 고르지 않고 닫으면 둘 다 비어 있다. 디렉토리를 고르는 창에서는 file 이 고른 디렉토리의
+        // 이름이고 directory 가 그 자리의 부모라, 둘을 이어야 고른 자리가 된다.
+        val parentDirectory = dialog.directory ?: return null
+        val chosenDirectoryName = dialog.file ?: return null
+        return Path.of(parentDirectory, chosenDirectoryName)
     } finally {
+        // 창을 만들다 끊긴 길에서도 되돌린다. 프로세스 전체가 함께 보는 값이라, 켜 둔 채로 두면
+        // 나중에 이 앱이 다른 목적으로 여는 FileDialog 까지 디렉토리만 고르게 된다.
         restoreMacFileDialogSetting(settingBeforeDialog)
     }
-
-    // 고르지 않고 닫으면 이름이 비어 있다. 디렉토리를 고르는 창에서는 이름이 고른 디렉토리의
-    // 이름이고, directory 가 그 자리의 부모다.
-    val chosenDirectoryName = dialog.file ?: return null
-    return Path.of(dialog.directory, chosenDirectoryName)
 }
 
 private fun restoreMacFileDialogSetting(settingBeforeDialog: String?) {
