@@ -27,7 +27,7 @@ class EmbeddedTerminalStateHolderTest {
     fun `진입을 요청하면 세션이 뜰 때까지 진행 중으로 둔다`() = runTest {
         val holder = stateHolder(RecordingSessionTerminalOpener())
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
 
         val running = assertIs<EmbeddedTerminalState.SessionEntryRunning>(holder.state.value)
         assertEquals(SessionTarget.Repo("proj-a"), running.target)
@@ -38,14 +38,23 @@ class EmbeddedTerminalStateHolderTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Main)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
         val onScreen = assertIs<EmbeddedTerminalState.SessionOnScreen>(holder.state.value)
         assertEquals(SessionTarget.Main, onScreen.target)
         assertSame<TtyConnector>(opener.openedConnectors.single(), onScreen.ttyConnector)
         assertEquals(listOf(SessionTarget.Main), holder.heldSessions.value.map { it.target })
-        assertEquals(listOf<Pair<Path, SessionTarget>>(WORK_DIR_PATH to SessionTarget.Main), opener.requests)
+        assertEquals(
+            listOf(
+                SessionEntryRequest(
+                    WORK_DIR_PATH,
+                    SessionTarget.Main,
+                    SessionConversationChoice.ContinueRecordedConversation,
+                ),
+            ),
+            opener.requests,
+        )
     }
 
     @Test
@@ -55,7 +64,7 @@ class EmbeddedTerminalStateHolderTest {
         }
         val holder = stateHolder(opener)
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
         val failed = assertIs<EmbeddedTerminalState.SessionEntryFailed>(holder.state.value)
@@ -68,11 +77,11 @@ class EmbeddedTerminalStateHolderTest {
     fun `다른 카드로 옮겨도 앞 세션은 끝나지 않는다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
         val firstConnector = opener.openedConnectors.single()
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-b"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-b"))
         runCurrent()
 
         // 이 전환의 존재 이유가 이 줄이다. 옮길 때마다 끝내면 사용자는 카드를 한 번 잘못 눌러
@@ -89,13 +98,13 @@ class EmbeddedTerminalStateHolderTest {
     fun `보유 중인 카드로 돌아가면 다시 띄우지 않고 그 통로를 그대로 보여준다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
         val firstConnector = opener.openedConnectors.single()
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-b"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-b"))
         runCurrent()
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
         // 다시 띄우면 하던 작업이 끝나고 새 대화가 그 자리에 열린다. 돌아온 사람이 바라는 것은
@@ -108,9 +117,9 @@ class EmbeddedTerminalStateHolderTest {
     fun `보고 있는 세션만 끝낸다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-b"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-b"))
         runCurrent()
         val (firstConnector, secondConnector) = opener.openedConnectors
 
@@ -126,9 +135,9 @@ class EmbeddedTerminalStateHolderTest {
     fun `전부 끝내면 보유한 세션이 하나도 남지 않는다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Main)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
         holder.endAllSessions()
@@ -144,7 +153,7 @@ class EmbeddedTerminalStateHolderTest {
     fun `세션이 스스로 끝나면 보유에서 빠지고 마지막 화면은 남는다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
         // 사용자가 세션 안에서 /exit 했거나, 이어갈 대화가 없어 claude 가 곧바로 죽었다.
@@ -161,12 +170,12 @@ class EmbeddedTerminalStateHolderTest {
     fun `끝난 세션의 카드를 다시 누르면 새로 띄운다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
         opener.lastSessionExit.complete(0)
         runCurrent()
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
         // 대화는 엔진이 --resume 으로 이어 준다 — 앱이 하는 일은 다시 묻는 것뿐이다.
@@ -178,7 +187,7 @@ class EmbeddedTerminalStateHolderTest {
     fun `우리가 끝낸 세션은 끝났다는 화면을 남기지 않는다`() = runTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
         holder.endSession()
@@ -196,8 +205,8 @@ class EmbeddedTerminalStateHolderTest {
         val holder = stateHolder(opener)
 
         // 첫 진입이 아직 끝나기 전에 다른 카드를 누른 상황이다.
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-b"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-b"))
         runCurrent()
 
         // 보유해 두면 아무 위젯도 그 통로를 읽지 않는 세션이 하나 생기고, PTY 버퍼가 차는 순간
@@ -215,7 +224,7 @@ class EmbeddedTerminalStateHolderTest {
         val opener = RecordingSessionTerminalOpener()
         val holder = stateHolder(opener)
 
-        holder.enterSession(WORK_DIR_PATH, SessionTarget.Repo("proj-a"))
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         holder.endSession()
         runCurrent()
 
@@ -223,6 +232,56 @@ class EmbeddedTerminalStateHolderTest {
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
         assertEquals(EmbeddedTerminalState.NoTerminalOpen, holder.state.value)
     }
+
+    @Test
+    fun `새로 시작을 고르면 그 뜻이 세션을 여는 자리까지 간다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val holder = stateHolder(opener)
+
+        holder.enterSession(
+            WORK_DIR_PATH,
+            SessionTarget.Repo("proj-a"),
+            SessionConversationChoice.StartNewConversation,
+        )
+        runCurrent()
+
+        // 앱은 대화 ID 를 들고 있지 않다. 고르는 것은 갈래 하나뿐이고, 적혀 있던 대화를 버리고
+        // 새 ID 를 만드는 일은 엔진이 한다(설계 원칙 11).
+        assertEquals(
+            listOf(SessionConversationChoice.StartNewConversation),
+            opener.requests.map { it.conversationChoice },
+        )
+    }
+
+    @Test
+    fun `보유 중인 대상에는 새로 시작이 돌고 있는 세션을 끝내지 않는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+        val heldConnector = opener.openedConnectors.single()
+
+        holder.enterSession(
+            WORK_DIR_PATH,
+            SessionTarget.Repo("proj-a"),
+            SessionConversationChoice.StartNewConversation,
+        )
+        runCurrent()
+
+        // 화면은 보유 중인 대상에 새로 시작하는 길을 내지 않는다(카드의 버튼은 앱 세션이 없을 때만
+        // 뜬다). 그래도 여기서 세션을 갈아치우지 않는 이유는, 그렇게 두면 화면 쪽 조건 하나가
+        // 바뀌는 날 사용자가 돌고 있는 작업을 잃기 때문이다.
+        assertEquals(0, heldConnector.closeCount)
+        assertEquals(1, opener.requests.size)
+        assertSame(heldConnector, assertIs<EmbeddedTerminalState.SessionOnScreen>(holder.state.value).ttyConnector)
+    }
+
+    /**
+     * 카드를 그냥 누른 자리. 이 시험 대부분이 재는 것이 그 흐름이라 갈래를 매번 적지 않는다 —
+     * 새로 시작을 재는 시험만 그것을 직접 적는다.
+     */
+    private fun EmbeddedTerminalStateHolder.enterSessionContinuingConversation(target: SessionTarget) =
+        enterSession(WORK_DIR_PATH, target, SessionConversationChoice.ContinueRecordedConversation)
 
     private fun TestScope.stateHolder(opener: SessionTerminalOpener) = EmbeddedTerminalStateHolder(
         sessionTerminalOpener = opener,
@@ -233,7 +292,7 @@ class EmbeddedTerminalStateHolderTest {
 
     private class RecordingSessionTerminalOpener : SessionTerminalOpener {
 
-        val requests = mutableListOf<Pair<Path, SessionTarget>>()
+        val requests = mutableListOf<SessionEntryRequest>()
         val openedConnectors = mutableListOf<FakeTtyConnector>()
         val sessionExits = mutableListOf<CompletableFuture<Int>>()
 
@@ -251,11 +310,21 @@ class EmbeddedTerminalStateHolderTest {
             this.respond = respond
         }
 
-        override fun openSessionIn(workDirPath: Path, target: SessionTarget): OpenedSessionTerminal {
-            requests.add(workDirPath to target)
+        override fun openSessionIn(
+            workDirPath: Path,
+            target: SessionTarget,
+            conversationChoice: SessionConversationChoice,
+        ): OpenedSessionTerminal {
+            requests.add(SessionEntryRequest(workDirPath, target, conversationChoice))
             return respond()
         }
     }
+
+    private data class SessionEntryRequest(
+        val workDirPath: Path,
+        val target: SessionTarget,
+        val conversationChoice: SessionConversationChoice,
+    )
 
     private companion object {
         val WORK_DIR_PATH: Path = Path.of("/home/me/work/WorkDir-featureX")

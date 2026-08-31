@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.terminal.pty
 import com.kyuchestration.desktop.platform.childProcessEnvironment
 import com.kyuchestration.desktop.terminal.OpenedSessionTerminal
 import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.SessionTerminalOpener
@@ -33,8 +34,12 @@ class PtySessionTerminalOpener(
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
 ) : SessionTerminalOpener {
 
-    override fun openSessionIn(workDirPath: Path, target: SessionTarget): OpenedSessionTerminal {
-        val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(workDirPath, target)
+    override fun openSessionIn(
+        workDirPath: Path,
+        target: SessionTarget,
+        conversationChoice: SessionConversationChoice,
+    ): OpenedSessionTerminal {
+        val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(workDirPath, target, conversationChoice)
 
         val plan = planSessionEntry(
             sessionCommandAnswer = sessionCommandAnswer,

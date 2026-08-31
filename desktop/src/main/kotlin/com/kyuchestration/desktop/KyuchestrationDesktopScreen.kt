@@ -30,6 +30,7 @@ import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.HeldSession
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
@@ -68,7 +69,7 @@ fun KyuchestrationDesktopScreen(
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget) -> Unit,
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
 ) {
     // 세션마다 살려 두는 터미널 위젯. 창이 사는 동안 같은 것 하나다 — 터미널 자리 안에 두면
@@ -155,7 +156,7 @@ private fun DashboardWithTerminal(
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget) -> Unit,
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {

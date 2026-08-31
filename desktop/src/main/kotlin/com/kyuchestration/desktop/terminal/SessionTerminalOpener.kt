@@ -20,7 +20,13 @@ fun interface SessionTerminalOpener {
     /**
      * 그 세션을 띄우고, 앱이 보유할 것을 돌려준다.
      *
+     * @param conversationChoice 이 세션이 쓸 대화를 어느 쪽으로 정할지. 여기를 지나 엔진에게
+     *   닿고, 엔진이 그 뜻대로 명령을 조립한다.
      * @throws TerminalSessionFailure 띄우지 못했을 때.
      */
-    fun openSessionIn(workDirPath: Path, target: SessionTarget): OpenedSessionTerminal
+    fun openSessionIn(
+        workDirPath: Path,
+        target: SessionTarget,
+        conversationChoice: SessionConversationChoice,
+    ): OpenedSessionTerminal
 }

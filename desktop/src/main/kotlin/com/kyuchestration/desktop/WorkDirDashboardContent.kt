@@ -30,6 +30,7 @@ import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.dashboard.mergeMainCardSessionFacts
 import com.kyuchestration.desktop.dashboard.mergeRepoCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.RepoSnapshot
 import com.kyuchestration.desktop.workdir.RepoState
@@ -51,7 +52,11 @@ fun WorkDirDashboardContent(
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget) -> Unit,
+    /**
+     * 카드를 눌러 세션에 들어간다. 어느 대화를 쓸지는 누른 자리가 정한다 — 카드 자체는 이어가기,
+     * 카드의 새 대화 버튼은 새로 시작.
+     */
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -203,7 +208,7 @@ private fun WorkDirHeader(
 private fun RepoCardList(
     snapshot: WorkDirSnapshot,
     heldSessionTargets: Set<SessionTarget>,
-    onEnterSessionRequested: (SessionTarget) -> Unit,
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
 ) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (snapshot.repos.isEmpty()) {
@@ -226,7 +231,19 @@ private fun RepoCardList(
                     hasRecordedConversation = repo.hasRecordedConversation,
                     appSessionHeld = SessionTarget.Repo(repo.name) in heldSessionTargets,
                 ),
-            ) { onEnterSessionRequested(SessionTarget.Repo(repo.name)) }
+                onEnterSessionRequested = {
+                    onEnterSessionRequested(
+                        SessionTarget.Repo(repo.name),
+                        SessionConversationChoice.ContinueRecordedConversation,
+                    )
+                },
+                onStartNewConversationRequested = {
+                    onEnterSessionRequested(
+                        SessionTarget.Repo(repo.name),
+                        SessionConversationChoice.StartNewConversation,
+                    )
+                },
+            )
         }
 
         item {
@@ -236,7 +253,13 @@ private fun RepoCardList(
                     hasRecordedConversation = snapshot.mainSessionHasRecordedConversation,
                     appSessionHeld = SessionTarget.Main in heldSessionTargets,
                 ),
-            ) { onEnterSessionRequested(SessionTarget.Main) }
+                onEnterSessionRequested = {
+                    onEnterSessionRequested(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+                },
+                onStartNewConversationRequested = {
+                    onEnterSessionRequested(SessionTarget.Main, SessionConversationChoice.StartNewConversation)
+                },
+            )
         }
     }
 }
@@ -244,14 +267,19 @@ private fun RepoCardList(
 /**
  * 카드 한 장을 누르는 것이 곧 그 레포의 세션에 들어가는 일이다.
  *
- * 카드 안에 "열기" 버튼을 따로 두지 않는다. 카드가 가리키는 것이 레포 하나뿐이라 누를 곳마다
- * 뜻이 갈릴 여지가 없고, 버튼을 두면 카드의 나머지 자리가 눌러도 아무 일이 없는 죽은 면이 된다.
+ * **"열기" 버튼은 여전히 두지 않는다.** 카드가 가리키는 것이 레포 하나뿐이라 카드 전체가 그 뜻이고,
+ * 같은 뜻의 버튼을 두면 카드의 나머지 자리가 눌러도 아무 일이 없는 죽은 면이 된다.
+ *
+ * **새 대화 버튼은 다르다.** 그것은 카드와 다른 일을 한다 — 카드는 이어가고 버튼은 앞 대화를
+ * 버린다. 이어갈 대화가 있는 카드에서만 뜨는 이유가 그것이다: 기록이 없으면 두 자리가 같은 일을
+ * 하게 되고, 그때 이 버튼은 다시 죽은 면이 된다.
  */
 @Composable
 private fun RepoCard(
     repo: RepoSnapshot,
     sessionFacts: CardSessionFacts,
     onEnterSessionRequested: () -> Unit,
+    onStartNewConversationRequested: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEnterSessionRequested)) {
         Column(
@@ -270,6 +298,10 @@ private fun RepoCard(
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (sessionFacts.conversationToResume) {
+                    Spacer(Modifier.width(8.dp))
+                    StartNewConversationButton(onStartNewConversationRequested)
                 }
             }
 
@@ -362,7 +394,11 @@ private fun SessionChip(label: String, color: Color) {
 }
 
 @Composable
-private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequested: () -> Unit) {
+private fun MainSessionRow(
+    sessionFacts: CardSessionFacts,
+    onEnterSessionRequested: () -> Unit,
+    onStartNewConversationRequested: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -387,11 +423,28 @@ private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequest
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (sessionFacts.conversationToResume) {
+                Spacer(Modifier.weight(1f))
+                StartNewConversationButton(onStartNewConversationRequested)
+            }
         }
 
         if (sessionFacts.cliSessionRunning) {
             CliSessionNotice()
         }
+    }
+}
+
+/**
+ * 이어가는 대신 새로 시작하는 자리.
+ *
+ * 문구가 "새 대화" 가 아니라 "새 대화로 시작" 인 것은, 이 버튼이 대화를 만드는 것이 아니라
+ * **세션을 여는** 것이어서다 — 누르면 그 자리에서 터미널이 열린다.
+ */
+@Composable
+private fun StartNewConversationButton(onStartNewConversationRequested: () -> Unit) {
+    TextButton(onClick = onStartNewConversationRequested) {
+        Text("새 대화로 시작", style = MaterialTheme.typography.labelMedium)
     }
 }
 

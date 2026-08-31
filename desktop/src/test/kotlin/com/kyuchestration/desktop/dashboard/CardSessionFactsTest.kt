@@ -11,7 +11,7 @@ class CardSessionFactsTest {
 
     @Test
     fun `엔진의 RUNNING 은 CLI 세션이다`() {
-        val facts = mergeRepoCardSessionFacts(RepoState.Running, hasRecordedConversation = false, appSessionHeld = false)
+        val facts = sessionlessFactsFor(RepoState.Running)
 
         // 앱은 이 세션에 붙지도 죽이지도 못한다. 앱 세션과 같은 칩으로 그리면 사용자는 카드를
         // 눌러 세션 두 개를 만들고 나서 그것을 알게 된다(설계 문서 5.4.2).
@@ -21,7 +21,7 @@ class CardSessionFactsTest {
 
     @Test
     fun `CLI 세션이 떠 있으면 git 상태는 실려 오지 않는다`() {
-        val facts = mergeRepoCardSessionFacts(RepoState.Running, hasRecordedConversation = false, appSessionHeld = false)
+        val facts = sessionlessFactsFor(RepoState.Running)
 
         // RUNNING 은 상태가 아니라 "세션이 떠 있어 git 상태를 답하지 못했다" 는 뜻이다.
         assertNull(facts.gitState)
@@ -50,21 +50,27 @@ class CardSessionFactsTest {
 
     @Test
     fun `세션이 없으면 엔진이 답한 git 상태를 그대로 쓴다`() {
-        assertEquals(RepoState.Idle, mergeRepoCardSessionFacts(RepoState.Idle, hasRecordedConversation = false, appSessionHeld = false).gitState)
-        assertEquals(RepoState.Ahead, mergeRepoCardSessionFacts(RepoState.Ahead, hasRecordedConversation = false, appSessionHeld = false).gitState)
+        assertEquals(RepoState.Idle, sessionlessFactsFor(RepoState.Idle).gitState)
+        assertEquals(RepoState.Ahead, sessionlessFactsFor(RepoState.Ahead).gitState)
     }
 
     @Test
     fun `모르는 상태도 git 상태 자리에 그대로 싣는다`() {
         val unrecognized = RepoState.Unrecognized("BEHIND")
 
-        val facts = mergeRepoCardSessionFacts(unrecognized, hasRecordedConversation = false, appSessionHeld = false)
+        val facts = sessionlessFactsFor(unrecognized)
 
         // 계약은 값이 하나 늘어도 판을 올리지 않는다. 모르는 낱말에서 멈추는 대신 그대로 들고
         // 있는 것이 관찰 쪽의 자세이고, 합치는 자리도 같아야 한다.
         assertEquals(unrecognized, facts.gitState)
         assertFalse(facts.cliSessionRunning)
     }
+
+    private fun sessionlessFactsFor(engineReportedState: RepoState) = mergeRepoCardSessionFacts(
+        engineReportedState,
+        hasRecordedConversation = false,
+        appSessionHeld = false,
+    )
 
     @Test
     fun `기록된 대화가 있으면 카드가 이어갈 대화를 말한다`() {

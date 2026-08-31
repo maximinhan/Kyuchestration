@@ -161,8 +161,8 @@ fun main() = application {
                 repositoryCloneStateHolder.close()
                 dashboardStateHolder.closeWorkDir()
             },
-            onEnterSessionRequested = { target ->
-                dashboardState.workDirPath?.let { terminalStateHolder.enterSession(it, target) }
+            onEnterSessionRequested = { target, conversationChoice ->
+                dashboardState.workDirPath?.let { terminalStateHolder.enterSession(it, target, conversationChoice) }
             },
             onEndSessionRequested = terminalStateHolder::endSession,
         )

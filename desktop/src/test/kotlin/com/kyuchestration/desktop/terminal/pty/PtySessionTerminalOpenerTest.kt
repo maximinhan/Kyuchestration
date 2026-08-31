@@ -4,6 +4,7 @@ import com.jediterm.terminal.ProcessTtyConnector
 import com.jediterm.terminal.TtyConnector
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import kotlin.io.path.createDirectories
@@ -85,12 +86,16 @@ class PtySessionTerminalOpenerTest {
     @Test
     fun `무엇을 띄울지 묻는 데 실패하면 PTY 를 열지 않는다`() {
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = { _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
+            sessionCommandSource = { _, _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
             baseEnvironment = emptyMap(),
         )
 
         assertFailsWith<TerminalSessionFailure.KyuExecutableNotFound> {
-            opener.openSessionIn(temporaryDirectory, SessionTarget.Repo("proj-a"))
+            opener.openSessionIn(
+                temporaryDirectory,
+                SessionTarget.Repo("proj-a"),
+                SessionConversationChoice.ContinueRecordedConversation,
+            )
         }
     }
 
@@ -100,10 +105,13 @@ class PtySessionTerminalOpenerTest {
         target: SessionTarget = SessionTarget.Repo("proj-a"),
     ): TtyConnector {
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = SessionCommandSource { _, _ -> answer },
+            sessionCommandSource = SessionCommandSource { _, _, _ -> answer },
             baseEnvironment = baseEnvironment,
         )
-        return opener.openSessionIn(temporaryDirectory, target).ttyConnector.also(openedConnectors::add)
+        return opener
+            .openSessionIn(temporaryDirectory, target, SessionConversationChoice.ContinueRecordedConversation)
+            .ttyConnector
+            .also(openedConnectors::add)
     }
 
     private fun ProcessTtyConnector.waitForWithin(timeoutMillis: Long) {

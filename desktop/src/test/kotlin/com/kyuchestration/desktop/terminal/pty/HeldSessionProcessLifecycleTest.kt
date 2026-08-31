@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.terminal.pty
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
@@ -30,7 +31,7 @@ class HeldSessionProcessLifecycleTest {
     private val holderScope = CoroutineScope(Dispatchers.Default)
     private val holder = EmbeddedTerminalStateHolder(
         sessionTerminalOpener = PtySessionTerminalOpener(
-            sessionCommandSource = SessionCommandSource { _, target -> answerFor(target) },
+            sessionCommandSource = SessionCommandSource { _, target, _ -> answerFor(target) },
             baseEnvironment = mapOf("PATH" to System.getenv("PATH")),
         ),
         coroutineScope = holderScope,
@@ -80,7 +81,7 @@ class HeldSessionProcessLifecycleTest {
     }
 
     private fun enterSessionAndWaitForItsProcess(target: SessionTarget): Long {
-        holder.enterSession(temporaryDirectory, target)
+        holder.enterSession(temporaryDirectory, target, SessionConversationChoice.ContinueRecordedConversation)
         return waitForSessionReport(reportPathFor(target)).processId
     }
 
