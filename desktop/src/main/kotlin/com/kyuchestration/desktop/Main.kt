@@ -44,7 +44,8 @@ fun main() = application {
     // 둘로 나눌 이유가 없다.
     val kyuCommandRunner = remember { ProcessKyuCommandRunner() }
     // 앱의 첫 갈림길. 다른 홀더보다 먼저 세우는 것이 뜻이다 — 엔진이 없으면 나머지 화면은
-    // 뜨지 않는다.
+    // 뜨지 않는다. 세우는 것 자체가 걸음이기도 하다: 어디에도 엔진이 없으면 이 홀더가 그
+    // 자리에서 곧바로 받기 시작한다.
     val engineInstallationStateHolder = remember(applicationCoroutineScope) {
         EngineInstallationStateHolder(
             engineInstaller = GitHubReleaseEngineInstaller(),
@@ -113,7 +114,7 @@ fun main() = application {
             initializationState = initializationState,
             terminalState = terminalState,
             repositoryCloneStateHolder = repositoryCloneStateHolder,
-            onInstallEngineRequested = engineInstallationStateHolder::installEngine,
+            onRetryEngineInstallationRequested = engineInstallationStateHolder::installEngine,
             onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
             onOpenWorkDirRequested = {
                 chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory ->
