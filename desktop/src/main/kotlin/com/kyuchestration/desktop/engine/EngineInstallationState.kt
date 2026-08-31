@@ -8,7 +8,13 @@ package com.kyuchestration.desktop.engine
  */
 sealed interface EngineInstallationState {
 
-    /** 세 자리 어디에도 kyu 가 없다. 설치 화면이 뜬다. */
+    /**
+     * 어디에도 kyu 가 없다.
+     *
+     * 앱을 띄운 직후라면 오래 머물지 않는다 — 상태 홀더가 곧바로 받기 시작해 [InstallationRunning]
+     * 으로 넘어간다. 이 상태가 화면에 보이는 것은 그렇게 한 번 받아 본 뒤에 [다시 찾기] 를 눌러
+     * 여전히 없을 때다.
+     */
     data object EngineMissing : EngineInstallationState
 
     data object InstallationRunning : EngineInstallationState
