@@ -15,4 +15,11 @@ import com.jediterm.terminal.TtyConnector
 data class HeldSession(
     val target: SessionTarget,
     val ttyConnector: TtyConnector,
+    /**
+     * 이 세션이 이어가는 대화의 ID. 새 대화면 null.
+     *
+     * 보유 중에는 쓰이지 않고, 세션이 스스로 끝난 자리에서 끝난 화면으로 넘어간다 —
+     * 이어가기로 열었던 세션인지가 그때 실패를 가려내는 근거가 된다.
+     */
+    val resumedConversationId: String?,
 )

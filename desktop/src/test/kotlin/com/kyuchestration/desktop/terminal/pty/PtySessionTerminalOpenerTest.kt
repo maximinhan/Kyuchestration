@@ -46,6 +46,7 @@ class PtySessionTerminalOpenerTest {
                 command = recordAndStayAliveCommand(reportPath),
                 workingDirectory = sessionDirectory,
                 environmentToAdd = mapOf("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" to "1"),
+                resumedConversationId = null,
             ),
             baseEnvironment = mapOf("PATH" to System.getenv("PATH"), "TERM" to "dumb"),
         )
@@ -69,6 +70,7 @@ class PtySessionTerminalOpenerTest {
                 command = recordAndStayAliveCommand(reportPath),
                 workingDirectory = temporaryDirectory,
                 environmentToAdd = emptyMap(),
+                resumedConversationId = null,
             ),
         )
         val sessionProcessId = waitForSessionReport(reportPath).processId
@@ -81,6 +83,32 @@ class PtySessionTerminalOpenerTest {
         (connector as ProcessTtyConnector).waitForWithin(PROCESS_EXIT_TIMEOUT_MILLIS)
         assertTrue(waitUntilProcessIsGone(sessionProcessId), "세션의 프로세스가 남아 있으면 안 된다 (pid $sessionProcessId)")
         assertFalse(connector.isConnected, "닫힌 통로는 끊긴 것으로 보여야 한다")
+    }
+
+    @Test
+    fun `엔진이 답한 이어간 대화를 앱이 그대로 들고 간다`() {
+        val reportPath = temporaryDirectory.resolve("세션이-받은-것.txt")
+        val opener = PtySessionTerminalOpener(
+            sessionCommandSource = SessionCommandSource { _, _, _ ->
+                SessionCommandAnswer(
+                    command = recordAndStayAliveCommand(reportPath),
+                    workingDirectory = temporaryDirectory,
+                    environmentToAdd = emptyMap(),
+                    resumedConversationId = "211f6974-88a8-4453-9248-a02b0d6febae",
+                )
+            },
+            baseEnvironment = mapOf("PATH" to System.getenv("PATH")),
+        )
+
+        val opened = opener.openSessionIn(
+            temporaryDirectory,
+            SessionTarget.Repo("proj-a"),
+            SessionConversationChoice.ContinueRecordedConversation,
+        )
+        openedConnectors.add(opened.ttyConnector)
+
+        // 이 값이 여기서 끊기면 세션이 끝났을 때 화면이 실패를 가려낼 근거를 잃는다.
+        assertEquals("211f6974-88a8-4453-9248-a02b0d6febae", opened.resumedConversationId)
     }
 
     @Test

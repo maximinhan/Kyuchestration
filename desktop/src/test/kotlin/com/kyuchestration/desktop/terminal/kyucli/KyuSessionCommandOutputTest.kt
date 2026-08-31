@@ -5,6 +5,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 
 class KyuSessionCommandOutputTest {
 
@@ -49,7 +50,7 @@ class KyuSessionCommandOutputTest {
     @Test
     fun `모르는 필드가 늘어도 그대로 읽는다`() {
         // 필드를 더하는 변경으로는 판이 오르지 않는다(session_command_json.go 의 판 규약).
-        // 3 단계가 resume 실패를 가려낼 필드를 더할 자리가 여기다.
+        // 앱보다 앞서 나간 엔진이 한 줄 더 내보내도 세션은 열려야 한다.
         val answer = parseKyuSessionCommandOutput(
             """
             {
@@ -57,12 +58,38 @@ class KyuSessionCommandOutputTest {
               "command": ["claude"],
               "cwd": "/home/me/work/WorkDir-featureX/proj-a",
               "env": {},
-              "resumedConversationId": "211f6974-88a8-4453-9248-a02b0d6febae"
+              "answeredAt": "2026-08-31T00:00:00Z"
             }
             """.trimIndent(),
         )
 
         assertEquals(listOf("claude"), answer.command)
+    }
+
+    @Test
+    fun `이어간 대화의 ID 를 그대로 읽는다`() {
+        val answer = parseKyuSessionCommandOutput(RESUMED_SESSION_DOCUMENT)
+
+        // 앱이 이 값을 만들거나 해석하지 않는다. 들고 있다가 세션이 끝났을 때 "이어가기로 연
+        // 세션이었다" 를 말하는 데만 쓴다(설계 문서 5.5.4).
+        assertEquals("211f6974-88a8-4453-9248-a02b0d6febae", answer.resumedConversationId)
+    }
+
+    @Test
+    fun `새 대화면 이어간 대화가 없다`() {
+        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT)
+
+        assertNull(answer.resumedConversationId)
+    }
+
+    @Test
+    fun `그 필드를 내지 않는 엔진과 만나도 세션은 열린다`() {
+        // 엔진과 앱은 따로 배포된다. 여기서 멈추면 뒤처진 kyu 를 쓰는 사람은 카드를 눌러도
+        // 세션이 아예 열리지 않는다 — 잃어도 되는 것은 실패를 가려내는 눈 하나뿐이다.
+        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT)
+
+        assertNull(answer.resumedConversationId)
+        assertEquals(listOf("claude", "--resume", "211f6974-88a8-4453-9248-a02b0d6febae"), answer.command)
     }
 
     @Test
@@ -95,16 +122,28 @@ class KyuSessionCommandOutputTest {
                 "--add-dir", "/home/me/work/WorkDir-featureX/proj-b"
               ],
               "cwd": "/home/me/work/WorkDir-featureX",
-              "env": { "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1" }
+              "env": { "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1" },
+              "resumedConversationId": null
             }
         """.trimIndent()
 
+        /** 이 필드를 배우기 전의 kyu 가 내던 문서. 지금도 읽을 수 있어야 한다. */
         val REPO_SESSION_DOCUMENT = """
             {
               "schemaVersion": 1,
               "command": ["claude", "--resume", "211f6974-88a8-4453-9248-a02b0d6febae"],
               "cwd": "/home/me/work/WorkDir-featureX/proj-a",
               "env": {}
+            }
+        """.trimIndent()
+
+        val RESUMED_SESSION_DOCUMENT = """
+            {
+              "schemaVersion": 1,
+              "command": ["claude", "--resume", "211f6974-88a8-4453-9248-a02b0d6febae"],
+              "cwd": "/home/me/work/WorkDir-featureX/proj-a",
+              "env": {},
+              "resumedConversationId": "211f6974-88a8-4453-9248-a02b0d6febae"
             }
         """.trimIndent()
     }

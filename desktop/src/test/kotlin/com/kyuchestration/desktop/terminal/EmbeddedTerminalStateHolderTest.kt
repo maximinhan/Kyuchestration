@@ -5,8 +5,11 @@ import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -276,6 +279,54 @@ class EmbeddedTerminalStateHolderTest {
         assertSame(heldConnector, assertIs<EmbeddedTerminalState.SessionOnScreen>(holder.state.value).ttyConnector)
     }
 
+    @Test
+    fun `이어가기로 연 세션이 실패한 코드로 끝나면 화면이 그 사실을 들고 있는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener().apply { resumedConversationId = RECORDED_CONVERSATION_ID }
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        // 전사가 사라진 대화를 이어가려 하면 claude 는 즉시 종료 코드 1 로 끝난다(설계 문서 5.5.1).
+        opener.lastSessionExit.complete(1)
+        runCurrent()
+
+        val ended = assertIs<EmbeddedTerminalState.SessionEndedOnScreen>(holder.state.value)
+        assertEquals(RECORDED_CONVERSATION_ID, ended.resumedConversationId)
+        assertTrue(ended.resumeFailureSuspected, "이 사실이 없으면 화면은 사용자의 /exit 과 구분하지 못한다")
+    }
+
+    @Test
+    fun `이어가기로 연 세션이 정상으로 끝난 것은 실패가 아니다`() = runTest {
+        val opener = RecordingSessionTerminalOpener().apply { resumedConversationId = RECORDED_CONVERSATION_ID }
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        // 사용자가 세션 안에서 /exit 한 자리다.
+        opener.lastSessionExit.complete(0)
+        runCurrent()
+
+        val ended = assertIs<EmbeddedTerminalState.SessionEndedOnScreen>(holder.state.value)
+        assertFalse(ended.resumeFailureSuspected, "일하고 나온 사람에게 실패를 알리면 안 된다")
+    }
+
+    @Test
+    fun `새 대화로 연 세션이 끝난 것은 이어가기 실패가 아니다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        opener.lastSessionExit.complete(1)
+        runCurrent()
+
+        // 이어간 적이 없으므로 이어가기가 실패했을 리 없다. 여기서 실패라고 말하면 화면이
+        // 일어나지 않은 일을 알리고, 사용자는 방금 연 대화를 또 버리게 된다.
+        val ended = assertIs<EmbeddedTerminalState.SessionEndedOnScreen>(holder.state.value)
+        assertNull(ended.resumedConversationId)
+        assertFalse(ended.resumeFailureSuspected)
+    }
+
     /**
      * 카드를 그냥 누른 자리. 이 시험 대부분이 재는 것이 그 흐름이라 갈래를 매번 적지 않는다 —
      * 새로 시작을 재는 시험만 그것을 직접 적는다.
@@ -299,10 +350,14 @@ class EmbeddedTerminalStateHolderTest {
         /** 세션이 스스로 끝나는 순간을 시험이 정한다. 진짜 PTY 라면 자식 프로세스가 정한다. */
         val lastSessionExit: CompletableFuture<Int> get() = sessionExits.last()
 
+        /** 다음에 열 세션이 이어갈 대화. 진짜 어댑터에서는 엔진의 답이 이 값을 정한다. */
+        var resumedConversationId: String? = null
+
         private var respond: () -> OpenedSessionTerminal = {
             OpenedSessionTerminal(
                 ttyConnector = FakeTtyConnector().also(openedConnectors::add),
                 sessionExit = CompletableFuture<Int>().also(sessionExits::add),
+                resumedConversationId = resumedConversationId,
             )
         }
 
@@ -328,5 +383,8 @@ class EmbeddedTerminalStateHolderTest {
 
     private companion object {
         val WORK_DIR_PATH: Path = Path.of("/home/me/work/WorkDir-featureX")
+
+        /** 엔진이 "이 대화를 이어갔다" 고 답한 값. 앱은 이 값을 만들지도 해석하지도 않는다. */
+        const val RECORDED_CONVERSATION_ID = "211f6974-88a8-4453-9248-a02b0d6febae"
     }
 }

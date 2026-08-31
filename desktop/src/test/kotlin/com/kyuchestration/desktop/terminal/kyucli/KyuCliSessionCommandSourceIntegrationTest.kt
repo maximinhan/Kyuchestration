@@ -15,6 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -79,6 +80,10 @@ class KyuCliSessionCommandSourceIntegrationTest {
         // 전에도 이 성질만으로 대화는 이어진다 — 그래서 2 단계 검증에 이 항목이 있다.
         val newConversationId = firstAnswer.command.flagValue("--session-id")
         assertEquals(listOf("--resume", newConversationId), secondAnswer.command.windowed(2).first { it.first() == "--resume" })
+
+        // 앱이 실패를 가려내는 근거도 같은 답에 실려 온다(설계 문서 5.5.4).
+        assertNull(firstAnswer.resumedConversationId, "새 대화를 연 답은 이어간 것이 없다")
+        assertEquals(newConversationId, secondAnswer.resumedConversationId)
 
         // 기록은 워크디렉토리 안에 사람이 읽을 수 있는 모양으로 남는다.
         val conversationsJson = workDirPath.resolve(".coord/conversations.json").readText()

@@ -131,7 +131,7 @@ class EmbeddedTerminalStateHolder(
     }
 
     private fun holdAndShow(target: SessionTarget, opened: OpenedSessionTerminal) {
-        val heldSession = HeldSession(target, opened.ttyConnector)
+        val heldSession = HeldSession(target, opened.ttyConnector, opened.resumedConversationId)
         mutableHeldSessions.value = mutableHeldSessions.value + heldSession
         mutableState.value = EmbeddedTerminalState.SessionOnScreen(target, opened.ttyConnector)
 
@@ -148,6 +148,9 @@ class EmbeddedTerminalStateHolder(
      * 보유 목록에서 빼되 화면에서는 내리지 않는다. 마지막 화면이 남아 있어야 사용자가 왜 끝났는지
      * (전사가 없다는 `claude` 의 한 줄까지) 읽을 수 있고, 그 자리에서 카드를 다시 누르면 새 세션이
      * 열린다.
+     *
+     * 이어가던 대화를 함께 넘긴다. 그 둘(이어가기였는가 · 어떤 코드로 끝났는가)이 만나야 화면이
+     * "이어갈 대화를 찾지 못한 것 같다" 를 말할 수 있다(설계 문서 5.5.4).
      */
     private fun markSessionEnded(heldSession: HeldSession, exitCode: Int?) {
         if (heldSession !in mutableHeldSessions.value) {
@@ -162,6 +165,7 @@ class EmbeddedTerminalStateHolder(
                 target = heldSession.target,
                 ttyConnector = heldSession.ttyConnector,
                 exitCode = exitCode,
+                resumedConversationId = heldSession.resumedConversationId,
             )
         }
     }

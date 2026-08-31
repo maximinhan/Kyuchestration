@@ -98,6 +98,8 @@ class HeldSessionProcessLifecycleTest {
             is SessionTarget.Repo -> temporaryDirectory.resolve(target.repoName).createDirectories()
         },
         environmentToAdd = emptyMap(),
+        // 이 시험이 재는 것은 프로세스의 생사이지 대화가 아니다.
+        resumedConversationId = null,
     )
 
     private fun reportPathFor(target: SessionTarget): Path =

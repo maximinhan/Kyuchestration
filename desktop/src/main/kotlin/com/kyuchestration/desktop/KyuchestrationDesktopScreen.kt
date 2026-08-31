@@ -180,6 +180,11 @@ private fun DashboardWithTerminal(
                 terminalState = terminalState,
                 heldSessionTerminalWidgets = heldSessionTerminalWidgets,
                 onEndSessionRequested = onEndSessionRequested,
+                // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 카드를 누르는
+                // 것과 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
+                onStartNewConversationRequested = { target ->
+                    onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
+                },
                 modifier = Modifier.weight(TERMINAL_HEIGHT_WEIGHT),
             )
         }

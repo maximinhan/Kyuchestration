@@ -41,12 +41,29 @@ sealed interface EmbeddedTerminalState {
      * 그렇다 — 그것을 치우면 사용자는 터미널이 깜빡였다는 것만 보게 된다(설계 문서 8 절 9 번).
      *
      * @param exitCode 세션이 남긴 종료 코드. 예외로 끝나 알 수 없으면 null.
+     * @param resumedConversationId 이 세션이 이어가려던 대화의 ID. 새 대화였으면 null.
      */
     data class SessionEndedOnScreen(
         override val target: SessionTarget,
         val ttyConnector: TtyConnector,
         val exitCode: Int?,
-    ) : EmbeddedTerminalState
+        val resumedConversationId: String?,
+    ) : EmbeddedTerminalState {
+
+        /**
+         * 이어가려던 대화를 열지 못한 것으로 보인다 — 이어가기로 연 세션이 0 이 아닌 코드로 끝났다.
+         *
+         * **단정하지 않는 이름인 것이 뜻이다.** 대화가 열린 뒤 `claude` 가 다른 이유로 죽어도
+         * 같은 모양이 된다. 그래서 화면은 이 자리에서 대신 새 대화를 열어 주지 않고, 왜 끝났는지는
+         * 남아 있는 마지막 화면이 말하게 두고(전사가 없다는 `claude` 의 한 줄이 거기 있다),
+         * 새로 시작할지는 사용자가 정한다(설계 문서 5.5.4 — 실패한 자리에서 자동으로 다시 열지 않는다).
+         *
+         * 종료 코드를 모르면 말하지 않는다. 예외로 끝나 코드가 없는 자리까지 실패로 세면
+         * 화면이 일어나지 않은 일을 알리게 된다.
+         */
+        val resumeFailureSuspected: Boolean
+            get() = resumedConversationId != null && exitCode != null && exitCode != 0
+    }
 
     data class SessionEntryFailed(
         override val target: SessionTarget,
