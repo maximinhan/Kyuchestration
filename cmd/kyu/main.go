@@ -51,7 +51,7 @@ const usageText = `사용법: kyu [명령] [인자]
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
 환경변수:
-  ` + session.BackendSelectionEnvName + `    세션 백엔드 — tmux(기본) | supervisor(진행 중, 진입은 아직 tmux)`
+  ` + session.BackendSelectionEnvName + `    세션 백엔드 — tmux(기본) | supervisor(진행 중)`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -166,8 +166,9 @@ func withSessionBackend(command func(session.SessionBackend) error) error {
 
 // newSessionBackend 는 이 실행에서 쓸 세션 백엔드를 고른다.
 //
-// 기본값은 아직 tmux 다. 감독 백엔드는 세션을 띄우고 목록에 보이고 죽이는 데까지 왔을 뿐
-// 진입이 아직 없어서, 동등성이 증명되기 전까지 환경변수로만 켠다(설계 문서 6절).
+// 기본값은 아직 tmux 다. 감독 백엔드는 이제 세션을 띄우고 붙고 떼고 죽이는 데까지 오지만,
+// 두 백엔드가 같게 동작한다는 것이 증명되기 전까지는 환경변수로만 켠다 — 동등성이 증명되지
+// 않은 백엔드는 기본값이 될 수 없다(설계 원칙 8 · 문서 6절 · 9절 3~4 단계).
 func newSessionBackend() (session.SessionBackend, error) {
 	switch name := os.Getenv(session.BackendSelectionEnvName); name {
 	case "", session.TmuxBackendName:

@@ -125,15 +125,20 @@ func (b *SupervisorBackend) Create(name, cwd string, cmd []string) error {
 	return awaitReadySignal(readyReader, name, paths.log)
 }
 
-// Attach 는 호출한 터미널을 해당 세션에 연결한다.
+// supervisorDetachKey 는 감독 세션에서 빠져나오는 키다.
 //
-// 아직 없다. attach 는 프레임 프로토콜·스크롤백 재생·raw 모드 클라이언트·SIGWINCH 핸들러를
-// 함께 요구하고, 그것은 설계 문서 9절의 2 단계다. 그때까지 이 자리는 "안 된다" 를 분명히 말하고
-// 돌아갈 자리를 함께 일러준다 — 세션을 띄우고 목록에서 보는 것까지는 지금도 되므로, 붙는 일만
-// tmux 백엔드로 하면 된다.
-func (b *SupervisorBackend) Attach(name string) error {
-	return fmt.Errorf("감독 백엔드는 아직 세션 진입을 지원하지 않습니다 (세션 %s)\n지금 진입하려면 %s=%s 로 실행하세요",
-		name, BackendSelectionEnvName, TmuxBackendName)
+// Ctrl-\ 를 고른 이유(설계 문서 5.8): 대화형 프로그램이 거의 쓰지 않고, 세션마다 프로세스
+// 하나에 소켓 하나라는 같은 배치를 오래 써온 dtach·abduco 의 관례이기도 하다. raw 모드에서는
+// ISIG 를 끄므로 이 키가 SIGQUIT 이 되지 않는다.
+//
+// tmux 처럼 접두 키 + d 로 두지 않는다. tmux 의 Ctrl-b 는 readline·emacs 계열에서 "한 글자
+// 뒤로" 라 세션 안 프로그램에게서 그 키를 뺏고, 다른 접두 키를 골라도 상태를 가진 키 파싱이
+// 하나 생긴다.
+const supervisorDetachKey = `Ctrl-\`
+
+// DetachKey 는 감독 세션에서 빠져나오는 키다.
+func (b *SupervisorBackend) DetachKey() string {
+	return supervisorDetachKey
 }
 
 // Kill 은 세션을 종료한다. 없으면 nil 을 반환한다(멱등).

@@ -52,7 +52,7 @@ func TestEnterWorkDirCreatesTheMainSessionWithAddDirAndThenEntersIt(t *testing.T
 	})
 	assertOnlyAttachedSession(t, backend, "kyu-WorkDir-featureX-main")
 
-	if !strings.Contains(out.String(), detachKeyBinding) {
+	if !strings.Contains(out.String(), backend.DetachKey()) {
 		t.Errorf("출력 = %q, 빠져나오는 방법 안내를 포함하기를 기대", out.String())
 	}
 }
@@ -142,7 +142,7 @@ func TestEnterWorkDirTranslatesNestedSessionRefusalIntoGuidance(t *testing.T) {
 	if err == nil {
 		t.Fatalf("EnterWorkDir() 가 에러를 반환하지 않음, 중첩 거절을 기대")
 	}
-	if !strings.Contains(err.Error(), detachKeyBinding) {
+	if !strings.Contains(err.Error(), backend.DetachKey()) {
 		t.Errorf("에러 = %v, 먼저 빠져나오는 방법 안내를 포함하기를 기대", err)
 	}
 }

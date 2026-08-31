@@ -27,8 +27,8 @@ func TestAttachSessionEntersTheRunningSessionAfterTellingHowToLeave(t *testing.T
 	if want := []string{"kyu-WorkDir-featureX-alpha-commons"}; !slices.Equal(backend.attachedSessionNames, want) {
 		t.Errorf("진입한 세션 = %q, want %q", backend.attachedSessionNames, want)
 	}
-	if !strings.Contains(out.String(), "Ctrl-b d") {
-		t.Errorf("출력 = %q, 빠져나오는 방법 안내를 포함하기를 기대", out.String())
+	if !strings.Contains(out.String(), backend.DetachKey()) {
+		t.Errorf("출력 = %q, 백엔드가 답한 빠져나오는 키(%s) 안내를 포함하기를 기대", out.String(), backend.DetachKey())
 	}
 }
 
@@ -87,8 +87,8 @@ func TestAttachSessionTranslatesNestedSessionRefusalIntoGuidance(t *testing.T) {
 	if err == nil {
 		t.Fatalf("AttachSession() 가 에러를 반환하지 않음, 중첩 거절을 기대")
 	}
-	if !strings.Contains(err.Error(), "Ctrl-b d") {
-		t.Errorf("에러 = %v, 먼저 빠져나오는 방법 안내를 포함하기를 기대", err)
+	if !strings.Contains(err.Error(), backend.DetachKey()) {
+		t.Errorf("에러 = %v, 백엔드가 답한 빠져나오는 키(%s) 안내를 포함하기를 기대", err, backend.DetachKey())
 	}
 }
 

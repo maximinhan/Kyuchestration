@@ -14,18 +14,17 @@ const attachUsageText = `사용법: kyu attach <repo>
   kyu attach <repo>   해당 레포의 세션으로 진입한다
   kyu attach main     메인 세션으로 진입한다`
 
-// detachKeyBinding 은 세션에서 빠져나오는 키다.
-//
-// tmux 의 키 바인딩이므로 엄밀히는 세션 계층의 지식이다. 그런데도 표시 계층에 두는 이유는
-// 백엔드가 아직 하나뿐이어서다. 두 번째 백엔드가 생기면 그때 세션 계층이 답하도록 옮긴다 —
-// 지금 인터페이스를 미리 넓히면 쓰이지도 않을 메서드를 앞으로의 모든 구현이 채워야 한다.
-const detachKeyBinding = "Ctrl-b d"
-
 // detachGuidance 는 세션에서 빠져나오는 방법이다.
 //
-// 사용자는 tmux 를 몰라도 되지만(설계 문서 8.2) 빠져나오는 방법 하나만은 알아야 한다.
-// 세션에 들어간 뒤에는 이 도구가 말을 걸 수 없으므로, 진입 직전이 그것을 알릴 유일한 기회다.
-const detachGuidance = "빠져나오기: " + detachKeyBinding
+// 사용자는 세션 계층이 무엇으로 되어 있는지 몰라도 되지만(설계 문서 8.2) 빠져나오는 방법
+// 하나만은 알아야 한다. 세션에 들어간 뒤에는 이 도구가 말을 걸 수 없으므로, 진입 직전이 그것을
+// 알릴 유일한 기회다.
+//
+// 키는 백엔드에게 묻는다. 백엔드마다 다른 키이고(tmux 는 Ctrl-b d, 감독은 Ctrl-\) 그것은 세션
+// 계층의 사실이다. 표시 계층이 그것을 알고 있으면 백엔드가 늘어날 때마다 이 파일이 함께 바뀐다.
+func detachGuidance(backend session.SessionBackend) string {
+	return "빠져나오기: " + backend.DetachKey()
+}
 
 // AttachSession 은 kyu attach 를 실행한다. 사용자가 세션에서 빠져나올 때까지 블로킹된다.
 func AttachSession(out io.Writer, args []string, backend session.SessionBackend) error {
@@ -50,12 +49,12 @@ func AttachSession(out io.Writer, args []string, backend session.SessionBackend)
 		return fmt.Errorf("%s 세션이 없습니다\n시작: kyu start %s", label, label)
 	}
 
-	fmt.Fprintln(out, detachGuidance)
+	fmt.Fprintln(out, detachGuidance(backend))
 
 	if err := backend.Attach(sessionName); err != nil {
 		// 백엔드는 "중첩이다" 까지만 말한다. 그것을 사용자가 할 수 있는 행동으로 옮기는 것은 이쪽 몫이다.
 		if errors.Is(err, session.ErrNestedSession) {
-			return fmt.Errorf("이 터미널은 이미 세션 안입니다 — %s 로 빠져나온 뒤 다시 실행하세요", detachKeyBinding)
+			return fmt.Errorf("이 터미널은 이미 세션 안입니다 — %s 로 빠져나온 뒤 다시 실행하세요", backend.DetachKey())
 		}
 		return fmt.Errorf("%s 세션 진입 실패: %w", label, err)
 	}

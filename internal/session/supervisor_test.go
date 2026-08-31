@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +28,22 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+
+	// 같은 이유로 raw 모드 클라이언트 호출도 받아준다. 이쪽은 진짜 PTY 안에서 돌아야 하므로
+	// 시험이 이 바이너리를 자식으로 띄운다(supervisor_attach_client_test.go).
+	if len(os.Args) > 2 && os.Args[1] == attachClientTestCommand {
+		backend, err := NewSupervisorBackend()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := backend.Attach(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	os.Exit(m.Run())
 }
 
@@ -149,7 +166,7 @@ func TestSupervisorBackendCreateRejectsDuplicateName(t *testing.T) {
 		t.Fatalf("첫 Create() 실패: %v", err)
 	}
 
-	// 소켓 바인딩 실패가 곧 중복 판정이다 — 판정과 획득이 같은 한 번의 연산이라
+	// 이름 잠금 획득 실패가 곧 중복 판정이다 — 판정과 획득이 같은 한 번의 연산이라
 	// 그 사이에 낄 틈이 없다(설계 문서 5.3).
 	err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"})
 	if !errors.Is(err, ErrSessionExists) {
@@ -546,9 +563,12 @@ func TestConcurrentCreateOfTheSameNameLeavesExactlyOneSession(t *testing.T) {
 	const sessionName = "kyu-test-sv-concurrent"
 	const attempts = 4
 
-	// 바인딩이 곧 배타성이라는 주장을 실제로 겨뤄본다. tmux 는 has-session 으로 먼저 묻고
+	// 이름 잠금이 곧 배타성이라는 주장을 실제로 겨뤄본다. tmux 는 has-session 으로 먼저 묻고
 	// 만들었으므로 그 둘 사이에 틈이 있었는데, 여기서는 판정과 획득이 같은 한 번의
 	// 연산이라 그 틈이 없다(설계 문서 5.3·5.9).
+	//
+	// 성공한 Create 의 수를 세는 것이 곧 감독의 수를 세는 것이다. 이름을 빼앗긴 감독은 그 사실을
+	// 모른 채 자기 Create 에 성공을 알렸을 것이므로, 둘이 되면 이 숫자가 둘이 된다.
 	workingDirectories := make([]string, attempts)
 	for i := range workingDirectories {
 		workingDirectories[i] = t.TempDir()
@@ -593,12 +613,14 @@ func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
 		t.Fatalf("Create() 실패: %v", err)
 	}
 
-	// 같은 이름으로 한 번 더 만들려 하면 두 번째 감독이 임자가 있는지 붙어보고 물러난다.
-	// 그 탐지 연결은 요청을 한 줄도 보내지 않고 끊는 모양이라, 첫 감독이 그것을 요청 해석
-	// 실패로 적으면 정상적인 일이 기록에 오류로 쌓인다.
-	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); !errors.Is(err, ErrSessionExists) {
-		t.Fatalf("두 번째 Create() = %v, ErrSessionExists 여야 한다", err)
+	// 감독은 잠금을 쥐지 않는 옛 판 감독이 그 이름으로 도는지 붙어보고 판정한다(bindSessionSocket).
+	// 그 탐지 연결은 요청을 한 줄도 보내지 않고 끊는 모양이라, 감독이 그것을 요청 해석 실패로
+	// 적으면 정상적인 일이 기록에 오류로 쌓인다. 같은 모양을 여기서 그대로 만든다.
+	probe, err := net.DialTimeout("unix", socketPathFor(t, sessionName), socketProbeTimeout)
+	if err != nil {
+		t.Fatalf("탐지 연결 실패: %v", err)
 	}
+	probe.Close()
 
 	// 첫 감독은 연결을 하나씩 처리한다. 이 조회에 답했다는 것은 앞의 탐지 연결을 이미
 	// 끝냈다는 뜻이므로, 기록을 읽는 시점이 그 뒤임이 보장된다.
@@ -606,9 +628,9 @@ func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
 		t.Fatalf("IsAlive() 실패: %v", err)
 	}
 
-	paths, err := newSessionRuntimePaths(sessionName)
-	if err != nil {
-		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	paths, pathsErr := newSessionRuntimePaths(sessionName)
+	if pathsErr != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", pathsErr)
 	}
 	recorded, err := os.ReadFile(paths.log)
 	if err != nil {
@@ -621,19 +643,130 @@ func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
 	}
 }
 
-func TestSupervisorBackendAttachSaysItIsNotThereYetAndPointsAtTheFallback(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-attach"
+// bindSocketWithoutListening 은 bind 는 마쳤지만 아직 listen 하지 않은 소켓을 남긴다.
+//
+// 감독이 기동 도중 잠깐 지나는 상태를 실제 커널 상태로 만든다 — 이 소켓 파일에 붙으면
+// ECONNREFUSED 로 끝난다. 즉 "죽은 소켓" 과 겉모습이 같다.
+func bindSocketWithoutListening(t *testing.T, socketPath string) {
+	t.Helper()
 
-	// 진입은 프레임 프로토콜과 스크롤백을 함께 요구하는 다음 단계의 일이다. 그때까지 이 자리는
-	// 조용히 실패하지 않고, 세션을 잃지 않은 채 돌아갈 길을 함께 말해야 한다.
-	err := backend.Attach(sessionName)
-	if err == nil {
-		t.Fatalf("Attach() = nil, 아직 지원하지 않는다고 답해야 한다")
+	fileDescriptor, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("소켓 생성 실패: %v", err)
 	}
-	for _, expected := range []string{sessionName, BackendSelectionEnvName, TmuxBackendName} {
-		if !strings.Contains(err.Error(), expected) {
-			t.Errorf("Attach() 에러 = %q, %q 를 포함하기를 기대", err, expected)
-		}
+	t.Cleanup(func() {
+		syscall.Close(fileDescriptor)
+		os.Remove(socketPath)
+	})
+
+	if err := syscall.Bind(fileDescriptor, &syscall.SockaddrUnix{Name: socketPath}); err != nil {
+		t.Fatalf("소켓 바인딩 실패 (%s): %v", socketPath, err)
+	}
+}
+
+// holdSessionNameLockForTest 는 감독이 하듯 세션 이름 잠금을 잡고 테스트가 끝날 때까지 쥔다.
+func holdSessionNameLockForTest(t *testing.T, lockPath string) {
+	t.Helper()
+
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, sessionFilePermission)
+	if err != nil {
+		t.Fatalf("잠금 파일 열기 실패 (%s): %v", lockPath, err)
+	}
+	t.Cleanup(func() { lockFile.Close() })
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("세션 이름 잠금 실패 (%s): %v", lockPath, err)
+	}
+}
+
+func TestSupervisorHoldsItsSessionNameLockForAsLongAsItLives(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-name-lock"
+
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
+		t.Fatalf("Create() 실패: %v", err)
+	}
+
+	paths, err := newSessionRuntimePaths(sessionName)
+	if err != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	}
+
+	// 이름의 임자는 소켓 파일이 아니라 이 잠금이다. 감독이 사는 내내 쥐고 있어야 "소켓이 아직
+	// 답하지 않는 순간" 에도 남이 그 이름을 가져가지 못한다.
+	lockFile, err := os.OpenFile(paths.lock, os.O_CREATE|os.O_RDWR, sessionFilePermission)
+	if err != nil {
+		t.Fatalf("잠금 파일 열기 실패: %v", err)
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		t.Errorf("살아있는 감독의 세션 이름 잠금을 잡을 수 있었다 — 감독이 수명 내내 쥐고 있어야 한다")
+	}
+}
+
+func TestCreateRefusesAHeldSessionNameEvenWhileItsSocketStillRefusesConnections(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-bind-listen-race"
+
+	paths, err := newSessionRuntimePaths(sessionName)
+	if err != nil {
+		t.Fatalf("newSessionRuntimePaths() 실패: %v", err)
+	}
+	if err := ensureSessionsDir(paths.sessionsDir); err != nil {
+		t.Fatalf("ensureSessionsDir() 실패: %v", err)
+	}
+
+	// 감독이 이름을 잡고 소켓을 바인딩했지만 아직 듣지는 않는 순간을 그대로 만든다.
+	// 지연을 주입해 그 순간을 노리는 대신 그 순간의 상태를 만든다 — 겨루기가 아니라 판정이므로
+	// 이 시험은 언제 돌려도 같은 답을 낸다.
+	//
+	// 이 상태에서 소켓에 붙으면 죽은 소켓과 똑같이 ECONNREFUSED 다. 붙어보는 것으로 임자를
+	// 판정하면 남의 소켓을 지우고 같은 이름의 감독이 둘이 된다.
+	holdSessionNameLockForTest(t, paths.lock)
+	bindSocketWithoutListening(t, paths.socket)
+
+	err = backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"})
+	if !errors.Is(err, ErrSessionExists) {
+		t.Fatalf("이름이 잡혀 있을 때 Create() = %v, ErrSessionExists 여야 한다", err)
+	}
+
+	if _, statErr := os.Stat(paths.socket); statErr != nil {
+		t.Errorf("남의 소켓 파일 stat = %v, 임자가 있는 소켓을 지우면 안 된다", statErr)
+	}
+}
+
+func TestRefusedCreateDoesNotStartTheSessionCommand(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-refused-no-child"
+
+	const markerCommand = `printf started > started.txt; sleep 60`
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sh", "-c", markerCommand}); err != nil {
+		t.Fatalf("첫 Create() 실패: %v", err)
+	}
+
+	// 배타성 판정이 자식보다 먼저여야 한다. 순서가 뒤집히면 중복 생성이 세션 안 프로그램을
+	// 하나 띄웠다 죽이는 일이 된다(설계 문서 5.3) — claude 라면 사용자가 그 깜빡임을 본다.
+	//
+	// 거절당한 Create 가 돌아온 시점에는 그쪽 감독이 이미 끝나 있다. 그래서 이 확인에는
+	// 기다림이 필요 없다 — 흔적이 생길 것이었다면 이미 생겼다.
+	refusedWorkingDirectory := t.TempDir()
+	if err := backend.Create(sessionName, refusedWorkingDirectory, []string{"sh", "-c", markerCommand}); !errors.Is(err, ErrSessionExists) {
+		t.Fatalf("두 번째 Create() = %v, ErrSessionExists 여야 한다", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(refusedWorkingDirectory, "started.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("거절당한 Create() 의 작업 디렉토리에 흔적 stat = %v, 명령이 실행되면 안 된다", err)
+	}
+}
+
+func TestSupervisorBackendDetachKeyIsControlBackslash(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+
+	// Ctrl-\ 는 raw 모드에서 ISIG 가 꺼지므로 SIGQUIT 이 되지 않는다. 그 성질이 이 키를 고른
+	// 근거이므로(설계 문서 5.8) 키가 바뀌면 raw 모드 클라이언트의 전제가 함께 바뀐다.
+	if got := backend.DetachKey(); got != `Ctrl-\` {
+		t.Errorf("DetachKey() = %q, want %q", got, `Ctrl-\`)
 	}
 }

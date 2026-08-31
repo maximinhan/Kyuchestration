@@ -151,6 +151,16 @@ func (b *TmuxBackend) IsAlive(name string) (bool, error) {
 	return false, err
 }
 
+// DetachKey 는 tmux 세션에서 빠져나오는 키다.
+//
+// tmux 의 접두 키 + d 다. 사용자가 ~/.tmux.conf 에서 접두 키를 바꿔 두었다면 이 안내는 틀린
+// 키를 알려준다 — 남의 프로그램을 감싸는 한 그 프로그램의 설정까지 감쌀 수는 없다(설계 문서 1.2).
+// tmux 에게 물어 알아낼 수는 있지만(show-options -g prefix) 진입 직전마다 프로세스를 하나 더
+// 띄우는 값이라, 기본값을 말하고 틀릴 여지를 남긴다.
+func (b *TmuxBackend) DetachKey() string {
+	return "Ctrl-b d"
+}
+
 // exactTarget 은 tmux 타깃을 정확 일치로 못박는다.
 //
 // tmux 의 `-t <name>` 은 기본이 접두사 매칭이라 `-t kyu-x-proj` 가 `kyu-x-proj-a` 에 걸린다.
