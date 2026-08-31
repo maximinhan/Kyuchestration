@@ -34,8 +34,11 @@ import kotlin.io.path.isRegularFile
  * 다른 터미널에서 설치하거나) 그때부터 동작해야 하는데, 시작할 때 한 번 찾아 두면 그 실행은
  * 영영 "kyu 가 없다" 로 남는다.
  *
- * 세 자리가 함께 쓴다 — 실행기(ProcessKyuCommandRunner) · 세션 진입 어댑터(kyu attach) ·
- * 설치 화면의 "다시 찾기". 각자 찾게 두면 찾는 자리가 한쪽에서만 느는 날이 온다.
+ * 두 자리가 함께 쓴다 — 실행기(ProcessKyuCommandRunner)와 설치 화면의 "다시 찾기". 각자 찾게
+ * 두면 찾는 자리가 한쪽에서만 느는 날이 온다.
+ *
+ * 세션 진입도 결국 이 함수에 닿는다. 앱이 PTY 에서 부르는 것은 이제 kyu 가 아니라 claude 지만,
+ * 무엇을 띄울지 묻는 걸음이 실행기를 지난다.
  *
  * PATH 는 이 앱이 물려받은 것이 아니라 자식에게 물려줄 것을 본다(ChildProcessEnvironment).
  * 찾는 자리와 부르는 자리가 다른 PATH 를 보면, Finder 로 띄운 맥 앱에서 "찾을 때는 보였는데

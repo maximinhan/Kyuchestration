@@ -17,6 +17,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -27,6 +29,7 @@ import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
+import com.kyuchestration.desktop.terminal.HeldSession
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
@@ -46,6 +49,13 @@ fun KyuchestrationDesktopScreen(
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
     /**
+     * 앱이 지금 보유 중인 세션 전부. 화면에 보이지 않는 것도 들어 있다.
+     *
+     * 엔진이 답한 목록에 얹을 앱 자신의 사실이다 — 앱 세션은 tmux 세션도 감독 세션도 아니라
+     * `kyu list` 에 보이지 않고, 앱이 자기 것을 스스로 아는 것 말고는 알 길이 없다(설계 문서 5.4).
+     */
+    heldSessions: List<HeldSession>,
+    /**
      * 레포를 골라 받아 오는 대화상자가 자기 상태를 직접 구독한다. 다른 상태들처럼 위에서 받아
      * 내려보내지 않는 이유는, 그 상태를 보는 곳이 대화상자 하나뿐이기 때문이다 — 여기서
      * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
@@ -59,8 +69,17 @@ fun KyuchestrationDesktopScreen(
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
-    onCloseTerminalRequested: () -> Unit,
+    onEndSessionRequested: () -> Unit,
 ) {
+    // 세션마다 살려 두는 터미널 위젯. 창이 사는 동안 같은 것 하나다 — 터미널 자리 안에 두면
+    // 터미널을 접을 때 함께 사라지고, 그러면 그때까지 보유하던 세션들의 화면을 통째로 잃는다.
+    val heldSessionTerminalWidgets = remember { HeldSessionTerminalWidgets() }
+
+    // 보유가 끝났고 화면에도 없는 세션의 위젯은 죽은 격자다. 합성이 끝날 때마다 정리한다 —
+    // 터미널을 접은 뒤에도 여기가 돌아야 마지막 위젯이 치워진다.
+    val liveConnectors = heldSessions.map { it.ttyConnector } + listOfNotNull(onScreenConnector(terminalState))
+    SideEffect { heldSessionTerminalWidgets.dropWidgetsOtherThan(liveConnectors.toSet()) }
+
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
@@ -89,14 +108,16 @@ fun KyuchestrationDesktopScreen(
                     is WorkDirDashboardState.WorkDirObserved -> {
                         DashboardWithTerminal(
                             observed = dashboardState,
+                            heldSessionTargets = heldSessions.map { it.target }.toSet(),
                             initializationState = initializationState,
                             terminalState = terminalState,
+                            heldSessionTerminalWidgets = heldSessionTerminalWidgets,
                             onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                             onCloneRepositoriesRequested = onCloneRepositoriesRequested,
                             onRefreshRequested = onRefreshRequested,
                             onCloseWorkDirRequested = onCloseWorkDirRequested,
                             onEnterSessionRequested = onEnterSessionRequested,
-                            onCloseTerminalRequested = onCloseTerminalRequested,
+                            onEndSessionRequested = onEndSessionRequested,
                         )
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
@@ -126,19 +147,22 @@ fun KyuchestrationDesktopScreen(
 @Composable
 private fun DashboardWithTerminal(
     observed: WorkDirDashboardState.WorkDirObserved,
+    heldSessionTargets: Set<SessionTarget>,
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
+    heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
     onInitializeOpenedWorkDirRequested: () -> Unit,
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget) -> Unit,
-    onCloseTerminalRequested: () -> Unit,
+    onEndSessionRequested: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(DASHBOARD_HEIGHT_WEIGHT)) {
             WorkDirDashboardContent(
                 observed = observed,
+                heldSessionTargets = heldSessionTargets,
                 initializationState = initializationState,
                 onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                 onCloneRepositoriesRequested = onCloneRepositoriesRequested,
@@ -153,11 +177,27 @@ private fun DashboardWithTerminal(
             HorizontalDivider()
             EmbeddedTerminalPane(
                 terminalState = terminalState,
-                onCloseTerminalRequested = onCloseTerminalRequested,
+                heldSessionTerminalWidgets = heldSessionTerminalWidgets,
+                onEndSessionRequested = onEndSessionRequested,
                 modifier = Modifier.weight(TERMINAL_HEIGHT_WEIGHT),
             )
         }
     }
+}
+
+/**
+ * 지금 화면에 떠 있는 세션의 통로. 터미널 자리가 비어 있으면 null.
+ *
+ * 끝난 세션도 여기 실린다 — 보유는 끝났지만 마지막 화면을 아직 보여주고 있어서, 그 위젯까지
+ * 치우면 사용자가 왜 끝났는지 읽을 자리가 사라진다.
+ */
+private fun onScreenConnector(terminalState: EmbeddedTerminalState) = when (terminalState) {
+    is EmbeddedTerminalState.SessionOnScreen -> terminalState.ttyConnector
+    is EmbeddedTerminalState.SessionEndedOnScreen -> terminalState.ttyConnector
+    is EmbeddedTerminalState.NoTerminalOpen,
+    is EmbeddedTerminalState.SessionEntryRunning,
+    is EmbeddedTerminalState.SessionEntryFailed,
+    -> null
 }
 
 /**

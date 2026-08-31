@@ -16,7 +16,7 @@ sealed class TerminalSessionFailure(
 
     class KyuExecutableNotFound : TerminalSessionFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",
-        guidance = "세션을 띄우고 진입하는 일은 전부 kyu 가 합니다. " +
+        guidance = "세션이 무엇을 띄우는지는 kyu 가 답합니다 — 앱은 그 답을 실행할 뿐입니다. " +
             "앱을 다시 띄우면 엔진 설치 화면이 뜹니다.",
     )
 
@@ -27,22 +27,51 @@ sealed class TerminalSessionFailure(
     )
 
     /**
-     * kyu start 가 세션을 띄우지 못했다.
+     * kyu 가 "무엇을 띄울지" 에 답하기를 거절했다.
      *
-     * 붙기 전에 걸린 실패라 터미널을 열 이유가 없다. 조용히 넘어가면 사용자는 빈 터미널이
-     * 곧바로 닫히는 것만 보게 되고, 이유(tmux 미설치·없는 레포)는 어디에도 남지 않는다.
+     * 없는 레포 이름, 워크디렉토리가 아닌 자리, 스캔 실패가 여기로 온다. 답을 못 받았으므로 열
+     * PTY 가 없다 — 조용히 넘어가면 사용자는 빈 터미널이 곧바로 닫히는 것만 보게 되고, 이유는
+     * 어디에도 남지 않는다.
+     *
+     * @param arguments 실제로 부른 인자. 사람이 같은 것을 손으로 다시 부를 수 있게 그대로 싣는다 —
+     *   메인 세션은 레포 이름 자리가 비어 있어서, 라벨(main)로 안내 문구를 지어내면 실제로는
+     *   부를 수 없는 명령을 알려 주게 된다.
      */
-    class SessionStartRejected(
+    class SessionCommandRefused(
         val targetLabel: String,
         val exitCode: Int,
+        val arguments: List<String>,
         standardError: String,
     ) : TerminalSessionFailure(
-        message = "$targetLabel 세션을 띄우지 못했습니다 (kyu start 가 종료 코드 $exitCode 로 끝남).",
+        message = "$targetLabel 세션이 무엇을 띄울지 kyu 가 답하지 못했습니다 (종료 코드 $exitCode).",
         // kyu 는 거절 이유를 stderr 에 사람 말로 적는다. 그것을 그대로 올리는 편이 이쪽에서
         // 다시 지어낸 문구보다 정확하다.
         guidance = standardError.ifBlank {
-            "워크디렉토리에서 kyu start $targetLabel 을 직접 실행해 이유를 확인하세요."
+            "워크디렉토리에서 kyu ${arguments.joinToString(" ")} 를 직접 실행해 이유를 확인하세요."
         },
+    )
+
+    /**
+     * 답은 받았는데 이 앱이 읽을 줄 아는 판이 아니다.
+     *
+     * 관찰(WorkDirObservationFailure)과 갈라 둔다. 사실은 같지만 사용자가 있던 자리가 다르고,
+     * 뒤처진 쪽을 올리라는 말이 목록이 안 뜨는 사람과 세션이 안 열리는 사람에게 같은 무게로
+     * 읽히지 않는다.
+     */
+    class UnsupportedSchemaVersion(
+        val actualSchemaVersion: Int,
+        val supportedSchemaVersion: Int,
+    ) : TerminalSessionFailure(
+        message = "kyu 가 낸 문서는 판 $actualSchemaVersion 인데 이 앱은 판 $supportedSchemaVersion 만 읽습니다.",
+        guidance = "kyu 와 데스크톱 앱 중 뒤처진 쪽을 올리세요. " +
+            "이 문서는 앱이 그대로 실행할 것이라, 반쯤 알아듣고 띄우면 엉뚱한 디렉토리에서 세션이 열립니다.",
+    )
+
+    class UnreadableKyuOutput(cause: Throwable) : TerminalSessionFailure(
+        message = "kyu 가 답한 문서를 읽지 못했습니다.",
+        guidance = "kyu session-command --json 의 stdout 에 JSON 문서 말고 다른 것이 섞이지 않았는지 " +
+            "확인하세요. 원인: ${cause.message}",
+        cause = cause,
     )
 
     /**
@@ -53,7 +82,7 @@ sealed class TerminalSessionFailure(
      */
     class PtyFailedToOpen(cause: Throwable) : TerminalSessionFailure(
         message = "앱 안에 터미널을 열지 못했습니다.",
-        guidance = "터미널에서 kyu attach 를 직접 실행하면 세션에는 들어갈 수 있습니다. " +
+        guidance = "터미널에서 그 디렉토리로 가 claude 를 직접 띄우면 작업은 이어갈 수 있습니다. " +
             "원인: ${cause.message}",
         cause = cause,
     )
