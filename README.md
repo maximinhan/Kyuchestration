@@ -33,21 +33,22 @@ WorkDir-featureX/
 |---|---|---|
 | git | 레포 발견 · 상태 판정 · `kyu clone` 의 클론 | 상태를 판정하지 못하고 클론도 못 함 |
 | claude CLI | 세션 안에서 실행되는 명령 | 세션은 뜨지만 바로 끝남 |
-| tmux | **CLI 세션** — `kyu start` · `kyu attach` · `kyu kill` · 인자 없는 `kyu`, 그리고 `kyu list` · `kyu clone` 이 세션 생존을 물을 때 | 그 명령들이 안내와 함께 종료. `kyu init` · `kyu version` · `kyu auth` · `kyu repos` · `kyu session-command` 는 그대로 동작 |
+| tmux | **CLI 세션을 만들고 붙고 죽일 때** — `kyu start` · `kyu attach` · `kyu kill` · 인자 없는 `kyu` | 그 명령들이 안내와 함께 종료. 나머지는 그대로 동작하고, `kyu list` · `kyu clone` 은 **"CLI 세션 없음" 을 기준으로 답한다** |
 | Go | 소스에서 설치할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | 릴리스 바이너리를 받는다 (설치 방식 A) |
 
 macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 — `brew install tmux` 또는
 `sudo apt install tmux`.
 
-**tmux 는 세션 계층의 것이지 이 도구 전체의 전제가 아니다.** 위 표의 셋째 줄이 그 경계다 —
-GitHub 에 묻는 일(`kyu repos` · `kyu auth`)과 파일을 만드는 일(`kyu init`)과 앱이 무엇을 띄울지
-묻는 일(`kyu session-command`)은 tmux 를 보지 않는다.
+**tmux 는 세션을 만들고 붙고 죽이는 일의 것이지 이 도구 전체의 전제가 아니다.** GitHub 에 묻는
+일(`kyu repos` · `kyu auth`)과 파일을 만드는 일(`kyu init`)과 앱이 무엇을 띄울지 묻는
+일(`kyu session-command`)은 물론, **무엇이 떠 있는지 묻기만 하는 일(`kyu list` · `kyu clone`)도
+tmux 를 보지 않는다.** 세션은 백엔드를 거쳐야만 생기므로, 백엔드가 없는 머신에 CLI 세션이 없다는
+것은 추측이 아니라 참인 답이다 — 그래서 그 자리는 실패가 아니라 "세션 없음" 으로 끝난다.
 
-**데스크톱 앱이 여는 세션에는 tmux 가 없다** — 앱은 `kyu attach` 를 거치지 않고 자기 PTY 에서
-`claude` 를 직접 띄운다([app-owned-sessions-design.md](app-owned-sessions-design.md)). **다만 앱을
-tmux 없는 머신에서 쓸 수는 아직 없다** — 대시보드가 3 초마다 부르는 `kyu list` 가 세션 생존을
-물으려고 백엔드를 조립하기 때문이다. 그 자리가 백엔드 없이 "이 머신에 CLI 세션이 없다" 로 답하게
-하는 것은 남은 작업이다(그 설계의 5.7).
+**데스크톱 앱은 tmux 없는 머신에서 그대로 돈다.** 앱은 `kyu attach` 를 거치지 않고 자기 PTY 에서
+`claude` 를 직접 띄우고([app-owned-sessions-design.md](app-owned-sessions-design.md)), 앱이 부르는
+엔진 명령(`version` · `list` · `session-command` · `init` · `clone` · `repos` · `auth`)은 하나도
+세션 백엔드를 요구하지 않는다.
 
 **CLI 의 tmux 의존은 걷어낼 예정이다** — 세션마다 `kyu` 자신의 감독 프로세스를 하나 두는 설계가
 [session-supervisor-design.md](session-supervisor-design.md) 에 있다(1~3 단계 구현 완료, 3.5 단계
@@ -341,7 +342,8 @@ start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유�
 직접 지우거나 옮긴다.
 
 파일을 만드는 일이라 **tmux 없이 동작한다.** 같은 이유로 `kyu version` · `kyu auth` ·
-`kyu repos` · `kyu session-command` 도 세션 백엔드를 거치지 않는다.
+`kyu repos` · `kyu session-command` 도 세션 백엔드를 거치지 않고, `kyu list` · `kyu clone` 은
+백엔드를 세우지 못하면 "CLI 세션 없음" 을 답으로 받아 계속 간다([요구사항](#요구사항)).
 
 ### `kyu clone`
 
@@ -555,6 +557,11 @@ kyu attach <repo> 로 진입
 
 상태는 도구가 세션 백엔드(tmux)와 git 에게 물어 매번 다시 계산한다. 세션이 자기 상태를 보고하지
 않는다.
+
+**세션 백엔드가 없는 머신에서도 답한다.** tmux 가 없으면 CLI 세션도 있을 수 없으므로, 목록은 그
+사실을 실패가 아니라 답으로 낸다 — 모든 행이 세션 없음(`○`)을 기준으로 판정된다. 대시보드가
+3 초마다 부르는 것이 이 명령이라, 여기가 서면 앱이 목록을 통째로 잃는다
+([app-owned-sessions-design.md](app-owned-sessions-design.md) 5.7 · 8 절 5 번).
 
 **데스크톱 앱이 보유한 세션은 여기 보이지 않는다.** 앱 세션은 tmux 세션도 감독 세션도 아니라
 엔진이 그것을 셀 수단이 없다 — 앱에서 작업 중인 레포가 이 목록에는 `DIRTY` 로 나온다
@@ -933,7 +940,7 @@ tasks:
 ```
 cmd/kyu/         # 진입점, 명령 라우팅
 internal/
-    session/     # SessionBackend 인터페이스 + tmux 구현 (유일한 플랫폼 의존부)
+    session/     # SessionBackend 인터페이스 + tmux · 감독 · "세션 없음" 구현 (유일한 플랫폼 의존부)
     workdir/     # 스캔 · 상태 추론 · plan 파싱 (플랫폼 무관 핵심)
     github/      # GitHub REST API 조회 + 클론 (kyu clone · kyu repos 가 닿는 유일한 바깥 세계)
     secretstore/ # 토큰 프로필 저장 (키체인 · secret-service · 파일 폴백)
@@ -967,20 +974,26 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 받고, 사람용 표를 되파싱하지 않는다 — 그 표는 사람이 읽기 좋게 언제든 다듬을 수 있어야 하는데,
 앱이 그것에 자기 파싱을 맞춰두면 문구 하나를 고칠 때마다 함께 깨진다.
 
-**윈도우에서는 WSL 안의 리눅스 앱으로 쓴다.** 앱이 세션을 여는 데는 이제 tmux 가 필요 없지만,
-앱이 부리는 엔진 `kyu` 는 목록을 낼 때(`kyu list`) 여전히 세션 생존을 tmux 에게 묻는다 — 윈도우
-네이티브에는 그 tmux 가 없다(설계 문서 10 절 로드맵 v4). 설치는 되고 아무것도 되지 않는 패키지를
-만들 이유가 없어 msi 는 내지 않는다. **앱의 전환으로 이 벽은 낮아졌다** — 남은 것은 그 한 자리다
-([app-owned-sessions-design.md](app-owned-sessions-design.md) 5.7).
+**윈도우에서는 WSL 안의 리눅스 앱으로 쓴다.** 막고 있던 것이 tmux 이던 시절은 끝났다 — 앱은
+자기 PTY 에서 세션을 열고, 엔진도 목록을 낼 때 세션 백엔드를 요구하지 않는다. 남은 것은 아무도
+윈도우 네이티브를 만들어 돌려본 적이 없다는 사실이다: 릴리스는 윈도우 바이너리를 내지 않고
+(`.github/workflows/release.yml` 의 크로스 컴파일 목록), 설치 패키지에도 msi 가 없으며
+(`desktop/build.gradle.kts` 의 `targetFormats`), PTY 를 여는 pty4j 가 ConPTY 위에서 실제로 도는지도
+확인되지 않았다([app-owned-sessions-design.md](app-owned-sessions-design.md) 부록 A). 그 셋을
+치우는 것은 별도 작업이다(그 문서 5.7 — "윈도우는 별도 작업이고 이 문서의 네 단계에 들어 있지
+않다").
 
 ### 시작하기
 
 | 필요한 것 | 왜 |
 |---|---|
 | `kyu` (엔진) | 앱은 스캔·상태 추론을 직접 하지 않고 엔진인 `kyu` 를 부른다 — **설치 패키지 안에 들어 있어 따로 받지 않는다** ([앱은 엔진을 들고 온다](#앱은-엔진을-들고-온다)) |
-| tmux | **앱 세션 때문이 아니다** — 앱 세션은 앱의 PTY 안에서 tmux 없이 뜬다. 대시보드가 부르는 `kyu list` 가 CLI 세션의 생존을 tmux 에게 묻기 때문에 아직 있어야 한다 |
 | claude CLI | 세션 안에서 실제로 돌아가는 명령 |
 | JDK 21 | **방식 2 에서만.** 설치 패키지 안에는 앱이 쓸 자바 런타임이 이미 들어 있다 |
+
+**tmux 는 이 표에 없다.** 앱 세션은 앱의 PTY 안에서 tmux 없이 뜨고, 대시보드가 3 초마다 부르는
+[`kyu list`](#kyu-list-path) 도 세션 백엔드 없이 답한다. 터미널에서 `kyu start` 로 CLI 세션을
+띄울 때만 필요하다([요구사항](#요구사항)).
 
 앱을 손에 넣는 길은 둘이다.
 
@@ -1237,17 +1250,17 @@ Go 를 찾는 자리는 `GOROOT` · `PATH` · Go 를 넣는 흔한 디렉토리�
 
 두 가지는 앱이 하지 않는다.
 
-- **tmux 설치** — 시스템 패키지라 관리자 권한이 필요하다. 앱 세션은 tmux 없이 뜨지만 목록을 내는
-  `kyu list` 가 tmux 를 찾지 못하면 대시보드가 서므로, `sudo apt install tmux`(WSL · 리눅스) 또는
-  `brew install tmux`(맥) 로 먼저 넣는다.
-  넣은 뒤에 앱에서 따로 할 일은 없다 — 앱은 로그인 셸(`.zprofile` · `.profile`)의 PATH 를 읽으므로,
-  Finder 로 띄운 맥 앱도 brew 가 `/opt/homebrew/bin` 에 놓은 tmux 를 그대로 찾는다.
+- **`claude` 설치** — 세션 안에서 실제로 도는 명령인데 앱이 대신 넣지 않는다. 넣은 뒤에 앱에서
+  따로 할 일은 없다 — 앱은 로그인 셸(`.zprofile` · `.profile`)의 PATH 를 읽으므로, Finder 로 띄운
+  맥 앱도 brew 가 `/opt/homebrew/bin` 에 놓은 것을 그대로 찾는다.
+  **tmux 는 이 목록에 없다 — 앱에 필요 없기 때문이다.** 터미널에서 `kyu start` 를 쓸 때만
+  `sudo apt install tmux`(WSL · 리눅스) · `brew install tmux`(맥) 로 넣는다.
 - **엔진 업데이트** — 동봉된 엔진은 앱을 새 판으로 설치할 때 함께 바뀐다. 소스에서 띄우며 받아
   둔 엔진은 한 번 받으면 그대로 쓰므로, 판을 올리려면 관리 디렉토리의 `kyu` 를 지우고 앱을 다시
   띄우거나 [설치](#설치)의 세 방식 중 하나로 덮는다.
 
-윈도우 네이티브에서는 받지 않고 거절한다. 바이너리가 없어서가 아니라 tmux 가 없어서이므로,
-받아 놓아도 엔진이 목록에 답하지 못한다 — WSL 안에서 앱을 띄우면 된다.
+윈도우 네이티브에서는 받지 않고 거절한다. 릴리스가 윈도우 엔진 바이너리를 내지 않으므로 받을
+것이 애초에 없다 — WSL 안에서 앱을 띄우면 된다(위 데스크톱 앱 절의 윈도우 문단).
 
 ### 고른 디렉토리가 곧 워크디렉토리다
 
@@ -1342,11 +1355,12 @@ Go 를 찾는 자리는 `GOROOT` · `PATH` · Go 를 넣는 흔한 디렉토리�
 `tmux` 도 거치지 않으므로 **앱이 여는 세션에는 tmux 가 없다**(설계 문서
 [app-owned-sessions-design.md](app-owned-sessions-design.md) 2 단계).
 
-**그래도 지금은 tmux 를 넣어야 한다.** 세션이 아니라 목록 때문이다 — 대시보드가 3 초마다 부르는
-[`kyu list`](#kyu-list-path) 가 CLI 세션의 생존을 물으려고 세션 백엔드를 조립하고, tmux 가 없으면
-거기서 끝난다. 그 자리가 백엔드 없이 "이 머신에 CLI 세션이 없다" 로 답하게 하는 것은 남은
-작업이다(설계 문서 5.7). **세션 요구는 사라졌고 목록 요구가 남았다** — 둘을 뭉뚱그리지 않으려고
-[요구사항](#요구사항) 표도 그렇게 갈라 적었다.
+**목록 때문에 tmux 를 넣어야 하던 자리도 사라졌다.** 대시보드가 3 초마다 부르는
+[`kyu list`](#kyu-list-path) 는 CLI 세션의 생존을 물으려고 세션 백엔드를 조립하다가 tmux 가
+없으면 거기서 끝났었다. 이제는 백엔드가 없는 것을 실패가 아니라 "이 머신에 CLI 세션이 없다" 는
+답으로 받는다(설계 문서 5.7 · 8 절 5 번). **앱에 tmux 가 필요한 자리는 이것으로 하나도 남지
+않았다** — 그래도 [요구사항](#요구사항) 표를 갈라 적어 두는 것은 CLI 의 `kyu start` 에는 그대로
+필요하기 때문이다.
 
 터미널 안은 터미널 창에서 그 디렉토리로 가 `claude` 를 띄운 것과 똑같다 — 키 입력도, 색도,
 스크롤백도 그대로다. 창 크기를 바꾸면 세션의 화면이 따라 커지고, 그 신호는 이제 홉 없이 `claude`
