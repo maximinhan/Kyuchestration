@@ -363,3 +363,77 @@ func TestLabelsWithRecordedConversationStopsWhenTheRecordFileIsThereButUnreadabl
 		t.Fatal("LabelsWithRecordedConversation() 이 읽을 수 없는 기록 파일에서 성공했습니다")
 	}
 }
+
+func TestStartNewConversationReplacesTheRecordSoTheNextCallResumesTheNewOne(t *testing.T) {
+	// 화면의 "새 대화로 시작" 이 여기로 온다. 기록을 교체하지 않으면 다음에 카드를 누른 사용자가
+	// 방금 버린 대화로 되돌아간다.
+	workDirPath := t.TempDir()
+	recorded, err := AssignConversation(workDirPath, "proj-a")
+	if err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	fresh, err := StartNewConversation(workDirPath, "proj-a")
+	if err != nil {
+		t.Fatalf("StartNewConversation() 실패: %v", err)
+	}
+
+	if !fresh.IsNewConversation {
+		t.Error("IsNewConversation = false, 새로 시작한 대화이기를 기대")
+	}
+	if fresh.ConversationID == recorded.ConversationID {
+		t.Errorf("대화 ID = %q, 앞서 적혀 있던 것과 다르기를 기대", fresh.ConversationID)
+	}
+
+	next, err := AssignConversation(workDirPath, "proj-a")
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+	if next.ConversationID != fresh.ConversationID {
+		t.Errorf("다음 물음의 대화 ID = %q, 새로 시작한 %q 를 이어가기를 기대",
+			next.ConversationID, fresh.ConversationID)
+	}
+	if next.IsNewConversation {
+		t.Error("다음 물음의 IsNewConversation = true, 새로 시작한 대화를 이어가기를 기대")
+	}
+}
+
+func TestStartNewConversationLeavesTheOtherLabelsAlone(t *testing.T) {
+	// 한 세션을 새로 시작하는 것이 다른 세션의 대화를 끊을 이유가 없다.
+	workDirPath := t.TempDir()
+	mainConversation, err := AssignConversation(workDirPath, "main")
+	if err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	if _, err := AssignConversation(workDirPath, "proj-a"); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	if _, err := StartNewConversation(workDirPath, "proj-a"); err != nil {
+		t.Fatalf("StartNewConversation() 실패: %v", err)
+	}
+
+	record := readConversationsFileForTest(t, workDirPath)
+	if record.Conversations["main"] != mainConversation.ConversationID {
+		t.Errorf("파일의 main = %q, 앞서 적은 %q 가 그대로 남아 있기를 기대",
+			record.Conversations["main"], mainConversation.ConversationID)
+	}
+}
+
+func TestStartNewConversationWorksWhenNothingWasRecordedYet(t *testing.T) {
+	// 아직 아무 대화도 없는 라벨에 대해서도 답이 있어야 한다. 앱이 이 길을 고르는 자리는
+	// 카드와 끝난 세션의 머리말이고, 그 사이에 기록이 사라지는 길이 있다.
+	workDirPath := t.TempDir()
+
+	fresh, err := StartNewConversation(workDirPath, "main")
+	if err != nil {
+		t.Fatalf("StartNewConversation() 실패: %v", err)
+	}
+
+	if !fresh.IsNewConversation || fresh.ConversationID == "" {
+		t.Errorf("배정 = %+v, 새 대화 하나를 기대", fresh)
+	}
+	if readConversationsFileForTest(t, workDirPath).Conversations["main"] != fresh.ConversationID {
+		t.Error("새로 시작한 대화가 기록에 남지 않았습니다")
+	}
+}

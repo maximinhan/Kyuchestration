@@ -99,6 +99,36 @@ func AssignConversation(workDirPath, label string) (ConversationAssignment, erro
 			"대화 기록의 %s 항목이 비어 있어 새 대화를 엽니다: %s", label, conversationsFilePath(workDirPath)))
 	}
 
+	return recordNewConversation(workDirPath, label, recordedConversations, warnings)
+}
+
+// StartNewConversation 은 이 라벨에 적혀 있던 대화를 버리고 새 대화를 배정한다 — 화면의 "새 대화로 시작".
+//
+// 이어가기가 기본인 자리에 이 길이 따로 필요한 이유가 둘이다. 대화가 길어져 새로 시작하고 싶은
+// 것은 아주 흔한 요구이고(설계 문서 5.5.5 가가 대화 ID 를 유도하는 안을 기각한 이유가 그것이다),
+// 적혀 있는 대화를 더는 이어갈 수 없을 때 — 전사가 사라졌을 때 — 사용자가 빠져나오는 길이
+// 이것뿐이다(설계 문서 5.5.4).
+//
+// 버리는 것은 이 라벨 하나다. 한 세션을 새로 시작하는 것이 같은 워크디렉토리의 다른 세션이
+// 이어가던 대화를 끊을 이유가 없다.
+func StartNewConversation(workDirPath, label string) (ConversationAssignment, error) {
+	recordedConversations, warnings, err := readConversations(workDirPath)
+	if err != nil {
+		return ConversationAssignment{}, err
+	}
+	return recordNewConversation(workDirPath, label, recordedConversations, warnings)
+}
+
+// recordNewConversation 은 새 대화를 만들어 이 라벨의 자리에 적고, 그 배정을 돌려준다.
+//
+// 두 입구가 이 자리에서 만난다 — 기록이 없어 새로 만드는 길과, 있는 기록을 버리고 새로 만드는 길.
+// 만드는 것과 적는 것을 갈라둘 수 없다는 규율이 그 둘에 똑같이 걸리므로(설계 문서 5.5.3)
+// 한 함수에 둔다.
+func recordNewConversation(
+	workDirPath, label string,
+	recordedConversations map[string]string,
+	warnings []string,
+) (ConversationAssignment, error) {
 	newID := newConversationID()
 	recordedConversations[label] = newID
 	if err := writeConversations(workDirPath, recordedConversations); err != nil {

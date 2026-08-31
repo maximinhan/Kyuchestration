@@ -310,3 +310,45 @@ func TestSessionCommandTellsAboutADiscardedRecordOnStderr(t *testing.T) {
 		t.Errorf("stderr = %q, 버린 기록의 경로를 알리기를 기대", run.stderr)
 	}
 }
+
+func TestSessionCommandForgetsTheRecordedConversationWhenAsked(t *testing.T) {
+	// 화면의 "새 대화로 시작" 이 이 옵션으로 온다. 앱이 기록 파일을 직접 지우지 않는 것이
+	// 요점이다 — 기록의 자리와 모양은 엔진의 것이고, 두 곳이 그것을 알면 갈라진다(설계 원칙 11).
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	_, recordedID, _ := splitConversationFlagsForTest(t, runSessionCommandForTest(t, "alpha-commons").document.Command)
+
+	freshRun := runSessionCommandForTest(t, "alpha-commons", forgetConversationOptionName)
+
+	freshFlag, freshID, _ := splitConversationFlagsForTest(t, freshRun.document.Command)
+	if freshFlag != "--session-id" {
+		t.Errorf("대화 플래그 = %q, 버린 기록 뒤에는 새 대화를 기대", freshFlag)
+	}
+	if freshID == recordedID {
+		t.Errorf("대화 ID = %q, 적혀 있던 것과 다르기를 기대", freshID)
+	}
+
+	// 기록이 교체되어야 다음에 카드를 누른 사용자가 방금 버린 대화로 되돌아가지 않는다.
+	nextFlag, nextID, _ := splitConversationFlagsForTest(t, runSessionCommandForTest(t, "alpha-commons").document.Command)
+	if nextFlag != "--resume" || nextID != freshID {
+		t.Errorf("다음 물음 = %q %q, 새로 시작한 %q 를 이어가기를 기대", nextFlag, nextID, freshID)
+	}
+}
+
+func TestSessionCommandForgetsTheMainSessionConversationToo(t *testing.T) {
+	// 메인 세션도 대화를 하나 갖는다. 레포 세션에만 새로 시작할 길이 있으면, 조율용 세션의
+	// 대화가 길어졌을 때 사용자가 빠져나올 자리가 없다.
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	_, recordedID, _ := splitConversationFlagsForTest(t, runSessionCommandForTest(t).document.Command)
+
+	freshFlag, freshID, _ := splitConversationFlagsForTest(t,
+		runSessionCommandForTest(t, forgetConversationOptionName).document.Command)
+
+	if freshFlag != "--session-id" || freshID == recordedID {
+		t.Errorf("대화 플래그 = %q, ID = %q, 적혀 있던 %q 를 버린 새 대화를 기대", freshFlag, freshID, recordedID)
+	}
+}

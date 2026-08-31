@@ -36,6 +36,15 @@ const sessionIDFlagName = "--session-id"
 // 앱 안에서는 PTY 가 곧바로 닫히고, 그것을 가려내는 일은 3 단계가 맡는다(설계 문서 5.5.4).
 const resumeFlagName = "--resume"
 
+// forgetConversationOptionName 은 적혀 있는 대화를 버리고 새 대화로 답하라는 뜻이다 —
+// 화면의 "새 대화로 시작" 이 이 옵션으로 온다.
+//
+// 이름이 하는 일 쪽(기록을 잊는다)이지 바라는 것 쪽(새로 시작한다)이 아닌 이유는, 되돌릴 수
+// 없는 쪽이 그것이어서다. 앱에서 이 옵션이 붙는 순간 앞 대화를 가리키던 기록은 사라진다.
+//
+// kyu start 에는 없다. CLI 세션은 대화 ID 를 갖지 않으므로(설계 문서 5.5.5 다) 버릴 기록도 없다.
+const forgetConversationOptionName = "--forget-conversation"
+
 const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] --json
 
   kyu session-command --json            메인 세션이 실행할 것 (명령·cwd·더할 환경)
@@ -44,6 +53,7 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
 옵션:
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
+  --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
 
 이 명령은 --json 으로만 답한다 — 답이 사람이 읽고 무엇을 할 것이 아니라 앱이 실행할 것이다.
 사람이 세션을 띄우는 자리는 kyu start 다.`
@@ -73,10 +83,23 @@ func AnswerSessionCommand(out, errOut io.Writer, args []string) error {
 		return err
 	}
 
-	if request.repoName == "" {
+	if request.session.repoName == "" {
 		return answerForMainSession(out, errOut, location, repos, request)
 	}
 	return answerForRepoSession(out, errOut, location, repos, request)
+}
+
+// sessionCommandRequest 는 파싱이 끝난 kyu session-command 요청이다.
+//
+// 공용 sessionRequest 를 그대로 쓰지 않고 감싼다. --forget-conversation 은 이 명령에만 있는
+// 옵션이고, 공용 요청에 필드를 더하면 kyu start 의 파서가 영원히 채우지 않는 자리가 하나 생긴다 —
+// 그 자리를 읽는 사람은 "start 도 이 옵션을 받는다" 로 읽는다.
+type sessionCommandRequest struct {
+	// session 은 두 명령이 함께 쓰는 부분이다. 조립을 같은 함수에서 가져오려면 이 모양이어야 한다.
+	session sessionRequest
+
+	// forgetRecordedConversation 은 적혀 있는 대화를 버리고 새 대화로 답할지다.
+	forgetRecordedConversation bool
 }
 
 // parseSessionCommandArgs 는 인자를 세션 요청으로 옮긴다.
@@ -84,8 +107,8 @@ func AnswerSessionCommand(out, errOut io.Writer, args []string) error {
 // kyu start 의 파서를 그대로 부르지 않는다. 받는 옵션은 같지만 거절할 때 실을 사용법이 다르고
 // (여기에는 --json 이 필수다), 파싱은 갈라져도 어긋날 것이 없다 — 갈라지면 안 되는 것은
 // 조립 지식이고 그쪽은 두 명령이 같은 함수를 부른다(설계 문서 5.5.5 다의 마지막 문단).
-func parseSessionCommandArgs(args []string) (sessionRequest, error) {
-	var request sessionRequest
+func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
+	var request sessionCommandRequest
 	asJSON := false
 
 	for _, arg := range args {
@@ -94,70 +117,73 @@ func parseSessionCommandArgs(args []string) (sessionRequest, error) {
 			asJSON = true
 
 		case arg == repoClaudeMdOptionName:
-			request.loadRepoClaudeMd = true
+			request.session.loadRepoClaudeMd = true
 
 		case arg == bypassPermissionsOptionName:
-			request.bypassPermissions = true
+			request.session.bypassPermissions = true
+
+		case arg == forgetConversationOptionName:
+			request.forgetRecordedConversation = true
 
 		// 모르는 옵션을 레포 이름으로 흘려보내면 "없는 레포입니다: --typo" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
-			return sessionRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, sessionCommandUsageText)
+			return sessionCommandRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, sessionCommandUsageText)
 
-		case request.repoName != "":
-			return sessionRequest{}, fmt.Errorf("session-command 는 레포 이름 하나만 받습니다 (인자 %d 개를 받음)\n\n%s",
+		case request.session.repoName != "":
+			return sessionCommandRequest{}, fmt.Errorf("session-command 는 레포 이름 하나만 받습니다 (인자 %d 개를 받음)\n\n%s",
 				len(args), sessionCommandUsageText)
 
 		default:
-			request.repoName = arg
+			request.session.repoName = arg
 		}
 	}
 
 	// 레포 세션은 자기 디렉토리에서 뜨므로 그 레포의 CLAUDE.md 를 이미 읽는다 — kyu start 와 같은 규칙이다.
 	// 조용히 무시하면 앱은 무언가 켜졌다고 믿고, 그 믿음은 세션이 지침을 어길 때까지 드러나지 않는다.
-	if request.loadRepoClaudeMd && request.repoName != "" {
-		return sessionRequest{}, fmt.Errorf("%s 는 메인 세션 전용입니다 — 레포 세션은 자기 디렉토리의 CLAUDE.md 를 이미 읽습니다",
+	if request.session.loadRepoClaudeMd && request.session.repoName != "" {
+		return sessionCommandRequest{}, fmt.Errorf("%s 는 메인 세션 전용입니다 — 레포 세션은 자기 디렉토리의 CLAUDE.md 를 이미 읽습니다",
 			repoClaudeMdOptionName)
 	}
 
 	if !asJSON {
-		return sessionRequest{}, fmt.Errorf("session-command 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 사람이 세션을 띄우는 자리는 kyu start 입니다\n\n%s",
+		return sessionCommandRequest{}, fmt.Errorf("session-command 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 사람이 세션을 띄우는 자리는 kyu start 입니다\n\n%s",
 			machineJSONOptionName, sessionCommandUsageText)
 	}
 	return request, nil
 }
 
 // answerForMainSession 은 워크디렉토리 최상위에서 열 조율용 세션을 답한다(설계 문서 5.4).
-func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionRequest) error {
-	conversationFlags, err := conversationFlagsForLabel(errOut, location.absolutePath, mainRowLabel)
+func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
+	conversationFlags, err := conversationFlagsForLabel(errOut, location.absolutePath, mainRowLabel, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		mainSessionCommand(repos, request, conversationFlags),
+		mainSessionCommand(repos, request.session, conversationFlags),
 		location.absolutePath,
-		sessionEnvironment(request))
+		sessionEnvironment(request.session))
 }
 
 // answerForRepoSession 은 레포 디렉토리에서 열 작업용 세션을 답한다.
 //
 // 없는 레포는 여기서 끝난다 — 대화를 배정하기 전이다. 답할 수 없는 물음에 대화를 적어두면
 // 오타 하나가 다시는 쓰이지 않을 기록을 남기고, 사용자가 그것을 지울 이유를 알아낼 방법은 없다.
-func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionRequest) error {
-	repo, err := repoNamed(repos, request.repoName)
+func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
+	repo, err := repoNamed(repos, request.session.repoName)
 	if err != nil {
 		return err
 	}
 
-	conversationFlags, err := conversationFlagsForLabel(errOut, location.absolutePath, repo.Name)
+	conversationFlags, err := conversationFlagsForLabel(errOut, location.absolutePath, repo.Name, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		claudeCommand(request.bypassPermissions, conversationFlags),
+		claudeCommand(request.session.bypassPermissions, conversationFlags),
 		repo.AbsolutePath,
-		sessionEnvironment(request))
+		sessionEnvironment(request.session))
 }
 
 // conversationFlagsForLabel 은 이 라벨이 쓸 대화를 정해 claude 에게 가리키는 플래그로 옮긴다.
@@ -169,8 +195,12 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 // 대화 기록을 읽지 못한 것은 실패가 아니라 경고다. 앞선 대화를 잃을 뿐 새 대화는 열 수 있고,
 // 여기서 실패로 끝내면 사용자는 자기가 쓴 적도 없는 파일을 손으로 지우기 전까지 앱에서
 // 어떤 세션도 열지 못한다.
-func conversationFlagsForLabel(errOut io.Writer, workDirPath, label string) ([]string, error) {
-	assignment, err := workdir.AssignConversation(workDirPath, label)
+func conversationFlagsForLabel(
+	errOut io.Writer,
+	workDirPath, label string,
+	request sessionCommandRequest,
+) ([]string, error) {
+	assignment, err := assignConversation(workDirPath, label, request)
 	if err != nil {
 		return nil, err
 	}
@@ -185,4 +215,15 @@ func conversationFlagsForLabel(errOut io.Writer, workDirPath, label string) ([]s
 		return []string{sessionIDFlagName, assignment.ConversationID}, nil
 	}
 	return []string{resumeFlagName, assignment.ConversationID}, nil
+}
+
+// assignConversation 은 요청이 고른 길로 대화를 정한다 — 이어가기가 기본이고, 새로 시작이 선택이다.
+//
+// 기본이 이어가기인 것이 이 표면의 자세다. 앱이 카드를 누를 때마다 무엇을 골라야 하는 것이 아니라,
+// 고르지 않으면 대화가 이어진다(설계 문서 5.5.3).
+func assignConversation(workDirPath, label string, request sessionCommandRequest) (workdir.ConversationAssignment, error) {
+	if request.forgetRecordedConversation {
+		return workdir.StartNewConversation(workDirPath, label)
+	}
+	return workdir.AssignConversation(workDirPath, label)
 }
