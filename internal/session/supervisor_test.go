@@ -547,9 +547,12 @@ func TestConcurrentCreateOfTheSameNameLeavesExactlyOneSession(t *testing.T) {
 	const sessionName = "kyu-test-sv-concurrent"
 	const attempts = 4
 
-	// 바인딩이 곧 배타성이라는 주장을 실제로 겨뤄본다. tmux 는 has-session 으로 먼저 묻고
+	// 이름 잠금이 곧 배타성이라는 주장을 실제로 겨뤄본다. tmux 는 has-session 으로 먼저 묻고
 	// 만들었으므로 그 둘 사이에 틈이 있었는데, 여기서는 판정과 획득이 같은 한 번의
 	// 연산이라 그 틈이 없다(설계 문서 5.3·5.9).
+	//
+	// 성공한 Create 의 수를 세는 것이 곧 감독의 수를 세는 것이다. 이름을 빼앗긴 감독은 그 사실을
+	// 모른 채 자기 Create 에 성공을 알렸을 것이므로, 둘이 되면 이 숫자가 둘이 된다.
 	workingDirectories := make([]string, attempts)
 	for i := range workingDirectories {
 		workingDirectories[i] = t.TempDir()
@@ -735,40 +738,27 @@ func TestCreateRefusesAHeldSessionNameEvenWhileItsSocketStillRefusesConnections(
 	}
 }
 
-func TestConcurrentCreateOfTheSameNameStartsTheSessionCommandExactlyOnce(t *testing.T) {
+func TestRefusedCreateDoesNotStartTheSessionCommand(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-one-child"
-	const attempts = 4
+	const sessionName = "kyu-test-sv-refused-no-child"
 
-	// 감독이 둘이 되면 세션 안 프로그램도 둘이 뜬다. 목록은 소켓 하나만 보므로 그 사실을
-	// 드러내지 못한다 — 시도마다 작업 디렉토리를 갈라 두고, 흔적이 몇 개 남는지로 센다.
-	workingDirectories := make([]string, attempts)
-	for i := range workingDirectories {
-		workingDirectories[i] = t.TempDir()
+	const markerCommand = `printf started > started.txt; sleep 60`
+	if err := backend.Create(sessionName, t.TempDir(), []string{"sh", "-c", markerCommand}); err != nil {
+		t.Fatalf("첫 Create() 실패: %v", err)
 	}
 
-	results := make(chan error, attempts)
-	for i := range attempts {
-		go func() {
-			results <- backend.Create(sessionName, workingDirectories[i], []string{
-				"sh", "-c", `printf started > started.txt; sleep 60`,
-			})
-		}()
-	}
-	for range attempts {
-		if err := <-results; err != nil && !errors.Is(err, ErrSessionExists) {
-			t.Errorf("Create() = %v, nil 이거나 ErrSessionExists 여야 한다", err)
-		}
+	// 배타성 판정이 자식보다 먼저여야 한다. 순서가 뒤집히면 중복 생성이 세션 안 프로그램을
+	// 하나 띄웠다 죽이는 일이 된다(설계 문서 5.3) — claude 라면 사용자가 그 깜빡임을 본다.
+	//
+	// 거절당한 Create 가 돌아온 시점에는 그쪽 감독이 이미 끝나 있다. 그래서 이 확인에는
+	// 기다림이 필요 없다 — 흔적이 생길 것이었다면 이미 생겼다.
+	refusedWorkingDirectory := t.TempDir()
+	if err := backend.Create(sessionName, refusedWorkingDirectory, []string{"sh", "-c", markerCommand}); !errors.Is(err, ErrSessionExists) {
+		t.Fatalf("두 번째 Create() = %v, ErrSessionExists 여야 한다", err)
 	}
 
-	started := 0
-	for _, workingDirectory := range workingDirectories {
-		if _, err := os.Stat(filepath.Join(workingDirectory, "started.txt")); err == nil {
-			started++
-		}
-	}
-	if started != 1 {
-		t.Errorf("실행된 세션 명령 = %d 개, 정확히 1 개여야 한다", started)
+	if _, err := os.Stat(filepath.Join(refusedWorkingDirectory, "started.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("거절당한 Create() 의 작업 디렉토리에 흔적 stat = %v, 명령이 실행되면 안 된다", err)
 	}
 }
 
