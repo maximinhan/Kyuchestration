@@ -39,7 +39,7 @@ WorkDir-featureX/
 macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 — `brew install tmux` 또는
 `sudo apt install tmux`.
 
-**tmux 의존은 걷어낼 예정이다** — 세션을 `kyu` 자신의 데몬 위에 올리는 설계가 [session-daemon-design.md](session-daemon-design.md) 에 있다.
+**tmux 의존은 걷어낼 예정이다** — 세션마다 `kyu` 자신의 감독 프로세스를 하나 두는 설계가 [session-supervisor-design.md](session-supervisor-design.md) 에 있다.
 
 ## 설치
 
