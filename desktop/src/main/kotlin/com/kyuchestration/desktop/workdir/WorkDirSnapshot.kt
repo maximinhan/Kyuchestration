@@ -17,12 +17,16 @@ data class WorkDirSnapshot(
     val planWarnings: List<String>,
 ) {
     /**
-     * 지금 떠 있는 세션의 수. 메인 세션도 한 자리를 차지한다.
+     * `kyu start` 가 띄운 세션 중 지금 떠 있는 것의 수. 메인 세션도 한 자리를 차지한다.
+     *
+     * **앱이 보유한 세션은 여기 없다.** 앱 세션은 tmux 세션도 감독 세션도 아니라 엔진 눈에
+     * 보이지 않는다(설계 문서 5.4). 이름에 CLI 를 적어 두는 이유가 그것이다 — "떠 있는 세션의
+     * 수" 라고만 부르면 화면이 앱 세션을 빠뜨린 채로 전부라고 말하게 된다.
      *
      * 레포의 세션 생존은 따로 실려 오지 않는다 — 상태가 RUNNING 인 것이 곧 세션이 떠 있다는 뜻이다
      * (README 의 상태 표).
      */
-    val aliveSessionCount: Int =
+    val cliSessionCount: Int =
         repos.count { it.state == RepoState.Running } + if (mainSessionAlive) 1 else 0
 }
 

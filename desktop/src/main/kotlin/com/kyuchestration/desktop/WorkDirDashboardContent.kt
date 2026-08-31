@@ -25,7 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.kyuchestration.desktop.dashboard.CardSessionFacts
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.dashboard.mergeRepoCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.workdir.RepoSnapshot
@@ -36,6 +38,13 @@ import com.kyuchestration.desktop.workdir.WorkDirSnapshot
 @Composable
 fun WorkDirDashboardContent(
     observed: WorkDirDashboardState.WorkDirObserved,
+    /**
+     * 앱이 지금 보유 중인 세션의 대상. 엔진이 답한 목록 위에 얹는 앱 자신의 사실이다.
+     *
+     * 통로가 아니라 대상만 받는다. 목록이 세션을 읽거나 쓸 일은 없고, 통로를 넘기면 카드를
+     * 그리는 자리가 세션을 끝낼 수도 있는 자리가 된다.
+     */
+    heldSessionTargets: Set<SessionTarget>,
     initializationState: WorkDirInitializationState,
     onInitializeOpenedWorkDirRequested: () -> Unit,
     onCloneRepositoriesRequested: () -> Unit,
@@ -49,6 +58,7 @@ fun WorkDirDashboardContent(
     ) {
         WorkDirHeader(
             snapshot = observed.snapshot,
+            appSessionCount = heldSessionTargets.size,
             onCloneRepositoriesRequested = onCloneRepositoriesRequested,
             onRefreshRequested = onRefreshRequested,
             onCloseWorkDirRequested = onCloseWorkDirRequested,
@@ -76,7 +86,11 @@ fun WorkDirDashboardContent(
             )
         }
 
-        RepoCardList(observed.snapshot, onEnterSessionRequested)
+        if (heldSessionTargets.isNotEmpty()) {
+            AppSessionBanner(heldSessionTargets.size)
+        }
+
+        RepoCardList(observed.snapshot, heldSessionTargets, onEnterSessionRequested)
     }
 }
 
@@ -120,9 +134,32 @@ private fun PlanFileMissingBanner(
     }
 }
 
+/**
+ * 앱 세션이 CLI 와 갈린다는 사실을 화면이 먼저 말하는 자리(설계 원칙 12).
+ *
+ * 감추면 사용자는 터미널에서 `kyu list` 를 쳤을 때, 또는 `kyu kill` 이 듣지 않을 때 그것을 알게
+ * 된다. 그때는 이미 "앱이 고장났다" 로 읽힌다.
+ *
+ * 보유한 세션이 하나라도 있을 때만 뜬다. 없는 사람에게는 아직 일어나지 않은 일이다.
+ */
+@Composable
+private fun AppSessionBanner(appSessionCount: Int) {
+    NoticeBanner(
+        accentColor = APP_SESSION_COLOR,
+        title = "앱 세션 ${appSessionCount}개는 이 앱 안에서만 삽니다",
+        lines = listOf(
+            "터미널에서 kyu list 를 쳐도 이 세션들은 보이지 않고, kyu kill 로 끝낼 수 없습니다. " +
+                "끝내는 길은 터미널의 세션 끝내기 버튼이나 앱 종료입니다.",
+            "앱을 끄면 함께 끝납니다. 잃는 것은 진행 중이던 턴이고, 다음에 카드를 누르면 " +
+                "그 대화를 이어서 새 세션을 엽니다.",
+        ),
+    )
+}
+
 @Composable
 private fun WorkDirHeader(
     snapshot: WorkDirSnapshot,
+    appSessionCount: Int,
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
@@ -136,8 +173,11 @@ private fun WorkDirHeader(
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // 두 수를 갈라 센다. 합쳐 놓으면 "세션 3 개" 중 어느 것을 이 앱이 끝낼 수 있는지
+            // 화면이 말하지 않게 된다.
             Text(
-                text = "레포 ${snapshot.repos.size}개 · 세션 ${snapshot.aliveSessionCount}개 떠 있음",
+                text = "레포 ${snapshot.repos.size}개 · 앱 세션 ${appSessionCount}개 · " +
+                    "CLI 세션 ${snapshot.cliSessionCount}개",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -159,7 +199,11 @@ private fun WorkDirHeader(
 }
 
 @Composable
-private fun RepoCardList(snapshot: WorkDirSnapshot, onEnterSessionRequested: (SessionTarget) -> Unit) {
+private fun RepoCardList(
+    snapshot: WorkDirSnapshot,
+    heldSessionTargets: Set<SessionTarget>,
+    onEnterSessionRequested: (SessionTarget) -> Unit,
+) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (snapshot.repos.isEmpty()) {
             item {
@@ -174,11 +218,24 @@ private fun RepoCardList(snapshot: WorkDirSnapshot, onEnterSessionRequested: (Se
         // 절대경로를 키로 쓴다. 이름은 워크디렉토리 안에서만 유일하고, 경로가 그 레포의 진짜
         // 신원이다(설계 문서 11 의 4번).
         items(snapshot.repos, key = { it.absolutePath }) { repo ->
-            RepoCard(repo) { onEnterSessionRequested(SessionTarget.Repo(repo.name)) }
+            RepoCard(
+                repo = repo,
+                sessionFacts = mergeRepoCardSessionFacts(
+                    engineReportedState = repo.state,
+                    appSessionHeld = SessionTarget.Repo(repo.name) in heldSessionTargets,
+                ),
+            ) { onEnterSessionRequested(SessionTarget.Repo(repo.name)) }
         }
 
         item {
-            MainSessionRow(snapshot.mainSessionAlive) { onEnterSessionRequested(SessionTarget.Main) }
+            MainSessionRow(
+                // 메인 세션은 git 상태가 없다 — 워크디렉토리 최상위는 레포가 아니다.
+                sessionFacts = CardSessionFacts(
+                    appSessionHeld = SessionTarget.Main in heldSessionTargets,
+                    cliSessionRunning = snapshot.mainSessionAlive,
+                    gitState = null,
+                ),
+            ) { onEnterSessionRequested(SessionTarget.Main) }
         }
     }
 }
@@ -190,14 +247,18 @@ private fun RepoCardList(snapshot: WorkDirSnapshot, onEnterSessionRequested: (Se
  * 뜻이 갈릴 여지가 없고, 버튼을 두면 카드의 나머지 자리가 눌러도 아무 일이 없는 죽은 면이 된다.
  */
 @Composable
-private fun RepoCard(repo: RepoSnapshot, onEnterSessionRequested: () -> Unit) {
+private fun RepoCard(
+    repo: RepoSnapshot,
+    sessionFacts: CardSessionFacts,
+    onEnterSessionRequested: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEnterSessionRequested)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RepoStateChip(repo.state)
+                SessionChips(sessionFacts)
                 Spacer(Modifier.width(12.dp))
                 Text(repo.name, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.weight(1f))
@@ -221,8 +282,47 @@ private fun RepoCard(repo: RepoSnapshot, onEnterSessionRequested: () -> Unit) {
                     MaterialTheme.colorScheme.onSurface
                 },
             )
+
+            if (sessionFacts.cliSessionRunning) {
+                CliSessionNotice()
+            }
         }
     }
+}
+
+/**
+ * 카드가 두 종류의 세션을 갈라 보여준다(설계 문서 5.4.2).
+ *
+ * 앱 세션과 CLI 세션이 함께 뜰 수 있다. 그 레포에 `claude` 가 둘 돌고 있다는 뜻이고, 그것을
+ * 한 칩으로 뭉치면 사용자는 자기가 만든 것이 몇 개인지 알 수 없다.
+ */
+@Composable
+private fun SessionChips(sessionFacts: CardSessionFacts) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (sessionFacts.appSessionHeld) {
+            SessionChip("앱 세션", APP_SESSION_COLOR)
+        }
+        if (sessionFacts.cliSessionRunning) {
+            SessionChip("CLI 세션", CLI_SESSION_COLOR)
+        }
+        sessionFacts.gitState?.let { SessionChip(it.rawValue, it.chipColor) }
+    }
+}
+
+/**
+ * 앱이 붙을 수 없는 세션이라는 사실을 카드가 먼저 말한다.
+ *
+ * 막지 않고 알린다(설계 문서 5.4.2). 막으면 이 카드에서 사용자가 할 수 있는 일이 아예 없어지고
+ * (앱은 CLI 세션에 붙을 수도 죽일 수도 없다), 같은 레포에 `claude` 를 둘 띄우는 것 자체는
+ * 사용자가 실제로 원할 수 있는 일이다.
+ */
+@Composable
+private fun CliSessionNotice() {
+    Text(
+        text = "CLI 세션이 떠 있습니다 — 앱은 여기에 붙지 못합니다. 누르면 앱이 보유하는 새 세션이 열립니다.",
+        style = MaterialTheme.typography.bodySmall,
+        color = CLI_SESSION_COLOR,
+    )
 }
 
 /**
@@ -237,8 +337,7 @@ private fun taskLabel(task: RepoTask): String {
 }
 
 @Composable
-private fun RepoStateChip(state: RepoState) {
-    val color = state.chipColor
+private fun SessionChip(label: String, color: Color) {
     Row(
         modifier = Modifier
             .background(color.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
@@ -248,7 +347,7 @@ private fun RepoStateChip(state: RepoState) {
         Text("●", color = color, style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.width(6.dp))
         Text(
-            text = state.rawValue,
+            text = label,
             color = color,
             style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace,
@@ -257,27 +356,35 @@ private fun RepoStateChip(state: RepoState) {
 }
 
 @Composable
-private fun MainSessionRow(mainSessionAlive: Boolean, onEnterSessionRequested: () -> Unit) {
-    Row(
+private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequested: () -> Unit) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onEnterSessionRequested)
             .padding(top = 8.dp, start = 4.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // 사람용 목록과 같은 기호를 쓴다 — ● 는 세션이 떠 있고 ○ 는 없다.
-        Text(
-            text = if (mainSessionAlive) "●" else "○",
-            color = if (mainSessionAlive) RepoState.Running.chipColor else RepoState.Idle.chipColor,
-        )
-        Spacer(Modifier.width(10.dp))
-        Text("main", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = if (mainSessionAlive) "워크디렉토리 세션이 떠 있습니다" else "워크디렉토리 세션 없음",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SessionChips(sessionFacts)
+            if (sessionFacts.appSessionHeld || sessionFacts.cliSessionRunning) {
+                Spacer(Modifier.width(10.dp))
+            }
+            Text("main", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = if (sessionFacts.appSessionHeld || sessionFacts.cliSessionRunning) {
+                    "워크디렉토리 세션이 떠 있습니다"
+                } else {
+                    "워크디렉토리 세션 없음"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (sessionFacts.cliSessionRunning) {
+            CliSessionNotice()
+        }
     }
 }
 
@@ -315,7 +422,9 @@ private fun NoticeBanner(
  */
 private val RepoState.chipColor: Color
     get() = when (this) {
-        RepoState.Running -> Color(0xFF2E7D32)
+        // 엔진의 RUNNING 은 카드에서 CLI 세션 칩이 되므로 이 자리에 오지 않는다. when 이 값을
+        // 남김없이 덮어야 해서 남겨 두고, 색은 CLI 세션과 같게 둔다.
+        RepoState.Running -> CLI_SESSION_COLOR
         RepoState.Dirty -> Color(0xFFE65100)
         RepoState.Ahead -> Color(0xFF1565C0)
         RepoState.Idle -> NEUTRAL_COLOR
@@ -323,6 +432,16 @@ private val RepoState.chipColor: Color
     }
 
 private val NEUTRAL_COLOR = Color(0xFF6B6B6B)
+
+/**
+ * 두 세션의 색을 갈라 둔다.
+ *
+ * 앱 세션은 예전의 RUNNING 이 쓰던 초록을 그대로 이어받는다 — 사용자가 앱에서 여는 세션이
+ * 그쪽이라 눈이 기대하는 자리가 같다. CLI 세션은 앱이 손댈 수 없는 것이라 다른 계열로 둬서,
+ * 낱말을 읽기 전에 "이건 내 것이 아니다" 가 먼저 보이게 한다.
+ */
+private val APP_SESSION_COLOR = Color(0xFF2E7D32)
+private val CLI_SESSION_COLOR = Color(0xFF6A1B9A)
 private val PLAN_WARNING_COLOR = Color(0xFFB26A00)
 private val REFRESH_FAILURE_COLOR = Color(0xFFB3261E)
 

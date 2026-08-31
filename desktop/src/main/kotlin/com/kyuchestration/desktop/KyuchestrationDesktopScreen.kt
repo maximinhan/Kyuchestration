@@ -108,6 +108,7 @@ fun KyuchestrationDesktopScreen(
                     is WorkDirDashboardState.WorkDirObserved -> {
                         DashboardWithTerminal(
                             observed = dashboardState,
+                            heldSessionTargets = heldSessions.map { it.target }.toSet(),
                             initializationState = initializationState,
                             terminalState = terminalState,
                             heldSessionTerminalWidgets = heldSessionTerminalWidgets,
@@ -146,6 +147,7 @@ fun KyuchestrationDesktopScreen(
 @Composable
 private fun DashboardWithTerminal(
     observed: WorkDirDashboardState.WorkDirObserved,
+    heldSessionTargets: Set<SessionTarget>,
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
     heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
@@ -160,6 +162,7 @@ private fun DashboardWithTerminal(
         Box(modifier = Modifier.weight(DASHBOARD_HEIGHT_WEIGHT)) {
             WorkDirDashboardContent(
                 observed = observed,
+                heldSessionTargets = heldSessionTargets,
                 initializationState = initializationState,
                 onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                 onCloneRepositoriesRequested = onCloneRepositoriesRequested,

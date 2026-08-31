@@ -64,7 +64,7 @@ class KyuCliWorkDirObserverIntegrationTest {
         assertEquals(1, projectB.doneTaskCount)
         assertEquals(2, projectB.totalTaskCount)
 
-        assertEquals(0, snapshot.aliveSessionCount)
+        assertEquals(0, snapshot.cliSessionCount)
         assertTrue(!snapshot.mainSessionAlive)
     }
 
