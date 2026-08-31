@@ -39,7 +39,9 @@ WorkDir-featureX/
 macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 — `brew install tmux` 또는
 `sudo apt install tmux`.
 
-**tmux 의존은 걷어낼 예정이다** — 세션마다 `kyu` 자신의 감독 프로세스를 하나 두는 설계가 [session-supervisor-design.md](session-supervisor-design.md) 에 있다.
+**tmux 의존은 걷어낼 예정이다** — 세션마다 `kyu` 자신의 감독 프로세스를 하나 두는 설계가 [session-supervisor-design.md](session-supervisor-design.md) 에 있다(1~3 단계 구현 완료, 3.5 단계 앞에서 중단).
+
+**데스크톱 앱의 tmux 의존은 먼저 사라진다** — 앱이 `kyu attach` 를 거치지 않고 자기 PTY 에서 `claude` 를 직접 띄우는 설계가 [app-owned-sessions-design.md](app-owned-sessions-design.md) 에 있다. 위 표는 그 구현이 끝난 뒤에 고친다.
 
 ## 설치
 
