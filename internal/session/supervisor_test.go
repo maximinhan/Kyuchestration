@@ -28,6 +28,22 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+
+	// 같은 이유로 raw 모드 클라이언트 호출도 받아준다. 이쪽은 진짜 PTY 안에서 돌아야 하므로
+	// 시험이 이 바이너리를 자식으로 띄운다(supervisor_attach_client_test.go).
+	if len(os.Args) > 2 && os.Args[1] == attachClientTestCommand {
+		backend, err := NewSupervisorBackend()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := backend.Attach(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	os.Exit(m.Run())
 }
 
@@ -624,23 +640,6 @@ func TestProbingALiveSupervisorIsNotRecordedAsAFailure(t *testing.T) {
 	// 기록은 세션 하나의 일생 몇 줄이라, 무엇이 잘못됐는지 찾는 사람이 읽는 곳이다.
 	if strings.Contains(string(recorded), "제어 요청 해석 실패") {
 		t.Errorf("세션 기록 = %q, 탐지 연결이 실패로 남아 있다", recorded)
-	}
-}
-
-func TestSupervisorBackendAttachSaysItIsNotThereYetAndPointsAtTheFallback(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-attach"
-
-	// 진입은 프레임 프로토콜과 스크롤백을 함께 요구하는 다음 단계의 일이다. 그때까지 이 자리는
-	// 조용히 실패하지 않고, 세션을 잃지 않은 채 돌아갈 길을 함께 말해야 한다.
-	err := backend.Attach(sessionName)
-	if err == nil {
-		t.Fatalf("Attach() = nil, 아직 지원하지 않는다고 답해야 한다")
-	}
-	for _, expected := range []string{sessionName, BackendSelectionEnvName, TmuxBackendName} {
-		if !strings.Contains(err.Error(), expected) {
-			t.Errorf("Attach() 에러 = %q, %q 를 포함하기를 기대", err, expected)
-		}
 	}
 }
 

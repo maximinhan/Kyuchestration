@@ -125,17 +125,6 @@ func (b *SupervisorBackend) Create(name, cwd string, cmd []string) error {
 	return awaitReadySignal(readyReader, name, paths.log)
 }
 
-// Attach 는 호출한 터미널을 해당 세션에 연결한다.
-//
-// 아직 없다. attach 는 프레임 프로토콜·스크롤백 재생·raw 모드 클라이언트·SIGWINCH 핸들러를
-// 함께 요구하고, 그것은 설계 문서 9절의 2 단계다. 그때까지 이 자리는 "안 된다" 를 분명히 말하고
-// 돌아갈 자리를 함께 일러준다 — 세션을 띄우고 목록에서 보는 것까지는 지금도 되므로, 붙는 일만
-// tmux 백엔드로 하면 된다.
-func (b *SupervisorBackend) Attach(name string) error {
-	return fmt.Errorf("감독 백엔드는 아직 세션 진입을 지원하지 않습니다 (세션 %s)\n지금 진입하려면 %s=%s 로 실행하세요",
-		name, BackendSelectionEnvName, TmuxBackendName)
-}
-
 // supervisorDetachKey 는 감독 세션에서 빠져나오는 키다.
 //
 // Ctrl-\ 를 고른 이유(설계 문서 5.8): 대화형 프로그램이 거의 쓰지 않고, 세션마다 프로세스
