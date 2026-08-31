@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.kyu
 
+import com.kyuchestration.desktop.platform.childProcessEnvironment
 import com.kyuchestration.desktop.platform.runningOnMac
 import java.io.File
 import java.nio.file.Path
@@ -36,6 +37,10 @@ import kotlin.io.path.isRegularFile
  * 세 자리가 함께 쓴다 — 실행기(ProcessKyuCommandRunner) · 세션 진입 어댑터(kyu attach) ·
  * 설치 화면의 "다시 찾기". 각자 찾게 두면 찾는 자리가 한쪽에서만 느는 날이 온다.
  *
+ * PATH 는 이 앱이 물려받은 것이 아니라 자식에게 물려줄 것을 본다(ChildProcessEnvironment).
+ * 찾는 자리와 부르는 자리가 다른 PATH 를 보면, Finder 로 띄운 맥 앱에서 "찾을 때는 보였는데
+ * 부를 때는 없는" kyu 가 생긴다.
+ *
  * @param lookUpEnvironmentVariable 환경 변수를 읽는 자리. 검사가 진짜 PATH 를 건드리지 않고
  *   순서를 확인하기 위한 이음매다.
  * @param bundledEngineCopyPath 앱에 동봉된 엔진을 복사해 둔 자리.
@@ -43,7 +48,7 @@ import kotlin.io.path.isRegularFile
  * @param isExecutableFile 그 자리에 실행 가능한 파일이 있는지 답하는 자리.
  */
 internal fun findKyuExecutable(
-    lookUpEnvironmentVariable: (String) -> String? = System::getenv,
+    lookUpEnvironmentVariable: (String) -> String? = childProcessEnvironment::get,
     bundledEngineCopyPath: Path = bundledEngineCopyPath(),
     managedEngineExecutablePath: Path = managedEngineExecutablePath(),
     isExecutableFile: (Path) -> Boolean = ::isExecutableRegularFile,
