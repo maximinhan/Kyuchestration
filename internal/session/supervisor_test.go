@@ -124,162 +124,6 @@ func waitUntil(t *testing.T, description string, condition func() bool) {
 	t.Fatalf("%s — 5초 안에 이뤄지지 않았습니다", description)
 }
 
-func TestSupervisorBackendCreateMakesSessionAliveAndKillEndsIt(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-lifecycle"
-
-	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
-		t.Fatalf("Create() 실패: %v", err)
-	}
-
-	alive, err := backend.IsAlive(sessionName)
-	if err != nil {
-		t.Fatalf("IsAlive() 실패: %v", err)
-	}
-	if !alive {
-		t.Fatalf("Create() 직후 IsAlive() = false, 세션이 살아있어야 한다")
-	}
-
-	if err := backend.Kill(sessionName); err != nil {
-		t.Fatalf("Kill() 실패: %v", err)
-	}
-
-	alive, err = backend.IsAlive(sessionName)
-	if err != nil {
-		t.Fatalf("Kill() 후 IsAlive() 실패: %v", err)
-	}
-	if alive {
-		t.Errorf("Kill() 후 IsAlive() = true, 세션이 종료되어야 한다")
-	}
-
-	// 정상 종료 경로가 소켓을 지운다. 그래야 죽은 소켓이 비정상 종료에서만 남는다(설계 문서 5.3).
-	if _, err := os.Stat(socketPathFor(t, sessionName)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("Kill() 후 소켓 파일 stat = %v, 파일이 사라져 있어야 한다", err)
-	}
-}
-
-func TestSupervisorBackendCreateRejectsDuplicateName(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-duplicate"
-
-	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
-		t.Fatalf("첫 Create() 실패: %v", err)
-	}
-
-	// 이름 잠금 획득 실패가 곧 중복 판정이다 — 판정과 획득이 같은 한 번의 연산이라
-	// 그 사이에 낄 틈이 없다(설계 문서 5.3).
-	err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"})
-	if !errors.Is(err, ErrSessionExists) {
-		t.Errorf("같은 이름으로 Create() 시 err = %v, ErrSessionExists 여야 한다", err)
-	}
-}
-
-func TestSupervisorBackendCreateRunsCommandInGivenDirectory(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-cwd"
-
-	workingDirectory := t.TempDir()
-	if err := backend.Create(sessionName, workingDirectory, []string{"sh", "-c", "pwd > pwd.txt; sleep 60"}); err != nil {
-		t.Fatalf("Create() 실패: %v", err)
-	}
-
-	got := waitForFileContent(t, filepath.Join(workingDirectory, "pwd.txt"))
-
-	// macOS 는 /var 가 /private/var 심볼릭 링크라 t.TempDir() 과 pwd 결과의 표기가 다르다.
-	want, err := filepath.EvalSymlinks(workingDirectory)
-	if err != nil {
-		t.Fatalf("작업 디렉토리 심볼릭 링크 해석 실패: %v", err)
-	}
-	if got != want {
-		t.Errorf("세션의 cwd = %q, want %q", got, want)
-	}
-}
-
-func TestSupervisorBackendCreatePreservesCommandArgumentBoundaries(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-argv"
-
-	workingDirectory := t.TempDir()
-
-	// 인자는 __supervise 의 `--` 뒤에 그대로 실려 감독에게 건너간다. 셸을 거치지 않으므로
-	// 공백 든 경로도 `;` 도 한 인자로 남아야 한다 — kyu start 가 넘기는 것이 그런 인자다.
-	if err := backend.Create(sessionName, workingDirectory, []string{
-		"sh", "-c", `printf "[%s]" "$@" > argv.txt; sleep 60`, "_", "a b", "c;d",
-	}); err != nil {
-		t.Fatalf("Create() 실패: %v", err)
-	}
-
-	got := waitForFileContent(t, filepath.Join(workingDirectory, "argv.txt"))
-	const want = "[a b][c;d]"
-	if got != want {
-		t.Errorf("세션에 전달된 인자 = %q, want %q", got, want)
-	}
-}
-
-func TestSupervisorBackendCreateMarksTheSessionForNestedDetection(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-marker"
-
-	workingDirectory := t.TempDir()
-
-	// tmux 가 TMUX 를 심는 자리다(tmux.go:18). 세션 안에서 도는 모든 프로세스가 물려받아야
-	// 그 안에서 부른 kyu 가 자기가 세션 안에 있음을 안다(설계 문서 5.3).
-	if err := backend.Create(sessionName, workingDirectory, []string{
-		"sh", "-c", `printf "%s" "$KYU_SESSION" > marker.txt; sleep 60`,
-	}); err != nil {
-		t.Fatalf("Create() 실패: %v", err)
-	}
-
-	got := waitForFileContent(t, filepath.Join(workingDirectory, "marker.txt"))
-	if got != sessionName {
-		t.Errorf("세션 안의 %s = %q, want %q", insideSupervisorSessionEnvName, got, sessionName)
-	}
-}
-
-func TestSupervisorBackendCreateGivesTheSessionATerminal(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-tty"
-
-	workingDirectory := t.TempDir()
-
-	// PTY 를 쥔 감독이 있어야 세션 안 프로그램이 자기 표준 입출력을 터미널로 본다. isatty 가
-	// 거짓이 되는 순간 그 프로그램은 화면 그리기를 포기한다(설계 문서 3.6).
-	if err := backend.Create(sessionName, workingDirectory, []string{
-		"sh", "-c", `if [ -t 0 ] && [ -t 1 ]; then printf tty > tty.txt; else printf notty > tty.txt; fi; sleep 60`,
-	}); err != nil {
-		t.Fatalf("Create() 실패: %v", err)
-	}
-
-	if got := waitForFileContent(t, filepath.Join(workingDirectory, "tty.txt")); got != "tty" {
-		t.Errorf("세션 안에서 본 표준 입출력 = %q, want %q", got, "tty")
-	}
-}
-
-func TestSupervisorBackendCreateReportsMissingWorkingDirectory(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-nocwd"
-
-	missingDirectory := filepath.Join(t.TempDir(), "없는-디렉토리")
-
-	// 준비 파이프가 있어 부모가 "왜 안 떴는지" 를 안다. 폴링이었다면 "소켓이 아직 안 받는다"
-	// 까지밖에 알 수 없었을 자리다(설계 문서 5.3).
-	err := backend.Create(sessionName, missingDirectory, []string{"sleep", "60"})
-	if err == nil {
-		t.Fatalf("없는 디렉토리로 Create() 가 성공했다")
-	}
-	if errors.Is(err, ErrSessionExists) {
-		t.Errorf("err = %v, 중복이 아니라 작업 디렉토리 문제로 끝나야 한다", err)
-	}
-	if !strings.Contains(err.Error(), missingDirectory) {
-		t.Errorf("err = %q, 없는 디렉토리 경로를 포함하기를 기대", err)
-	}
-
-	// 자식을 못 띄운 이름은 죽은 소켓을 남기지 않아야 한다.
-	if _, statErr := os.Stat(socketPathFor(t, sessionName)); !errors.Is(statErr, os.ErrNotExist) {
-		t.Errorf("실패한 Create() 뒤 소켓 파일 stat = %v, 남아 있으면 안 된다", statErr)
-	}
-}
-
 func TestSupervisorBackendSocketIsReadableOnlyByItsOwner(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
 	const sessionName = "kyu-test-sv-perm"
@@ -298,7 +142,13 @@ func TestSupervisorBackendSocketIsReadableOnlyByItsOwner(t *testing.T) {
 	}
 }
 
-func TestSupervisorBackendSessionEndsWhenItsCommandEnds(t *testing.T) {
+// 세션이 끝나면 소켓 파일도 사라진다.
+//
+// 세션이 죽었다는 사실 자체는 매트릭스가 두 백엔드에 함께 묻는다(backend_parity_test.go).
+// 여기서 보는 것은 감독만의 뒷정리다 — 정상 종료 경로가 자기 소켓을 지워야 남아 있는 죽은
+// 소켓이 "비정상 종료" 하나만 뜻하게 된다(설계 문서 5.3). 이 규칙이 깨지면 재사용 경로가
+// 살아있는 감독의 소켓과 죽은 감독이 남긴 파일을 구별할 근거를 잃는다.
+func TestSupervisorRemovesItsSocketWhenTheSessionCommandEnds(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
 	const sessionName = "kyu-test-sv-natural-exit"
 
@@ -307,132 +157,68 @@ func TestSupervisorBackendSessionEndsWhenItsCommandEnds(t *testing.T) {
 		t.Fatalf("Create() 실패: %v", err)
 	}
 
-	waitUntil(t, "명령이 끝난 세션이 목록에서 사라지기", func() bool {
-		alive, err := backend.IsAlive(sessionName)
-		return err == nil && !alive
+	waitUntil(t, "명령이 끝난 세션의 소켓 파일이 사라지기", func() bool {
+		_, err := os.Stat(socketPathFor(t, sessionName))
+		return errors.Is(err, os.ErrNotExist)
 	})
-
-	if _, err := os.Stat(socketPathFor(t, sessionName)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("자연사 후 소켓 파일 stat = %v, 파일이 사라져 있어야 한다", err)
-	}
 }
 
-func TestSupervisorBackendKillIsIdempotent(t *testing.T) {
+func TestSupervisorRemovesItsSocketWhenKillEndsTheSession(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
-	const sessionName = "kyu-test-sv-idempotent-kill"
-
-	if err := backend.Kill(sessionName); err != nil {
-		t.Errorf("세션을 만든 적 없을 때 Kill() = %v, nil 이어야 한다", err)
-	}
+	const sessionName = "kyu-test-sv-kill-socket"
 
 	if err := backend.Create(sessionName, t.TempDir(), []string{"sleep", "60"}); err != nil {
 		t.Fatalf("Create() 실패: %v", err)
 	}
 	if err := backend.Kill(sessionName); err != nil {
-		t.Fatalf("첫 Kill() 실패: %v", err)
+		t.Fatalf("Kill() 실패: %v", err)
 	}
-	if err := backend.Kill(sessionName); err != nil {
-		t.Errorf("두 번째 Kill() = %v, 멱등해야 하므로 nil 이어야 한다", err)
+
+	// Kill 은 감독이 답한 뒤에 돌아오므로 여기서는 기다리지 않는다.
+	if _, err := os.Stat(socketPathFor(t, sessionName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Kill() 후 소켓 파일 stat = %v, 파일이 사라져 있어야 한다", err)
 	}
 }
 
-func TestSupervisorBackendIsAliveIsFalseWhenNothingWasEverCreated(t *testing.T) {
+// 죽은 감독이 남긴 소켓 앞에서도 IsAlive 는 판정으로 답한다.
+//
+// 조율 계층은 IsAlive 의 에러를 판정 불가로 보고 그대로 올린다(internal/workdir/state.go:59) —
+// 그 자리에서 에러가 나면 `kyu list` 는 한 줄도 찍지 못한다. tmux 백엔드에서는 이런 흔적이
+// 남을 수 없어(서버가 죽으면 세션도 함께 사라진다) 이 위험은 감독 쪽에만 있고, macOS 폴백
+// 경로에서는 재부팅도 이 파일을 치우지 않아 드문 경우도 아니다(설계 문서 5.2).
+//
+// 매트릭스가 "세션이 없으면 false" 를 두 백엔드에 묻는 것과 같은 성질을, 감독에게만 있는
+// 상태에서 한 번 더 묻는 셈이다.
+func TestSupervisorIsAliveAnswersFalseForTheSocketLeftByAKilledSupervisor(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
+	const sessionName = "kyu-test-sv-dead-socket-alive"
 
-	// 세션 디렉토리조차 없는 상태다. 그것이 세션 0 개의 정상적인 표현이므로 오류가 아니다.
-	alive, err := backend.IsAlive("kyu-test-sv-absent")
+	supervisorPid := createSessionRecordingItsSupervisorPid(t, backend, sessionName)
+	if err := syscall.Kill(supervisorPid, syscall.SIGKILL); err != nil {
+		t.Fatalf("감독(pid %d) SIGKILL 실패: %v", supervisorPid, err)
+	}
+
+	// IsAlive 로 기다리지 않는다 — 그것이 지금 시험하려는 것이라, 그것으로 기다리면 실패가
+	// 5 초 뒤의 시간 초과로만 드러나고 무엇이 잘못됐는지는 가려진다.
+	waitUntil(t, "SIGKILL 한 감독의 소켓이 연결을 거절하기", func() bool {
+		connection, err := net.DialTimeout("unix", socketPathFor(t, sessionName), socketProbeTimeout)
+		if err != nil {
+			return true
+		}
+		connection.Close()
+		return false
+	})
+
+	if _, err := os.Stat(socketPathFor(t, sessionName)); err != nil {
+		t.Fatalf("죽은 소켓 파일 stat = %v, 파일은 그 자리에 남아 있어야 한다", err)
+	}
+
+	alive, err := backend.IsAlive(sessionName)
 	if err != nil {
-		t.Fatalf("소켓이 없을 때 IsAlive() 가 에러를 반환했다: %v", err)
+		t.Fatalf("죽은 소켓 앞에서 IsAlive() 가 에러를 반환했다: %v", err)
 	}
 	if alive {
-		t.Errorf("IsAlive() = true, 소켓이 없으면 false 여야 한다")
-	}
-}
-
-func TestSupervisorBackendIsAliveRequiresExactName(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-
-	// 세션 이름은 kyu-<workdir>-<repo> 라 서로 접두사 관계가 되기 쉽다. tmux 는 -t 가 접두사
-	// 매칭이라 = 를 붙여 막았는데, 소켓 이름은 파일 이름이라 그 위험이 애초에 없다는 것을 고정한다.
-	if err := backend.Create("kyu-test-sv-exact-suffix", t.TempDir(), []string{"sleep", "60"}); err != nil {
-		t.Fatalf("Create() 실패: %v", err)
-	}
-
-	alive, err := backend.IsAlive("kyu-test-sv-exact")
-	if err != nil {
-		t.Fatalf("IsAlive() 실패: %v", err)
-	}
-	if alive {
-		t.Errorf(`IsAlive("kyu-test-sv-exact") = true, 접두사가 일치할 뿐인 세션에 걸리면 안 된다`)
-	}
-}
-
-func TestSupervisorBackendListIsEmptyWhenNothingWasEverCreated(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-
-	// 세션 디렉토리가 아직 없다. 그것이 세션 0 개의 정상적인 표현이므로 오류가 아니다 —
-	// tmux 백엔드가 "서버 없음" 을 그렇게 다루는 것과 같은 규칙이다(tmux.go:119).
-	names, err := backend.List()
-	if err != nil {
-		t.Fatalf("세션 디렉토리가 없을 때 List() 가 에러를 반환했다: %v", err)
-	}
-	if len(names) != 0 {
-		t.Errorf("List() = %v, 빈 목록이어야 한다", names)
-	}
-}
-
-func TestSupervisorBackendListReturnsCreatedSessionNames(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-	want := []string{"kyu-test-sv-list-a", "kyu-test-sv-list-b"}
-
-	for _, name := range want {
-		if err := backend.Create(name, t.TempDir(), []string{"sleep", "60"}); err != nil {
-			t.Fatalf("Create(%q) 실패: %v", name, err)
-		}
-	}
-
-	got, err := backend.List()
-	if err != nil {
-		t.Fatalf("List() 실패: %v", err)
-	}
-
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Errorf("List() = %v, want %v", got, want)
-	}
-}
-
-func TestSupervisorBackendListNamesStillAnswerToTheWorkDirPrefixFilter(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-
-	// 조율 계층은 List() 결과를 WorkDirSessionPrefix 로 거른다 — kill --all 이 그렇게 돈다.
-	// 백엔드가 바뀌어도 그 코드가 손대지 않고 돌아야 한다(설계 문서 5.9).
-	inThisWorkDir := []string{
-		MainSessionName("featureX"),
-		RepoSessionName("featureX", "proj-a"),
-	}
-	for _, name := range append(inThisWorkDir, RepoSessionName("otherWorkDir", "proj-a")) {
-		if err := backend.Create(name, t.TempDir(), []string{"sleep", "60"}); err != nil {
-			t.Fatalf("Create(%q) 실패: %v", name, err)
-		}
-	}
-
-	names, err := backend.List()
-	if err != nil {
-		t.Fatalf("List() 실패: %v", err)
-	}
-
-	var got []string
-	for _, name := range names {
-		if strings.HasPrefix(name, WorkDirSessionPrefix("featureX")) {
-			got = append(got, name)
-		}
-	}
-
-	slices.Sort(got)
-	slices.Sort(inThisWorkDir)
-	if !slices.Equal(got, inThisWorkDir) {
-		t.Errorf("접두사로 거른 세션 = %v, want %v", got, inThisWorkDir)
+		t.Errorf("IsAlive() = true, 감독이 죽었으면 false 여야 한다")
 	}
 }
 
@@ -758,15 +544,5 @@ func TestRefusedCreateDoesNotStartTheSessionCommand(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(refusedWorkingDirectory, "started.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("거절당한 Create() 의 작업 디렉토리에 흔적 stat = %v, 명령이 실행되면 안 된다", err)
-	}
-}
-
-func TestSupervisorBackendDetachKeyIsControlBackslash(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-
-	// Ctrl-\ 는 raw 모드에서 ISIG 가 꺼지므로 SIGQUIT 이 되지 않는다. 그 성질이 이 키를 고른
-	// 근거이므로(설계 문서 5.8) 키가 바뀌면 raw 모드 클라이언트의 전제가 함께 바뀐다.
-	if got := backend.DetachKey(); got != `Ctrl-\` {
-		t.Errorf("DetachKey() = %q, want %q", got, `Ctrl-\`)
 	}
 }

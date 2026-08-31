@@ -2,7 +2,7 @@ package session
 
 import (
 	"bytes"
-	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -68,6 +68,42 @@ func (c *terminalOutputCollector) waitFor(t *testing.T, want string) string {
 	return ""
 }
 
+// appearsWithin 은 짧게 기다려보고 나타났는지만 답한다. 나타나지 않은 것은 실패가 아니다.
+func (c *terminalOutputCollector) appearsWithin(want string, window time.Duration) bool {
+	deadline := time.Now().Add(window)
+	for time.Now().Before(deadline) {
+		if strings.Contains(c.text(), want) {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// askUntilTheSessionReportsSize 는 세션이 그 크기를 답할 때까지 줄을 다시 보내며 기다린다.
+//
+// 크기 변경과 키는 클라이언트 안에서 서로 다른 고루틴을 타고 같은 연결로 나간다 —
+// SIGWINCH → 핸들러 → RESIZE 프레임 하나, 터미널 읽기 → INPUT 프레임 하나다(설계 문서 7절).
+// 둘 사이에 순서 보장은 없고 있을 필요도 없다. 그래서 "크기를 바꾼 직후에 보낸 줄이 새 크기를
+// 본다" 는 계약이 아니라 이 시험의 가정이었고, 입력이 먼저 도착하는 판에서는 옛 크기가 찍혔다
+// (부하를 준 상태에서 재현). 한 줄에 걸지 않고 새 크기가 적용될 때까지 물어본다 — 적용 자체가
+// 안 되면 마감 시각에 걸리므로 지켜보려던 것은 그대로 지켜진다.
+func askUntilTheSessionReportsSize(t *testing.T, terminal *os.File, screen *terminalOutputCollector, wantSize string) {
+	t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for question := 0; time.Now().Before(deadline); question++ {
+		marker := fmt.Sprintf("크기물음%d", question)
+		if _, err := terminal.Write([]byte(marker + "\n")); err != nil {
+			t.Fatalf("터미널에 쓰기 실패: %v", err)
+		}
+		if screen.appearsWithin(marker+" "+wantSize, 500*time.Millisecond) {
+			return
+		}
+	}
+	t.Fatalf("세션이 %q 크기를 답하지 않았습니다 — 지금까지 본 것: %q", wantSize, screen.text())
+}
+
 func TestAttachClientCarriesTheTerminalToTheSessionAndGivesItBack(t *testing.T) {
 	backend := newIsolatedSupervisorBackend(t)
 	const sessionName = "kyu-test-sv-client-terminal"
@@ -109,10 +145,7 @@ func TestAttachClientCarriesTheTerminalToTheSessionAndGivesItBack(t *testing.T) 
 	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 60, Rows: 20}); err != nil {
 		t.Fatalf("터미널 크기 변경 실패: %v", err)
 	}
-	if _, err := terminal.Write([]byte("크기바꾼뒤\n")); err != nil {
-		t.Fatalf("터미널에 쓰기 실패: %v", err)
-	}
-	screen.waitFor(t, "크기바꾼뒤 20 60")
+	askUntilTheSessionReportsSize(t, terminal, screen, "20 60")
 
 	// Ctrl-\ 로 빠져나온다. raw 모드가 아니었다면 이 바이트는 SIGQUIT 이 되어 클라이언트를
 	// 죽인다 — 깨끗이 끝났다는 것이 곧 ISIG 가 꺼져 있었다는 뜻이다(설계 문서 5.8).
@@ -137,19 +170,6 @@ func TestAttachClientCarriesTheTerminalToTheSessionAndGivesItBack(t *testing.T) 
 	}
 	if !alive {
 		t.Errorf("빠져나온 뒤 IsAlive() = false, 세션은 살아 있어야 한다")
-	}
-}
-
-func TestSupervisorBackendAttachRefusesToNestInsideAnotherSession(t *testing.T) {
-	backend := newIsolatedSupervisorBackend(t)
-
-	// 감독이 자식에게 심어둔 표식이다. 세션 안에서 도는 모든 프로세스가 물려받으므로 그 안에서
-	// kyu attach 를 부르면 이것이 보인다 — tmux 가 TMUX 로 하는 것과 같은 기전이다(설계 문서 5.3).
-	t.Setenv(insideSupervisorSessionEnvName, "kyu-featureX-proj-a")
-
-	err := backend.Attach("kyu-featureX-proj-b")
-	if !errors.Is(err, ErrNestedSession) {
-		t.Errorf("세션 안에서 Attach() = %v, ErrNestedSession 이어야 한다", err)
 	}
 }
 
