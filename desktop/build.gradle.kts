@@ -365,7 +365,7 @@ val bundledEngineForRun = providers.gradleProperty("bundledEngineForRun")
  *
  * 윈도우 네이티브에서 Go 를 가진 채로 run 하면 buildBundledEngine 이 "이 호스트에서는 엔진을
  * 동봉하지 않습니다 — WSL 안에서 쓰세요" 로 멈춘다. 감수하는 쪽을 골랐다: 그 머신에서는 엔진이
- * tmux 위에서 돌지 않아 앱이 떠도 아무것도 되지 않으므로, 조용히 뜨는 것보다 그 자리에서
+ * 목록을 낼 때 찾는 tmux 가 없어 앱이 떠도 아무것도 되지 않으므로, 조용히 뜨는 것보다 그 자리에서
  * 이유를 듣는 편이 낫다.
  */
 tasks.matching { it.name == "run" }.configureEach {
@@ -408,9 +408,9 @@ compose.desktop {
             // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
             // 일어난다(.github/workflows/release.yml).
             //
-            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 tmux 위에서 한다 —
-            // 윈도우 네이티브에는 그 tmux 가 없으므로(설계 문서 10 절 로드맵 v4) 설치는 되고
-            // 아무것도 되지 않는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
+            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 하는데, 그 kyu 는 목록을
+            // 낼 때 tmux 를 찾는다 — 윈도우 네이티브에는 그 tmux 가 없으므로(설계 문서 10 절
+            // 로드맵 v4) 설치는 되고 아무것도 되지 않는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
 
             // 설치 패키지 이름은 파일 이름과 설치 경로(/opt/kyuchestration · /Applications)에

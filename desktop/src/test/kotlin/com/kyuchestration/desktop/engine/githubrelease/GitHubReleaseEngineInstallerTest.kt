@@ -181,7 +181,7 @@ class GitHubReleaseEngineInstallerTest {
         }
 
         // 자산을 하나도 받지 않았다는 것이 요점이다. tmux 가 없는 자리에서는 바이너리가 있어도
-        // 세션이 뜨지 않으므로, 받고 나서 실패하면 사용자는 다운로드를 의심하게 된다.
+        // 엔진이 목록에 답하지 못하므로, 받고 나서 실패하면 사용자는 다운로드를 의심하게 된다.
         assertNoDownloadLeftovers()
     }
 

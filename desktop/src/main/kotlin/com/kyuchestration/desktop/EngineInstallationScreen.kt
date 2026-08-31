@@ -102,7 +102,8 @@ internal fun EngineInstallationScreen(
         HorizontalDivider(modifier = Modifier.widthIn(max = EXPLANATION_MAX_WIDTH))
 
         Text(
-            text = "kyu 는 세션을 tmux 위에서 돌립니다. tmux 가 없으면 세션이 뜨지 않으므로 먼저 넣으세요 — " +
+            text = "앱이 여는 세션에는 tmux 가 필요 없습니다. 다만 kyu 가 워크디렉토리 목록을 낼 때 " +
+                "CLI 세션의 생존을 tmux 에게 물으므로, 없으면 대시보드가 서 있습니다 — " +
                 "WSL · 리눅스는 sudo apt install tmux, 맥은 brew install tmux 입니다. " +
                 "앱이 대신 넣지 않습니다: 시스템 패키지라 관리자 권한이 필요합니다.",
             style = MaterialTheme.typography.bodySmall,
