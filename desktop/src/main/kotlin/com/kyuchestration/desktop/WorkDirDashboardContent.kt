@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.CardSessionFacts
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.dashboard.mergeMainCardSessionFacts
 import com.kyuchestration.desktop.dashboard.mergeRepoCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -222,6 +223,7 @@ private fun RepoCardList(
                 repo = repo,
                 sessionFacts = mergeRepoCardSessionFacts(
                     engineReportedState = repo.state,
+                    hasRecordedConversation = repo.hasRecordedConversation,
                     appSessionHeld = SessionTarget.Repo(repo.name) in heldSessionTargets,
                 ),
             ) { onEnterSessionRequested(SessionTarget.Repo(repo.name)) }
@@ -229,11 +231,10 @@ private fun RepoCardList(
 
         item {
             MainSessionRow(
-                // 메인 세션은 git 상태가 없다 — 워크디렉토리 최상위는 레포가 아니다.
-                sessionFacts = CardSessionFacts(
+                sessionFacts = mergeMainCardSessionFacts(
+                    mainSessionAlive = snapshot.mainSessionAlive,
+                    hasRecordedConversation = snapshot.mainSessionHasRecordedConversation,
                     appSessionHeld = SessionTarget.Main in heldSessionTargets,
-                    cliSessionRunning = snapshot.mainSessionAlive,
-                    gitState = null,
                 ),
             ) { onEnterSessionRequested(SessionTarget.Main) }
         }
@@ -305,6 +306,11 @@ private fun SessionChips(sessionFacts: CardSessionFacts) {
         if (sessionFacts.cliSessionRunning) {
             SessionChip("CLI 세션", CLI_SESSION_COLOR)
         }
+        // 돌고 있는 세션 칩보다 뒤에 둔다. 앞의 둘은 지금 일어나고 있는 일이고 이것은 누르면
+        // 일어날 일이라, 눈이 급한 것부터 읽게 한다.
+        if (sessionFacts.conversationToResume) {
+            SessionChip("이어갈 대화", RESUMABLE_CONVERSATION_COLOR)
+        }
         sessionFacts.gitState?.let { SessionChip(it.rawValue, it.chipColor) }
     }
 }
@@ -366,7 +372,8 @@ private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequest
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SessionChips(sessionFacts)
-            if (sessionFacts.appSessionHeld || sessionFacts.cliSessionRunning) {
+            // 칩이 하나도 없는 줄에서는 간격만 남아 이름이 밀려 보인다.
+            if (sessionFacts.anyChipShown) {
                 Spacer(Modifier.width(10.dp))
             }
             Text("main", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace)
@@ -387,6 +394,12 @@ private fun MainSessionRow(sessionFacts: CardSessionFacts, onEnterSessionRequest
         }
     }
 }
+
+/**
+ * 이 줄에 그려질 칩이 하나라도 있는가. 메인 세션에는 git 상태가 없으므로 셋 중 하나다.
+ */
+private val CardSessionFacts.anyChipShown: Boolean
+    get() = appSessionHeld || cliSessionRunning || conversationToResume
 
 /**
  * @param trailingContent 배너 아래에 붙는 것. 안내만 하는 배너는 비워 두고, 사람이 그 자리에서
@@ -442,6 +455,14 @@ private val NEUTRAL_COLOR = Color(0xFF6B6B6B)
  */
 private val APP_SESSION_COLOR = Color(0xFF2E7D32)
 private val CLI_SESSION_COLOR = Color(0xFF6A1B9A)
+
+/**
+ * 이어갈 대화가 있다는 표시.
+ *
+ * 두 세션 칩과 다른 계열로 둔다. 저 둘은 지금 `claude` 가 돌고 있다는 뜻이고 이것은 아직 아무것도
+ * 돌고 있지 않다는 뜻이라, 같은 계열로 두면 카드를 훑는 사람이 세션 수를 잘못 센다.
+ */
+private val RESUMABLE_CONVERSATION_COLOR = Color(0xFF00695C)
 private val PLAN_WARNING_COLOR = Color(0xFFB26A00)
 private val REFRESH_FAILURE_COLOR = Color(0xFFB3261E)
 

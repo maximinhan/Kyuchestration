@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -132,6 +133,45 @@ class KyuListOutputTest {
         assertFailsWith<WorkDirObservationFailure.UnreadableKyuOutput> {
             parseKyuListOutput("""{ "schemaVersion": 1 }""")
         }
+    }
+
+    @Test
+    fun `이어갈 대화가 적혀 있는 라벨을 그대로 옮긴다`() {
+        val snapshot = parseKyuListOutput(
+            """
+            {
+              "schemaVersion": 1,
+              "workDir": { "name": "W", "absolutePath": "/w" },
+              "repos": [
+                {
+                  "name": "proj-a",
+                  "absolutePath": "/w/proj-a",
+                  "state": "IDLE",
+                  "task": null,
+                  "doneTaskCount": 0,
+                  "totalTaskCount": 0,
+                  "hasRecordedConversation": true
+                }
+              ],
+              "mainSession": { "alive": false, "hasRecordedConversation": true },
+              "planWarnings": []
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(snapshot.repos.single().hasRecordedConversation)
+        assertTrue(snapshot.mainSessionHasRecordedConversation)
+    }
+
+    @Test
+    fun `그 필드를 내지 않는 엔진과 만나면 이어갈 대화가 없는 것으로 읽는다`() {
+        // 엔진과 앱은 따로 배포된다. 계약은 필드가 늘어도 판을 올리지 않으므로, 앱이 이 필드를
+        // 배운 뒤에도 그것을 모르는 kyu 와 만나는 일이 실제로 있다 — 그때 목록이 통째로
+        // "읽을 수 없는 출력" 이 되면 카드가 하나도 뜨지 않는다.
+        val snapshot = parseKyuListOutput(oneRepoDocument(state = "IDLE", taskJson = "null"))
+
+        assertFalse(snapshot.repos.single().hasRecordedConversation)
+        assertFalse(snapshot.mainSessionHasRecordedConversation)
     }
 
     private fun oneRepoDocument(state: String, taskJson: String): String =

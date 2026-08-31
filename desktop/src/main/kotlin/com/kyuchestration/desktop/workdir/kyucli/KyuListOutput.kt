@@ -59,19 +59,32 @@ private data class KyuListRepo(
     val task: KyuListTask?,
     val doneTaskCount: Int,
     val totalTaskCount: Int,
+    /**
+     * 없으면 "이어갈 대화 없음" 으로 읽는다.
+     *
+     * 기본값을 두는 것이 판 규약의 나머지 반쪽이다. 계약은 필드가 늘어도 판을 올리지 않으므로,
+     * 이 앱이 그 필드를 더하기 전의 kyu 와 만나는 일이 실제로 있다 — 엔진과 앱은 따로 배포된다.
+     * 기본값이 없으면 그때 목록이 통째로 "읽을 수 없는 출력" 이 된다.
+     */
+    val hasRecordedConversation: Boolean = false,
 )
 
 @Serializable
 private data class KyuListTask(val id: String, val status: String, val blockedBy: List<String>)
 
 @Serializable
-private data class KyuListMainSession(val alive: Boolean)
+private data class KyuListMainSession(
+    val alive: Boolean,
+    /** 레포의 같은 이름 필드와 같은 이유로 기본값을 둔다 — 뒤처진 엔진이 이 필드를 내지 않는다. */
+    val hasRecordedConversation: Boolean = false,
+)
 
 private fun KyuListDocument.toWorkDirSnapshot(): WorkDirSnapshot = WorkDirSnapshot(
     name = workDir.name,
     absolutePath = workDir.absolutePath,
     repos = repos.map { it.toRepoSnapshot() },
     mainSessionAlive = mainSession.alive,
+    mainSessionHasRecordedConversation = mainSession.hasRecordedConversation,
     planWarnings = planWarnings,
 )
 
@@ -82,4 +95,5 @@ private fun KyuListRepo.toRepoSnapshot(): RepoSnapshot = RepoSnapshot(
     task = task?.let { RepoTask(id = it.id, status = it.status, blockedBy = it.blockedBy) },
     doneTaskCount = doneTaskCount,
     totalTaskCount = totalTaskCount,
+    hasRecordedConversation = hasRecordedConversation,
 )
