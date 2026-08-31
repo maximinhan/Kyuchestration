@@ -135,8 +135,12 @@ func TestReattachAfterTheRingWrapsNoLongerCarriesTheModesTheSessionSetOnce(t *te
 	}
 
 	// 같은 크기로 다시 붙는다. 크기가 그대로라 커널은 SIGWINCH 를 보내지 않는다.
+	//
+	// 재생의 끝을 시간으로 판정하지 않는다. 세션의 마지막 출력이 올 때까지 읽고 나서 조용해지기를
+	// 기다려야, 느린 판에서 재생이 중간에 끊긴 것을 "다 받았다" 로 오해하지 않는다.
 	again := attachToSession(t, sessionName, 120, 40)
-	replay := again.drainUntilQuiet(2 * time.Second)
+	again.readOutputUntil(gateDoneMarker)
+	replay := again.drainUntilQuiet(time.Second)
 
 	if len(replay) >= len(whole) {
 		t.Fatalf("재생 %d 바이트가 전체 %d 바이트보다 짧지 않다 — 링이 감기지 않았으므로 이 시험은 아무것도 재지 못한다",
@@ -154,7 +158,7 @@ func TestReattachAfterTheRingWrapsNoLongerCarriesTheModesTheSessionSetOnce(t *te
 	// 크기를 바꿔 다시 그리게 한다. 그려지기는 하지만 모드는 돌아오지 않는다.
 	again.collected.Reset()
 	again.sendResize(100, 30)
-	afterResize := again.drainUntilQuiet(2 * time.Second)
+	afterResize := again.drainUntilQuiet(3 * time.Second)
 
 	if !strings.Contains(afterResize, redrawMarker) {
 		t.Fatalf("크기를 바꿨는데 세션이 다시 그리지 않았다 (받은 것 %q) — 이 시험의 뒷부분이 성립하지 않는다", afterResize)
@@ -179,7 +183,8 @@ func TestReattachAfterTheRingWrapsStillCarriesTheNewestBytesFromALineBoundary(t 
 	defer backend.Kill(sessionName)
 
 	again := attachToSession(t, sessionName, 120, 40)
-	replay := again.drainUntilQuiet(2 * time.Second)
+	again.readOutputUntil(gateDoneMarker)
+	replay := again.drainUntilQuiet(time.Second)
 
 	if len(replay) >= len(whole) {
 		t.Fatalf("재생 %d 바이트가 전체 %d 바이트보다 짧지 않다 — 링이 감기지 않았다", len(replay), len(whole))
