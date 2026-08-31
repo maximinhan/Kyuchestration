@@ -68,9 +68,9 @@ internal fun findKyuExecutable(
  * 읽을 수만 있는 원본이다. 실제로 부르는 것은 이것을 복사해 둔 [bundledEngineCopyPath] 다.
  *
  * null 이 되는 실행이 둘이다. IDE 에서 main 을 띄우면 시스템 프로퍼티 자체가 없고,
- * `./gradlew run` 은 자리를 알려 주지만 아직 `./gradlew buildBundledEngine` 을 부르지 않았으면
- * 그 자리가 비어 있다. 둘 다 "동봉이 없다" 로 답해야 예전 길(PATH · 첫 화면의 [엔진 설치])이
- * 그대로 열린다.
+ * `./gradlew run` 은 자리를 알려 주지만 Go 가 없는 머신에서는 엔진을 만드는 걸음을 건너뛰어
+ * 그 자리가 비어 있다(desktop/build.gradle.kts 의 run 게이트). 둘 다 "동봉이 없다" 로 답해야
+ * 나머지 길(PATH · 첫 화면이 스스로 받아 오는 것)이 그대로 열린다.
  *
  * @param lookUpSystemProperty Compose 가 앱 리소스 자리를 알려 주는 프로퍼티를 읽는 자리.
  * @param isExistingFile 그 자리에 파일이 있는지 답하는 자리.
@@ -86,10 +86,10 @@ internal fun bundledEngineResourcePath(
 /**
  * 동봉된 엔진을 실행할 수 있게 복사해 두는 자리.
  *
- * 앱이 받아 둔 엔진과 자리를 나눈다. 한 자리를 함께 쓰면 앱을 새 판으로 설치할 때마다 사용자가
- * [엔진 설치] 로 받으라고 시킨 엔진이 말없이 덮이고, 무엇이 지금 그 자리에 있는지 아무도 모른다.
- * 두 자리는 각자 자기 주인이 있다 — 이 자리의 주인은 지금 설치된 앱이고, 옆자리의 주인은 받으라고
- * 누른 사용자다.
+ * 앱이 받아 둔 엔진과 자리를 나눈다. 한 자리를 함께 쓰면 앱을 새 판으로 설치할 때마다 설치 화면이
+ * 받아 둔 엔진이 말없이 덮이고, 무엇이 지금 그 자리에 있는지 아무도 모른다. 두 자리는 각자 자기
+ * 주인이 있다 — 이 자리의 주인은 지금 설치된 앱이고, 옆자리의 주인은 그 앱과 무관하게 설치 화면이
+ * 받아 둔 것이라 앱이 바뀌어도 그대로 남는다.
  */
 internal fun bundledEngineCopyPath(engineDirectory: Path = managedEngineDirectory()): Path =
     engineDirectory.resolve("bundled").resolve("kyu")

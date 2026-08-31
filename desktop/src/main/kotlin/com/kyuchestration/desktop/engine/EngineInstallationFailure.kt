@@ -85,13 +85,13 @@ sealed class EngineInstallationFailure(
      * 앱에 동봉된 엔진을 부를 수 있는 자리로 옮기지 못했다.
      *
      * 앱이 자기 데이터 디렉토리에 파일 하나를 놓는 일이라 여기 오는 것은 대개 디스크가 찼거나 그
-     * 자리에 쓸 수 없는 경우다. 화면을 세우지는 않는다 — [엔진 설치] 로 받아 오는 길이 그대로
+     * 자리에 쓸 수 없는 경우다. 화면을 세우지는 않는다 — [다시 시도] 로 받아 오는 길이 그대로
      * 열려 있고, 그 길은 다른 디렉토리를 쓴다.
      */
     class BundledEngineNotPlaced(copyPath: Path, cause: IOException) : EngineInstallationFailure(
         message = "앱에 동봉된 엔진을 쓸 수 있는 자리에 놓지 못했습니다.",
         guidance = "$copyPath 에 쓸 수 있는지 확인하세요 (디스크 여유 · 권한). " +
-            "그때까지는 [엔진 설치] 로 최신 릴리스에서 받아 쓸 수 있습니다. 원인: ${cause.message}",
+            "그때까지는 [다시 시도] 로 최신 릴리스에서 받아 쓸 수 있습니다. 원인: ${cause.message}",
         cause = cause,
     )
 
@@ -99,11 +99,11 @@ sealed class EngineInstallationFailure(
      * 앱에 동봉된 엔진이 `kyu version` 에 답하지 못했다.
      *
      * 이 머신의 것이 아닌 바이너리가 패키지에 들어간 경우다 — 받은 사람이 할 수 있는 일은 없고,
-     * 릴리스를 만드는 쪽이 고칠 일이다. 그동안은 [엔진 설치] 로 받아 쓸 수 있다.
+     * 릴리스를 만드는 쪽이 고칠 일이다. 그동안은 [다시 시도] 로 받아 쓸 수 있다.
      */
     class BundledEngineDidNotRun(reason: String) : EngineInstallationFailure(
         message = "앱에 동봉된 엔진이 실행되지 않았습니다.",
         guidance = "이 머신의 것이 아닌 바이너리가 들어 있는 설치 패키지입니다. " +
-            "[엔진 설치] 로 최신 릴리스에서 받으면 그대로 쓸 수 있습니다. 원인: $reason",
+            "[다시 시도] 로 최신 릴리스에서 받으면 그대로 쓸 수 있습니다. 원인: $reason",
     )
 }
