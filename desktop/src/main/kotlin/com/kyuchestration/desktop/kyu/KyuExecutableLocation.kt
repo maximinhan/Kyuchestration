@@ -48,7 +48,7 @@ import kotlin.io.path.isRegularFile
  * @param isExecutableFile 그 자리에 실행 가능한 파일이 있는지 답하는 자리.
  */
 internal fun findKyuExecutable(
-    lookUpEnvironmentVariable: (String) -> String? = childProcessEnvironment::get,
+    lookUpEnvironmentVariable: (String) -> String? = childProcessEnvironment()::get,
     bundledEngineCopyPath: Path = bundledEngineCopyPath(),
     managedEngineExecutablePath: Path = managedEngineExecutablePath(),
     isExecutableFile: (Path) -> Boolean = ::isExecutableRegularFile,

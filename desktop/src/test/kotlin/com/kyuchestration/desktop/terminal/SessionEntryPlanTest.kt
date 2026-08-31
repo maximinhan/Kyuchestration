@@ -48,7 +48,7 @@ class SessionEntryPlanTest {
 
     @Test
     fun `터미널 종류를 xterm-256color 로 못 박는다`() {
-        val plan = planFor(SessionTarget.Repo("proj-a"), parentEnvironment = mapOf("TERM" to "dumb"))
+        val plan = planFor(SessionTarget.Repo("proj-a"), baseEnvironment = mapOf("TERM" to "dumb"))
 
         assertEquals("xterm-256color", plan.environment["TERM"])
     }
@@ -57,7 +57,7 @@ class SessionEntryPlanTest {
     fun `부모에게 붙어 있던 TMUX 는 자식에게 넘기지 않는다`() {
         val plan = planFor(
             SessionTarget.Repo("proj-a"),
-            parentEnvironment = mapOf("TMUX" to "/tmp/tmux-1000/default,1234,0"),
+            baseEnvironment = mapOf("TMUX" to "/tmp/tmux-1000/default,1234,0"),
         )
 
         // 이 변수가 남아 있으면 kyu attach 가 "이 터미널은 이미 세션 안입니다" 로 거절한다.
@@ -66,10 +66,10 @@ class SessionEntryPlanTest {
     }
 
     @Test
-    fun `나머지 부모 환경은 그대로 물려준다`() {
+    fun `나머지 바탕 환경은 그대로 물려준다`() {
         val plan = planFor(
             SessionTarget.Repo("proj-a"),
-            parentEnvironment = mapOf("PATH" to "/usr/bin", "HOME" to "/home/me"),
+            baseEnvironment = mapOf("PATH" to "/usr/bin", "HOME" to "/home/me"),
         )
 
         assertEquals("/usr/bin", plan.environment["PATH"])
@@ -78,12 +78,12 @@ class SessionEntryPlanTest {
 
     private fun planFor(
         target: SessionTarget,
-        parentEnvironment: Map<String, String> = emptyMap(),
+        baseEnvironment: Map<String, String> = emptyMap(),
     ) = planSessionEntry(
         kyuExecutablePath = KYU_PATH,
         workDirPath = WORK_DIR_PATH,
         target = target,
-        parentEnvironment = parentEnvironment,
+        baseEnvironment = baseEnvironment,
     )
 
     private companion object {

@@ -21,7 +21,9 @@ import kotlin.io.path.isDirectory
  * 셸에 묻는 데에는 시간 제한이 걸려 있다. 앱이 도는 동안 사용자가 `.zprofile` 을 고쳐도 다시
  * 묻지 않는다 — 물을 때마다 셸을 띄우면 3 초 폴링마다 프로세스가 하나씩 더 뜬다.
  */
-internal val childProcessEnvironment: Map<String, String> by lazy {
+internal fun childProcessEnvironment(): Map<String, String> = environmentResolvedOnce
+
+private val environmentResolvedOnce: Map<String, String> by lazy {
     System.getenv() + mapOf(
         SEARCH_PATH_ENV_NAME to searchPathForChildProcesses(
             loginShellSearchPath = loginShellSearchPath(),
