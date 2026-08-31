@@ -20,6 +20,23 @@ var ErrSessionExists = errors.New("세션이 이미 존재합니다")
 // 백엔드가 늘어날 때마다 표시 계층이 함께 바뀐다.
 var ErrNestedSession = errors.New("이미 세션 안에서 실행 중입니다")
 
+// BackendSelectionEnvName 은 어느 세션 백엔드를 쓸지 고르는 환경변수다.
+//
+// 값을 읽어 실제로 조립하는 곳은 진입점 한 군데다. 이름만 여기 두는 이유는 세션 계층도 자기
+// 안내에서 이것을 말해야 하기 때문이다 — 감독 백엔드가 아직 못 하는 일을 알릴 때 돌아갈 자리를
+// 함께 일러준다. 두 곳에 문자열을 따로 적으면 이름을 바꿀 때 안내만 옛것으로 남는다.
+const BackendSelectionEnvName = "KYU_SESSION_BACKEND"
+
+// 고를 수 있는 백엔드 이름이다.
+//
+// tmux 를 지우지 않고 남긴다. 검증된 폴백이 있는 것과 없는 것은 사용자가 감수하는 위험이
+// 다르다 — 감독이 어떤 터미널·어떤 셸에서 무너져도 자기 작업을 멈추지 않고 환경변수 하나로
+// 돌아갈 수 있어야 한다(설계 문서 6절).
+const (
+	TmuxBackendName       = "tmux"
+	SupervisorBackendName = "supervisor"
+)
+
 // SessionBackend 는 세션 백엔드가 제공해야 하는 최소 기능이다.
 // 플랫폼 의존부는 이 5개 함수가 전부다.
 type SessionBackend interface {
