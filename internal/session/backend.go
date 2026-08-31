@@ -57,4 +57,11 @@ type SessionBackend interface {
 
 	// IsAlive 는 세션의 생존 여부를 반환한다.
 	IsAlive(name string) (bool, error)
+
+	// DetachKey 는 이 백엔드의 세션에서 빠져나오는 키다.
+	//
+	// 키를 돌려주고 문장은 돌려주지 않는다. 무엇을 어떻게 말할지는 표시 계층의 몫이다 —
+	// 백엔드가 완성된 문장을 주면 CLI 와 GUI 가 같은 문장을 쓰게 되는데, 두 곳은 사용자가
+	// 있는 자리가 달라 할 말도 다르다(설계 문서 5.8).
+	DetachKey() string
 }

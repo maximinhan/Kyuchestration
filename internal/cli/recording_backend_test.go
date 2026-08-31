@@ -33,6 +33,10 @@ type recordingSessionBackend struct {
 	// attachError 는 Attach 가 돌려줄 에러다. ErrNestedSession 처리를 확인할 때 채운다.
 	attachError error
 
+	// detachKey 는 DetachKey 의 답이다. 두 실제 백엔드 중 어느 쪽의 키도 아닌 값을 둔다 —
+	// 표시 계층이 이 값을 그대로 옮기는지가 곧 "키를 백엔드에게 묻는가" 의 답이다.
+	detachKey string
+
 	createdSessions      []createdSession
 	attachedSessionNames []string
 	killedSessionNames   []string
@@ -45,7 +49,7 @@ func newRecordingSessionBackend(aliveSessionNames ...string) *recordingSessionBa
 	for _, sessionName := range aliveSessionNames {
 		alive[sessionName] = true
 	}
-	return &recordingSessionBackend{aliveSessionNames: alive}
+	return &recordingSessionBackend{aliveSessionNames: alive, detachKey: "Ctrl-시험키"}
 }
 
 func (backend *recordingSessionBackend) Create(name, cwd string, command []string) error {
@@ -78,4 +82,8 @@ func (backend *recordingSessionBackend) List() ([]string, error) {
 
 func (backend *recordingSessionBackend) IsAlive(name string) (bool, error) {
 	return backend.aliveSessionNames[name], nil
+}
+
+func (backend *recordingSessionBackend) DetachKey() string {
+	return backend.detachKey
 }

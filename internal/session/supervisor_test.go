@@ -771,3 +771,13 @@ func TestConcurrentCreateOfTheSameNameStartsTheSessionCommandExactlyOnce(t *test
 		t.Errorf("실행된 세션 명령 = %d 개, 정확히 1 개여야 한다", started)
 	}
 }
+
+func TestSupervisorBackendDetachKeyIsControlBackslash(t *testing.T) {
+	backend := newIsolatedSupervisorBackend(t)
+
+	// Ctrl-\ 는 raw 모드에서 ISIG 가 꺼지므로 SIGQUIT 이 되지 않는다. 그 성질이 이 키를 고른
+	// 근거이므로(설계 문서 5.8) 키가 바뀌면 raw 모드 클라이언트의 전제가 함께 바뀐다.
+	if got := backend.DetachKey(); got != `Ctrl-\` {
+		t.Errorf("DetachKey() = %q, want %q", got, `Ctrl-\`)
+	}
+}

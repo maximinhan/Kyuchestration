@@ -136,6 +136,22 @@ func (b *SupervisorBackend) Attach(name string) error {
 		name, BackendSelectionEnvName, TmuxBackendName)
 }
 
+// supervisorDetachKey 는 감독 세션에서 빠져나오는 키다.
+//
+// Ctrl-\ 를 고른 이유(설계 문서 5.8): 대화형 프로그램이 거의 쓰지 않고, 세션마다 프로세스
+// 하나에 소켓 하나라는 같은 배치를 오래 써온 dtach·abduco 의 관례이기도 하다. raw 모드에서는
+// ISIG 를 끄므로 이 키가 SIGQUIT 이 되지 않는다.
+//
+// tmux 처럼 접두 키 + d 로 두지 않는다. tmux 의 Ctrl-b 는 readline·emacs 계열에서 "한 글자
+// 뒤로" 라 세션 안 프로그램에게서 그 키를 뺏고, 다른 접두 키를 골라도 상태를 가진 키 파싱이
+// 하나 생긴다.
+const supervisorDetachKey = `Ctrl-\`
+
+// DetachKey 는 감독 세션에서 빠져나오는 키다.
+func (b *SupervisorBackend) DetachKey() string {
+	return supervisorDetachKey
+}
+
 // Kill 은 세션을 종료한다. 없으면 nil 을 반환한다(멱등).
 func (b *SupervisorBackend) Kill(name string) error {
 	paths, err := newSessionRuntimePaths(name)

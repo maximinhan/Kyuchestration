@@ -266,3 +266,12 @@ func TestTmuxBackendAttachRefusesToNestInsideAnotherSession(t *testing.T) {
 		t.Errorf("Attach() 에러 = %v, ErrNestedSession 으로 풀리기를 기대", err)
 	}
 }
+
+func TestTmuxBackendDetachKeyIsTheTmuxPrefixSequence(t *testing.T) {
+	backend := newIsolatedTmuxBackend(t)
+
+	// 표시 계층은 이 답을 그대로 옮긴다. 값이 바뀌면 사용자는 세션에 갇힌 채로 틀린 키를 누른다.
+	if got := backend.DetachKey(); got != "Ctrl-b d" {
+		t.Errorf("DetachKey() = %q, want %q", got, "Ctrl-b d")
+	}
+}
