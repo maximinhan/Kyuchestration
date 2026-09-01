@@ -151,13 +151,21 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 
 // answerForMainSession 은 워크디렉토리 최상위에서 열 조율용 세션을 답한다(설계 문서 5.4).
 func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
+	// 등록을 대화보다 먼저 조립한다. 등록에 실패하면 이 답 자체가 성립하지 않는데, 대화를 먼저
+	// 배정하면 그 실패가 쓰이지 않을 기록을 하나 남긴다 — 없는 레포를 대화 배정 전에 거절하는
+	// answerForRepoSession 과 같은 자세다.
+	registration, err := orchestrationServerRegistration(location.absolutePath)
+	if err != nil {
+		return err
+	}
+
 	conversation, err := conversationForLabel(errOut, location.absolutePath, mainSessionLabel, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		mainSessionCommand(repos, request, conversation.flags),
+		mainSessionCommand(repos, request, conversation.flags, registration),
 		location.absolutePath,
 		sessionEnvironment(request),
 		conversation)

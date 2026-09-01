@@ -18,11 +18,15 @@ import (
 //	{
 //	  "schemaVersion": 1,
 //	  "command": ["claude", "--session-id", "d1b9d634-a927-4abf-ad80-5941671b08a8",
+//	              "--mcp-config", "{\"mcpServers\":{\"kyu\":{…}}}",   // 메인 세션에만
 //	              "--add-dir", "/home/me/work/WorkDir-featureX/proj-a"],
 //	  "cwd": "/home/me/work/WorkDir-featureX",
 //	  "env": { "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1" },
 //	  "resumedConversationId": null            // 이어가기로 열었으면 그 대화의 ID
 //	}
+//
+// 명령에 무엇이 실리는지는 판이 아니다. --mcp-config 가 더해진 것은 조립이 바뀐 것이지 문서의
+// 모양이 바뀐 것이 아니라, 앱은 전과 똑같이 이 배열을 그대로 실행한다(orchestration-tools-design.md 5.2).
 //
 // 담지 않는 것이 셋이다(설계 문서 5.2).
 //
