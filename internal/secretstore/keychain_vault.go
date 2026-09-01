@@ -93,6 +93,10 @@ func (vault keychainVault) lookup(profileName string) (string, error) {
 	}
 
 	// -w 는 비밀번호만 찍고 끝에 개행을 붙인다. 그 개행이 토큰에 섞이면 GitHub 이 401 로 답한다.
+	//
+	// 값이 아스키 밖으로 나가면 security 는 같은 -w 로 값 대신 16진수를 찍는다(맥 러너 실측).
+	// GitHub 토큰은 아스키라 이 도구가 그 자리에 닿지 않고, 닿는 값이 오면 store 의 확인이
+	// 저장하는 그 자리에서 끊는다 — 여기서 16진수를 되돌리려 들면 진짜 16진수 값과 구별할 수 없다.
 	return strings.TrimRight(stdout.String(), "\r\n"), nil
 }
 
