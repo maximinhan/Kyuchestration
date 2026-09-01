@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -63,7 +64,8 @@ func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
 
 	buildInfo, _ := debug.ReadBuildInfo()
 
-	return mcpserver.Serve(in, out, orchestrationServerName, versionName(buildInfo), orchestrationTools(absoluteWorkDirPath))
+	return mcpserver.Serve(in, out, orchestrationServerName, versionName(buildInfo),
+		orchestrationTools(absoluteWorkDirPath, mainSessionOpenedWithBypass()))
 }
 
 // orchestrationTools 는 메인 세션에 보일 도구 전부다(설계 문서 5.3).
@@ -71,10 +73,22 @@ func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
 // plan 읽기·쓰기 도구를 두지 않는다. 메인 세션의 cwd 가 워크디렉토리라 .coord/plan.md 는 내장
 // Read·Edit 도구로 이미 닿고, 같은 파일에 이르는 길이 둘이 되면 둘이 다르게 굴 자리가 생긴다
 // (설계 문서 5.3.1).
-func orchestrationTools(workDirPath string) []mcpserver.Tool {
+func orchestrationTools(workDirPath string, bypassPermissions bool) []mcpserver.Tool {
 	return []mcpserver.Tool{
 		newListReposTool(workDirPath),
+		newRunInRepoTool(workDirPath, bypassPermissions),
 	}
+}
+
+// mainSessionOpenedWithBypass 는 이 서버를 띄운 메인 세션이 bypass 로 열렸는지다.
+//
+// 프로세스 환경에서 읽는다. stdio MCP 서버는 자기를 띄운 claude 의 환경을 물려받고, 그 claude 는
+// kyu session-command 가 답한 env 로 떴다(설계 문서 5.4.1). 그 통로가 이 한 줄이다.
+//
+// 값이 정확히 표식과 같을 때만 참으로 본다. 비어 있지 않으면 참으로 두면 KYU_BYPASS_PERMISSIONS=0
+// 이 bypass 를 켜게 된다 — 끄려고 적은 값이 켜는 값이 되는 자리다.
+func mainSessionOpenedWithBypass() bool {
+	return os.Getenv(bypassPermissionsEnvName) == bypassPermissionsEnvValue
 }
 
 func parseServeArgs(args []string) (string, error) {

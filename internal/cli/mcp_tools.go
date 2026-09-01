@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/maximinhan/Kyuchestration/internal/mcpserver"
+	"github.com/maximinhan/Kyuchestration/internal/workdir"
 )
 
 // 이 파일은 메인 세션의 모델이 보는 도구 표면이다 — 설계 문서 5.3 의 둘.
@@ -26,7 +27,9 @@ run_in_repo 의 repo 인자로 넣을 수 있는 이름이 여기에 있는 것�
 있으므로, 위임하기 전에 이 도구로 확인한다.
 
 state 는 git 을 관찰한 결과다 — DIRTY(커밋되지 않은 변경) · AHEAD(푸시가 남음) · IDLE(넘길 것 없음).
-task 는 .coord/plan.md 에서 이 레포를 가리키는 작업이다. 없으면 null 이다.`
+task 는 .coord/plan.md 에서 이 레포를 가리키는 작업이다. 없으면 null 이다.
+recentDelegation 은 이 레포에서 마지막으로 끝난 위임이다 — 위임한 적이 없으면 null 이고,
+지금 도는 중인 위임은 여기 나오지 않는다.`
 
 // listReposAnswer 는 list_repos 가 모델에게 답하는 문서다.
 //
@@ -50,12 +53,32 @@ type listReposRepo struct {
 
 	// Task 는 계획이 이 레포에 대해 가리키는 작업이다. 가리키는 것이 없으면 null 이다.
 	Task *listReposTask `json:"task"`
+
+	// RecentDelegation 은 이 레포에서 가장 최근에 끝난 위임이다. 위임한 적이 없으면 null 이다.
+	//
+	// 도는 중인 위임은 여기 없다(설계 문서 6.2). 그것을 알리려면 시작할 때 어딘가에 적어야 하고,
+	// 그 순간 그것은 관찰된 상태가 아니라 선언된 상태가 된다 — 그 프로세스가 SIGKILL 로 죽으면
+	// 끝 줄이 안 적히고, 그때부터 그 기록은 거짓말을 한다.
+	RecentDelegation *listReposDelegation `json:"recentDelegation"`
 }
 
 type listReposTask struct {
 	ID        string   `json:"id"`
 	Status    string   `json:"status"`
 	BlockedBy []string `json:"blockedBy"`
+}
+
+type listReposDelegation struct {
+	FinishedAt string `json:"finishedAt"`
+	ExitCode   int    `json:"exitCode"`
+	TimedOut   bool   `json:"timedOut"`
+
+	// HadPermissionDenials 는 그 위임이 권한에 막힌 도구를 만났는지다. 참이면 그 위임은
+	// 완결되지 않은 것이고, 종료 코드 0 은 그 사실을 말하지 않는다(설계 문서 3.3).
+	HadPermissionDenials bool `json:"hadPermissionDenials"`
+
+	// LogPath 는 claude 의 답 원문이 통째로 남은 자리다.
+	LogPath string `json:"logPath"`
 }
 
 // newListReposTool 은 이 워크디렉토리를 훑어 답하는 list_repos 도구 하나를 만든다.
@@ -91,11 +114,19 @@ func listReposToolAnswer(workDirPath string) (mcpserver.ToolResult, error) {
 
 	repos := make([]listReposRepo, 0, len(listing.repos))
 	for _, repo := range listing.repos {
+		// 위임 기록을 읽지 못한 것은 목록을 막지 않는다. 잃는 것은 "그때 무엇이 있었나" 한 줄이고,
+		// 그것 때문에 모델이 레포 목록 자체를 못 받으면 위임을 걸 길이 사라진다.
+		recentDelegation, err := workdir.MostRecentDelegation(listing.workDirAbsolutePath, repo.name)
+		if err != nil {
+			return mcpserver.ToolResult{Text: err.Error(), IsError: true}, nil
+		}
+
 		repos = append(repos, listReposRepo{
-			Name:         repo.name,
-			AbsolutePath: repo.absolutePath,
-			State:        string(repo.state),
-			Task:         newListReposTask(repo.planSummary),
+			Name:             repo.name,
+			AbsolutePath:     repo.absolutePath,
+			State:            string(repo.state),
+			Task:             newListReposTask(repo.planSummary),
+			RecentDelegation: newListReposDelegation(recentDelegation),
 		})
 	}
 
@@ -103,6 +134,23 @@ func listReposToolAnswer(workDirPath string) (mcpserver.ToolResult, error) {
 		WorkDir: listReposWorkDir{Name: listing.workDirName, AbsolutePath: listing.workDirAbsolutePath},
 		Repos:   repos,
 	})
+}
+
+// newListReposDelegation 은 관찰한 최근 위임을 문서의 한 항목으로 옮긴다. 없으면 nil 이다.
+//
+// 빈 객체로 채우지 않는다. 그러면 모델이 "위임한 적 있음" 으로 읽고, 위임한 적 없는 레포에
+// 이어가기를 기대하게 된다.
+func newListReposDelegation(recent *workdir.RecentDelegation) *listReposDelegation {
+	if recent == nil {
+		return nil
+	}
+	return &listReposDelegation{
+		FinishedAt:           recent.FinishedAt,
+		ExitCode:             recent.ExitCode,
+		TimedOut:             recent.TimedOut,
+		HadPermissionDenials: recent.HadPermissionDenials,
+		LogPath:              recent.LogPath,
+	}
 }
 
 func newListReposTask(summary repoPlanSummary) *listReposTask {
