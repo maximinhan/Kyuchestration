@@ -8,8 +8,8 @@ import kotlin.io.path.isDirectory
  * 이 앱이 자식 프로세스에게 물려줄 환경. 앱이 도는 동안 한 번만 정해진다.
  *
  * **왜 물려받은 환경을 그대로 쓰지 않는가.** Finder 에서 띄운 맥 앱의 PATH 는 시스템 기본값뿐이다
- * (launchd 가 로그인 셸을 거치지 않고 실행한다). 그 PATH 에는 brew 가 놓은 tmux 도 install.sh 가
- * 놓은 kyu 도 없어서, 터미널에서 멀쩡히 도는 사람이 앱 안에서만 "tmux 가 없습니다" 를 본다.
+ * (launchd 가 로그인 셸을 거치지 않고 실행한다). 그 PATH 에는 install.sh 가 놓은 kyu 도 사용자가
+ * 자기 손으로 넣은 claude 도 없어서, 터미널에서 멀쩡히 도는 사람이 앱 안에서만 "없습니다" 를 본다.
  * 그래서 로그인 셸에게 PATH 를 물어([loginShellSearchPath]) 물려받은 것과 합친 뒤, 그 하나를
  * 모든 자식에게 물려준다.
  *
@@ -37,13 +37,13 @@ private val environmentResolvedOnce: Map<String, String> by lazy {
  * 자식에게 물려줄 PATH 를 만든다. 앞에서부터 로그인 셸 · 물려받은 것 · 잘 알려진 자리 순이고,
  * 같은 자리는 처음 나온 것만 남는다.
  *
- * 로그인 셸이 앞이다. 터미널에서 kyu 와 tmux 를 부를 때 실제로 걸리는 것이 그 순서라, 앱 안에서
+ * 로그인 셸이 앞이다. 터미널에서 kyu 와 claude 를 부를 때 실제로 걸리는 것이 그 순서라, 앱 안에서
  * 부르는 것도 같은 파일이어야 "터미널에서는 되는데" 가 없어진다.
  *
  * 잘 알려진 자리는 못 물어봤을 때의 대비만이 아니라 언제나 맨 뒤에 붙는다. brew 를 `.zshrc`
  * 에서만 여는 사람은 로그인 셸에게 물어도 그 자리가 나오지 않는데(로그인 셸은 그 파일을 읽지
  * 않는다), 맨 뒤에 붙는 자리는 앞에서 이미 찾히는 것의 순서를 바꾸지 않으므로 그 사람에게만
- * tmux 를 찾아 준다.
+ * 그 자리를 찾아 준다.
  */
 internal fun searchPathForChildProcesses(
     loginShellSearchPath: String?,

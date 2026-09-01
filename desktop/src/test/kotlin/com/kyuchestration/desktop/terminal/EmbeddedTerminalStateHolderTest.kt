@@ -148,8 +148,8 @@ class EmbeddedTerminalStateHolderTest {
 
         holder.endAllSessions()
 
-        // 워크디렉토리를 바꾸거나 앱을 끌 때다. 남기면 kyu list 에도 앱에도 보이지 않는
-        // 프로세스가 되고, 찾을 수 있는 자리가 ps 뿐이다(설계 문서 8 절 1 번).
+        // 워크디렉토리를 바꾸거나 앱을 끌 때다. 남기면 어디에도 보이지 않는 프로세스가 되고,
+        // 찾을 수 있는 자리가 ps 뿐이다(설계 문서 8 절 1 번).
         assertEquals(listOf(1, 1), opener.openedConnectors.map { it.closeCount })
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
         assertEquals(EmbeddedTerminalState.NoTerminalOpen, holder.state.value)
@@ -166,7 +166,7 @@ class EmbeddedTerminalStateHolderTest {
         opener.lastSessionExit.complete(1)
         runCurrent()
 
-        assertEquals(emptyList(), holder.heldSessions.value.map { it.target }, "돌지 않는 세션을 카드가 RUNNING 이라 말하면 안 된다")
+        assertEquals(emptyList(), holder.heldSessions.value.map { it.target }, "돌지 않는 세션을 카드가 세션 칩으로 말하면 안 된다")
         val ended = assertIs<EmbeddedTerminalState.SessionEndedOnScreen>(holder.state.value)
         assertEquals(1, ended.exitCode)
         assertSame(opener.openedConnectors.single(), ended.ttyConnector)

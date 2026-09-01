@@ -137,7 +137,7 @@ class ProcessKyuCommandRunnerTest {
 
     @Test
     fun `자식은 앱이 정한 환경만 물려받는다`() {
-        // kyu 는 자기 자식으로 tmux 와 git 을 부른다. 그 둘을 찾는 PATH 가 이 자리에서 정해지므로
+        // kyu 는 자기 자식으로 git 을 부른다. 그것을 찾는 PATH 가 이 자리에서 정해지므로
         // (Finder 로 띄운 맥 앱은 로그인 셸의 PATH 를 물려받지 못한다) 실제로 실려 가는지 본다.
         val executable = executableScript(
             """

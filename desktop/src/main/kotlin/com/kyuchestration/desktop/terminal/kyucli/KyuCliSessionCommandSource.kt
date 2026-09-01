@@ -12,7 +12,7 @@ import java.nio.file.Path
 /**
  * kyu CLI 에게 이 세션이 무엇을 띄울지 묻는다.
  *
- * 앱은 세션 명령을 스스로 조립하지 않는다. 그 지식은 `kyu start` 안에 있고, 이 표면이 그것을
+ * 앱은 세션 명령을 스스로 조립하지 않는다. 그 지식은 엔진 안에 있고, 이 표면이 그것을
  * 프로세스 경계 너머로 건네준다(설계 문서 5.2).
  */
 class KyuCliSessionCommandSource(private val kyuCommandRunner: KyuCommandRunner) : SessionCommandSource {
@@ -54,9 +54,9 @@ class KyuCliSessionCommandSource(private val kyuCommandRunner: KyuCommandRunner)
 /**
  * `kyu session-command [repo] --json`.
  *
- * 메인 세션은 레포 이름 자리를 비운다. `kyu attach main` 과 문법이 갈리는 자리이고, 이쪽은
- * `kyu start` 와 같은 규칙이다 — 인자 없는 실행을 메인 세션으로 읽는다(session_command.go 의
- * parseSessionCommandArgs). when 으로 가르면 세션 종류가 하나 늘 때 이 파일이 컴파일되지 않는다.
+ * 메인 세션은 레포 이름 자리를 비운다 — 이 명령은 인자 없는 실행을 메인 세션으로 읽는다
+ * (session_command.go 의 parseSessionCommandArgs). when 으로 가르면 세션 종류가 하나 늘 때
+ * 이 파일이 컴파일되지 않는다.
  */
 private fun sessionCommandArguments(
     target: SessionTarget,

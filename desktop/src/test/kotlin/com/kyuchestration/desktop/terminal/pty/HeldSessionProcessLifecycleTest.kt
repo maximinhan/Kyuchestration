@@ -75,7 +75,7 @@ class HeldSessionProcessLifecycleTest {
         // 창을 닫을 때 앱이 부르는 것이 이것이다(Main.kt 의 onCloseRequest).
         holder.endAllSessions()
 
-        // 남으면 kyu list 에도 앱에도 보이지 않는 프로세스가 되고, 찾을 수 있는 자리가 ps 뿐이다.
+        // 남으면 어디에도 보이지 않는 프로세스가 되고, 찾을 수 있는 자리가 ps 뿐이다.
         assertTrue(waitUntilProcessIsGone(firstProcessId), "pid $firstProcessId 가 남아 있으면 안 된다")
         assertTrue(waitUntilProcessIsGone(secondProcessId), "pid $secondProcessId 가 남아 있으면 안 된다")
     }
