@@ -3,6 +3,7 @@ package secretstore
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -128,6 +129,73 @@ func TestKeychainSaysTheProfileIsMissingInsteadOfAnsweringWithAnEmptyToken(t *te
 	}
 }
 
+// terminalHelperEnvironmentVariable 은 아래 두 시험이 부모와 자식을 가르는 표식이다.
+const terminalHelperEnvironmentVariable = "KYU_KEYCHAIN_TERMINAL_HELPER"
+
+// terminalHelperTestName 은 부모가 자식으로 다시 부를 시험의 이름이다.
+// 아래 함수 이름과 한 글자도 다르면 자식은 아무것도 하지 않고 끝나고, 부모는 그것을 성공으로 읽는다.
+const terminalHelperTestName = "TestKeychainStoreCalledFromAProcessThatOwnsATerminal"
+
+const terminalTestProfileName = "kyu-터미널-시험"
+
+func TestKeychainStoresWithoutAskingTheTerminalThatKyuWasCalledFrom(t *testing.T) {
+	// 터미널에서 kyu auth add 를 부른 사용자가 지나는 길이다.
+	//
+	// security 의 비밀번호 프롬프트는 표준 입력이 아니라 제어 터미널을 먼저 읽는다. 그래서 터미널이
+	// 있는 자리에서는 파이프로 건넨 토큰을 아무도 읽지 않고, 화면에 "password data for new item:" 이
+	// 뜬 채로 kyu 가 멎는다 — 앱에서 부른 kyu(터미널 없음)와는 다른 길이다.
+	//
+	// CI 는 터미널 없이 돌기 때문에, 이 갈림길은 여기서 터미널을 만들어 주지 않으면 검사되지 않는다.
+	vault := keychainVaultForIntegrationTest(t)
+	removeKeychainItemBeforeAndAfter(t, vault, terminalTestProfileName)
+
+	// 시험 바이너리 자신을 PTY 에 띄운다. pty.Start 가 새 세션을 열고 그 PTY 를 제어 터미널로
+	// 물려주므로, 자식은 "터미널에서 불린 kyu" 와 같은 처지가 된다.
+	helper := exec.Command(os.Args[0], "-test.run", "^"+terminalHelperTestName+"$", "-test.v")
+	helper.Env = append(os.Environ(), terminalHelperEnvironmentVariable+"=1")
+
+	terminal, err := pty.Start(helper)
+	if err != nil {
+		t.Fatalf("PTY 를 열지 못했습니다: %v", err)
+	}
+
+	transcript := collectTerminalOutput(terminal)
+	waitErr := waitWithin(helper, keychainRoundTripTimeout)
+	_ = terminal.Close()
+	seen := waitForTranscript(transcript)
+
+	if waitErr != nil {
+		t.Fatalf("터미널을 가진 프로세스에서 저장이 끝나지 않았습니다: %v\n터미널에 찍힌 것:\n%s", waitErr, seen)
+	}
+	if strings.Contains(seen, "password data for new item") {
+		t.Errorf("사용자의 터미널에 토큰을 다시 물었습니다 — 파이프로 건넨 토큰은 아무도 읽지 않습니다:\n%s", seen)
+	}
+
+	loaded, err := vault.lookup(terminalTestProfileName)
+	if err != nil {
+		t.Fatalf("lookup() 실패: %v (터미널에 찍힌 것:\n%s)", err, seen)
+	}
+	if loaded != firstFakeToken {
+		t.Fatalf("lookup() = %q (%d 바이트), 저장한 %q (%d 바이트) 를 기대",
+			loaded, len(loaded), firstFakeToken, len(firstFakeToken))
+	}
+}
+
+// TestKeychainStoreCalledFromAProcessThatOwnsATerminal 은 위 시험이 PTY 에 띄우는 쪽이다.
+//
+// 시험처럼 생겼지만 검사하는 것은 없다. 제어 터미널을 가진 프로세스가 필요해서 시험 바이너리를
+// 그 역할로 다시 부르는 것이고(Go 의 helper process 방식), 그렇게 불린 것이 아니면 넘어간다.
+func TestKeychainStoreCalledFromAProcessThatOwnsATerminal(t *testing.T) {
+	if os.Getenv(terminalHelperEnvironmentVariable) != "1" {
+		t.Skip("터미널 역할로 불린 것이 아니어서 건너뜁니다")
+	}
+
+	vault := keychainVaultForIntegrationTest(t)
+	if err := vault.store(terminalTestProfileName, firstFakeToken); err != nil {
+		t.Fatalf("store() 실패: %v", err)
+	}
+}
+
 func keychainVaultForIntegrationTest(t *testing.T) keychainVault {
 	t.Helper()
 
@@ -208,7 +276,41 @@ func typeTokenIntoSecurityPrompt(securityPath, profileName, token string) (strin
 	}()
 
 	waitErr := waitWithin(command, keychainRoundTripTimeout)
-	return <-transcript, waitErr
+	return waitForTranscript(transcript), waitErr
+}
+
+// collectTerminalOutput 은 PTY 에 찍히는 글자를 끝까지 모은다.
+func collectTerminalOutput(terminal io.Reader) <-chan string {
+	transcript := make(chan string, 1)
+	go func() {
+		var seen strings.Builder
+		buffer := make([]byte, 256)
+
+		for {
+			readCount, err := terminal.Read(buffer)
+			if readCount > 0 {
+				seen.Write(buffer[:readCount])
+			}
+			if err != nil {
+				break
+			}
+		}
+		transcript <- seen.String()
+	}()
+	return transcript
+}
+
+// waitForTranscript 는 모아 둔 글자를 받되 한도를 둔다.
+//
+// 죽인 자식의 자식이 PTY 를 붙잡고 있으면 읽기는 끝나지 않는다. 그때 여기서 기다리면 시험은
+// 실패도 성공도 아닌 채로 멎고, 정작 알고 싶던 "무엇이 찍혔는가" 도 볼 수 없게 된다.
+func waitForTranscript(transcript <-chan string) string {
+	select {
+	case seen := <-transcript:
+		return seen
+	case <-time.After(3 * time.Second):
+		return "(PTY 읽기가 끝나지 않았습니다)"
+	}
 }
 
 // waitWithin 은 자식이 한도 안에 끝나기를 기다린다. 넘기면 죽이고 그 사실을 에러로 돌려준다.

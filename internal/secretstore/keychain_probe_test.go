@@ -12,14 +12,21 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 const probeTimeout = 15 * time.Second
+
+// probeTerminalTimeout 은 "아무도 타이핑해 주지 않는" 갈래를 기다려 주는 한도다.
+// 여기서 한도를 넘기는 것 자체가 답이므로 짧게 둔다.
+const probeTerminalTimeout = 5 * time.Second
 
 // probeFirstToken 과 probeSecondToken 은 가짜다. 두 번째 저장이 -U 경로(사용자가 실제로 지난 길)다.
 const (
@@ -44,6 +51,7 @@ func TestKeychainProbeMeasuresWhatSecurityActuallyStores(t *testing.T) {
 		{"⑦ security -i 대화형 — 따옴표로 감싸서", storeWithInteractiveMode(true)},
 		{"⑧ PTY 프롬프트에 두 번 타이핑", storeByTypingIntoPromptForProbe},
 		{"⑨ 대조군 — 토큰을 인자로 (운영에는 쓰지 않는다)", storeWithTokenInArguments},
+		{"⑫ 제어 터미널이 있는 자리에서 두 줄 (setsid 없이)", storeFromAShellThatOwnsATerminal},
 	}
 
 	for strategyIndex, strategy := range strategies {
@@ -139,6 +147,33 @@ func storeWithTokenInArguments(securityPath, account, token string) string {
 	arguments := append(keychainStoreArguments(account), token)
 	command := exec.Command(securityPath, arguments...)
 	return describeRun(command, "")
+}
+
+// storeFromAShellThatOwnsATerminal 은 터미널에서 kyu 를 부른 사용자의 자리를 흉내 낸다.
+//
+// sh 를 PTY 에 띄우면 sh 도 그 자식(security)도 제어 터미널을 갖는다. 표준 입력은 파이프 그대로다.
+// 여기서 두 줄을 먹여도 저장되지 않는다면, 파이프에 두 줄을 적는 것만으로는 부족하다는 뜻이다 —
+// 새 세션으로 떼는 일이 함께 필요한지가 이 갈래에서 갈린다.
+//
+// 아무도 타이핑해 주지 않는다. 그것이 요점이다 — 프롬프트가 뜨면 사용자는 이 자리에서 멎는다.
+func storeFromAShellThatOwnsATerminal(securityPath, account, token string) string {
+	// 토큰은 환경변수로 넘긴다. sh 의 인자로 적으면 같은 머신의 다른 사용자가 ps 로 읽는다.
+	const script = `printf '%s\n%s\n' "$KYU_PROBE_TOKEN" "$KYU_PROBE_TOKEN" | "$@"`
+	arguments := append([]string{"-c", script, "sh", securityPath}, keychainStoreArguments(account)...)
+
+	command := exec.Command("/bin/sh", arguments...)
+	command.Env = append(os.Environ(), "KYU_PROBE_TOKEN="+token)
+
+	terminal, err := pty.Start(command)
+	if err != nil {
+		return fmt.Sprintf("PTY 를 열지 못했습니다: %v", err)
+	}
+
+	transcript := collectTerminalOutput(terminal)
+	waitErr := waitWithin(command, probeTerminalTimeout)
+	_ = terminal.Close()
+
+	return fmt.Sprintf("결과=%v 터미널에찍힌것=%q", waitErr, waitForTranscript(transcript))
 }
 
 func storeByTypingIntoPromptForProbe(securityPath, account, token string) string {

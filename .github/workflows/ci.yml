@@ -92,7 +92,7 @@ jobs:
       - name: 지금 코드의 키체인 왕복
         env:
           KYU_KEYCHAIN_INTEGRATION: '1'
-        run: go test ./internal/secretstore/ -run 'TestKeychainGivesBack|TestKeychainReplaces|TestKeychainReads|TestKeychainSays' -v -count=1 -timeout 15m
+        run: go test ./internal/secretstore/ -run 'TestKeychainGivesBack|TestKeychainReplaces|TestKeychainReads|TestKeychainSays|TestKeychainStores' -v -count=1 -timeout 15m
 
       - name: 시험용 키체인 정리
         if: always()
