@@ -42,6 +42,55 @@ jobs:
       - name: go test
         run: go test ./...
 
+  # 키체인에 넣은 토큰이 그대로 돌아오는지 진짜 security 로 확인한다.
+  #
+  # 이 검사를 맥에서 돌려야 하는 이유가 있다. 키체인 저장 경로는 리눅스에서 t.Skip 으로 넘어가므로,
+  # 우분투 잡 하나였을 때 그 코드는 한 번도 실행되지 않은 채 초록이었다. 그 자리에서 결함이 났고
+  # (빈 토큰을 저장하고 성공으로 끝냈다), 사용자의 맥에서 401 로 처음 발견됐다(PR 46).
+  mac-keychain-round-trip:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 버려도 되는 키체인을 기본으로 잡는다. 러너는 일회용이라 기본을 바꿔도 무방하고,
+      # 시험은 이런 자리에서만 켜진다(KYU_KEYCHAIN_INTEGRATION).
+      #
+      # 기본 키체인(add 가 쓰는 자리)과 검색 목록(find 가 뒤지는 자리)은 서로 다른 설정이다.
+      # 하나만 바꾸면 저장과 조회가 다른 키체인을 보고, 시험은 늘 "항목 없음" 으로 깨진다.
+      - name: 시험용 키체인을 기본으로 잡는다
+        run: |
+          set -euo pipefail
+          keychain_password="$(uuidgen)"
+
+          security create-keychain -p "$keychain_password" kyu-ci.keychain
+          # 자동 잠금을 끈다. 스텝 사이에 잠기면 다음 스텝은 암호를 묻다가 멎는다.
+          security set-keychain-settings kyu-ci.keychain
+          security default-keychain -s kyu-ci.keychain
+          security list-keychains -d user -s kyu-ci.keychain
+          security unlock-keychain -p "$keychain_password" kyu-ci.keychain
+
+      - name: 키체인 왕복 시험
+        env:
+          KYU_KEYCHAIN_INTEGRATION: '1'
+        run: |
+          set -euo pipefail
+          go test ./internal/secretstore/... -v -count=1 -timeout 10m | tee /tmp/keychain-test.log
+
+          # 이 시험들은 조건이 어긋나면 t.Skip 으로 넘어간다. 환경변수 하나만 빠져도 전부 건너뛴
+          # 채로 초록이 뜨는데, 그 초록은 아무것도 검사하지 않았다는 뜻이다. 여기서 먼저 끊는다.
+          grep -q -- "--- PASS: TestKeychainGivesBackTheTokenItWasGiven" /tmp/keychain-test.log
+
+      - name: 시험용 키체인 정리
+        if: always()
+        run: |
+          security list-keychains -d user -s login.keychain-db || true
+          security default-keychain -s login.keychain-db || true
+          security delete-keychain kyu-ci.keychain || true
+
   # ── 임시 잡: security 가 표준 입력을 어떻게 다루는지 실측한다. 원인을 확정하고 걷어낸다. ────
   #
   # WSL 에는 security 가 없어서, "값 없는 -w 에 파이프로 토큰을 먹이면 그 토큰이 저장된다" 는
