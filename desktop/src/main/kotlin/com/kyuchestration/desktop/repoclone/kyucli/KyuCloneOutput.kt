@@ -23,14 +23,18 @@ internal fun parseKyuCloneOutput(rawJson: String): CloneOutcome =
                         message = it.message,
                     )
                 },
-                mainSessionRestartNeeded = document.mainSessionRestartNeeded,
             )
         }
 
+/**
+ * `mainSessionRestartNeeded` 는 읽지 않는다. 엔진이 자기가 띄운 메인 세션을 들여다보고 답하던
+ * 값인데, 세션을 띄우는 것이 앱뿐이라 엔진에게는 볼 세션이 없다. 필드를 계속 읽으면 앱은
+ * "언제나 거짓" 을 물어보느라 한 번 더 왕복하는 셈이고, 그 답이 사라지는 날 목록이 통째로
+ * 읽히지 않게 된다.
+ */
 @Serializable
 private data class KyuCloneDocument(
     val results: List<KyuCloneResult>,
-    val mainSessionRestartNeeded: Boolean,
 )
 
 @Serializable

@@ -164,10 +164,10 @@ private val EmbeddedTerminalState.showsResumeFailure: Boolean
  * 문구를 띄우면 없는 것을 있다고 말하게 된다.
  */
 private fun headerNotice(terminalState: EmbeddedTerminalState): String? = when (terminalState) {
-    // 버튼을 누르기 전에 두 가지를 말한다 — 이 세션은 앱이 보유하므로 끝내는 길이 여기뿐이고,
-    // 그래서 터미널에서 kyu list 를 쳐도 이 세션은 보이지 않는다(설계 원칙 12).
+    // 버튼을 누르기 전에 되돌릴 수 없다는 것을 말한다. 앱이 이 세션을 직접 보유하므로 끝내는
+    // 길이 여기뿐이고, 끝난 세션에 다시 붙는 길은 없다.
     is EmbeddedTerminalState.SessionOnScreen ->
-        "이 세션은 앱이 보유합니다 — 끝내면 되돌릴 수 없고, kyu list 에는 보이지 않습니다"
+        "이 세션은 앱이 보유합니다 — 끝내면 되돌릴 수 없습니다"
 
     // 이어가기로 연 세션이 곧바로 끝난 자리다. claude 는 전사가 없으면 종료 코드 1 로 즉시 끝나고
     // (설계 문서 5.5.1), 그 이유를 적은 마지막 줄이 이 머리말 아래 화면에 그대로 남아 있다.

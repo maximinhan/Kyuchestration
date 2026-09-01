@@ -28,13 +28,12 @@ interface WorkDirRepositoryCloner {
 /**
  * 클론 한 번의 결과 전부.
  *
- * @param mainSessionRestartNeeded 떠 있는 메인 세션이 방금 받아 온 레포를 보지 못하는지.
- *   세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다 — 조용히 넘어가면
- *   사용자는 방금 받은 레포가 세션에서 왜 안 보이는지 알 수 없다.
+ * 세션에 대한 것은 담지 않는다. 문서의 `mainSessionRestartNeeded` 를 읽던 자리였는데, 그것은
+ * 엔진이 자기가 띄운 메인 세션을 들여다보고 답하던 값이다. 세션을 띄우는 것이 앱뿐인 지금
+ * 그 사실을 아는 것도 앱이라, 화면이 자기 보유 목록에서 직접 답한다.
  */
 data class CloneOutcome(
     val results: List<RepositoryCloneResult>,
-    val mainSessionRestartNeeded: Boolean,
 )
 
 /**

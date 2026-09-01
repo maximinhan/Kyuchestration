@@ -71,15 +71,6 @@ class KyuCliWorkDirRepositoryClonerTest {
     }
 
     @Test
-    fun `떠 있는 메인 세션이 새 레포를 보지 못한다는 사실을 함께 들고 온다`() {
-        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(THREE_RESULTS_OUTPUT) }
-
-        val outcome = KyuCliWorkDirRepositoryCloner(runner).cloneInto(WORK_DIR_PATH, "개인", listOf("maximinhan/proj-a"))
-
-        assertTrue(outcome.mainSessionRestartNeeded)
-    }
-
-    @Test
     fun `실패한 레포가 섞여 종료 코드가 1 이어도 결과 문서를 읽는다`() {
         val runner = RecordingKyuCommandRunner {
             KyuCommandResult(exitCode = 1, standardOutput = THREE_RESULTS_OUTPUT, standardError = "")
@@ -117,8 +108,7 @@ class KyuCliWorkDirRepositoryClonerTest {
                 """
                 {
                   "schemaVersion": 1,
-                  "results": [ { "repo": "me/proj-a", "status": "retried", "message": "" } ],
-                  "mainSessionRestartNeeded": false
+                  "results": [ { "repo": "me/proj-a", "status": "retried", "message": "" } ]
                 }
                 """.trimIndent(),
             )
@@ -132,7 +122,7 @@ class KyuCliWorkDirRepositoryClonerTest {
     @Test
     fun `아는 판이 아니면 판이 다르다고 말한다`() {
         val runner = RecordingKyuCommandRunner {
-            succeedingKyuCommandResult("""{ "schemaVersion": 2, "results": [], "mainSessionRestartNeeded": false }""")
+            succeedingKyuCommandResult("""{ "schemaVersion": 2, "results": [] }""")
         }
 
         assertFailsWith<CloneStepFailure.UnsupportedSchemaVersion> {
@@ -143,6 +133,8 @@ class KyuCliWorkDirRepositoryClonerTest {
     private companion object {
         val WORK_DIR_PATH: Path = Path.of("/home/me/work/WorkDir-featureX")
 
+        // mainSessionRestartNeeded 를 그대로 둔다. 계약이 아직 내는 필드이고, 앱이 그것을 읽지
+        // 않으면서도 문서를 통째로 읽어내는지가 이 문서로 함께 확인된다.
         val THREE_RESULTS_OUTPUT = """
             {
               "schemaVersion": 1,

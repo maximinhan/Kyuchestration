@@ -59,8 +59,8 @@ fun KyuchestrationDesktopScreen(
     /**
      * 앱이 지금 보유 중인 세션 전부. 화면에 보이지 않는 것도 들어 있다.
      *
-     * 엔진이 답한 목록에 얹을 앱 자신의 사실이다 — 앱 세션은 tmux 세션도 감독 세션도 아니라
-     * `kyu list` 에 보이지 않고, 앱이 자기 것을 스스로 아는 것 말고는 알 길이 없다(설계 문서 5.4).
+     * 엔진이 답한 목록에 얹을 앱 자신의 사실이다 — 세션을 띄우는 것이 앱뿐이라 엔진은 이것을
+     * 알지 못하고, 앱이 자기 것을 스스로 아는 것 말고는 알 길이 없다(설계 문서 5.4).
      */
     heldSessions: List<HeldSession>,
     /**
@@ -130,7 +130,11 @@ fun KyuchestrationDesktopScreen(
                         )
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
-                        RepositoryCloneDialog(repositoryCloneStateHolder, diagnosticLogPathLabel)
+                        RepositoryCloneDialog(
+                            repositoryCloneStateHolder = repositoryCloneStateHolder,
+                            diagnosticLogPathLabel = diagnosticLogPathLabel,
+                            mainSessionHeld = heldSessions.any { it.target == SessionTarget.Main },
+                        )
                     }
 
                     is WorkDirDashboardState.FirstObservationFailed ->
