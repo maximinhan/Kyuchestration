@@ -38,8 +38,8 @@ func runMachineCloneForTest(t *testing.T, gitHub *fakeGitHub, repoReferences ...
 	}
 	args = append(args, machineJSONOptionName)
 
-	var out, errOut bytes.Buffer
-	err := CloneRepos(nil, &out, &errOut, args, gitHub.newAccess, storeWithOneProfile(t))
+	var out bytes.Buffer
+	err := CloneRepos(&out, args, gitHub.newAccess, storeWithOneProfile(t))
 
 	var document cloneJSONDocumentForTest
 	decodeMachineJSONForTest(t, out.String(), &document)
@@ -170,7 +170,7 @@ func TestCloneAsksTheRepositoryListOncePerOwner(t *testing.T) {
 	}
 }
 
-func TestCloneWithJSONSaysWhenTheRunningMainSessionMustBeRestarted(t *testing.T) {
+func TestCloneAlwaysReportsThatNoMainSessionNeedsRestarting(t *testing.T) {
 	// 계약이라 필드는 남지만 값은 늘 거짓이다. 엔진에는 떠 있는 세션을 물을 상대가 없다 —
 	// 세션은 앱의 PTY 안에 있고 앱만 그것을 안다.
 	workDirPath := makeWorkDir(t)
@@ -195,8 +195,8 @@ func TestCloneWithoutJSONStillClonesWithoutAskingAnything(t *testing.T) {
 
 	gitHub := newTestGitHubWithRepos(makeRepository("proj-a", false, time.Now()))
 
-	var out, errOut bytes.Buffer
-	err := CloneRepos(nil, &out, &errOut,
+	var out bytes.Buffer
+	err := CloneRepos(&out,
 		[]string{profileOptionName, "개인", repoOptionName, "maximinhan/proj-a"},
 		gitHub.newAccess, storeWithOneProfile(t))
 	if err != nil {
@@ -209,9 +209,6 @@ func TestCloneWithoutJSONStillClonesWithoutAskingAnything(t *testing.T) {
 	if !strings.Contains(out.String(), "proj-a") {
 		t.Errorf("stdout = %q, 무엇을 클론했는지 알리기를 기대", out.String())
 	}
-	if errOut.Len() != 0 {
-		t.Errorf("stderr = %q, 할 말이 없으면 비어 있기를 기대", errOut.String())
-	}
 }
 
 func TestCloneWithRepoNeedsToKnowWhichTokenToUse(t *testing.T) {
@@ -219,8 +216,8 @@ func TestCloneWithRepoNeedsToKnowWhichTokenToUse(t *testing.T) {
 	// "머신에 굴러다니는 인증을 집어 쓰지 않는다" 는 이 도구의 원칙과 정면으로 어긋난다.
 	t.Chdir(makeWorkDir(t))
 
-	var out, errOut bytes.Buffer
-	err := CloneRepos(nil, &out, &errOut,
+	var out bytes.Buffer
+	err := CloneRepos(&out,
 		[]string{repoOptionName, "maximinhan/proj-a", machineJSONOptionName},
 		newTestGitHub().newAccess, storeWithOneProfile(t))
 	if err == nil {
@@ -236,8 +233,8 @@ func TestCloneRefusesARepoThatIsNotOwnerSlashName(t *testing.T) {
 	// 같은 이름의 조직 레포를 적은 사용자가 엉뚱한 레포를 받는다.
 	t.Chdir(makeWorkDir(t))
 
-	var out, errOut bytes.Buffer
-	err := CloneRepos(nil, &out, &errOut,
+	var out bytes.Buffer
+	err := CloneRepos(&out,
 		[]string{profileOptionName, "개인", repoOptionName, "proj-a", machineJSONOptionName},
 		newTestGitHub().newAccess, storeWithOneProfile(t))
 	if err == nil {
@@ -248,12 +245,13 @@ func TestCloneRefusesARepoThatIsNotOwnerSlashName(t *testing.T) {
 	}
 }
 
-func TestCloneWithAProfileButNoRepoSaysWhatIsMissing(t *testing.T) {
-	// --profile 만 적은 실행을 대화형으로 흘려보내면 사용자는 방금 고른 프로필을 다시 고르게 된다.
+func TestCloneWithoutARepoPointsAtTheCommandThatListsCandidates(t *testing.T) {
+	// 무엇을 클론할지 적지 않은 실행을 목록으로 데려가지 않는다. 고를 화면은 앱에 있고,
+	// 엔진에는 물어볼 상대가 없다 — 후보를 답하는 자리를 대신 일러준다.
 	t.Chdir(makeWorkDir(t))
 
-	var out, errOut bytes.Buffer
-	err := CloneRepos(strings.NewReader(""), &out, &errOut,
+	var out bytes.Buffer
+	err := CloneRepos(&out,
 		[]string{profileOptionName, "개인"},
 		newTestGitHub().newAccess, storeWithOneProfile(t))
 	if err == nil {
@@ -261,6 +259,9 @@ func TestCloneWithAProfileButNoRepoSaysWhatIsMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), repoOptionName) {
 		t.Errorf("에러 = %q, 무엇이 빠졌는지 알리기를 기대", err.Error())
+	}
+	if !strings.Contains(err.Error(), "kyu repos") {
+		t.Errorf("에러 = %q, 후보를 답하는 명령을 함께 알리기를 기대", err.Error())
 	}
 }
 

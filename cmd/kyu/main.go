@@ -25,7 +25,7 @@ import (
 const usageText = `사용법: kyu <명령> [인자]
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-  kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
+  kyu clone [옵션]       적어 보낸 GitHub 레포를 이 디렉토리에 클론 — 기계용
   kyu list [path]        레포 목록 + 상태
   kyu repos <owners|list>
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
@@ -41,8 +41,8 @@ const usageText = `사용법: kyu <명령> [인자]
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다
 
 옵션 (kyu clone):
-  --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
-  --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
+  --profile <이름>       어느 토큰으로 붙을지 (필수)
+  --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
 옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
@@ -64,8 +64,8 @@ func main() {
 // 두 출력 스트림을 모두 받는다. 명령이 내는 말에는 다른 명령의 입력으로 넘길 수 있는 것(out)과
 // 사람에게만 하는 말(errOut)이 섞여 있고, 그 구분은 명령마다 다르다.
 //
-// 입력도 받는다. kyu clone 은 처음부터 끝까지 대화라, 어디서 답을 읽을지가 진입점의 결정이어야
-// 표시 계층이 os.Stdin 을 직접 붙들지 않는다.
+// 입력도 받는다. kyu auth add 는 토큰을 stdin 으로 받는데, 어디서 그것을 읽을지가 진입점의
+// 결정이어야 표시 계층이 os.Stdin 을 직접 붙들지 않는다.
 func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// 인자 없는 kyu 는 사용법으로 끝난다. 목록으로 보내지 않는 이유는 그것이 이 도구가 하는
 	// 일을 대표하지 않아서다 — kyu list 는 앱과 스크립트를 위한 읽기 표면이고, 사람이 이 도구
@@ -87,12 +87,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	case "list":
 		return cli.ListWorkDir(out, errOut, commandArgs)
 
-	// clone 은 GitHub 에 붙어 레포를 받아 오는 일이라 세션과 무관하다. 클론이 끝난 뒤 떠 있는
-	// 메인 세션에 새 레포가 닿는지를 묻던 걸음이 있었지만, 그 세션은 이제 앱의 것이라 엔진이
-	// 물을 상대가 없다(app-owned-sessions-design.md 6절).
+	// clone 은 무엇을 클론할지 묻지 않는다. 고르는 화면은 앱으로 옮겨갔고, 이 명령은 이미
+	// 고른 것을 받아 클론한다(app-owned-sessions-design.md 6절).
 	case "clone":
 		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
-			return cli.CloneRepos(in, out, errOut, commandArgs, newGitHubAccess, tokenStore)
+			return cli.CloneRepos(out, commandArgs, newGitHubAccess, tokenStore)
 		})
 
 	// repos 도 GitHub 에 무엇이 있는지 묻기만 하는 명령이라 워크디렉토리를 보지 않는다 —

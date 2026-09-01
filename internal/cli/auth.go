@@ -21,8 +21,7 @@ const authUsageText = `사용법: kyu auth <add|list|remove>
 옵션 (add, list):
   --json                   사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
-토큰은 인자가 아니라 stdin 으로 받는다 — 인자는 같은 머신의 다른 사용자가 ps 로 읽는다.
-kyu clone 도 필요한 자리에서 물어보므로, 사람은 어느 쪽으로 들어와도 된다.`
+토큰은 인자가 아니라 stdin 으로 받는다 — 인자는 같은 머신의 다른 사용자가 ps 로 읽는다.`
 
 // tokenRegistrationGuidance 는 토큰을 받기 전에 보여주는 안내다.
 //
@@ -45,23 +44,15 @@ const plaintextStorageWarning = "경고: 이 머신에는 키체인도 secret-se
 	"      토큰을 남기고 싶지 않다면 지금 중단하고(Ctrl-C), 키체인이 있는 머신에서 실행하세요.\n"
 
 // tokenQuestion 은 토큰을 받는 자리의 물음이다.
-//
-// 두 등록 경로가 같은 문구를 쓴다. 사람이 대화형으로 들어오든 kyu auth add 를 터미널에서 치든
-// 화면에 뜨는 것은 같아야, "이 도구는 이렇게 토큰을 묻는다" 가 하나로 남는다.
 const tokenQuestion = "GitHub personal access token (입력은 보이지 않습니다): "
 
-// noTokenProfileGuidance 는 등록된 프로필이 하나도 없을 때 보여주는 두 갈래 길이다.
+// noTokenProfileGuidance 는 등록된 프로필이 하나도 없을 때 보여주는 다음 걸음이다.
 //
-// 두 길을 모두 적는다. kyu clone 은 사람이 지나는 길이고 kyu auth add 는 스크립트와 GUI 가
-// 지나는 길인데, 한쪽만 적으면 다른 쪽 사용자는 자기 자리에서 쓸 수 없는 방법만 보게 된다.
+// 빈 목록만 보여주면 사용자는 도구가 못 찾은 것인지 등록한 적이 없는 것인지 모른다.
 const noTokenProfileGuidance = `등록된 토큰 프로필이 없습니다.
 
   kyu auth add <이름>   토큰을 stdin 으로 넘겨 등록한다
-  kyu clone             필요한 자리에서 물어본다
 `
-
-// newTokenProfileOptionLabel 은 프로필 목록의 마지막 항목이다.
-const newTokenProfileOptionLabel = "새 토큰 등록"
 
 // RepositoryAccessFactory 는 토큰 하나를 GitHub 접근 경로로 바꾼다.
 //
@@ -71,11 +62,7 @@ type RepositoryAccessFactory func(token string) github.RepositoryAccess
 
 // ManageTokenProfiles 는 kyu auth 를 실행한다.
 //
-// 등록하는 하위 명령(add)이 뒤늦게 생긴 이유는 GUI 다. 대화형 등록은 kyu clone 안에 있고 그것이
-// 사람이 실제로 지나는 길이지만, 앱은 물음에 답할 수 없다 — 물음 없이 토큰 하나를 건네고
-// 성공·실패만 돌려받는 표면이 따로 있어야 앱이 자기 화면에서 등록을 마칠 수 있다.
-//
-// 입력과 stderr 까지 받는 이유가 그 add 다. 토큰은 인자로 받지 않으므로 어딘가에서 읽어야 하고,
+// 입력과 stderr 까지 받는 이유는 add 다. 토큰은 인자로 받지 않으므로 어딘가에서 읽어야 하고,
 // 물음과 경고는 stdout 을 오염시키면 안 된다 — stdout 은 --json 문서가 통째로 쓰는 자리다.
 //
 // GitHub 접근 경로도 받는다. 등록은 저장이 아니라 확인이 먼저인 일이라(verifyAndStoreToken),
@@ -178,9 +165,8 @@ func removeTokenProfile(out io.Writer, profileName string, tokenStore secretstor
 
 // accessWithStoredToken 은 이름으로 고른 프로필의 토큰으로 GitHub 에 붙는다.
 //
-// 묻지 않는다는 것이 대화형 인증(authenticateWithTokenProfile)과의 차이 전부다. 저장된 토큰이
-// 거절당하면 대화형 흐름은 그 자리에서 새 토큰을 받지만, 기계용 표면에는 되물을 상대가 없다 —
-// 실패로 끝내야 앱이 자기 화면에서 등록을 이끌 수 있다.
+// 저장된 토큰이 거절당하면 그 자리에서 새 토큰을 받지 않고 실패로 끝낸다. 되물을 상대가
+// 없기 때문이다 — 등록을 이끄는 것은 앱의 화면이다.
 //
 // 붙은 계정까지 돌려준다. 토큰이 유효한지 확인하려면 어차피 GitHub 에 한 번 물어야 하고,
 // 그 답이 곧 개인 계정이 누구인지다 — 뒤이은 소유자 목록이 같은 것을 다시 묻지 않아도 된다.
@@ -220,133 +206,10 @@ func unknownProfileError(profileName string, tokenStore secretstore.TokenStore) 
 	return fmt.Errorf("등록되지 않은 프로필입니다: %s\n등록된 프로필: %s", profileName, strings.Join(registeredNames, ", "))
 }
 
-// authenticateWithTokenProfile 은 저장된 프로필을 고르거나 새 토큰을 등록해 GitHub 에 붙는다.
-//
-// 머신의 다른 인증(GITHUB_TOKEN 환경변수, gh 의 로그인)을 보지 않는다. 그것을 집어 쓰면 회사
-// 토큰이 깔린 머신에서 개인 레포를 클론하려던 사용자가 엉뚱한 계정의 목록을 보게 되고,
-// 무엇으로 인증했는지 화면에서 확인할 방법도 없다. 여기서 고른 프로필이 곧 그 답이다.
-//
-// 붙은 계정(Owner)까지 함께 돌려준다. 토큰이 유효한지 확인하려면 어차피 GitHub 에 한 번 물어야
-// 하는데, 그 답을 버리면 뒤이은 소유자 선택이 같은 것을 다시 묻게 된다.
-func authenticateWithTokenProfile(prompt *interactivePrompt, errOut io.Writer, tokenStore secretstore.TokenStore, newAccess RepositoryAccessFactory) (github.RepositoryAccess, github.Owner, error) {
-	profiles, err := tokenStore.Profiles()
-	if err != nil {
-		return nil, github.Owner{}, err
-	}
-
-	// 등록된 것이 없으면 고를 것이 없는 목록을 보여주지 않고 곧바로 등록으로 간다.
-	if len(profiles) == 0 {
-		return registerTokenProfile(prompt, errOut, tokenStore, newAccess, "")
-	}
-
-	chosenIndex, err := askWhichTokenProfile(prompt, profiles)
-	if err != nil {
-		return nil, github.Owner{}, err
-	}
-	if chosenIndex == len(profiles) {
-		return registerTokenProfile(prompt, errOut, tokenStore, newAccess, "")
-	}
-
-	profile := profiles[chosenIndex]
-	token, err := tokenStore.LoadToken(profile.Name)
-	if err != nil {
-		return nil, github.Owner{}, fmt.Errorf("%s 프로필의 토큰을 꺼내지 못했습니다: %w", profile.Name, err)
-	}
-
-	access := newAccess(token)
-	owner, err := access.AuthenticatedOwner()
-
-	// 토큰은 만료되고 폐기된다. "거절됐습니다" 로 끝내면 사용자는 지우고 다시 등록하는 두 걸음을
-	// 스스로 찾아야 하는데, 그 두 걸음이 지금 이 자리에서 할 수 있는 일이다.
-	if errors.Is(err, github.ErrInvalidToken) {
-		fmt.Fprintf(errOut, "%s 프로필의 토큰을 GitHub 이 거절했습니다 — 같은 이름으로 새 토큰을 등록합니다.\n", profile.Name)
-		return registerTokenProfile(prompt, errOut, tokenStore, newAccess, profile.Name)
-	}
-	if err != nil {
-		return nil, github.Owner{}, err
-	}
-
-	fmt.Fprintf(prompt.out, "%s 프로필로 붙었습니다 — %s 계정입니다.\n", profile.Name, owner.Login)
-	return access, owner, nil
-}
-
-// askWhichTokenProfile 은 프로필 목록을 보여주고 하나를 고르게 한다.
-// 마지막 항목은 새 토큰 등록이라, 돌려주는 값이 len(profiles) 이면 그 뜻이다.
-func askWhichTokenProfile(prompt *interactivePrompt, profiles []secretstore.Profile) (int, error) {
-	fmt.Fprintf(prompt.out, "\n토큰 프로필을 고르세요.\n\n")
-
-	table := tabwriter.NewWriter(prompt.out, 0, 0, tableColumnPadding, ' ', 0)
-	for profileNumber, profile := range profiles {
-		fmt.Fprintf(table, "%s%d)\t%s\t%s\n", rowIndent, profileNumber+1, profile.Name, profile.Storage.Description())
-	}
-	fmt.Fprintf(table, "%s%d)\t%s\t\n", rowIndent, len(profiles)+1, newTokenProfileOptionLabel)
-	if err := table.Flush(); err != nil {
-		return 0, fmt.Errorf("프로필 표 정렬 실패: %w", err)
-	}
-
-	chosenNumber, err := prompt.askForNumberedChoice("\n번호: ", len(profiles)+1)
-	if err != nil {
-		return 0, err
-	}
-	return chosenNumber, nil
-}
-
-// registerTokenProfile 은 토큰을 받아 확인하고 저장한다.
-//
-// presetProfileName 이 비어 있지 않으면 이름을 묻지 않는다 — 이미 있는 프로필의 토큰을 갈아 끼우는 길이다.
-func registerTokenProfile(prompt *interactivePrompt, errOut io.Writer, tokenStore secretstore.TokenStore, newAccess RepositoryAccessFactory, presetProfileName string) (github.RepositoryAccess, github.Owner, error) {
-	fmt.Fprintf(prompt.out, "\n%s", tokenRegistrationGuidance)
-
-	profileName := presetProfileName
-	if profileName == "" {
-		typedName, err := prompt.ask("\n프로필 이름 (예: 개인, 회사): ")
-		if err != nil {
-			return nil, github.Owner{}, err
-		}
-		// 이름을 적지 않은 것은 그만두겠다는 뜻이다. 대신 정해주면 사용자가 짓지 않은 이름의
-		// 프로필이 남는다.
-		if typedName == "" {
-			return nil, github.Owner{}, errInputClosed
-		}
-		profileName = typedName
-	}
-
-	if err := warnWhenTheTokenWouldBeStoredInPlaintext(errOut, tokenStore); err != nil {
-		return nil, github.Owner{}, err
-	}
-
-	// 거절당한 토큰으로 되묻는다. 토큰을 붙여넣다 한 글자를 흘리는 것은 흔한 실수인데,
-	// 그때마다 명령을 처음부터 다시 실행하게 하면 프로필 선택부터 다시 지나야 한다.
-	for {
-		token, err := prompt.askHidden(tokenQuestion)
-		if err != nil {
-			return nil, github.Owner{}, err
-		}
-		if token == "" {
-			return nil, github.Owner{}, errInputClosed
-		}
-
-		access, owner, err := verifyAndStoreToken(profileName, token, tokenStore, newAccess)
-		if errors.Is(err, github.ErrInvalidToken) {
-			// 되묻는 것은 사람이 앞에 있을 때만 할 수 있는 일이다. kyu auth add 는 같은 실패를
-			// 종료 코드로 돌려준다 — 파이프 너머에는 다시 붙여넣을 상대가 없다.
-			fmt.Fprintf(errOut, "GitHub 이 이 토큰을 거절했습니다 — 저장하지 않았습니다. 다시 붙여넣으세요.\n")
-			continue
-		}
-		if err != nil {
-			return nil, github.Owner{}, err
-		}
-
-		writeTokenStoredNotice(prompt.out, profileName, owner, tokenStore)
-		return access, owner, nil
-	}
-}
-
 // verifyAndStoreToken 은 토큰이 살아 있는지 GitHub 에 먼저 묻고, 그 답을 받은 뒤에만 저장한다.
 //
-// 이 순서가 이 함수의 전부이고, 대화형 등록과 kyu auth add 가 이 함수를 함께 쓰는 이유다.
-// 저장부터 하면 거절당한 토큰이 프로필에 남아 다음 실행에서도 같은 실패가 반복되는데,
-// 두 등록 경로가 그 순서를 각자 지키면 한쪽만 어긋나는 날이 온다.
+// 이 순서가 이 함수의 전부다. 저장부터 하면 거절당한 토큰이 프로필에 남아 다음 실행에서도
+// 같은 실패가 반복된다.
 //
 // 붙은 계정까지 돌려준다. 확인하려면 어차피 GitHub 에 한 번 물어야 하고, 그 답이 곧 사용자가
 // 화면에서 확인해야 하는 것이다 — 회사 토큰을 개인 프로필로 저장하는 것은 그 자리에서만 막힌다.

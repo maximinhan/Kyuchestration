@@ -288,7 +288,7 @@ func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
 		t.Fatalf("kyu auth list 실행 실패: %v (%s)", err, stderr.String())
 	}
 
-	if !strings.Contains(stdout.String(), "kyu clone") {
+	if !strings.Contains(stdout.String(), "kyu auth add") {
 		t.Errorf("stdout = %q, 등록이 일어나는 자리를 알리기를 기대", stdout.String())
 	}
 }
