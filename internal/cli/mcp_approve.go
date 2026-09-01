@@ -75,8 +75,13 @@ func approveRepoDelegation(in io.Reader, out io.Writer, args []string) error {
 		return err
 	}
 	if approval.Approved {
+		approvedFilePaths := make([]string, 0, len(approval.ExecutionConfigs))
+		for _, config := range approval.ExecutionConfigs {
+			approvedFilePaths = append(approvedFilePaths, config.AbsolutePath)
+		}
+
 		_, err := fmt.Fprintf(out, "%s 의 지금 설정 내용은 이미 승인되어 있습니다 (%s).\n",
-			repo.Name, joinConfigPaths(approval.ExecutionConfigs))
+			repo.Name, strings.Join(approvedFilePaths, ", "))
 		return err
 	}
 
@@ -96,15 +101,6 @@ func approveRepoDelegation(in io.Reader, out io.Writer, args []string) error {
 	_, err = fmt.Fprintf(out, "승인했습니다 — 이제 %s 에 위임할 수 있습니다. 이 파일들이 바뀌거나 하나 늘면 다시 묻습니다.\n",
 		repo.Name)
 	return err
-}
-
-// joinConfigPaths 는 걸린 파일들의 자리를 한 줄로 잇는다.
-func joinConfigPaths(executionConfigs []workdir.RepoExecutionConfig) string {
-	paths := make([]string, 0, len(executionConfigs))
-	for _, config := range executionConfigs {
-		paths = append(paths, config.AbsolutePath)
-	}
-	return strings.Join(paths, ", ")
 }
 
 // executionConfigsReviewText 는 사람이 승인 여부를 정할 때 보는 화면이다.
