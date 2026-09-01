@@ -88,6 +88,67 @@ class RepositoryCloneStateHolder(
         mutableState.value = RepositoryCloneState.ChoosingTokenProfile(form.profilesToReturnTo)
     }
 
+    /** 프로필 목록에서 하나를 지우겠다고 눌렀다. 지우기 전에 무엇을 지우는지 확인받는다. */
+    fun startRemovingTokenProfile(profileName: String) {
+        val choosing = mutableState.value as? RepositoryCloneState.ChoosingTokenProfile ?: return
+        // 목록에 없는 이름은 지울 것이 없다. 화면에서도 그 버튼이 뜨지 않지만, 무엇을 지울 수
+        // 있는가는 화면의 모양이 아니라 이 홀더의 판단이어야 한다.
+        if (choosing.profiles.none { it.name == profileName }) {
+            return
+        }
+        mutableState.value = RepositoryCloneState.ConfirmingTokenProfileRemoval(profileName, choosing.profiles)
+    }
+
+    /** 지우지 않기로 하고 목록으로 돌아간다. */
+    fun stopRemovingTokenProfile() {
+        val confirming = mutableState.value as? RepositoryCloneState.ConfirmingTokenProfileRemoval ?: return
+        mutableState.value = RepositoryCloneState.ChoosingTokenProfile(confirming.profilesToReturnTo)
+    }
+
+    /**
+     * 확인받은 프로필을 지우고, 지운 뒤의 목록을 엔진에게 다시 묻는다.
+     *
+     * **두 걸음을 한 코루틴 안에서 잇는다.** 지운 뒤에 runCloneStep 을 부르면 그 함수가 맨
+     * 앞에서 돌고 있는 걸음을 취소하는데, 그 걸음이 바로 자기 자신이다 — 목록을 다시 묻는
+     * 일은 시작도 못 하고 화면은 스피너를 문 채로 멎는다.
+     *
+     * 지운 이름만 빼서 목록을 지어내지 않는 이유는 그것이 이 머신의 사실이 아니라 앱의
+     * 짐작이기 때문이다. 다른 터미널에서 그 사이에 프로필을 하나 더 지웠으면 앱은 없는 것을
+     * 계속 보여준다.
+     */
+    fun removeChosenTokenProfile() {
+        val confirming = mutableState.value as? RepositoryCloneState.ConfirmingTokenProfileRemoval ?: return
+
+        runningStep?.cancel()
+        mutableState.value = RepositoryCloneState.StepRunning(CloneStep.RemoveTokenProfile(confirming.profileName))
+
+        runningStep = coroutineScope.launch {
+            try {
+                withContext(cloneStepDispatcher) { tokenProfileRegistry.removeProfile(confirming.profileName) }
+            } catch (failure: CloneStepFailure) {
+                // 실패는 목록 위에 얹어 보여준다. StepFailed 로 보내면 "다시 시도" 가 붙는데,
+                // 되돌릴 수 없는 일을 그 버튼으로 되풀이하게 두어서는 안 된다.
+                mutableState.value = RepositoryCloneState.ChoosingTokenProfile(
+                    profiles = confirming.profilesToReturnTo,
+                    removalRejectionReason = failure.guidance,
+                )
+                return@launch
+            }
+
+            mutableState.value = RepositoryCloneState.StepRunning(CloneStep.LoadTokenProfiles)
+            val remainingProfiles = try {
+                withContext(cloneStepDispatcher) { tokenProfileRegistry.listProfiles() }
+            } catch (failure: CloneStepFailure) {
+                // 지우기는 끝났는데 다시 묻지 못한 자리다. 이쪽은 되풀이해도 되는 일이라
+                // 그대로 "다시 시도" 로 보낸다.
+                mutableState.value = RepositoryCloneState.StepFailed(CloneStep.LoadTokenProfiles, failure)
+                return@launch
+            }
+
+            mutableState.value = tokenProfileStateAfterLoading(remainingProfiles)
+        }
+    }
+
     /**
      * 적어 넣은 이름과 토큰으로 프로필을 등록한다.
      *
@@ -236,18 +297,8 @@ class RepositoryCloneStateHolder(
     }
 
     private fun performCloneStep(step: CloneStep.Retryable): CloneStepOutcome = when (step) {
-        is CloneStep.LoadTokenProfiles -> {
-            val profiles = tokenProfileRegistry.listProfiles()
-            CloneStepOutcome.Settled(
-                // 등록된 것이 없으면 고를 것이 없는 목록을 보여주지 않고 곧바로 등록으로 간다
-                // (kyu clone 의 대화형 흐름이 하는 것과 같은 선택이다).
-                if (profiles.isEmpty()) {
-                    RepositoryCloneState.RegisteringTokenProfile(profilesToReturnTo = emptyList(), rejectionReason = null)
-                } else {
-                    RepositoryCloneState.ChoosingTokenProfile(profiles)
-                },
-            )
-        }
+        is CloneStep.LoadTokenProfiles ->
+            CloneStepOutcome.Settled(tokenProfileStateAfterLoading(tokenProfileRegistry.listProfiles()))
 
         is CloneStep.LoadOwners -> {
             val owners = gitHubRepositoryCatalog.listOwners(step.profileName)
@@ -278,6 +329,22 @@ class RepositoryCloneStateHolder(
             ),
         )
     }
+
+    /**
+     * 프로필 목록을 받아 든 자리에서 화면이 멈춰 설 곳.
+     *
+     * 두 자리가 함께 쓴다 — 처음 열 때와, 하나를 지운 뒤 다시 물었을 때. 각자 적어 두면 한쪽만
+     * 고쳐지는 날이 오고, 그날 "마지막 프로필을 지웠는데 빈 목록이 뜬다" 같은 어긋남이 난다.
+     *
+     * 등록된 것이 없으면 고를 것이 없는 목록을 보여주지 않고 곧바로 등록으로 간다
+     * (kyu clone 의 대화형 흐름이 하는 것과 같은 선택이다).
+     */
+    private fun tokenProfileStateAfterLoading(profiles: List<TokenProfile>): RepositoryCloneState =
+        if (profiles.isEmpty()) {
+            RepositoryCloneState.RegisteringTokenProfile(profilesToReturnTo = emptyList(), rejectionReason = null)
+        } else {
+            RepositoryCloneState.ChoosingTokenProfile(profiles)
+        }
 }
 
 /**

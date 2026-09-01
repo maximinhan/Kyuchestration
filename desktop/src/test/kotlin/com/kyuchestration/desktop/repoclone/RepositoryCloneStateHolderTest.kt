@@ -5,6 +5,7 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -179,6 +180,175 @@ class RepositoryCloneStateHolderTest {
     }
 
     @Test
+    fun `지우겠다고 누르면 무엇을 지우는지 먼저 확인받는다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES)
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("회사")
+        runCurrent()
+
+        // 확인 전에는 엔진을 부르지 않는다. 되돌릴 수 없는 일이라 누른 그 자리에서 일어나면 안 된다.
+        assertEquals(emptyList(), registry.removedProfileNames)
+        assertEquals(
+            RepositoryCloneState.ConfirmingTokenProfileRemoval("회사", TWO_PROFILES),
+            holder.state.value,
+        )
+    }
+
+    @Test
+    fun `지우지 않기로 하면 목록 그대로 돌아간다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES)
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("회사")
+        holder.stopRemovingTokenProfile()
+        runCurrent()
+
+        assertEquals(emptyList(), registry.removedProfileNames)
+        assertEquals(RepositoryCloneState.ChoosingTokenProfile(TWO_PROFILES), holder.state.value)
+    }
+
+    @Test
+    fun `목록에 없는 이름은 지울 것이 없다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES)
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("있지도 않은 프로필")
+        runCurrent()
+
+        assertEquals(RepositoryCloneState.ChoosingTokenProfile(TWO_PROFILES), holder.state.value)
+    }
+
+    @Test
+    fun `확인하면 그 이름으로 지우고 남은 목록을 엔진에게 다시 묻는다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES)
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("회사")
+        holder.removeChosenTokenProfile()
+        assertEquals(
+            RepositoryCloneState.StepRunning(CloneStep.RemoveTokenProfile("회사")),
+            holder.state.value,
+        )
+        runCurrent()
+
+        assertEquals(listOf("회사"), registry.removedProfileNames)
+        // 지운 이름만 빼서 목록을 지어내면 그것은 이 머신의 사실이 아니라 앱의 짐작이다.
+        assertEquals(2, registry.listProfilesCallCount)
+        assertEquals(
+            RepositoryCloneState.ChoosingTokenProfile(listOf(TokenProfile("개인", TokenStorage.Keychain))),
+            holder.state.value,
+        )
+    }
+
+    /**
+     * 마지막 하나를 지우면 등록 폼으로 간다.
+     *
+     * 처음 열 때 등록된 것이 없으면 곧바로 등록으로 가는 것과 같은 자리여야 한다. 고를 것이
+     * 없는 빈 목록을 보여주면 사용자가 거기서 할 수 있는 일이 없다.
+     */
+    @Test
+    fun `마지막 프로필을 지우면 등록 폼으로 간다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = listOf(TokenProfile("개인", TokenStorage.Keychain)))
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("개인")
+        holder.removeChosenTokenProfile()
+        runCurrent()
+
+        val form = assertIs<RepositoryCloneState.RegisteringTokenProfile>(holder.state.value)
+        assertEquals(emptyList(), form.profilesToReturnTo)
+    }
+
+    @Test
+    fun `지우지 못하면 다시 시도가 아니라 목록 위에 이유를 얹는다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES).apply {
+            failRemovalWith(CloneStepFailure.KyuExitedWithFailure(1, "등록되지 않은 프로필입니다: 회사"))
+        }
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("회사")
+        holder.removeChosenTokenProfile()
+        runCurrent()
+
+        // "다시 시도" 를 붙이면 되돌릴 수 없는 일을 그 버튼으로 되풀이하게 된다 — 첫 번째가
+        // 사실은 성공했는데 앱이 실패로 읽은 경우, 두 번째는 "없는 프로필" 로 끝난다.
+        val choosing = assertIs<RepositoryCloneState.ChoosingTokenProfile>(holder.state.value)
+        assertEquals(TWO_PROFILES, choosing.profiles)
+        assertEquals("등록되지 않은 프로필입니다: 회사", choosing.removalRejectionReason)
+    }
+
+    @Test
+    fun `지운 뒤 목록을 다시 묻지 못하면 그 걸음만 다시 시도한다`() = runTest {
+        val registry = object : TokenProfileRegistry {
+            var listProfilesCallCount = 0
+            override fun listProfiles(): List<TokenProfile> {
+                listProfilesCallCount++
+                // 지우기 전의 첫 물음은 성립하고, 지운 뒤의 물음만 실패하는 자리를 만든다.
+                if (listProfilesCallCount > 1) {
+                    throw CloneStepFailure.KyuExecutableNotFound()
+                }
+                return TWO_PROFILES
+            }
+
+            override fun registerProfile(profileName: String, token: String) =
+                RegisteredTokenProfile(profileName, "maximinhan")
+
+            override fun removeProfile(profileName: String) = Unit
+        }
+        val holder = stateHolder(registry = registry)
+
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("회사")
+        holder.removeChosenTokenProfile()
+        runCurrent()
+
+        // 지우기는 이미 끝났고 남은 것은 다시 묻는 일뿐이다. 그것은 되풀이해도 되는 걸음이다.
+        val failed = assertIs<RepositoryCloneState.StepFailed>(holder.state.value)
+        assertEquals(CloneStep.LoadTokenProfiles, failed.step)
+    }
+
+    /**
+     * 지운 뒤의 화면에 지난 실패가 따라붙지 않는다.
+     *
+     * 한 번 실패하고 다시 눌러 성공한 자리다. 이유를 그대로 두면 사용자는 방금 성공한 제거를
+     * 두고 실패 문구를 읽게 된다.
+     */
+    @Test
+    fun `성공한 제거는 지난 실패 이유를 거둔다`() = runTest {
+        val registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES).apply {
+            failRemovalWith(CloneStepFailure.KyuExitedWithFailure(1, "잠깐 안 됐다"))
+        }
+        val holder = stateHolder(registry = registry)
+        holder.open(WORK_DIR_PATH, emptySet())
+        runCurrent()
+        holder.startRemovingTokenProfile("회사")
+        holder.removeChosenTokenProfile()
+        runCurrent()
+
+        registry.failRemovalWith(null)
+        holder.startRemovingTokenProfile("회사")
+        holder.removeChosenTokenProfile()
+        runCurrent()
+
+        val choosing = assertIs<RepositoryCloneState.ChoosingTokenProfile>(holder.state.value)
+        assertNull(choosing.removalRejectionReason)
+    }
+
+    @Test
     fun `등록을 그만두면 돌아갈 목록으로 돌아간다`() = runTest {
         val holder = stateHolder(registry = FakeTokenProfileRegistry(profiles = TWO_PROFILES))
 
@@ -338,7 +508,9 @@ class RepositoryCloneStateHolderTest {
     }
 
     private fun TestScope.stateHolder(
-        registry: FakeTokenProfileRegistry = FakeTokenProfileRegistry(),
+        // 가짜 구현 타입이 아니라 포트로 받는다. 지운 뒤 다시 묻는 걸음처럼 부를 때마다 다르게
+        // 답해야 하는 시험은 그 자리에서 포트를 직접 구현하는 편이 읽기 쉽다.
+        registry: TokenProfileRegistry = FakeTokenProfileRegistry(),
         catalog: FakeGitHubRepositoryCatalog = FakeGitHubRepositoryCatalog(),
         cloner: FakeWorkDirRepositoryCloner = FakeWorkDirRepositoryCloner(),
     ) = RepositoryCloneStateHolder(
@@ -352,29 +524,53 @@ class RepositoryCloneStateHolderTest {
     )
 
     private class FakeTokenProfileRegistry(
-        private val profiles: List<TokenProfile> = emptyList(),
+        profiles: List<TokenProfile> = emptyList(),
     ) : TokenProfileRegistry {
+
+        /**
+         * 이 머신에 등록돼 있다고 치는 것.
+         *
+         * 지우는 걸음이 생기면서 고정 목록으로는 부족해졌다. 제거 뒤에 다시 물었을 때 같은
+         * 목록이 돌아오면, 홀더가 정말 엔진에게 다시 묻는지와 지어낸 목록을 보여주는지가
+         * 구분되지 않는다.
+         */
+        private val remainingProfiles = profiles.toMutableList()
 
         var listProfilesCallCount = 0
             private set
 
         val registeredProfiles = mutableListOf<Pair<String, String>>()
 
+        val removedProfileNames = mutableListOf<String>()
+
         private var registrationFailure: CloneStepFailure? = null
+
+        private var removalFailure: CloneStepFailure? = null
 
         fun failRegistrationWith(failure: CloneStepFailure) {
             registrationFailure = failure
         }
 
+        /** null 을 주면 다시 성립하게 된다 — 한 번 실패하고 다시 눌러 성공하는 자리를 재려면 필요하다. */
+        fun failRemovalWith(failure: CloneStepFailure?) {
+            removalFailure = failure
+        }
+
         override fun listProfiles(): List<TokenProfile> {
             listProfilesCallCount++
-            return profiles
+            return remainingProfiles.toList()
         }
 
         override fun registerProfile(profileName: String, token: String): RegisteredTokenProfile {
             registrationFailure?.let { throw it }
             registeredProfiles.add(profileName to token)
             return RegisteredTokenProfile(profileName, "maximinhan")
+        }
+
+        override fun removeProfile(profileName: String) {
+            removalFailure?.let { throw it }
+            removedProfileNames.add(profileName)
+            remainingProfiles.removeAll { it.name == profileName }
         }
     }
 
