@@ -9,7 +9,7 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/workdir"
 )
 
-// 이 파일은 kyu mcp approve 다 — 레포의 .mcp.json 을 사람에게 보이고 승인을 받는 자리(설계 문서 5.6).
+// 이 파일은 kyu mcp approve 다 — 레포의 실행 유발 설정을 사람에게 보이고 승인을 받는 자리(설계 문서 5.6).
 //
 // 이 명령이 따로 있는 이유는 위임에 사람이 없기 때문이다. 위임은 헤드리스라 승인 프롬프트에 답할
 // 상대가 없고(설계 문서 2 절), run_in_repo 는 거절하면서 "사람에게 이것을 실행해 달라고 전하라" 고
@@ -17,8 +17,8 @@ import (
 //
 // **이 관문이 막는 것과 막지 못하는 것을 정확히 적어둔다.**
 //
-// 막는 것: 설계 5.6 이 이름 붙인 위협 — *검토되지 않은 레포의 .mcp.json 이 사람에게 한 번도
-// 보이지 않은 채 도는 것*. 정상 흐름에서 그 파일은 반드시 사람의 화면을 한 번 지난다.
+// 막는 것: 설계 5.6 이 이름 붙인 위협 — *검토되지 않은 레포의 설정에 적힌 명령이 사람에게 한 번도
+// 보이지 않은 채 도는 것*. 정상 흐름에서 그 파일들은 반드시 사람의 화면을 한 번 지난다.
 //
 // 막지 못하는 것: **작정하고 우회하는 메인 세션.** 그 프로세스는 우리와 같은 OS 사용자로 돌고,
 // 워크디렉토리에 쓰기 권한이 있으며(승인 기록이 그 안에 산다), pty 를 붙이는 도구도 쓸 수 있다.
@@ -38,11 +38,11 @@ const mcpApproveSubcommandName = "approve"
 // 늘어나고, 이 물음은 실수로 지나가면 사람이 본 적 없는 명령이 도는 자리다.
 const approvalAnswerYes = "y"
 
-// approveRepoMCPConfig 는 그 레포의 .mcp.json 을 사람에게 보이고 승인을 받아 적는다.
+// approveRepoDelegation 은 그 레포의 실행 유발 설정을 사람에게 보이고 승인을 받아 적는다.
 //
 // 대상 워크디렉토리는 명령을 실행한 디렉토리다 — 다른 명령과 같다. 사용자는 앱이 연 워크디렉토리
 // 창에서 이 명령을 치게 된다.
-func approveRepoMCPConfig(in io.Reader, out io.Writer, args []string) error {
+func approveRepoDelegation(in io.Reader, out io.Writer, args []string) error {
 	repoName, err := parseApproveArgs(args)
 	if err != nil {
 		return err
@@ -62,25 +62,30 @@ func approveRepoMCPConfig(in io.Reader, out io.Writer, args []string) error {
 		return err
 	}
 
-	approval, err := workdir.InspectRepoMCPApproval(location.absolutePath, repo)
+	approval, err := workdir.InspectRepoDelegationApproval(location.absolutePath, repo)
 	if err != nil {
 		return err
 	}
 
 	// 물을 것이 없는 것은 실패가 아니다. 승인하러 온 사용자에게 "이 레포는 그냥 위임된다" 를
 	// 알리고 끝낸다 — 종료 코드 1 로 끝내면 스크립트가 그것을 실패로 읽는다.
-	if !approval.HasMCPConfig {
-		_, err := fmt.Fprintf(out, "%s 에는 %s 이 없어 승인할 것이 없습니다 — 이 레포에는 그냥 위임됩니다.\n",
-			repo.Name, ".mcp.json")
+	if len(approval.ExecutionConfigs) == 0 {
+		_, err := fmt.Fprintf(out, "%s 에는 위임 시작만으로 도는 설정 파일이 없어 승인할 것이 없습니다 — 이 레포에는 그냥 위임됩니다.\n",
+			repo.Name)
 		return err
 	}
 	if approval.Approved {
-		_, err := fmt.Fprintf(out, "%s 의 지금 %s 내용은 이미 승인되어 있습니다 (%s).\n",
-			repo.Name, ".mcp.json", approval.ConfigPath)
+		approvedFilePaths := make([]string, 0, len(approval.ExecutionConfigs))
+		for _, config := range approval.ExecutionConfigs {
+			approvedFilePaths = append(approvedFilePaths, config.AbsolutePath)
+		}
+
+		_, err := fmt.Fprintf(out, "%s 의 지금 설정 내용은 이미 승인되어 있습니다 (%s).\n",
+			repo.Name, strings.Join(approvedFilePaths, ", "))
 		return err
 	}
 
-	approved, err := askAboutRepoMCPConfig(in, out, repo.Name, approval)
+	approved, err := askAboutRepoExecutionConfigs(in, out, repo.Name, approval)
 	if err != nil {
 		return err
 	}
@@ -89,17 +94,39 @@ func approveRepoMCPConfig(in io.Reader, out io.Writer, args []string) error {
 		return err
 	}
 
-	if err := workdir.ApproveRepoMCPConfig(location.absolutePath, repo.Name, approval.Fingerprint); err != nil {
+	if err := workdir.ApproveRepoDelegation(location.absolutePath, repo.Name, approval.Fingerprint); err != nil {
 		return err
 	}
 
-	_, err = fmt.Fprintf(out, "승인했습니다 — 이제 %s 에 위임할 수 있습니다. %s 이 바뀌면 다시 묻습니다.\n",
-		repo.Name, ".mcp.json")
+	_, err = fmt.Fprintf(out, "승인했습니다 — 이제 %s 에 위임할 수 있습니다. 이 파일들이 바뀌거나 하나 늘면 다시 묻습니다.\n",
+		repo.Name)
 	return err
 }
 
-// askAboutRepoMCPConfig 는 파일 내용을 보이고 한 줄로 답을 받는다.
-func askAboutRepoMCPConfig(in io.Reader, out io.Writer, repoName string, approval workdir.RepoMCPApproval) (bool, error) {
+// executionConfigsReviewText 는 사람이 승인 여부를 정할 때 보는 화면이다.
+//
+// 답을 받는 자리와 나눠 둔 이유는 터미널이다. 답을 받는 쪽은 진짜 터미널 없이 한 줄도 돌지 않아서
+// 합쳐 두면 "걸린 파일이 전부, 자르지 않고 보이는가" 를 시험할 길이 없는데, 그것은 이 관문이
+// 관문인 이유 그 자체다 — 보이지 않은 것에 대한 승인은 승인이 아니다.
+//
+// 여기서는 자르지 않는다. 모델에게 보내는 거절 메시지에는 크기 상한이 있지만(mcp_run_in_repo.go
+// 의 shownConfigLimit), 그쪽은 남의 문맥을 지키는 자리이고 이쪽은 사람이 판단하는 자리다.
+func executionConfigsReviewText(repoName string, executionConfigs []workdir.RepoExecutionConfig) string {
+	var screen strings.Builder
+
+	fmt.Fprintf(&screen, `%s 에서 위임 시작만으로 claude 가 읽고 실행에 쓰는 설정 파일 %d 개입니다.
+여기 적힌 command 는 이 레포에 위임하는 순간 사람에게 묻지 않고 그대로 실행됩니다.
+`, repoName, len(executionConfigs))
+
+	for _, config := range executionConfigs {
+		fmt.Fprintf(&screen, "\n%s\n%s\n", config.AbsolutePath, config.Content)
+	}
+
+	return screen.String()
+}
+
+// askAboutRepoExecutionConfigs 는 걸린 파일 전부를 보이고 한 줄로 답을 받는다.
+func askAboutRepoExecutionConfigs(in io.Reader, out io.Writer, repoName string, approval workdir.RepoDelegationApproval) (bool, error) {
 	prompt := newInteractivePrompt(in, out)
 
 	// 파이프 너머에는 이 물음에 답할 상대가 없다. 그런데도 읽어버리면 승인이 사람을 한 번도
@@ -110,16 +137,12 @@ func askAboutRepoMCPConfig(in io.Reader, out io.Writer, repoName string, approva
 	// 작정한 우회의 경계는 메인 세션 자신의 도구 권한 확인이 진다(이 파일 머리말).
 	if !prompt.readsFromATerminal() {
 		return false, fmt.Errorf(
-			"MCP 설정 승인은 사람이 직접 확인하는 자리라 터미널에서만 할 수 있습니다 — %s 에서 터미널을 열고 kyu mcp %s %s 를 실행하세요",
+			"설정 승인은 사람이 직접 확인하는 자리라 터미널에서만 할 수 있습니다 — %s 에서 터미널을 열고 kyu mcp %s %s 를 실행하세요",
 			repoName, mcpApproveSubcommandName, repoName)
 	}
 
-	if _, err := fmt.Fprintf(out, `%s 의 %s 입니다. 이 파일에 적힌 command 는 이 레포에 위임하는 순간 그대로 실행됩니다.
-
-%s
-%s
-`, repoName, ".mcp.json", approval.ConfigPath, approval.ConfigContent); err != nil {
-		return false, fmt.Errorf("MCP 설정 출력 실패: %w", err)
+	if _, err := fmt.Fprint(out, executionConfigsReviewText(repoName, approval.ExecutionConfigs)); err != nil {
+		return false, fmt.Errorf("설정 출력 실패: %w", err)
 	}
 
 	if _, err := fmt.Fprintf(out, "이 내용으로 %s 에 위임하는 것을 승인할까요? (%s/N): ", repoName, approvalAnswerYes); err != nil {

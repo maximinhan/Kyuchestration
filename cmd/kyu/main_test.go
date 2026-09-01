@@ -615,7 +615,7 @@ func TestMCPApproveCannotBeAnsweredThroughAPipe(t *testing.T) {
 	}
 
 	// 관문이 실제로 닫혀 있어야 한다. 거절해 놓고 기록을 남기면 다음 위임이 통과한다.
-	if _, statErr := os.Stat(filepath.Join(workDirPath, ".coord", "mcp-approvals.json")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(workDirPath, ".coord", "delegation-approvals.json")); statErr == nil {
 		t.Error("파이프 너머의 답으로 승인 기록이 만들어졌습니다")
 	}
 }
