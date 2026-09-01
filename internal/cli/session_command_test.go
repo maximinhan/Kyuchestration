@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,6 +85,128 @@ func assertRestOfCommand(t *testing.T, rest, want []string) {
 	}
 }
 
+// orchestrationServerRegistrationForTest 는 답한 명령에서 --mcp-config 한 쌍을 떼어내 되읽고,
+// 나머지를 돌려준다.
+//
+// 등록에 실리는 kyu 절대경로는 실행마다 다르므로(테스트에서는 테스트 바이너리다) 값을 미리
+// 적어둘 수 없다. 자리와 모양을 확인하고 나머지 조립은 그대로 비교한다.
+func orchestrationServerRegistrationForTest(t *testing.T, command []string) (registration mcpConfigForTest, rest []string) {
+	t.Helper()
+
+	flagIndex := slices.Index(command, "--mcp-config")
+	if flagIndex < 0 {
+		t.Fatalf("명령 = %q, 오케스트레이션 서버를 등록하는 --mcp-config 를 기대", command)
+	}
+	if flagIndex+1 >= len(command) {
+		t.Fatalf("명령 = %q, --mcp-config 뒤에 설정 문자열을 기대", command)
+	}
+
+	if err := json.Unmarshal([]byte(command[flagIndex+1]), &registration); err != nil {
+		t.Fatalf("--mcp-config 의 값을 JSON 으로 읽지 못했습니다: %v\n--- 값 ---\n%s", err, command[flagIndex+1])
+	}
+	return registration, slices.Concat(command[:flagIndex], command[flagIndex+2:])
+}
+
+// mcpConfigForTest 는 claude 가 --mcp-config 로 받는 문서다.
+//
+// 생산 코드의 타입을 재사용하지 않는다. 이 모양은 claude 와 맺는 계약이고, 도구 안에서 이름이
+// 바뀌는 것이 계약을 바꾸는 일이 되어서는 안 된다.
+type mcpConfigForTest struct {
+	McpServers map[string]struct {
+		Type    string   `json:"type"`
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+	} `json:"mcpServers"`
+}
+
+func TestTheMainSessionCommandRegistersTheOrchestrationServerAsAConfigString(t *testing.T) {
+	// 워크디렉토리 .mcp.json 에 적는 길은 대화형 승인 관문을 탄다(설계 문서 3.2 · 5.2).
+	// 문자열로 넘기면 그 관문이 없고, 워크디렉토리에 낡을 파일도 생기지 않는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t)
+
+	registration, rest := orchestrationServerRegistrationForTest(t, run.document.Command)
+	server, registered := registration.McpServers["kyu"]
+	if !registered {
+		t.Fatalf("등록한 서버 = %v, kyu 하나를 기대", registration.McpServers)
+	}
+	if server.Type != "stdio" {
+		t.Errorf("서버 type = %q, want stdio", server.Type)
+	}
+	// 답하는 kyu 가 자기 경로를 적는다 — 앱이 KYU_BINARY_PATH 로 어느 엔진을 겨누든
+	// 그 엔진이 자기를 등록해야 등록이 낡지 않는다(설계 문서 5.2).
+	if !filepath.IsAbs(server.Command) {
+		t.Errorf("서버 command = %q, kyu 의 절대경로를 기대", server.Command)
+	}
+	if !slices.Equal(server.Args, []string{"mcp", "serve", workDirPath}) {
+		t.Errorf("서버 args = %q, want [mcp serve %s]", server.Args, workDirPath)
+	}
+
+	// 등록을 떼어낸 나머지는 전과 같아야 한다.
+	_, _, restAfterConversation := splitConversationFlagsForTest(t, rest)
+	assertRestOfCommand(t, restAfterConversation, []string{"--add-dir", filepath.Join(workDirPath, "alpha-commons")})
+}
+
+func TestARepoSessionIsNotGivenTheOrchestrationServer(t *testing.T) {
+	// 레포 세션이 run_in_repo 를 가지면 레포 세션이 다른 레포에 위임하게 된다. 위임의 시작점은
+	// 메인 하나다(설계 문서 5.2.1).
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons")
+
+	if slices.Contains(run.document.Command, "--mcp-config") {
+		t.Errorf("명령 = %q, 레포 세션에는 오케스트레이션 서버를 붙이지 않기를 기대", run.document.Command)
+	}
+}
+
+func TestTheMainSessionCarriesTheBypassMarkerInItsEnvironmentSoDelegationInheritsIt(t *testing.T) {
+	// 위임은 메인보다 넓은 권한을 갖지 않는다(설계 원칙 13). 메인이 bypass 로 열렸다는 사실이
+	// 위임까지 닿는 통로가 이 환경변수다 — stdio MCP 서버는 자기를 띄운 claude 의 환경을
+	// 물려받는다(설계 문서 5.4.1).
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, bypassPermissionsOptionName)
+
+	if run.document.Env["KYU_BYPASS_PERMISSIONS"] != "1" {
+		t.Errorf("env = %v, 위임까지 닿을 bypass 표식을 기대", run.document.Env)
+	}
+}
+
+func TestTheMainSessionWithoutBypassCarriesNoBypassMarker(t *testing.T) {
+	// 표식이 늘 붙어 있으면 그것은 사실을 나르지 않는다 — 위임은 늘 bypass 로 돌게 된다.
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t)
+
+	if _, marked := run.document.Env["KYU_BYPASS_PERMISSIONS"]; marked {
+		t.Errorf("env = %v, bypass 없이 연 메인에는 표식이 없기를 기대", run.document.Env)
+	}
+}
+
+func TestARepoSessionDoesNotCarryTheBypassMarker(t *testing.T) {
+	// 레포 세션에는 오케스트레이션 서버가 없으므로 이 표식을 읽을 상대가 없다. 그래도 실어 보내면
+	// 그 세션이 무언가를 더 할 수 있다고 읽힌다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons", bypassPermissionsOptionName)
+
+	if _, marked := run.document.Env["KYU_BYPASS_PERMISSIONS"]; marked {
+		t.Errorf("env = %v, 레포 세션에는 bypass 표식이 없기를 기대", run.document.Env)
+	}
+	if !slices.Contains(run.document.Command, "--dangerously-skip-permissions") {
+		t.Errorf("명령 = %q, 레포 세션의 bypass 는 여전히 플래그로 가기를 기대", run.document.Command)
+	}
+}
+
 func TestSessionCommandForTheMainSessionAnswersAddDirForEveryRepo(t *testing.T) {
 	// 앱이 이 답을 그대로 실행한다. 레포를 하나라도 빠뜨리면 메인 세션은 그 레포를 읽지 못한 채
 	// 계획을 세우고, 사용자는 그 사실을 세션 안에서야 알게 된다.
@@ -94,7 +217,8 @@ func TestSessionCommandForTheMainSessionAnswersAddDirForEveryRepo(t *testing.T) 
 
 	run := runSessionCommandForTest(t)
 
-	flagName, _, rest := splitConversationFlagsForTest(t, run.document.Command)
+	_, commandWithoutRegistration := orchestrationServerRegistrationForTest(t, run.document.Command)
+	flagName, _, rest := splitConversationFlagsForTest(t, commandWithoutRegistration)
 	if flagName != "--session-id" {
 		t.Errorf("대화 플래그 = %q, 첫 물음에는 --session-id 를 기대", flagName)
 	}

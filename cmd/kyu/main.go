@@ -31,6 +31,9 @@ const usageText = `사용법: kyu <명령> [인자]
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
   kyu session-command [repo]
                          세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
+  kyu mcp <serve|approve>
+                         메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
+                         approve 는 레포의 .mcp.json 을 눈으로 확인하고 승인한다)
   kyu auth <add|list|remove>
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
@@ -105,6 +108,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// 만들거나 죽이거나 셀 수 있는 것이 아니다(설계 문서 5.1).
 	case "session-command":
 		return cli.AnswerSessionCommand(out, errOut, commandArgs)
+
+	// mcp 는 답하고 끝나지 않는 유일한 명령이다. stdin 이 닫힐 때까지 살아 있고, 그 수명은
+	// 자기를 띄운 메인 세션의 수명이다(orchestration-tools-design.md 5.1).
+	case "mcp":
+		return cli.ManageOrchestrationTools(in, out, errOut, commandArgs)
 
 	// auth 는 토큰을 등록하고 보고 지우는 일이다.
 	case "auth":

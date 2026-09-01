@@ -44,6 +44,14 @@ func newInteractivePrompt(in io.Reader, out io.Writer) *interactivePrompt {
 	return prompt
 }
 
+// readsFromATerminal 은 이 입력이 터미널인지다.
+//
+// "사람인지" 가 아니라 "터미널인지" 다. pty 를 붙인 프로그램도 참을 받으므로 사람의 존재를
+// 보증하지 않는다 — 이 값에 기대는 쪽(mcp_approve.go)이 그 한계를 자기 머리말에 적어두고 있다.
+func (prompt *interactivePrompt) readsFromATerminal() bool {
+	return prompt.inputFile != nil
+}
+
 // readAnswerLine 은 아무것도 찍지 않고 한 줄만 읽는다. 앞뒤 공백은 걷어낸다.
 func (prompt *interactivePrompt) readAnswerLine() (string, error) {
 	line, err := prompt.reader.ReadString('\n')

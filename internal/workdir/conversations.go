@@ -26,11 +26,22 @@ import (
 //	  "conversations": {
 //	    "main": "d1b9d634-a927-4abf-ad80-5941671b08a8",
 //	    "proj-a": "211f6974-88a8-4453-9248-a02b0d6febae"
+//	  },
+//	  "delegations": {
+//	    "proj-a": "8f2c1a05-2f10-4f0e-9a3b-0c1d2e3f4a5b"
 //	  }
 //	}
 //
 // 키가 세션 이름(kyu-<workdir>-<repo>)이 아니라 라벨(main 또는 레포 이름)인 이유는,
 // 파일이 이미 그 워크디렉토리 안에 있어 워크디렉토리 이름이 키에 또 드는 것이 중복이어서다.
+//
+// 지도가 둘인 이유는 반드시 갈라야 하기 때문이다(orchestration-tools-design.md 5.5.1). 같은
+// 레포에 앱 세션 대화와 위임 대화가 동시에 있을 수 있고, 하나의 UUID 를 둘이 쓰면 뒤에 오는 쪽이
+// "already in use" 로 거절된다. 접두사를 섞은 키("delegate:proj-a")로 가르지 않는 이유는 그러면
+// 한 지도에 두 종류의 키가 살게 되어서다 — 객체를 나누면 그럴 일이 없다.
+//
+// 지도가 하나 더 생겼지만 판은 오르지 않는다. 필드를 더하는 변경으로는 올리지 않으므로,
+// delegations 가 없는 기록 파일을 만나는 일이 실제로 있고 그때 세션 대화는 그대로 이어진다.
 
 // conversationsFileName 은 대화 기록 파일의 이름이다. 자리는 계획 파일과 같은 .coord 다.
 const conversationsFileName = "conversations.json"
@@ -52,6 +63,21 @@ const CoordDirectoryPermission = 0o755
 // conversationsFilePermission 은 대화 기록 파일의 권한이다. 사람이 열어볼 수 있어야 하고
 // (설계 문서 5.5.2) 대화 ID 는 비밀이 아니다.
 const conversationsFilePermission = 0o644
+
+// ConversationKind 는 그 대화가 이 파일의 어느 지도에 사는지다.
+//
+// 참·거짓이 아니라 이름 있는 값으로 둔다. 부르는 쪽의 코드에 true 한 글자가 남으면 그것이
+// 세션 쪽인지 위임 쪽인지를 그 자리에서 알 수 없고, 잘못 고르면 두 대화가 하나의 UUID 를
+// 나눠 쓰게 된다 — 그 실패는 두 번째 실행이 already in use 로 거절될 때에야 드러난다.
+type ConversationKind string
+
+const (
+	// SessionConversation 은 사람이 붙는 세션의 대화다 — 앱이 카드를 눌러 여는 것.
+	SessionConversation ConversationKind = "session"
+
+	// DelegationConversation 은 메인이 run_in_repo 로 건 위임의 대화다. 사람이 붙지 않는다.
+	DelegationConversation ConversationKind = "delegation"
+)
 
 // ConversationAssignment 는 한 세션 라벨에 배정된 대화 하나다.
 //
@@ -82,13 +108,13 @@ type ConversationAssignment struct {
 // 적었는데 그 대화가 실제로 열리지 않는 경우(앱의 PTY 열기 실패 등)에는 전사가 없는 채로
 // 기록만 남는다. 다음 실행이 --resume 을 시도했다 실패하고, 그것을 앱의 폴백이 받는다
 // (설계 문서 5.5.4). 해가 없으므로 여기서 되돌리지 않는다.
-func AssignConversation(workDirPath, label string) (ConversationAssignment, error) {
-	recordedConversations, warnings, err := readConversations(workDirPath)
+func AssignConversation(workDirPath, label string, kind ConversationKind) (ConversationAssignment, error) {
+	records, warnings, err := readConversations(workDirPath)
 	if err != nil {
 		return ConversationAssignment{}, err
 	}
 
-	if recordedID, recorded := recordedConversations[label]; recorded {
+	if recordedID, recorded := records.mapFor(kind)[label]; recorded {
 		if conversationCanBeResumed(recordedID) {
 			return ConversationAssignment{ConversationID: recordedID, Warnings: warnings}, nil
 		}
@@ -99,7 +125,7 @@ func AssignConversation(workDirPath, label string) (ConversationAssignment, erro
 			"대화 기록의 %s 항목이 비어 있어 새 대화를 엽니다: %s", label, conversationsFilePath(workDirPath)))
 	}
 
-	return recordNewConversation(workDirPath, label, recordedConversations, warnings)
+	return recordNewConversation(workDirPath, label, kind, records, warnings)
 }
 
 // StartNewConversation 은 이 라벨에 적혀 있던 대화를 버리고 새 대화를 배정한다 — 화면의 "새 대화로 시작".
@@ -111,12 +137,12 @@ func AssignConversation(workDirPath, label string) (ConversationAssignment, erro
 //
 // 버리는 것은 이 라벨 하나다. 한 세션을 새로 시작하는 것이 같은 워크디렉토리의 다른 세션이
 // 이어가던 대화를 끊을 이유가 없다.
-func StartNewConversation(workDirPath, label string) (ConversationAssignment, error) {
-	recordedConversations, warnings, err := readConversations(workDirPath)
+func StartNewConversation(workDirPath, label string, kind ConversationKind) (ConversationAssignment, error) {
+	records, warnings, err := readConversations(workDirPath)
 	if err != nil {
 		return ConversationAssignment{}, err
 	}
-	return recordNewConversation(workDirPath, label, recordedConversations, warnings)
+	return recordNewConversation(workDirPath, label, kind, records, warnings)
 }
 
 // recordNewConversation 은 새 대화를 만들어 이 라벨의 자리에 적고, 그 배정을 돌려준다.
@@ -126,12 +152,16 @@ func StartNewConversation(workDirPath, label string) (ConversationAssignment, er
 // 한 함수에 둔다.
 func recordNewConversation(
 	workDirPath, label string,
-	recordedConversations map[string]string,
+	kind ConversationKind,
+	records conversationRecords,
 	warnings []string,
 ) (ConversationAssignment, error) {
 	newID := newConversationID()
-	recordedConversations[label] = newID
-	if err := writeConversations(workDirPath, recordedConversations); err != nil {
+	records.mapFor(kind)[label] = newID
+
+	// 읽어온 두 지도를 함께 적는다. 고친 지도만 적으면 위임 대화 하나를 배정하는 것으로
+	// 그 워크디렉토리의 세션 대화가 통째로 사라진다.
+	if err := writeConversations(workDirPath, records); err != nil {
 		return ConversationAssignment{}, err
 	}
 	return ConversationAssignment{ConversationID: newID, IsNewConversation: true, Warnings: warnings}, nil
@@ -148,13 +178,17 @@ func recordNewConversation(
 // 되풀이할 자리가 아니고, 읽지 못한 기록으로는 어떤 대화도 이어갈 수 없으므로 "이어갈 대화 없음"
 // 은 그 자체로 참인 답이다.
 func LabelsWithRecordedConversation(workDirPath string) (map[string]bool, error) {
-	recordedConversations, _, err := readConversations(workDirPath)
+	records, _, err := readConversations(workDirPath)
 	if err != nil {
 		return nil, err
 	}
 
-	labels := make(map[string]bool, len(recordedConversations))
-	for label, recordedID := range recordedConversations {
+	// 세션 지도만 본다. 이 물음에 답하는 자리는 앱의 카드이고, 카드가 묻는 것은 "이 카드를 누르면
+	// 이어갈 대화가 있는가" 다 — 위임 대화는 그 카드가 열 수 있는 것이 아니다.
+	sessionConversations := records.mapFor(SessionConversation)
+
+	labels := make(map[string]bool, len(sessionConversations))
+	for label, recordedID := range sessionConversations {
 		if conversationCanBeResumed(recordedID) {
 			labels[label] = true
 		}
@@ -185,6 +219,32 @@ type conversationsFile struct {
 
 	// Conversations 는 세션 라벨(main 또는 레포 이름)에서 대화 ID 로 가는 표다.
 	Conversations map[string]string `json:"conversations"`
+
+	// Delegations 는 같은 라벨에서 위임 대화 ID 로 가는 표다(설계 문서 5.5.1).
+	Delegations map[string]string `json:"delegations"`
+}
+
+// conversationRecords 는 읽어온 두 지도를 함께 든 것이다.
+//
+// 지도 하나만 들고 다니면 쓰는 쪽이 나머지 하나를 잃는다 — 그 손실은 "위임을 걸었더니 앱 세션의
+// 대화가 새로 열렸다" 로만 보이고, 원인은 파일이 이미 덮인 뒤에야 드러난다.
+type conversationRecords struct {
+	sessions    map[string]string
+	delegations map[string]string
+}
+
+// mapFor 는 이 종류의 대화가 사는 지도를 고른다.
+func (records conversationRecords) mapFor(kind ConversationKind) map[string]string {
+	if kind == DelegationConversation {
+		return records.delegations
+	}
+	return records.sessions
+}
+
+// newConversationRecords 는 빈 두 지도를 만든다. 읽을 것이 없던 경우에도 쓰는 쪽이 곧바로
+// 항목을 더할 수 있어야 한다.
+func newConversationRecords() conversationRecords {
+	return conversationRecords{sessions: map[string]string{}, delegations: map[string]string{}}
 }
 
 // readConversations 는 적혀 있는 대화 표를 읽는다. 읽지 못한 기록은 버리고 그 이유를 경고로 남긴다.
@@ -195,38 +255,44 @@ type conversationsFile struct {
 //
 // 버리는 자세가 계획 파일과 다른 자리도 하나 있다. 계획은 사람이 쓴 글이라 도구가 고쳐 쓰지
 // 않지만, 이 파일은 도구가 쓰고 도구가 읽는 것이라(설계 문서 5.5.2) 다음 쓰기가 새 문서로 덮는다.
-func readConversations(workDirPath string) (map[string]string, []string, error) {
+func readConversations(workDirPath string) (conversationRecords, []string, error) {
 	recordFilePath := conversationsFilePath(workDirPath)
 
 	recordFileContent, err := os.ReadFile(recordFilePath)
 	if errors.Is(err, os.ErrNotExist) {
-		// 이 워크디렉토리에서 아직 세션을 연 적이 없다. 흔한 정상 상태다.
-		return map[string]string{}, nil, nil
+		// 이 워크디렉토리에서 아직 세션을 연 적도 위임을 건 적도 없다. 흔한 정상 상태다.
+		return newConversationRecords(), nil, nil
 	}
 	if err != nil {
 		// 파일이 거기 있는데 읽지 못한 것(권한 등)은 기록 없음과 다른 사실이다. 없는 기록으로
 		// 뭉뚱그리면 이어갈 수 있었던 대화를 새 대화로 덮어쓰고, 사용자는 그것이 왜 사라졌는지 모른다.
-		return nil, nil, fmt.Errorf("대화 기록 파일 읽기 실패 (%s): %w", recordFilePath, err)
+		return conversationRecords{}, nil, fmt.Errorf("대화 기록 파일 읽기 실패 (%s): %w", recordFilePath, err)
 	}
 
 	var record conversationsFile
 	if err := json.Unmarshal(recordFileContent, &record); err != nil {
-		return map[string]string{}, []string{fmt.Sprintf(
+		return newConversationRecords(), []string{fmt.Sprintf(
 			"대화 기록을 읽지 못해 버립니다 (%s): %v — 이어가던 대화 대신 새 대화가 열립니다", recordFilePath, err)}, nil
 	}
 
 	// 모르는 판의 값을 아는 판인 척 읽지 않는다. 판이 오르는 것은 필드를 빼거나 뜻을 바꿀 때이므로
 	// (list_json.go 의 판 규약) 모르는 판의 대화 ID 는 이 판의 대화 ID 와 같은 것이라는 보장이 없다.
 	if record.SchemaVersion != conversationsFileSchemaVersion {
-		return map[string]string{}, []string{fmt.Sprintf(
+		return newConversationRecords(), []string{fmt.Sprintf(
 			"대화 기록이 모르는 판이라 버립니다 (%s): schemaVersion %d — 이 kyu 가 아는 판은 %d 입니다",
 			recordFilePath, record.SchemaVersion, conversationsFileSchemaVersion)}, nil
 	}
 
-	if record.Conversations == nil {
-		return map[string]string{}, nil, nil
+	// 없는 지도를 빈 지도로 채운다. delegations 는 이 판에 나중에 더해진 것이라, 그 전에 적힌
+	// 기록에는 통째로 없다 — nil 지도에 항목을 더하면 그 자리에서 프로세스가 멈춘다.
+	records := newConversationRecords()
+	if record.Conversations != nil {
+		records.sessions = record.Conversations
 	}
-	return record.Conversations, nil, nil
+	if record.Delegations != nil {
+		records.delegations = record.Delegations
+	}
+	return records, nil, nil
 }
 
 // writeConversations 는 대화 표를 기록 파일에 적는다. .coord 가 아직 없으면 만든다.
@@ -239,7 +305,7 @@ func readConversations(workDirPath string) (map[string]string, []string, error) 
 // 이긴다. 그때 잃는 것은 진 쪽 라벨의 기록 하나이고, 그 라벨은 다음 물음에서 새 대화를 받는다 —
 // 5.5.3 이 "기록했는데 앱이 실행하지 않은 경우" 에 대해 적은 것과 같은 정도의 해다.
 // 잠금을 두는 것은 그 해에 비해 큰 장치이므로 두지 않는다.
-func writeConversations(workDirPath string, conversations map[string]string) error {
+func writeConversations(workDirPath string, records conversationRecords) error {
 	recordFilePath := conversationsFilePath(workDirPath)
 
 	coordDirectoryPath := filepath.Dir(recordFilePath)
@@ -251,7 +317,8 @@ func writeConversations(workDirPath string, conversations map[string]string) err
 	// 어느 라벨의 대화인지 눈으로 찾지 못한다.
 	document, err := json.MarshalIndent(conversationsFile{
 		SchemaVersion: conversationsFileSchemaVersion,
-		Conversations: conversations,
+		Conversations: records.sessions,
+		Delegations:   records.delegations,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("대화 기록 조립 실패: %w", err)

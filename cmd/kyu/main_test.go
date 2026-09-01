@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -432,5 +436,186 @@ func TestListAnswersWithNothingButGitOnThePath(t *testing.T) {
 	}
 	if answer.MainSession.Alive {
 		t.Error("mainSession.alive = true, 엔진이 세션을 세지 않으므로 false 를 기대")
+	}
+}
+
+// TestMCPServeSpeaksTheProtocolOverStdioToARealProcess 는 실제 프로세스와 줄을 주고받는다.
+//
+// 이 서버의 상대는 우리 코드가 아니라 claude 의 MCP 클라이언트다. 함수 호출로만 검증하면
+// "stdout 에 진단 한 줄이 섞였다" 나 "프로세스가 곧바로 끝난다" 같은, 이 표면에서 가장 흔한
+// 실패가 통째로 빠진다 — 그것들은 프로세스 경계에서만 드러난다.
+func TestMCPServeSpeaksTheProtocolOverStdioToARealProcess(t *testing.T) {
+	workDirPath := t.TempDir()
+	initGitRepoForListing(t, filepath.Join(workDirPath, "proj-a"))
+
+	command := exec.Command(buildKyuBinary(t), "mcp", "serve", workDirPath)
+	// 서버는 자기가 뜬 디렉토리를 보지 않는다. 인자로 받은 워크디렉토리를 훑는 것이 계약이고,
+	// 다른 곳에서 띄워도 같은 답이 나와야 그 계약이 성립한다.
+	command.Dir = t.TempDir()
+	command.Env = append(os.Environ(), searchPathWithOnly(t, "git"))
+
+	requestWriter, err := command.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin 파이프 생성 실패: %v", err)
+	}
+	answerReader, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout 파이프 생성 실패: %v", err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+
+	if err := command.Start(); err != nil {
+		t.Fatalf("kyu mcp serve 실행 실패: %v", err)
+	}
+
+	requestLines := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude","version":"2.1.252"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_repos","arguments":{}}}`,
+	}
+	for _, requestLine := range requestLines {
+		if _, err := fmt.Fprintln(requestWriter, requestLine); err != nil {
+			t.Fatalf("요청을 보내지 못했습니다: %v", err)
+		}
+	}
+
+	// 요청 순서로 답을 받지 않는다. 서버는 요청마다 따로 답하므로(동시 위임이 그 이유다)
+	// 답의 짝은 순서가 아니라 id 가 짓는다.
+	answers := readJSONRPCAnswers(t, answerReader, len(requestLines)-1)
+
+	// stdin 을 닫는 것이 claude 가 세션을 접는 자리다. 그때 서버도 끝나야 프로세스가 남지 않는다.
+	requestWriter.Close()
+	if err := command.Wait(); err != nil {
+		t.Fatalf("kyu mcp serve 가 깨끗하게 끝나지 않았습니다: %v (stderr %q)", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, 서버는 할 말이 없으면 아무것도 쓰지 않아야 한다", stderr.String())
+	}
+
+	initialized := answers[1]
+	if initialized.Result.ServerInfo.Name != "kyu" {
+		t.Errorf("serverInfo.name = %q, want kyu", initialized.Result.ServerInfo.Name)
+	}
+	if initialized.Result.Capabilities.Tools == nil {
+		t.Error("capabilities.tools 가 없습니다 — 클라이언트가 도구를 묻지 않게 됩니다")
+	}
+
+	listedTools := answers[2].Result.Tools
+	toolNames := make([]string, 0, len(listedTools))
+	for _, tool := range listedTools {
+		toolNames = append(toolNames, tool.Name)
+	}
+	if !slices.Contains(toolNames, "list_repos") {
+		t.Errorf("tools/list = %q, list_repos 를 기대", toolNames)
+	}
+
+	calledContent := answers[3].Result.Content
+	if len(calledContent) != 1 {
+		t.Fatalf("tools/call 의 content = %+v, 텍스트 한 덩어리를 기대", calledContent)
+	}
+	if !strings.Contains(calledContent[0].Text, "proj-a") {
+		t.Errorf("list_repos 의 답 = %q, 클론해 둔 proj-a 를 기대", calledContent[0].Text)
+	}
+}
+
+// jsonRPCAnswerForTest 는 서버가 내보낸 한 줄을 되읽은 것이다. 이 시험이 보는 필드만 담는다.
+type jsonRPCAnswerForTest struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  struct {
+		Capabilities struct {
+			Tools *struct{} `json:"tools"`
+		} `json:"capabilities"`
+		ServerInfo struct {
+			Name string `json:"name"`
+		} `json:"serverInfo"`
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"result"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// readJSONRPCAnswers 는 답 줄을 기대한 수만큼 읽어 요청 id 로 찾을 수 있게 모은다.
+//
+// 도착 순서로 모으지 않는다. 서버는 요청마다 따로 답하므로 오래 도는 도구 뒤의 요청이 먼저
+// 답할 수 있고, 순서로 짝을 지으면 그때부터 이 시험이 엉뚱한 답을 본다.
+//
+// stdout 을 통째로 모아 마지막에 파싱하지도 않는다. 서버가 끝나기 전에 답이 와야 한다는 것이
+// 이 시험이 확인하려는 것이고, 다 읽고 나서 보면 그 구분이 사라진다.
+func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) map[int]jsonRPCAnswerForTest {
+	t.Helper()
+
+	reader := bufio.NewReader(answerReader)
+	answers := make(map[int]jsonRPCAnswerForTest, wantedCount)
+
+	for len(answers) < wantedCount {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("답을 %d 개까지 읽고 끊겼습니다: %v", len(answers), err)
+		}
+
+		var answer jsonRPCAnswerForTest
+		if err := json.Unmarshal([]byte(line), &answer); err != nil {
+			t.Fatalf("답한 줄을 JSON 으로 읽지 못했습니다: %v\n--- 줄 ---\n%s", err, line)
+		}
+		if answer.JSONRPC != "2.0" {
+			t.Errorf("jsonrpc = %q, want 2.0", answer.JSONRPC)
+		}
+		if answer.Error != nil {
+			t.Fatalf("서버가 거절했습니다: %s", answer.Error.Message)
+		}
+		answers[answer.ID] = answer
+	}
+	return answers
+}
+
+func TestMCPApproveCannotBeAnsweredThroughAPipe(t *testing.T) {
+	// 관문의 요점은 사람이 직접 본다는 것이다(orchestration-tools-design.md 5.6). 파이프로 흘려보낸
+	// y 가 통과하면 승인이 사람을 한 번도 지나지 않고 저장된다.
+	//
+	// 프로세스로 확인한다 — 터미널인지 아닌지는 파일 서술자의 성질이라 함수 호출로는 재현되지 않는다.
+	//
+	// 보증 범위는 파이프까지다. pty 를 붙인 프로그램은 이 검사를 지나며, 그것을 가르는 길이 이
+	// 계층에 없다는 것을 internal/cli/mcp_approve.go 머리말이 적고 있다.
+	workDirPath := t.TempDir()
+	repoPath := filepath.Join(workDirPath, "proj-a")
+	initGitRepoForListing(t, repoPath)
+	if err := os.WriteFile(filepath.Join(repoPath, ".mcp.json"), []byte(`{"mcpServers":{}}`), 0o644); err != nil {
+		t.Fatalf("테스트용 .mcp.json 생성 실패: %v", err)
+	}
+
+	command := exec.Command(buildKyuBinary(t), "mcp", "approve", "proj-a")
+	command.Dir = workDirPath
+	command.Env = append(os.Environ(), searchPathWithOnly(t, "git"))
+	command.Stdin = strings.NewReader("y\ny\ny\n")
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("실행 결과 = %v, 종료 코드로 거절하기를 기대 (stdout %q)", err, stdout.String())
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), "터미널") {
+		t.Errorf("stderr = %q, 터미널이 필요하다는 것을 알리기를 기대", stderr.String())
+	}
+
+	// 관문이 실제로 닫혀 있어야 한다. 거절해 놓고 기록을 남기면 다음 위임이 통과한다.
+	if _, statErr := os.Stat(filepath.Join(workDirPath, ".coord", "mcp-approvals.json")); statErr == nil {
+		t.Error("파이프 너머의 답으로 승인 기록이 만들어졌습니다")
 	}
 }

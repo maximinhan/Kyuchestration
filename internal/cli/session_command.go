@@ -151,13 +151,21 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 
 // answerForMainSession 은 워크디렉토리 최상위에서 열 조율용 세션을 답한다(설계 문서 5.4).
 func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
+	// 등록을 대화보다 먼저 조립한다. 등록에 실패하면 이 답 자체가 성립하지 않는데, 대화를 먼저
+	// 배정하면 그 실패가 쓰이지 않을 기록을 하나 남긴다 — 없는 레포를 대화 배정 전에 거절하는
+	// answerForRepoSession 과 같은 자세다.
+	registration, err := orchestrationServerRegistration(location.absolutePath)
+	if err != nil {
+		return err
+	}
+
 	conversation, err := conversationForLabel(errOut, location.absolutePath, mainSessionLabel, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		mainSessionCommand(repos, request, conversation.flags),
+		mainSessionCommand(repos, request, conversation.flags, registration),
 		location.absolutePath,
 		sessionEnvironment(request),
 		conversation)
@@ -262,8 +270,10 @@ func conversationForLabel(
 // 기본이 이어가기인 것이 이 표면의 자세다. 앱이 카드를 누를 때마다 무엇을 골라야 하는 것이 아니라,
 // 고르지 않으면 대화가 이어진다(설계 문서 5.5.3).
 func assignConversation(workDirPath, label string, request sessionCommandRequest) (workdir.ConversationAssignment, error) {
+	// 세션 지도를 본다. 같은 레포에 위임 대화가 함께 있을 수 있고, 하나의 UUID 를 둘이 쓰면
+	// 뒤에 오는 쪽이 already in use 로 거절된다(orchestration-tools-design.md 5.5.1).
 	if request.forgetRecordedConversation {
-		return workdir.StartNewConversation(workDirPath, label)
+		return workdir.StartNewConversation(workDirPath, label, workdir.SessionConversation)
 	}
-	return workdir.AssignConversation(workDirPath, label)
+	return workdir.AssignConversation(workDirPath, label, workdir.SessionConversation)
 }
