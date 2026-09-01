@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -43,7 +44,6 @@ import com.kyuchestration.desktop.repoclone.RemoteRepository
 import com.kyuchestration.desktop.repoclone.RepositoryCloneResult
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
-import com.kyuchestration.desktop.repoclone.TokenProfile
 import com.kyuchestration.desktop.repoclone.TokenStorage
 import java.time.Instant
 import java.time.ZoneId
@@ -60,7 +60,10 @@ import java.time.format.DateTimeFormatter
  * "레포를 받아 온다" 하나이고, 그 사이의 물음들은 그 일의 부분이다.
  */
 @Composable
-fun RepositoryCloneDialog(repositoryCloneStateHolder: RepositoryCloneStateHolder) {
+fun RepositoryCloneDialog(
+    repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    diagnosticLogPathLabel: String,
+) {
     val cloneState by repositoryCloneStateHolder.state.collectAsState()
     if (cloneState is RepositoryCloneState.Closed) {
         return
@@ -87,12 +90,16 @@ fun RepositoryCloneDialog(repositoryCloneStateHolder: RepositoryCloneStateHolder
 
                     is RepositoryCloneState.StepRunning -> StepRunningBody(state.step)
 
-                    is RepositoryCloneState.StepFailed -> StepFailedBody(state)
+                    is RepositoryCloneState.StepFailed -> StepFailedBody(state, diagnosticLogPathLabel)
 
                     is RepositoryCloneState.ChoosingTokenProfile -> TokenProfileChoiceBody(
-                        profiles = state.profiles,
+                        state = state,
                         onTokenProfileChosen = repositoryCloneStateHolder::chooseTokenProfile,
+                        onTokenProfileRemovalRequested = repositoryCloneStateHolder::startRemovingTokenProfile,
                     )
+
+                    is RepositoryCloneState.ConfirmingTokenProfileRemoval ->
+                        TokenProfileRemovalConfirmationBody(state)
 
                     is RepositoryCloneState.RegisteringTokenProfile -> TokenProfileRegistrationBody(
                         state = state,
@@ -138,11 +145,21 @@ fun RepositoryCloneDialog(repositoryCloneStateHolder: RepositoryCloneStateHolder
                 onCloneRequested = repositoryCloneStateHolder::cloneSelectedRepositories,
                 onRetryRequested = repositoryCloneStateHolder::retryFailedStep,
                 onCloseRequested = repositoryCloneStateHolder::close,
+                onRemovalConfirmed = repositoryCloneStateHolder::removeChosenTokenProfile,
             )
         },
         dismissButton = {
-            if (cloneState !is RepositoryCloneState.CloneFinished) {
-                TextButton(onClick = repositoryCloneStateHolder::close) { Text("닫기") }
+            when {
+                cloneState is RepositoryCloneState.CloneFinished -> Unit
+
+                // 지우기를 확인하는 자리에서 "닫기" 는 대화상자를 통째로 닫는 말로 읽힌다.
+                // 사용자가 무르려던 것은 지우기 하나이지 레포를 받는 일 전체가 아니다.
+                cloneState is RepositoryCloneState.ConfirmingTokenProfileRemoval ->
+                    TextButton(onClick = repositoryCloneStateHolder::stopRemovingTokenProfile) {
+                        Text("지우지 않기")
+                    }
+
+                else -> TextButton(onClick = repositoryCloneStateHolder::close) { Text("닫기") }
             }
         },
     )
@@ -157,10 +174,20 @@ private fun CloneDialogConfirmButton(
     onCloneRequested: () -> Unit,
     onRetryRequested: () -> Unit,
     onCloseRequested: () -> Unit,
+    onRemovalConfirmed: () -> Unit,
 ) {
     when (cloneState) {
         is RepositoryCloneState.ChoosingTokenProfile ->
             Button(onClick = onRegisterTokenProfileRequested) { Text("새 토큰 등록") }
+
+        is RepositoryCloneState.ConfirmingTokenProfileRemoval -> Button(
+            onClick = onRemovalConfirmed,
+            // 되돌릴 수 없는 일이라 붉게 칠한다. 옆의 "지우지 않기" 와 같은 색으로 두면 손이
+            // 어느 쪽을 누르는지 보지 않고 지나간다.
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+        ) {
+            Text("${cloneState.profileName} 지우기")
+        }
 
         is RepositoryCloneState.RegisteringTokenProfile ->
             Button(onClick = onRegisterSubmitted) { Text("등록") }
@@ -200,7 +227,7 @@ private fun StepRunningBody(step: CloneStep) {
 }
 
 @Composable
-private fun StepFailedBody(state: RepositoryCloneState.StepFailed) {
+private fun StepFailedBody(state: RepositoryCloneState.StepFailed, diagnosticLogPathLabel: String) {
     Text(state.failure.message.orEmpty(), style = MaterialTheme.typography.bodyMedium)
     Text(
         // kyu 가 stderr 에 적은 사람 말 그대로다. 앱이 다시 지어낸 문구보다 정확하다.
@@ -210,11 +237,16 @@ private fun StepFailedBody(state: RepositoryCloneState.StepFailed) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.heightIn(max = LIST_MAX_HEIGHT).verticalScroll(rememberScrollState()),
     )
+    DiagnosticLogPathNotice(diagnosticLogPathLabel)
 }
 
 @Composable
-private fun TokenProfileChoiceBody(profiles: List<TokenProfile>, onTokenProfileChosen: (String) -> Unit) {
-    if (profiles.isEmpty()) {
+private fun TokenProfileChoiceBody(
+    state: RepositoryCloneState.ChoosingTokenProfile,
+    onTokenProfileChosen: (String) -> Unit,
+    onTokenProfileRemovalRequested: (String) -> Unit,
+) {
+    if (state.profiles.isEmpty()) {
         Text(
             text = "등록된 토큰 프로필이 없습니다. 새 토큰을 등록하면 이 목록에 남고, 다음부터는 고르기만 하면 됩니다.",
             style = MaterialTheme.typography.bodyMedium,
@@ -222,17 +254,29 @@ private fun TokenProfileChoiceBody(profiles: List<TokenProfile>, onTokenProfileC
         return
     }
 
+    // 지우지 못한 자리에서 목록으로 돌아왔다. 목록 위에 얹어야 사용자가 방금 누른 것과 이어 읽는다.
+    state.removalRejectionReason?.let { reason ->
+        Text(
+            text = reason,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+
     Text("어느 토큰으로 GitHub 에 붙을까요?", style = MaterialTheme.typography.bodyMedium)
     LazyColumn(
         modifier = Modifier.heightIn(max = LIST_MAX_HEIGHT),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(profiles, key = { it.name }) { profile ->
+        items(state.profiles, key = { it.name }) { profile ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // 줄 전체를 누르는 것은 고르는 일이다. 지우기는 그 안의 버튼 하나로만
+                    // 일어나야, 이 목록에서 누르는 손이 실수로 지우는 자리를 만들지 않는다.
                     .clickable { onTokenProfileChosen(profile.name) }
-                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                    .padding(vertical = 4.dp, horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(profile.name, style = MaterialTheme.typography.titleSmall)
@@ -248,9 +292,29 @@ private fun TokenProfileChoiceBody(profiles: List<TokenProfile>, onTokenProfileC
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { onTokenProfileRemovalRequested(profile.name) }) {
+                    Text("제거", color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
+}
+
+@Composable
+private fun TokenProfileRemovalConfirmationBody(state: RepositoryCloneState.ConfirmingTokenProfileRemoval) {
+    // 이름을 문구 안에서 그대로 말한다. "정말 지울까요?" 만으로는 사용자가 무엇을 지우는지
+    // 그 자리에서 확인할 수 없고, 목록은 이 화면에 더 이상 떠 있지 않다.
+    Text(
+        text = "${state.profileName} 프로필과 그 토큰을 이 머신에서 지웁니다.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Text(
+        text = "되돌릴 수 없습니다 — 지워진 토큰은 앱도 kyu 도 되살리지 못하고, 다시 쓰려면 " +
+            "GitHub 에서 새로 발급받아 등록해야 합니다. 이미 받아 둔 레포는 그대로 남습니다.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -486,6 +550,7 @@ private val RepositoryCloneState.title: String
         is RepositoryCloneState.StepRunning -> "레포 클론"
         is RepositoryCloneState.StepFailed -> "이 걸음을 마치지 못했습니다"
         is RepositoryCloneState.ChoosingTokenProfile -> "1 / 3 · 토큰 프로필"
+        is RepositoryCloneState.ConfirmingTokenProfileRemoval -> "1 / 3 · 토큰 프로필 지우기"
         is RepositoryCloneState.RegisteringTokenProfile -> "1 / 3 · 새 토큰 등록"
         is RepositoryCloneState.TokenProfileRegistered -> "1 / 3 · 등록한 계정 확인"
         is RepositoryCloneState.ChoosingOwner -> "2 / 3 · 계정"
@@ -497,6 +562,7 @@ private val CloneStep.runningLabel: String
     get() = when (this) {
         is CloneStep.LoadTokenProfiles -> "등록된 토큰 프로필을 묻는 중입니다"
         is CloneStep.RegisterTokenProfile -> "$profileName 프로필로 토큰을 확인하고 저장하는 중입니다"
+        is CloneStep.RemoveTokenProfile -> "$profileName 프로필과 그 토큰을 지우는 중입니다"
         is CloneStep.LoadOwners -> "이 토큰으로 볼 수 있는 계정을 묻는 중입니다"
         is CloneStep.LoadRepositories -> "$ownerLogin 의 레포 목록을 받아 오는 중입니다"
         is CloneStep.CloneRepositories -> "레포 ${repositoryFullNames.size}개를 받아 오는 중입니다"

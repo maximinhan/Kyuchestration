@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.terminal
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +27,13 @@ import kotlinx.coroutines.withContext
 class EmbeddedTerminalStateHolder(
     private val sessionTerminalOpener: SessionTerminalOpener,
     private val coroutineScope: CoroutineScope,
+    /**
+     * 세션의 생사를 남길 자리.
+     *
+     * 화면이 말하지 못하는 것을 이쪽이 말한다. 화면은 보고 있는 세션 하나만 고쳐 그리므로,
+     * 뒤에서 죽은 세션은 사용자가 그 카드로 돌아갈 때까지 아무 데도 드러나지 않는다.
+     */
+    private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
     // 무엇을 띄울지 묻고 PTY 를 여는 동안 프로세스를 기다린다. 화면을 그리는 스레드에서 하면 창이 멎는다.
     private val sessionEntryDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -91,8 +100,15 @@ class EmbeddedTerminalStateHolder(
             opened.fold(
                 onSuccess = { holdAndShow(target, it) },
                 onFailure = {
-                    mutableState.value =
-                        EmbeddedTerminalState.SessionEntryFailed(target, it.asTerminalSessionFailure())
+                    val failure = it.asTerminalSessionFailure()
+                    diagnosticLog.record(
+                        DiagnosticLogEntry.SessionEntryFailed(
+                            targetLabel = target.label,
+                            failureMessage = failure.message.orEmpty(),
+                            guidance = failure.guidance,
+                        ),
+                    )
+                    mutableState.value = EmbeddedTerminalState.SessionEntryFailed(target, failure)
                 },
             )
         }
@@ -135,6 +151,15 @@ class EmbeddedTerminalStateHolder(
         mutableHeldSessions.value = mutableHeldSessions.value + heldSession
         mutableState.value = EmbeddedTerminalState.SessionOnScreen(target, opened.ttyConnector)
 
+        // 이어간 대화의 ID 자체는 남기지 않는다. 뒤에 오는 종료를 읽는 근거는 "이어갔는가" 이고,
+        // ID 는 그 판단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다.
+        diagnosticLog.record(
+            DiagnosticLogEntry.SessionStarted(
+                targetLabel = target.label,
+                resumingConversation = opened.resumedConversationId != null,
+            ),
+        )
+
         opened.sessionExit.whenComplete { exitCode, _ ->
             // 완료를 알리는 스레드는 이 홀더의 것이 아니다. 상태를 만지는 일은 전부 이 홀더의
             // 스코프 안에서 한다 — 두 스레드가 보유 목록을 동시에 고치면 세션 하나가 조용히 샌다.
@@ -158,6 +183,19 @@ class EmbeddedTerminalStateHolder(
             return
         }
         mutableHeldSessions.value = mutableHeldSessions.value - heldSession
+
+        // 잘 끝난 세션은 남기지 않는다 — `/exit` 는 사용자가 시킨 일이라 진단할 것이 없다.
+        // 화면과 달리 이 자리는 보고 있지 않은 세션의 죽음도 남긴다. 뒤에서 죽은 세션은 사용자가
+        // 그 카드로 돌아갈 때까지 아무 데도 드러나지 않아, 기록이 없으면 영영 보이지 않는다.
+        if (exitCode != 0) {
+            diagnosticLog.record(
+                DiagnosticLogEntry.SessionEndedUnexpectedly(
+                    targetLabel = heldSession.target.label,
+                    exitCode = exitCode,
+                    resumeFailureSuspected = resumeFailureSuspected(heldSession.resumedConversationId, exitCode),
+                ),
+            )
+        }
 
         val onScreen = mutableState.value
         if (onScreen is EmbeddedTerminalState.SessionOnScreen && onScreen.ttyConnector === heldSession.ttyConnector) {

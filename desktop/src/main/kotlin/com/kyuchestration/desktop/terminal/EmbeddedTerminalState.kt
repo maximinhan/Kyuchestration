@@ -62,7 +62,7 @@ sealed interface EmbeddedTerminalState {
          * 화면이 일어나지 않은 일을 알리게 된다.
          */
         val resumeFailureSuspected: Boolean
-            get() = resumedConversationId != null && exitCode != null && exitCode != 0
+            get() = resumeFailureSuspected(resumedConversationId, exitCode)
     }
 
     data class SessionEntryFailed(
@@ -70,3 +70,16 @@ sealed interface EmbeddedTerminalState {
         val failure: TerminalSessionFailure,
     ) : EmbeddedTerminalState
 }
+
+/**
+ * 이어가려던 대화를 열지 못한 것으로 보이는가.
+ *
+ * 화면(SessionEndedOnScreen)과 진단 기록(EmbeddedTerminalStateHolder)이 함께 쓴다. 둘이 같은
+ * 판단을 각자 적어 두면 한쪽만 고쳐지는 날이 오고, 그날 화면과 기록은 같은 세션을 두고 다른
+ * 말을 한다 — 받은 기록으로 화면에서 본 것을 확인하려던 사람이 가장 먼저 걸리는 자리다.
+ *
+ * 종료 코드를 모르면 말하지 않는다. 예외로 끝나 코드가 없는 자리까지 실패로 세면 일어나지 않은
+ * 일을 알리게 된다.
+ */
+internal fun resumeFailureSuspected(resumedConversationId: String?, exitCode: Int?): Boolean =
+    resumedConversationId != null && exitCode != null && exitCode != 0

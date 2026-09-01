@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.engine.githubrelease
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.engine.EngineInstaller
 import com.kyuchestration.desktop.engine.reasonEngineDoesNotRun
@@ -40,6 +41,13 @@ class GitHubReleaseEngineInstaller(
     private val gitHubApiBaseUrl: String = GITHUB_API_BASE_URL,
     private val osName: String = System.getProperty("os.name").orEmpty(),
     private val osArchitecture: String = System.getProperty("os.arch").orEmpty(),
+    /**
+     * 받아 온 엔진이 돌지 않을 때 그 사실을 남길 자리.
+     *
+     * 여기서 걸린 실행은 설치 화면에 멈춰 서고 그 뒤로 엔진을 부르는 일이 하나도 없다 —
+     * 남기지 않으면 그 실행에 대해 파일에 적히는 것은 "앱이 시작했다" 한 줄뿐이다.
+     */
+    private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
 ) : EngineInstaller {
 
     override fun installEngine() {
@@ -81,7 +89,7 @@ class GitHubReleaseEngineInstaller(
             Files.setPosixFilePermissions(downloadPath, PosixFilePermissions.fromString("rwxr-xr-x"))
             // 옮기기 전에 확인한다. 다른 플랫폼의 바이너리도 실행 가능한 파일이긴 하므로, 자리를
             // 먼저 내주면 돌지 않는 엔진이 설치된 것으로 남는다.
-            reasonEngineDoesNotRun(downloadPath)?.let {
+            reasonEngineDoesNotRun(downloadPath, diagnosticLog)?.let {
                 throw EngineInstallationFailure.DownloadedEngineDidNotRun(it)
             }
 

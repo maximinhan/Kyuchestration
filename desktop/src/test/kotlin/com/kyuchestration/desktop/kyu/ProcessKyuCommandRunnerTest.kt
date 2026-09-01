@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.kyu
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
@@ -9,6 +11,9 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import java.nio.file.attribute.PosixFilePermissions
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.condition.DisabledOnOs
@@ -152,9 +157,102 @@ class ProcessKyuCommandRunnerTest {
         assertEquals("PATH=/opt/homebrew/bin:/usr/bin\nHOME=물려받지 않음\n", result.standardOutput)
     }
 
+    @Test
+    fun `0 이 아닌 코드로 끝나면 인자와 종료 코드와 stderr 를 기록에 남긴다`() {
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo "없는 프로필입니다: 개인" >&2
+            exit 1
+            """.trimIndent(),
+        )
+        val diagnosticLog = RecordingDiagnosticLog()
+
+        ProcessKyuCommandRunner(executable, diagnosticLog = diagnosticLog)
+            .run(listOf("auth", "remove", "개인"))
+
+        val recorded = diagnosticLog.recordedEntries.single()
+        assertEquals(
+            DiagnosticLogEntry.EngineCallFailed(
+                arguments = listOf("auth", "remove", "개인"),
+                exitCode = 1,
+                standardError = "없는 프로필입니다: 개인\n",
+            ),
+            recorded,
+        )
+    }
+
+    @Test
+    fun `성공한 호출은 기록에 남기지 않는다`() {
+        // 성공까지 남기면 기록이 정상적인 사용으로 찬다 — 대시보드가 3 초마다 kyu list 를 부르므로
+        // 하루만 켜 두어도 봐야 할 줄이 그 아래 묻힌다.
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo "{}"
+            """.trimIndent(),
+        )
+        val diagnosticLog = RecordingDiagnosticLog()
+
+        ProcessKyuCommandRunner(executable, diagnosticLog = diagnosticLog).run(listOf("list", "/w", "--json"))
+
+        assertEquals(emptyList(), diagnosticLog.recordedEntries)
+    }
+
+    @Test
+    fun `띄우지도 못한 호출은 종료 코드 없이 이유만 남긴다`() {
+        val notExecutable = temporaryDirectory.resolve("kyu").apply {
+            writeText("#!/bin/sh\nexit 0\n")
+            setPosixFilePermissions(PosixFilePermissions.fromString("rw-r--r--"))
+        }
+        val diagnosticLog = RecordingDiagnosticLog()
+
+        assertFailsWith<KyuCommandFailure.FailedToStart> {
+            ProcessKyuCommandRunner(notExecutable, diagnosticLog = diagnosticLog).run(listOf("version"))
+        }
+
+        val recorded = assertIs<DiagnosticLogEntry.EngineCallCouldNotStart>(diagnosticLog.recordedEntries.single())
+        assertEquals(listOf("version"), recorded.arguments)
+        assertTrue(recorded.reason.isNotBlank(), "왜 띄우지 못했는지가 비어 있으면 기록이 사실을 잃는다")
+    }
+
+    /**
+     * 토큰은 기록 어디에도 나타나지 않는다.
+     *
+     * 이 앱에서 비밀이 지나는 통로는 stdin 하나다(kyu auth add). 그 통로를 지나는 호출이
+     * 실패하는 자리를 실제로 만들어, 남은 기록 전체를 훑어 토큰이 없음을 고정한다 — 기록 타입에
+     * stdin 필드가 없다는 사실만으로도 지켜지지만, 그 결정이 뒷날 조용히 뒤집히지 않게 한다.
+     */
+    @Test
+    fun `실패한 토큰 등록을 기록해도 토큰은 남지 않는다`() {
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            cat > /dev/null
+            echo "토큰이 거절당했습니다 (401). 아무것도 저장하지 않았습니다." >&2
+            exit 1
+            """.trimIndent(),
+        )
+        val diagnosticLog = RecordingDiagnosticLog()
+
+        ProcessKyuCommandRunner(executable, diagnosticLog = diagnosticLog).run(
+            arguments = listOf("auth", "add", "개인", "--json"),
+            standardInput = SECRET_LOOKING_TOKEN,
+        )
+
+        assertFalse(
+            diagnosticLog.recordedText().contains(SECRET_LOOKING_TOKEN),
+            "기록에 토큰이 실렸다: ${diagnosticLog.recordedText()}",
+        )
+    }
+
     private fun executableScript(source: String): Path =
         temporaryDirectory.resolve("kyu").apply {
             writeText(source + "\n")
             setPosixFilePermissions(PosixFilePermissions.fromString("rwxr-xr-x"))
         }
+
+    private companion object {
+        const val SECRET_LOOKING_TOKEN = "ghp_이것이기록에나타나면안된다1234567890"
+    }
 }

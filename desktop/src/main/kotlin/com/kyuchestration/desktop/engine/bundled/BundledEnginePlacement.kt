@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.engine.bundled
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.engine.reasonEngineDoesNotRun
 import com.kyuchestration.desktop.kyu.bundledEngineCopyPath
@@ -39,6 +40,7 @@ import kotlin.io.path.isRegularFile
 internal fun placeBundledEngineWhereItCanRun(
     bundledEnginePath: Path? = bundledEngineResourcePath(),
     copyPath: Path = bundledEngineCopyPath(),
+    diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
 ) {
     if (bundledEnginePath == null) {
         removeCopyLeftByAnEarlierInstallation(copyPath)
@@ -49,7 +51,7 @@ internal fun placeBundledEngineWhereItCanRun(
         return
     }
 
-    replaceCopy(bundledEnginePath, copyPath)
+    replaceCopy(bundledEnginePath, copyPath, diagnosticLog)
 }
 
 /**
@@ -99,7 +101,7 @@ private fun copyIsTheSameEngine(bundledEnginePath: Path, copyPath: Path): Boolea
  * 이름을 차지한다. 탐색은 "실행 가능한 파일이 있는가" 만 보므로 그것을 엔진으로 여기고, 다음
  * 실행부터는 바이트가 다르니 다시 복사하겠지만 그 사이의 호출은 전부 깨진 엔진으로 나간다.
  */
-private fun replaceCopy(bundledEnginePath: Path, copyPath: Path) {
+private fun replaceCopy(bundledEnginePath: Path, copyPath: Path, diagnosticLog: DiagnosticLog) {
     val copyDirectory = copyPath.parent
 
     val temporaryCopy = try {
@@ -115,7 +117,7 @@ private fun replaceCopy(bundledEnginePath: Path, copyPath: Path) {
         Files.copy(bundledEnginePath, temporaryCopy, StandardCopyOption.REPLACE_EXISTING)
         Files.setPosixFilePermissions(temporaryCopy, PosixFilePermissions.fromString("rwxr-xr-x"))
 
-        reasonEngineDoesNotRun(temporaryCopy)?.let { reason ->
+        reasonEngineDoesNotRun(temporaryCopy, diagnosticLog)?.let { reason ->
             throw EngineInstallationFailure.BundledEngineDidNotRun(reason)
         }
 

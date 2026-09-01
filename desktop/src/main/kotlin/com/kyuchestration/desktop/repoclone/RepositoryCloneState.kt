@@ -26,8 +26,33 @@ sealed interface RepositoryCloneState {
      */
     data class StepFailed(val step: CloneStep.Retryable, val failure: CloneStepFailure) : RepositoryCloneState
 
-    /** 1 단계 — 어느 토큰으로 GitHub 에 붙을지 고른다. */
-    data class ChoosingTokenProfile(val profiles: List<TokenProfile>) : RepositoryCloneState
+    /**
+     * 1 단계 — 어느 토큰으로 GitHub 에 붙을지 고른다.
+     *
+     * @param removalRejectionReason 지난 제거가 성립하지 않은 이유. 그런 일이 없었으면 null 이다.
+     *   제거 실패를 StepFailed 로 보내지 않는 이유는 "다시 시도" 다 — 지우는 일을 그 버튼으로
+     *   되풀이하게 두면, 첫 번째가 사실은 성공했는데 앱이 실패로 읽은 경우에 두 번째가
+     *   "없는 프로필" 로 끝나고 사용자는 자기가 무엇을 지웠는지 알 수 없게 된다.
+     */
+    data class ChoosingTokenProfile(
+        val profiles: List<TokenProfile>,
+        val removalRejectionReason: String? = null,
+    ) : RepositoryCloneState
+
+    /**
+     * 1 단계의 세 번째 길 — 등록된 프로필 하나를 지울지 확인한다.
+     *
+     * 확인 한 걸음을 두는 이유는 되돌릴 수 없기 때문이다. 지워진 토큰은 앱도 엔진도 되살리지
+     * 못하고, 사용자는 GitHub 에 가서 새로 발급받아야 한다 — 목록에서 곧바로 지우면 옆줄을
+     * 누르려던 손이 그 대가를 치른다.
+     *
+     * @param profileName 지울 프로필의 이름. 확인 문구가 이 이름을 그대로 말한다 — "정말
+     *   지울까요?" 만으로는 사용자가 무엇을 지우는지 그 자리에서 확인할 수 없다.
+     */
+    data class ConfirmingTokenProfileRemoval(
+        val profileName: String,
+        val profilesToReturnTo: List<TokenProfile>,
+    ) : RepositoryCloneState
 
     /**
      * 1 단계의 다른 길 — 새 토큰을 등록한다.
@@ -108,9 +133,15 @@ sealed interface CloneStep {
     /**
      * 실패해도 같은 재료로 다시 시킬 수 있는 걸음.
      *
-     * 토큰 등록만 이 갈래 밖에 있다. 되풀이하려면 토큰을 들고 있어야 하는데, 앱이 토큰을 쥐고
-     * 있는 시간은 건네는 그 한 번으로 끝나야 한다 — 그 결정을 주석이 아니라 타입으로 적어 두면,
-     * 뒷날 누가 "다시 시도" 에 등록을 얹으려 해도 컴파일이 되지 않는다.
+     * 토큰을 다루는 두 걸음만 이 갈래 밖에 있다.
+     *
+     * 등록은 되풀이하려면 토큰을 들고 있어야 하는데, 앱이 토큰을 쥐고 있는 시간은 건네는 그 한
+     * 번으로 끝나야 한다. 제거는 되돌릴 수 없는 일이라서다 — "다시 시도" 로 되풀이하면, 첫
+     * 번째가 사실은 성공했는데 앱이 실패로 읽은 경우에 두 번째가 "없는 프로필" 로 끝나고
+     * 사용자는 자기가 무엇을 지웠는지 알 수 없게 된다.
+     *
+     * 그 결정을 주석이 아니라 타입으로 적어 두면, 뒷날 누가 "다시 시도" 에 둘 중 하나를
+     * 얹으려 해도 컴파일이 되지 않는다.
      */
     sealed interface Retryable : CloneStep
 
@@ -118,6 +149,8 @@ sealed interface CloneStep {
 
     /** @param profileName 이름만 들고 있다. 토큰은 이 값 어디에도 없다. */
     data class RegisterTokenProfile(val profileName: String) : CloneStep
+
+    data class RemoveTokenProfile(val profileName: String) : CloneStep
 
     data class LoadOwners(val profileName: String) : Retryable
 

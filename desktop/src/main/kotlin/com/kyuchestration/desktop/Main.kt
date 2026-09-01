@@ -10,6 +10,11 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
+import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
+import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
 import com.kyuchestration.desktop.engine.EngineInstallationStateHolder
 import com.kyuchestration.desktop.engine.bundled.placeBundledEngineWhereItCanRun
 import com.kyuchestration.desktop.engine.githubrelease.GitHubReleaseEngineInstaller
@@ -39,19 +44,57 @@ import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
  * 홀더끼리 서로를 부르지 않는 것도 이 자리의 몫이다. 워크디렉토리를 바꿀 때 터미널을 놓고
  * 초기화 실패 문구를 거두는 것은 어느 한 홀더의 일이 아니라 조립하는 쪽의 결정이다.
  */
-fun main() = application {
+fun main() {
+    val diagnosticLogPath = diagnosticLogFile()
+    val diagnosticLog = FileDiagnosticLog(diagnosticLogPath)
+
+    // 창을 세우기 전에 세운다. 화면을 조립하다 죽는 예외도 받아야 하기 때문이다.
+    recordUncaughtFailuresIn(diagnosticLog)
+    diagnosticLog.record(
+        DiagnosticLogEntry.ApplicationStarted(
+            versionLabel = DesktopBuildVersion.label,
+            operatingSystemName = System.getProperty("os.name").orEmpty(),
+            javaRuntimeVersion = System.getProperty("java.version").orEmpty(),
+        ),
+    )
+
+    try {
+        runDesktopApplication(diagnosticLog, diagnosticLogPath.toString())
+    } catch (failure: Throwable) {
+        // Compose 의 합성에서 빠져나온 예외가 닿는 자리다. 기본 미처리 예외 핸들러는 스레드가
+        // 예외로 끝날 때 도는데, 이쪽은 `application` 이 예외를 그대로 되던지므로 그 핸들러를
+        // 지나지 않는다 — 두 자리를 합칠 수 없어 둘 다 둔다.
+        //
+        // 삼키지 않고 되던진다. 기록은 더하는 일이지, 앱이 죽어야 할 자리에서 죽지 않게 하는
+        // 일이 아니다 — 여기서 삼키면 창이 사라진 채 프로세스만 남는다.
+        diagnosticLog.record(DiagnosticLogEntry.UnhandledFailure(Thread.currentThread().name, failure))
+        throw failure
+    }
+}
+
+/**
+ * @param diagnosticLogPathLabel 화면이 오류 자리마다 알려 줄 기록 파일의 경로. 사용자가 무엇을
+ *   보고할 때 건네면 되는지가 그 자리에 있어야, 원격에서 진단할 수 있는 것이 화면 문구를 넘어선다.
+ */
+private fun runDesktopApplication(
+    diagnosticLog: DiagnosticLog,
+    diagnosticLogPathLabel: String,
+) = application {
     val applicationCoroutineScope = rememberCoroutineScope()
     // 관찰과 초기화가 같은 실행기를 함께 쓴다. 실행기는 부를 때마다 kyu 를 새로 찾는 무상태라
     // 둘로 나눌 이유가 없다.
-    val kyuCommandRunner = remember { ProcessKyuCommandRunner() }
+    val kyuCommandRunner = remember { ProcessKyuCommandRunner(diagnosticLog = diagnosticLog) }
     // 앱의 첫 갈림길. 다른 홀더보다 먼저 세우는 것이 뜻이다 — 엔진이 없으면 나머지 화면은
     // 뜨지 않는다. 세우는 것 자체가 걸음이기도 하다: 어디에도 엔진이 없으면 이 홀더가 그
     // 자리에서 곧바로 받기 시작한다.
     val engineInstallationStateHolder = remember(applicationCoroutineScope) {
         EngineInstallationStateHolder(
-            engineInstaller = GitHubReleaseEngineInstaller(),
+            // 이 두 자리도 기록을 받는다. 여기서 걸린 실행은 설치 화면에 멈춰 서고 그 뒤로
+            // 엔진을 부르는 일이 하나도 없어서, 넘기지 않으면 그 실행의 기록이 "앱이 시작했다"
+            // 한 줄로 끝난다 — 맥이 격리해 둔 바이너리처럼 원격으로 봐야 하는 실패가 그렇게 끝난다.
+            engineInstaller = GitHubReleaseEngineInstaller(diagnosticLog = diagnosticLog),
             findEngineExecutable = ::findKyuExecutable,
-            placeBundledEngine = ::placeBundledEngineWhereItCanRun,
+            placeBundledEngine = { placeBundledEngineWhereItCanRun(diagnosticLog = diagnosticLog) },
             coroutineScope = applicationCoroutineScope,
         )
     }
@@ -83,6 +126,7 @@ fun main() = application {
             // PTY 어댑터의 일이라, 두 어댑터가 여기서 만난다.
             sessionTerminalOpener = PtySessionTerminalOpener(KyuCliSessionCommandSource(kyuCommandRunner)),
             coroutineScope = applicationCoroutineScope,
+            diagnosticLog = diagnosticLog,
         )
     }
     val engineInstallationState by engineInstallationStateHolder.state.collectAsState()
@@ -116,6 +160,7 @@ fun main() = application {
 
         KyuchestrationDesktopScreen(
             versionLabel = DesktopBuildVersion.label,
+            diagnosticLogPathLabel = diagnosticLogPathLabel,
             engineInstallationState = engineInstallationState,
             engineDirectoryLabel = engineDirectoryLabel,
             dashboardState = dashboardState,

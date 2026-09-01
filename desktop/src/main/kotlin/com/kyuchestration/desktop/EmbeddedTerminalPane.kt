@@ -35,6 +35,7 @@ import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 fun EmbeddedTerminalPane(
     terminalState: EmbeddedTerminalState,
     heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
+    diagnosticLogPathLabel: String,
     onEndSessionRequested: () -> Unit,
     /**
      * 이어가지 못한 채 끝난 세션을 새 대화로 다시 여는 자리.
@@ -46,7 +47,12 @@ fun EmbeddedTerminalPane(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        EmbeddedTerminalHeader(terminalState, onEndSessionRequested, onStartNewConversationRequested)
+        EmbeddedTerminalHeader(
+            terminalState = terminalState,
+            diagnosticLogPathLabel = diagnosticLogPathLabel,
+            onEndSessionRequested = onEndSessionRequested,
+            onStartNewConversationRequested = onStartNewConversationRequested,
+        )
 
         when (terminalState) {
             // 이 자리가 그려지는 것은 화면이 터미널을 보여주기로 한 뒤다. 그 판단은 상태 홀더가
@@ -72,13 +78,34 @@ fun EmbeddedTerminalPane(
                 SessionTerminal(terminalState.ttyConnector, heldSessionTerminalWidgets)
 
             is EmbeddedTerminalState.SessionEntryFailed ->
-                SessionEntryFailureNotice(terminalState.failure)
+                SessionEntryFailureNotice(terminalState.failure, diagnosticLogPathLabel)
         }
     }
 }
 
 @Composable
 private fun EmbeddedTerminalHeader(
+    terminalState: EmbeddedTerminalState,
+    diagnosticLogPathLabel: String,
+    onEndSessionRequested: () -> Unit,
+    onStartNewConversationRequested: (SessionTarget) -> Unit,
+) {
+    Column {
+        EmbeddedTerminalHeaderRow(terminalState, onEndSessionRequested, onStartNewConversationRequested)
+
+        // 잘 돌고 있는 세션 아래에는 두지 않는다. 늘 붙어 있으면 이 줄이 머리말의 일부처럼
+        // 읽혀서, 정작 무언가 잘못됐을 때 눈에 띄지 않는다.
+        if (terminalState.showsResumeFailure) {
+            DiagnosticLogPathNotice(
+                diagnosticLogPathLabel = diagnosticLogPathLabel,
+                modifier = Modifier.padding(start = 24.dp, end = 16.dp, bottom = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmbeddedTerminalHeaderRow(
     terminalState: EmbeddedTerminalState,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
@@ -189,7 +216,7 @@ private fun SessionTerminal(
 }
 
 @Composable
-private fun SessionEntryFailureNotice(failure: TerminalSessionFailure) {
+private fun SessionEntryFailureNotice(failure: TerminalSessionFailure, diagnosticLogPathLabel: String) {
     CenteredNotice {
         Text(
             text = failure.message.orEmpty(),
@@ -202,6 +229,7 @@ private fun SessionEntryFailureNotice(failure: TerminalSessionFailure) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
     }
 }
 

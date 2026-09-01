@@ -119,6 +119,65 @@ class KyuCliTokenProfileRegistryTest {
         assertTrue("ghp_틀린토큰" !in "${failure.message} ${failure.guidance} ${failure.standardError}")
     }
 
+    /**
+     * 제거는 --json 을 붙이지 않는다.
+     *
+     * kyu 쪽이 그 옵션을 받지 않아서다 — `auth remove` 는 인자를 정확히 하나만 받고, 하나 더
+     * 붙이면 "지울 프로필 이름 하나가 필요합니다" 로 거절한다(auth.go 의 ManageTokenProfiles).
+     * 붙였다면 모든 제거가 실패하는데, 그 실패는 kyu 가 거절한 것과 종료 코드가 같아서 화면에서
+     * 가려지지 않는다.
+     */
+    @Test
+    fun `제거는 kyu auth remove 에 이름 하나만 넘긴다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult("개인 프로필과 그 토큰을 지웠습니다.\n") }
+
+        KyuCliTokenProfileRegistry(runner).removeProfile("개인")
+
+        assertEquals(listOf(listOf("auth", "remove", "개인")), runner.receivedArguments)
+        assertEquals(listOf<String?>(null), runner.receivedStandardInputs)
+    }
+
+    /**
+     * 성공 판정은 종료 코드로 한다.
+     *
+     * 제거에는 기계용 문서가 없다. 그래도 충분한 이유는 이 걸음이 앱에게 돌려줄 것이 없기
+     * 때문이다 — 지워졌는지만 알면 되고, 그 답은 종료 코드가 이미 말한다. 지운 뒤의 목록은
+     * 어차피 엔진에게 다시 묻는다.
+     */
+    @Test
+    fun `종료 코드 0 이면 지워진 것으로 본다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult("개인 프로필과 그 토큰을 지웠습니다.\n") }
+
+        KyuCliTokenProfileRegistry(runner).removeProfile("개인")
+    }
+
+    @Test
+    fun `없는 프로필을 지우려 하면 kyu 가 남긴 이유를 그대로 싣는다`() {
+        val runner = RecordingKyuCommandRunner {
+            KyuCommandResult(
+                exitCode = 1,
+                standardOutput = "",
+                standardError = "등록되지 않은 프로필입니다: 개인\n등록된 프로필: 회사\n",
+            )
+        }
+
+        val failure = assertFailsWith<CloneStepFailure.KyuExitedWithFailure> {
+            KyuCliTokenProfileRegistry(runner).removeProfile("개인")
+        }
+
+        assertEquals(1, failure.exitCode)
+        assertTrue("등록된 프로필: 회사" in failure.guidance)
+    }
+
+    @Test
+    fun `제거도 kyu 를 부르지 못했다는 사실을 이 걸음의 실패로 옮긴다`() {
+        val runner = RecordingKyuCommandRunner { throw KyuCommandFailure.ExecutableNotFound() }
+
+        assertFailsWith<CloneStepFailure.KyuExecutableNotFound> {
+            KyuCliTokenProfileRegistry(runner).removeProfile("개인")
+        }
+    }
+
     @Test
     fun `아는 판이 아니면 판이 다르다고 말한다`() {
         val runner = RecordingKyuCommandRunner {
