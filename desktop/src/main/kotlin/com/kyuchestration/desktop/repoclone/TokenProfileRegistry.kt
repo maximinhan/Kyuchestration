@@ -29,6 +29,18 @@ interface TokenProfileRegistry {
      * @throws CloneStepFailure 토큰이 거절당했거나 등록을 마치지 못했을 때.
      */
     fun registerProfile(profileName: String, token: String): RegisteredTokenProfile
+
+    /**
+     * [profileName] 프로필과 그 토큰을 지운다.
+     *
+     * 돌려주는 것이 없다. 지운 뒤의 목록을 여기서 만들어 주지 않는 이유는, 앱이 지운 이름만
+     * 빼서 목록을 지어내면 그 목록이 이 머신의 사실이 아니라 앱의 짐작이 되기 때문이다 —
+     * 다른 터미널에서 그 사이에 프로필을 하나 더 지웠으면 앱은 없는 것을 계속 보여준다.
+     * 지운 뒤의 목록은 부르는 쪽이 [listProfiles] 로 다시 묻는다.
+     *
+     * @throws CloneStepFailure 그런 이름이 없거나 지우지 못했을 때.
+     */
+    fun removeProfile(profileName: String)
 }
 
 /**

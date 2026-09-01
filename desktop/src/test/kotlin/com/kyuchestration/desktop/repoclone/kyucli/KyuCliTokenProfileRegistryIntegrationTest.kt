@@ -47,11 +47,47 @@ class KyuCliTokenProfileRegistryIntegrationTest {
         )
     }
 
+    /**
+     * 등록된 적 없는 이름을 지우려 하면 엔진이 거절한다.
+     *
+     * **성공하는 길은 여기서 재지 않는다.** 재려면 진짜 토큰을 먼저 등록해야 하는데, 이 시험은
+     * 아무나 돌리는 것이고 진짜 토큰은 만들지도 두지도 않는다. 그래서 확인하는 것은 이 어댑터가
+     * 실제로 확인해야 하는 하나다 — `auth remove` 를 부르는 방식이 엔진이 받는 모양과 맞는가.
+     *
+     * 그 하나가 가짜 실행기로는 확인되지 않는 이유가 --json 이다. 이 흐름의 다른 명령은 모두
+     * 그 옵션을 받지만 remove 만 받지 않고(auth.go 는 인자를 정확히 하나만 받는다), 붙였다면
+     * 여기서 나는 거절이 "없는 프로필" 이 아니라 "인자 개수가 틀렸다" 가 된다.
+     */
+    @Test
+    fun `등록된 적 없는 프로필을 지우려 하면 엔진이 거절한다`() {
+        val registry = KyuCliTokenProfileRegistry(realKyuCommandRunnerOrSkip())
+
+        val failure = assertFailsWith<CloneStepFailure.KyuExitedWithFailure> {
+            registry.removeProfile(NEVER_REGISTERED_PROFILE_NAME)
+        }
+
+        assertTrue(failure.guidance.isNotBlank(), "kyu 가 stderr 로 남긴 이유가 안내 문구가 되어야 한다")
+        // 인자 개수를 잘못 넘겼다면 엔진은 사용법을 되돌려준다. 그 말이 섞여 오면 이 어댑터가
+        // 부르는 모양이 엔진이 받는 모양과 어긋난 것이다.
+        assertTrue(
+            "지울 프로필 이름 하나가 필요합니다" !in failure.guidance,
+            "auth remove 에 인자를 잘못 넘겼다: ${failure.guidance}",
+        )
+    }
+
     private companion object {
         /**
          * 이 시험만 쓰는 이름. 사람이 쓸 법한 이름("개인")을 쓰면, 만에 하나 저장되는 날
          * 사용자의 진짜 프로필을 덮어쓴다.
          */
         const val REJECTED_PROFILE_NAME = "kyu-desktop-통합시험-거절되는-토큰"
+
+        /**
+         * 지우기 시험이 겨누는 이름.
+         *
+         * 위의 것과 갈라 둔다. 같은 이름을 쓰면 이 시험이 앞선 시험의 뒤처리에 기대게 되고,
+         * 시험 순서가 바뀌는 날 이유 없이 빨개진다.
+         */
+        const val NEVER_REGISTERED_PROFILE_NAME = "kyu-desktop-통합시험-등록된-적-없는-프로필"
     }
 }
