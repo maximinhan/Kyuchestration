@@ -20,7 +20,7 @@ import (
 const mcpUsageText = `사용법: kyu mcp <serve|approve> [인자]
 
   kyu mcp serve <워크디렉토리>   메인 세션에 붙는 오케스트레이션 MCP 서버를 stdio 로 연다 — 기계용
-  kyu mcp approve <repo>        그 레포의 .mcp.json 을 눈으로 확인하고 위임을 승인한다
+  kyu mcp approve <repo>        그 레포의 실행 유발 설정을 눈으로 확인하고 위임을 승인한다
 
 serve 는 사람이 직접 부르는 명령이 아니다. kyu session-command --json 이 답하는 메인 세션 명령의
 --mcp-config 에 이 명령이 실려 있고, claude 가 그것을 자식 프로세스로 띄운다.
@@ -43,7 +43,7 @@ func ManageOrchestrationTools(in io.Reader, out, errOut io.Writer, args []string
 		return serveOrchestrationTools(in, out, subcommandArgs)
 
 	case mcpApproveSubcommandName:
-		return approveRepoMCPConfig(in, out, subcommandArgs)
+		return approveRepoDelegation(in, out, subcommandArgs)
 
 	default:
 		return fmt.Errorf("mcp 가 모르는 하위 명령입니다: %s\n\n%s", subcommandName, mcpUsageText)
