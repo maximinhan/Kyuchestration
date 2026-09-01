@@ -52,21 +52,18 @@ private fun sessionEnvironment(
 ): Map<String, String> {
     val environment = baseEnvironment.toMutableMap()
 
-    // 이 앱을 tmux 안에서 띄웠으면 TMUX 가, 감독 세션 안에서 띄웠으면 KYU_SESSION 이 딸려 온다.
-    // 그 값은 이 GUI 프로세스의 사실이지 앱 안에서 새로 연 PTY 의 사실이 아니다. 예전에는
-    // kyu attach 가 중첩으로 보고 거절하기 때문에 덜어냈고, 이제는 claude 가 그 값을 보고 다르게
-    // 굴 수 있기 때문에 덜어낸다(claude --help 에 --tmux 가 있다).
-    // 앱 안의 PTY 는 어느 세션 안도 아니라는 사실은 어느 쪽이든 참이다.
+    // 사용자가 자기 tmux 안에서 이 앱을 띄웠으면 TMUX 가 딸려 온다. 그 값은 GUI 프로세스가
+    // 어디서 떴는지에 대한 사실이지 앱 안에서 새로 연 PTY 의 사실이 아니고, 그대로 넘기면
+    // claude 가 자기가 tmux 안에 있다고 믿는다(claude --help 에 --tmux 가 있다).
     environment.remove(INSIDE_TMUX_ENV_NAME)
-    environment.remove(INSIDE_SUPERVISED_SESSION_ENV_NAME)
 
     // JediTerm 이 흉내 내는 것이 xterm 계열이다. 물려받은 TERM(데스크톱 런처에서 띄우면 아예
     // 없고, 셸에서 띄우면 그 셸의 값)을 그대로 두면 세션 안의 프로그램이 다른 화면을 그린다.
-    // 이제 claude 가 이 값을 직접 읽으므로 전보다 중요해졌다 — 사이에 tmux 가 없다.
+    // claude 가 이 값을 직접 읽는다 — 사이에 아무것도 없다.
     environment[TERMINAL_TYPE_ENV_NAME] = TERMINAL_TYPE
 
-    // 앱이 죽어도 SIGHUP 을 무시하고 살아남은 자식은 kyu list 에도 앱에도 보이지 않는다.
-    // 그때 그 프로세스를 찾을 수 있는 유일한 자리가 ps 이고, 이 표식이 거기서 눈에 띈다
+    // 앱이 죽어도 SIGHUP 을 무시하고 살아남은 자식은 앱 어디에도 보이지 않는다. 그때 그
+    // 프로세스를 찾을 수 있는 유일한 자리가 ps 이고, 이 표식이 거기서 눈에 띈다
     // (`ps eww` 가 환경을 함께 그린다). 설계 문서 8 절 1 번의 (가)다.
     environment[APP_SESSION_MARKER_ENV_NAME] = "${workDirPath.fileName ?: workDirPath}-${target.label}"
 
@@ -77,9 +74,6 @@ private fun sessionEnvironment(
 }
 
 private const val INSIDE_TMUX_ENV_NAME = "TMUX"
-
-/** 감독이 자기 세션 안의 프로세스에 심는 표식(session/supervise.go 의 insideSupervisorSessionEnvName). */
-private const val INSIDE_SUPERVISED_SESSION_ENV_NAME = "KYU_SESSION"
 
 /** 앱이 보유한 세션임을 자식 환경에 남기는 표식. `<워크디렉토리 이름>-<라벨>` 이 값이다. */
 internal const val APP_SESSION_MARKER_ENV_NAME = "KYU_APP_SESSION"
