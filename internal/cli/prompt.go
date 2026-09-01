@@ -44,6 +44,14 @@ func newInteractivePrompt(in io.Reader, out io.Writer) *interactivePrompt {
 	return prompt
 }
 
+// readsFromATerminal 은 답할 사람이 이 입력 너머에 있는지다.
+//
+// 파이프와 터미널을 가르는 이 한 줄이 MCP 설정 승인 관문의 전부다(mcp_approve.go). 파이프
+// 너머에는 물음에 답할 상대가 없고, 그것을 읽어버리면 관문이 "y 를 흘려보내는 것" 으로 열린다.
+func (prompt *interactivePrompt) readsFromATerminal() bool {
+	return prompt.inputFile != nil
+}
+
 // readAnswerLine 은 아무것도 찍지 않고 한 줄만 읽는다. 앞뒤 공백은 걷어낸다.
 func (prompt *interactivePrompt) readAnswerLine() (string, error) {
 	line, err := prompt.reader.ReadString('\n')

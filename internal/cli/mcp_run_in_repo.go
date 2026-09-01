@@ -165,6 +165,16 @@ func (dispatcher *delegationDispatcher) delegate(rawArguments json.RawMessage) (
 		return refuseDelegation(err.Error()), nil
 	}
 
+	// 관문이 먼저다. 대화를 배정하기 전이어야, 승인을 기다리는 물음이 쓰이지 않을 대화 기록을
+	// 남기지 않는다 — 없는 레포를 대화 배정 전에 거절하는 것과 같은 자세다.
+	approval, err := workdir.InspectRepoMCPApproval(dispatcher.workDirPath, repo)
+	if err != nil {
+		return refuseDelegation(err.Error()), nil
+	}
+	if !approval.DelegationIsAllowed() {
+		return refuseDelegation(mcpApprovalNeededMessage(dispatcher.workDirPath, repo.Name, approval)), nil
+	}
+
 	assignment, err := dispatcher.claimRepoAndConversation(repo.Name, arguments.NewConversation)
 	if err != nil {
 		return refuseDelegation(err.Error()), nil
@@ -345,6 +355,28 @@ func renderToolAnswerWithFailure(answer runInRepoAnswer, incomplete bool) (mcpse
 
 	result.IsError = incomplete
 	return result, nil
+}
+
+// mcpApprovalNeededMessage 는 관문에 걸린 위임을 모델이 사용자에게 전할 수 있는 말로 옮긴다.
+//
+// 모델이 스스로 통과할 수 있는 길을 적지 않는다. 여기 적힌 명령은 터미널에서 사람이 직접 쳐야
+// 하는 것이고(kyu mcp approve 가 터미널을 요구한다), 그것이 이 관문의 요점이다 — 위임에는
+// 승인 프롬프트에 답할 사람이 없으므로(설계 문서 2 절) 사람이 있는 자리로 물음을 옮긴다.
+func mcpApprovalNeededMessage(workDirPath, repoName string, approval workdir.RepoMCPApproval) string {
+	return fmt.Sprintf(`%s 에 위임하려면 그 레포의 .mcp.json 을 사람이 먼저 확인해야 합니다.
+
+이 파일에 적힌 command 는 위임이 시작되는 순간 그대로 실행됩니다. 대화형 claude 에는 그 전에 사람이
+한 번 보는 관문이 있지만 헤드리스 실행에는 없어서, 이 도구가 그 자리를 대신합니다.
+
+파일: %s
+내용:
+%s
+사용자에게 이렇게 전하세요 — 워크디렉토리(%s)에서 터미널을 열고 다음을 실행한 뒤 알려 달라고:
+
+  kyu mcp approve %s
+
+승인은 지금 이 내용에 대한 것입니다. 파일이 바뀌면 다시 묻습니다.`,
+		repoName, approval.ConfigPath, approval.ConfigContent, workDirPath, repoName)
 }
 
 // refuseDelegation 은 위임을 걸기도 전에 끝난 물음을 모델이 읽을 거절로 옮긴다.

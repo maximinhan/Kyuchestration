@@ -576,3 +576,43 @@ func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) m
 	}
 	return answers
 }
+
+func TestMCPApproveCannotBeAnsweredThroughAPipe(t *testing.T) {
+	// 관문의 요점은 사람이 직접 본다는 것이다(orchestration-tools-design.md 5.6). 파이프로 y 를
+	// 흘려보내 통과할 수 있으면, 관문에 막힌 그 메인 세션이 자기 Bash 도구로 자기 관문을 연다.
+	//
+	// 프로세스로 확인한다 — 터미널인지 아닌지는 파일 서술자의 성질이라 함수 호출로는 재현되지 않는다.
+	workDirPath := t.TempDir()
+	repoPath := filepath.Join(workDirPath, "proj-a")
+	initGitRepoForListing(t, repoPath)
+	if err := os.WriteFile(filepath.Join(repoPath, ".mcp.json"), []byte(`{"mcpServers":{}}`), 0o644); err != nil {
+		t.Fatalf("테스트용 .mcp.json 생성 실패: %v", err)
+	}
+
+	command := exec.Command(buildKyuBinary(t), "mcp", "approve", "proj-a")
+	command.Dir = workDirPath
+	command.Env = append(os.Environ(), searchPathWithOnly(t, "git"))
+	command.Stdin = strings.NewReader("y\ny\ny\n")
+
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("실행 결과 = %v, 종료 코드로 거절하기를 기대 (stdout %q)", err, stdout.String())
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("종료 코드 = %d, want 1", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), "터미널") {
+		t.Errorf("stderr = %q, 터미널이 필요하다는 것을 알리기를 기대", stderr.String())
+	}
+
+	// 관문이 실제로 닫혀 있어야 한다. 거절해 놓고 기록을 남기면 다음 위임이 통과한다.
+	if _, statErr := os.Stat(filepath.Join(workDirPath, ".coord", "mcp-approvals.json")); statErr == nil {
+		t.Error("파이프 너머의 답으로 승인 기록이 만들어졌습니다")
+	}
+}

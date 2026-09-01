@@ -31,8 +31,9 @@ const usageText = `사용법: kyu <명령> [인자]
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
   kyu session-command [repo]
                          세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
-  kyu mcp serve <워크디렉토리>
-                         메인 세션이 레포에 위임하는 도구를 stdio 로 연다 — 기계용
+  kyu mcp <serve|approve>
+                         메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
+                         approve 는 레포의 .mcp.json 을 눈으로 확인하고 승인한다)
   kyu auth <add|list|remove>
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
