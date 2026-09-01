@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.workdir.kyucli
 
+import com.kyuchestration.desktop.dashboard.mergeCardSessionFacts
 import com.kyuchestration.desktop.kyu.realKyuCommandRunnerOrSkip
 import com.kyuchestration.desktop.workdir.RepoState
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
@@ -64,8 +65,22 @@ class KyuCliWorkDirObserverIntegrationTest {
         assertEquals(1, projectB.doneTaskCount)
         assertEquals(2, projectB.totalTaskCount)
 
-        assertEquals(0, snapshot.cliSessionCount)
-        assertTrue(!snapshot.mainSessionAlive)
+        // 엔진이 답하는 상태는 이제 git 이 본 것 하나뿐이다. RUNNING 이 실려 오면 아래 두 카드의
+        // git 상태가 그 값에 가려지고, 앱은 세션을 띄운 적도 없는데 "돌고 있다" 를 읽게 된다.
+        assertTrue(
+            snapshot.repos.none { it.state.rawValue == "RUNNING" },
+            "엔진이 답한 상태: ${snapshot.repos.map { it.state.rawValue }}",
+        )
+
+        // 그 목록 위에 앱이 자기 세션을 얹는다. 값 하나가 두 축을 겸하던 시절에는 이 둘이 한
+        // 카드에 함께 뜰 수 없었다 — 세션이 떠 있으면 git 상태가 가려졌다(설계 문서 5.4.1).
+        val heldSessionCard = mergeCardSessionFacts(
+            gitState = projectB.state,
+            hasRecordedConversation = projectB.hasRecordedConversation,
+            appSessionHeld = true,
+        )
+        assertTrue(heldSessionCard.appSessionHeld)
+        assertEquals(RepoState.Dirty, heldSessionCard.gitState)
     }
 
     @Test

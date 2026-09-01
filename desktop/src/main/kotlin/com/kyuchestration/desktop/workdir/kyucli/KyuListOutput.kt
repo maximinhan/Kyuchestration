@@ -72,9 +72,13 @@ private data class KyuListRepo(
 @Serializable
 private data class KyuListTask(val id: String, val status: String, val blockedBy: List<String>)
 
+/**
+ * `alive` 는 읽지 않는다. 계약은 그 필드를 그대로 두지만 세션을 띄우는 것이 앱뿐이라 값이 늘 거짓이고,
+ * 무엇이 돌고 있는지는 앱이 자기 보유 목록에서 답한다. 읽어 두기만 하면 화면이 언젠가 그 값을 쓰게
+ * 되고, 그때 카드는 "엔진이 모르는 사실" 을 엔진에게 물은 셈이 된다.
+ */
 @Serializable
 private data class KyuListMainSession(
-    val alive: Boolean,
     /** 레포의 같은 이름 필드와 같은 이유로 기본값을 둔다 — 뒤처진 엔진이 이 필드를 내지 않는다. */
     val hasRecordedConversation: Boolean = false,
 )
@@ -83,7 +87,6 @@ private fun KyuListDocument.toWorkDirSnapshot(): WorkDirSnapshot = WorkDirSnapsh
     name = workDir.name,
     absolutePath = workDir.absolutePath,
     repos = repos.map { it.toRepoSnapshot() },
-    mainSessionAlive = mainSession.alive,
     mainSessionHasRecordedConversation = mainSession.hasRecordedConversation,
     planWarnings = planWarnings,
 )

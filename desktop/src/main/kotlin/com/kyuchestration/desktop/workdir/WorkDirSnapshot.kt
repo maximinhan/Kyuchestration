@@ -12,30 +12,17 @@ data class WorkDirSnapshot(
     val absolutePath: String,
     /** 워크디렉토리 바로 아래의 레포, 이름순. 메인 세션은 여기 없다. */
     val repos: List<RepoSnapshot>,
-    val mainSessionAlive: Boolean,
     /**
      * 메인 세션이 이어갈 대화가 적혀 있는지(`.coord/conversations.json`).
      *
-     * 생존과 다른 축의 사실이라 따로 싣는다 — 생존은 지금 돌고 있는가이고, 이것은 다음에 열면
-     * 이어갈 것이 있는가다. 앱을 껐다 켠 사용자에게는 뒤쪽이 남는다.
+     * 지금 돌고 있는가는 여기 없다. 세션을 띄우는 것은 앱뿐이라 그 사실은 엔진에게 물을 것이
+     * 아니라 앱이 자기 보유 목록에서 답한다(HeldSession). 여기 실리는 것은 앱을 껐다 켠 사용자에게
+     * 남는 쪽 — 다음에 열면 이어갈 것이 있는가다.
      */
     val mainSessionHasRecordedConversation: Boolean,
     /** 계획을 그대로 쓰지 못한 이유. 계획이 깨져도 목록 자체는 성립하므로 실패가 아니라 곁들이는 말이다. */
     val planWarnings: List<String>,
-) {
-    /**
-     * `kyu start` 가 띄운 세션 중 지금 떠 있는 것의 수. 메인 세션도 한 자리를 차지한다.
-     *
-     * **앱이 보유한 세션은 여기 없다.** 앱 세션은 tmux 세션도 감독 세션도 아니라 엔진 눈에
-     * 보이지 않는다(설계 문서 5.4). 이름에 CLI 를 적어 두는 이유가 그것이다 — "떠 있는 세션의
-     * 수" 라고만 부르면 화면이 앱 세션을 빠뜨린 채로 전부라고 말하게 된다.
-     *
-     * 레포의 세션 생존은 따로 실려 오지 않는다 — 상태가 RUNNING 인 것이 곧 세션이 떠 있다는 뜻이다
-     * (README 의 상태 표).
-     */
-    val cliSessionCount: Int =
-        repos.count { it.state == RepoState.Running } + if (mainSessionAlive) 1 else 0
-}
+)
 
 data class RepoSnapshot(
     val name: String,
@@ -69,21 +56,22 @@ data class RepoTask(
 )
 
 /**
- * 레포의 상태. kyu 가 tmux 와 git 에게 물어 매번 다시 계산한 결과다.
+ * 레포의 상태. kyu 가 git 에게 물어 매번 다시 계산한 결과다.
+ *
+ * **셋 다 git 이 본 것이다.** 예전에는 여기에 RUNNING 이 있어서, 세션이 떠 있는 레포는 git 상태가
+ * 가려졌다 — 값이 하나뿐인 자리에 두 축의 사실이 들어앉아 있었다. 세션이 엔진의 일이 아니게 되면서
+ * 그 값이 사라졌고, 이제 이 타입은 한 축만 말한다.
  *
  * 상태마다 화면에서 색이 다르므로 문자열이 아니라 타입으로 좁힌다. 다만 계약은 값이 하나 늘어도
  * schemaVersion 을 올리지 않으므로(list_json.go 의 판 규약), 모르는 낱말을 만나도 멈추지 않고
  * 그대로 들고 있는다. GUI 가 엔진보다 늦게 배포되는 일은 흔하고, 그때 화면 전체가 죽는 것보다
- * 낯선 낱말 하나를 회색으로 보여주는 편이 낫다.
+ * 낯선 낱말 하나를 회색으로 보여주는 편이 낫다. 낡은 kyu 가 PATH 에 남아 RUNNING 을 답하는
+ * 머신도 같은 길로 지나간다 — 회색 칩 하나로 뜨고 목록은 그대로 산다.
  */
 sealed interface RepoState {
 
     /** kyu 문서에 실려 온 낱말. 화면도 같은 낱말을 쓴다. */
     val rawValue: String
-
-    data object Running : RepoState {
-        override val rawValue: String = "RUNNING"
-    }
 
     data object Dirty : RepoState {
         override val rawValue: String = "DIRTY"
@@ -101,7 +89,6 @@ sealed interface RepoState {
 
     companion object {
         fun ofRawValue(rawValue: String): RepoState = when (rawValue) {
-            Running.rawValue -> Running
             Dirty.rawValue -> Dirty
             Ahead.rawValue -> Ahead
             Idle.rawValue -> Idle

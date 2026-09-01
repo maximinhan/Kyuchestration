@@ -292,7 +292,6 @@ class WorkDirDashboardStateHolderTest {
             name = name,
             absolutePath = "/home/me/work/$name",
             repos = emptyList(),
-            mainSessionAlive = false,
             mainSessionHasRecordedConversation = false,
             planWarnings = emptyList(),
         )
