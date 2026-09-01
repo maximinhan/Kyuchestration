@@ -481,6 +481,8 @@ func TestMCPServeSpeaksTheProtocolOverStdioToARealProcess(t *testing.T) {
 		}
 	}
 
+	// 요청 순서로 답을 받지 않는다. 서버는 요청마다 따로 답하므로(동시 위임이 그 이유다)
+	// 답의 짝은 순서가 아니라 id 가 짓는다.
 	answers := readJSONRPCAnswers(t, answerReader, len(requestLines)-1)
 
 	// stdin 을 닫는 것이 claude 가 세션을 접는 자리다. 그때 서버도 끝나야 프로세스가 남지 않는다.
@@ -492,32 +494,36 @@ func TestMCPServeSpeaksTheProtocolOverStdioToARealProcess(t *testing.T) {
 		t.Errorf("stderr = %q, 서버는 할 말이 없으면 아무것도 쓰지 않아야 한다", stderr.String())
 	}
 
-	if answers[0].Result.ServerInfo.Name != "kyu" {
-		t.Errorf("serverInfo.name = %q, want kyu", answers[0].Result.ServerInfo.Name)
+	initialized := answers[1]
+	if initialized.Result.ServerInfo.Name != "kyu" {
+		t.Errorf("serverInfo.name = %q, want kyu", initialized.Result.ServerInfo.Name)
 	}
-	if answers[0].Result.Capabilities.Tools == nil {
+	if initialized.Result.Capabilities.Tools == nil {
 		t.Error("capabilities.tools 가 없습니다 — 클라이언트가 도구를 묻지 않게 됩니다")
 	}
 
-	toolNames := make([]string, 0, len(answers[1].Result.Tools))
-	for _, tool := range answers[1].Result.Tools {
+	listedTools := answers[2].Result.Tools
+	toolNames := make([]string, 0, len(listedTools))
+	for _, tool := range listedTools {
 		toolNames = append(toolNames, tool.Name)
 	}
 	if !slices.Contains(toolNames, "list_repos") {
 		t.Errorf("tools/list = %q, list_repos 를 기대", toolNames)
 	}
 
-	if len(answers[2].Result.Content) != 1 {
-		t.Fatalf("tools/call 의 content = %+v, 텍스트 한 덩어리를 기대", answers[2].Result.Content)
+	calledContent := answers[3].Result.Content
+	if len(calledContent) != 1 {
+		t.Fatalf("tools/call 의 content = %+v, 텍스트 한 덩어리를 기대", calledContent)
 	}
-	if !strings.Contains(answers[2].Result.Content[0].Text, "proj-a") {
-		t.Errorf("list_repos 의 답 = %q, 클론해 둔 proj-a 를 기대", answers[2].Result.Content[0].Text)
+	if !strings.Contains(calledContent[0].Text, "proj-a") {
+		t.Errorf("list_repos 의 답 = %q, 클론해 둔 proj-a 를 기대", calledContent[0].Text)
 	}
 }
 
 // jsonRPCAnswerForTest 는 서버가 내보낸 한 줄을 되읽은 것이다. 이 시험이 보는 필드만 담는다.
 type jsonRPCAnswerForTest struct {
 	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
 	Result  struct {
 		Capabilities struct {
 			Tools *struct{} `json:"tools"`
@@ -537,15 +543,18 @@ type jsonRPCAnswerForTest struct {
 	} `json:"error"`
 }
 
-// readJSONRPCAnswers 는 답 줄을 기대한 수만큼 읽는다.
+// readJSONRPCAnswers 는 답 줄을 기대한 수만큼 읽어 요청 id 로 찾을 수 있게 모은다.
 //
-// stdout 을 통째로 모아 마지막에 파싱하지 않는다. 서버가 끝나기 전에 답이 와야 한다는 것이
+// 도착 순서로 모으지 않는다. 서버는 요청마다 따로 답하므로 오래 도는 도구 뒤의 요청이 먼저
+// 답할 수 있고, 순서로 짝을 지으면 그때부터 이 시험이 엉뚱한 답을 본다.
+//
+// stdout 을 통째로 모아 마지막에 파싱하지도 않는다. 서버가 끝나기 전에 답이 와야 한다는 것이
 // 이 시험이 확인하려는 것이고, 다 읽고 나서 보면 그 구분이 사라진다.
-func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) []jsonRPCAnswerForTest {
+func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) map[int]jsonRPCAnswerForTest {
 	t.Helper()
 
 	reader := bufio.NewReader(answerReader)
-	answers := make([]jsonRPCAnswerForTest, 0, wantedCount)
+	answers := make(map[int]jsonRPCAnswerForTest, wantedCount)
 
 	for len(answers) < wantedCount {
 		line, err := reader.ReadString('\n')
@@ -563,7 +572,7 @@ func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) [
 		if answer.Error != nil {
 			t.Fatalf("서버가 거절했습니다: %s", answer.Error.Message)
 		}
-		answers = append(answers, answer)
+		answers[answer.ID] = answer
 	}
 	return answers
 }
