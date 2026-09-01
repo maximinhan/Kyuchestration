@@ -38,9 +38,14 @@ WorkDir-featureX/
 
 macOS 와 Windows(WSL) 에서 쓴다.
 
-**엔진이 부르는 바깥 명령은 `git` 하나다.** 세션을 만들고 붙고 죽이던 명령이 은퇴하면서
+**엔진이 관찰에 쓰는 바깥 명령은 `git` 하나다.** 세션을 만들고 붙고 죽이던 명령이 은퇴하면서
 `tmux` 의존이 함께 사라졌다 — 엔진 코드에서 그것을 부르는 자리가 하나도 남지 않았다
 ([app-owned-sessions-design.md](app-owned-sessions-design.md) 6 절).
+
+**`claude` 를 부르는 자리가 하나 있다.** `kyu mcp serve` 가 여는 `run_in_repo` 는 레포 디렉토리에서
+`claude` 를 헤드리스로 실행한다 — 그 레포의 설정을 전부 로드한 채로 일을 시키는 것이 그 도구의
+존재 이유다([orchestration-tools-design.md](orchestration-tools-design.md) 5.4). 나머지 명령은
+`claude` 없이 동작한다.
 
 `git` 조차 필요 없는 명령이 있다. `kyu init` 은 파일을 만들고, `kyu version` 은 자기 자신에 대해
 답하고, `kyu auth` 는 저장해둔 토큰을 다루고, `kyu session-command` 는 앱이 무엇을 띄울지 답한다 —
@@ -227,6 +232,9 @@ kyu repos <owners|list>
                        GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
 kyu session-command [repo]
                        세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
+kyu mcp <serve|approve>
+                       메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
+                       approve 는 레포의 .mcp.json 을 눈으로 확인하고 승인한다)
 kyu auth <add|list|remove>
                        저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
 kyu version            이 바이너리의 버전
@@ -262,6 +270,7 @@ kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크�
 | `kyu clone --profile <이름> --repo <owner/name> --json` | 적어 보낸 레포를 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
+| `kyu mcp serve <워크디렉토리>` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo` ([설계](orchestration-tools-design.md) 5.3) |
 
 공통 규칙이 다섯 가지다.
 
