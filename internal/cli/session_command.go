@@ -270,8 +270,10 @@ func conversationForLabel(
 // 기본이 이어가기인 것이 이 표면의 자세다. 앱이 카드를 누를 때마다 무엇을 골라야 하는 것이 아니라,
 // 고르지 않으면 대화가 이어진다(설계 문서 5.5.3).
 func assignConversation(workDirPath, label string, request sessionCommandRequest) (workdir.ConversationAssignment, error) {
+	// 세션 지도를 본다. 같은 레포에 위임 대화가 함께 있을 수 있고, 하나의 UUID 를 둘이 쓰면
+	// 뒤에 오는 쪽이 already in use 로 거절된다(orchestration-tools-design.md 5.5.1).
 	if request.forgetRecordedConversation {
-		return workdir.StartNewConversation(workDirPath, label)
+		return workdir.StartNewConversation(workDirPath, label, workdir.SessionConversation)
 	}
-	return workdir.AssignConversation(workDirPath, label)
+	return workdir.AssignConversation(workDirPath, label, workdir.SessionConversation)
 }

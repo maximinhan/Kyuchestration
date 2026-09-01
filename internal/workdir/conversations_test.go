@@ -69,7 +69,7 @@ func TestAssignConversationMakesAndRecordsAConversationTheFirstTime(t *testing.T
 	// 다음 물음이 다른 ID 를 만들고, 그러면 이어갈 대화가 매번 새로 생겨 이 기능이 성립하지 않는다.
 	workDirPath := t.TempDir()
 
-	assignment, err := AssignConversation(workDirPath, "main")
+	assignment, err := AssignConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("AssignConversation() 실패: %v", err)
 	}
@@ -94,11 +94,11 @@ func TestAssignConversationAnswersTheSameConversationOnTheNextCall(t *testing.T)
 	// 이것이 깨지면 앱을 껐다 켠 사용자가 이어갈 대화를 잃는다.
 	workDirPath := t.TempDir()
 
-	first, err := AssignConversation(workDirPath, "proj-a")
+	first, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
 	if err != nil {
 		t.Fatalf("첫 AssignConversation() 실패: %v", err)
 	}
-	second, err := AssignConversation(workDirPath, "proj-a")
+	second, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
 	if err != nil {
 		t.Fatalf("둘째 AssignConversation() 실패: %v", err)
 	}
@@ -117,11 +117,11 @@ func TestAssignConversationKeepsWhatTheOtherLabelsAlreadyHad(t *testing.T) {
 	// 앞의 것을 지우면 먼저 열었던 세션이 다음 실행에서 대화를 잃는다.
 	workDirPath := t.TempDir()
 
-	mainConversation, err := AssignConversation(workDirPath, "main")
+	mainConversation, err := AssignConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("main AssignConversation() 실패: %v", err)
 	}
-	repoConversation, err := AssignConversation(workDirPath, "proj-a")
+	repoConversation, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
 	if err != nil {
 		t.Fatalf("proj-a AssignConversation() 실패: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestAssignConversationMakesAnIdClaudeAcceptsAsAUuid(t *testing.T) {
 	// 빠지면 대체로는 통과하고 가끔 틀리는 값이 나온다 — 그 가끔이 사용자 앞에서 터진다.
 	workDirPath := t.TempDir()
 	for callIndex := range 32 {
-		assignment, err := AssignConversation(workDirPath, "레포-"+string(rune('a'+callIndex)))
+		assignment, err := AssignConversation(workDirPath, "레포-"+string(rune('a'+callIndex)), SessionConversation)
 		if err != nil {
 			t.Fatalf("AssignConversation() 실패: %v", err)
 		}
@@ -164,7 +164,7 @@ func TestAssignConversationLeavesTheRecordFileReadableByAPerson(t *testing.T) {
 	// 이 파일이 한 줄로 뭉쳐 있으면 사람이 어느 라벨의 대화인지 눈으로 찾지 못한다.
 	workDirPath := t.TempDir()
 
-	if _, err := AssignConversation(workDirPath, "main"); err != nil {
+	if _, err := AssignConversation(workDirPath, "main", SessionConversation); err != nil {
 		t.Fatalf("AssignConversation() 실패: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestAssignConversationKeepsGoingWhenTheRecordFileIsBroken(t *testing.T) {
 	workDirPath := t.TempDir()
 	writeConversationsFileForTest(t, workDirPath, "{ 이건 JSON 이 아니다")
 
-	assignment, err := AssignConversation(workDirPath, "main")
+	assignment, err := AssignConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("AssignConversation() 가 깨진 기록 파일에서 실패했습니다: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestAssignConversationKeepsGoingWhenTheRecordFileIsFromASchemaItDoesNotKnow
 	writeConversationsFileForTest(t, workDirPath,
 		`{"schemaVersion": 99, "conversations": {"main": "이 판의 뜻을 모른다"}}`)
 
-	assignment, err := AssignConversation(workDirPath, "main")
+	assignment, err := AssignConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("AssignConversation() 가 모르는 판에서 실패했습니다: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestAssignConversationTreatsABlankRecordAsNoRecord(t *testing.T) {
 	workDirPath := t.TempDir()
 	writeConversationsFileForTest(t, workDirPath, `{"schemaVersion": 1, "conversations": {"main": "   "}}`)
 
-	assignment, err := AssignConversation(workDirPath, "main")
+	assignment, err := AssignConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("AssignConversation() 실패: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestAssignConversationCreatesTheCoordDirectoryWhenItIsNotThereYet(t *testin
 	// 초기화하지 않은 워크디렉토리를 앱에서 여는 것도 실제로 있는 순서다.
 	workDirPath := t.TempDir()
 
-	if _, err := AssignConversation(workDirPath, "main"); err != nil {
+	if _, err := AssignConversation(workDirPath, "main", SessionConversation); err != nil {
 		t.Fatalf("AssignConversation() 실패: %v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestAssignConversationStopsWhenTheRecordFileIsThereButUnreadable(t *testing
 		t.Fatalf("준비 실패: %v", err)
 	}
 
-	if _, err := AssignConversation(workDirPath, "main"); err == nil {
+	if _, err := AssignConversation(workDirPath, "main", SessionConversation); err == nil {
 		t.Fatal("AssignConversation() 가 읽을 수 없는 기록 파일에서 성공했습니다")
 	}
 }
@@ -289,10 +289,10 @@ func TestLabelsWithRecordedConversationAnswersWhatTheNextCallWillResume(t *testi
 	// 카드가 "이어갈 대화 있음" 이라고 말한 자리에서 --session-id 가 나가면, 사용자는 이어진다고
 	// 믿은 대화를 잃는다. 두 함수가 같은 판단을 쓰는지를 여기서 고정한다.
 	workDirPath := t.TempDir()
-	if _, err := AssignConversation(workDirPath, "main"); err != nil {
+	if _, err := AssignConversation(workDirPath, "main", SessionConversation); err != nil {
 		t.Fatalf("준비 실패: %v", err)
 	}
-	if _, err := AssignConversation(workDirPath, "proj-a"); err != nil {
+	if _, err := AssignConversation(workDirPath, "proj-a", SessionConversation); err != nil {
 		t.Fatalf("준비 실패: %v", err)
 	}
 
@@ -368,12 +368,12 @@ func TestStartNewConversationReplacesTheRecordSoTheNextCallResumesTheNewOne(t *t
 	// 화면의 "새 대화로 시작" 이 여기로 온다. 기록을 교체하지 않으면 다음에 카드를 누른 사용자가
 	// 방금 버린 대화로 되돌아간다.
 	workDirPath := t.TempDir()
-	recorded, err := AssignConversation(workDirPath, "proj-a")
+	recorded, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
 	if err != nil {
 		t.Fatalf("준비 실패: %v", err)
 	}
 
-	fresh, err := StartNewConversation(workDirPath, "proj-a")
+	fresh, err := StartNewConversation(workDirPath, "proj-a", SessionConversation)
 	if err != nil {
 		t.Fatalf("StartNewConversation() 실패: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestStartNewConversationReplacesTheRecordSoTheNextCallResumesTheNewOne(t *t
 		t.Errorf("대화 ID = %q, 앞서 적혀 있던 것과 다르기를 기대", fresh.ConversationID)
 	}
 
-	next, err := AssignConversation(workDirPath, "proj-a")
+	next, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
 	if err != nil {
 		t.Fatalf("AssignConversation() 실패: %v", err)
 	}
@@ -401,15 +401,15 @@ func TestStartNewConversationReplacesTheRecordSoTheNextCallResumesTheNewOne(t *t
 func TestStartNewConversationLeavesTheOtherLabelsAlone(t *testing.T) {
 	// 한 세션을 새로 시작하는 것이 다른 세션의 대화를 끊을 이유가 없다.
 	workDirPath := t.TempDir()
-	mainConversation, err := AssignConversation(workDirPath, "main")
+	mainConversation, err := AssignConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("준비 실패: %v", err)
 	}
-	if _, err := AssignConversation(workDirPath, "proj-a"); err != nil {
+	if _, err := AssignConversation(workDirPath, "proj-a", SessionConversation); err != nil {
 		t.Fatalf("준비 실패: %v", err)
 	}
 
-	if _, err := StartNewConversation(workDirPath, "proj-a"); err != nil {
+	if _, err := StartNewConversation(workDirPath, "proj-a", SessionConversation); err != nil {
 		t.Fatalf("StartNewConversation() 실패: %v", err)
 	}
 
@@ -425,7 +425,7 @@ func TestStartNewConversationWorksWhenNothingWasRecordedYet(t *testing.T) {
 	// 카드와 끝난 세션의 머리말이고, 그 사이에 기록이 사라지는 길이 있다.
 	workDirPath := t.TempDir()
 
-	fresh, err := StartNewConversation(workDirPath, "main")
+	fresh, err := StartNewConversation(workDirPath, "main", SessionConversation)
 	if err != nil {
 		t.Fatalf("StartNewConversation() 실패: %v", err)
 	}
@@ -435,5 +435,155 @@ func TestStartNewConversationWorksWhenNothingWasRecordedYet(t *testing.T) {
 	}
 	if readConversationsFileForTest(t, workDirPath).Conversations["main"] != fresh.ConversationID {
 		t.Error("새로 시작한 대화가 기록에 남지 않았습니다")
+	}
+}
+
+// conversationsFileWithDelegationsForTest 는 위임 대화까지 담은 기록 파일의 모양이다.
+//
+// 위의 conversationsFileForTest 와 나란히 둔다. 세션 대화만 읽던 시절의 모양을 그대로 남겨두어야,
+// 위임 대화가 더해진 것이 그 모양을 깨지 않았다는 것이 시험에서 드러난다 — 필드를 더하는 변경은
+// 판을 올리지 않는다는 규약이 여기 걸린다.
+type conversationsFileWithDelegationsForTest struct {
+	SchemaVersion int               `json:"schemaVersion"`
+	Conversations map[string]string `json:"conversations"`
+	Delegations   map[string]string `json:"delegations"`
+}
+
+func readConversationsFileWithDelegationsForTest(t *testing.T, workDirPath string) conversationsFileWithDelegationsForTest {
+	t.Helper()
+
+	fileContent, err := os.ReadFile(conversationsFilePathForTest(workDirPath))
+	if err != nil {
+		t.Fatalf("기록 파일을 읽지 못했습니다: %v", err)
+	}
+
+	var record conversationsFileWithDelegationsForTest
+	if err := json.Unmarshal(fileContent, &record); err != nil {
+		t.Fatalf("기록 파일을 JSON 으로 읽지 못했습니다: %v\n--- 파일 ---\n%s", err, fileContent)
+	}
+	return record
+}
+
+func TestADelegationConversationLivesInItsOwnKeySpace(t *testing.T) {
+	// 반드시 갈라야 한다(설계 문서 5.5.1). 같은 레포에 앱 세션 대화와 위임 대화가 동시에 있을 수
+	// 있고, 하나의 UUID 를 둘이 쓰면 뒤에 오는 쪽이 already in use 로 거절된다(3.5).
+	workDirPath := t.TempDir()
+
+	sessionConversation, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+	delegationConversation, err := AssignConversation(workDirPath, "proj-a", DelegationConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+
+	if delegationConversation.ConversationID == sessionConversation.ConversationID {
+		t.Fatalf("두 대화 ID 가 %q 로 같습니다 — 뒤에 오는 쪽이 already in use 로 거절됩니다",
+			sessionConversation.ConversationID)
+	}
+	if !delegationConversation.IsNewConversation {
+		t.Error("IsNewConversation = false, 위임 지도에는 아직 기록이 없었습니다")
+	}
+
+	record := readConversationsFileWithDelegationsForTest(t, workDirPath)
+	if record.Conversations["proj-a"] != sessionConversation.ConversationID {
+		t.Errorf("conversations[proj-a] = %q, want %q", record.Conversations["proj-a"], sessionConversation.ConversationID)
+	}
+	if record.Delegations["proj-a"] != delegationConversation.ConversationID {
+		t.Errorf("delegations[proj-a] = %q, want %q", record.Delegations["proj-a"], delegationConversation.ConversationID)
+	}
+}
+
+func TestRecordingOneKindOfConversationDoesNotDropTheOther(t *testing.T) {
+	// 한 파일에 두 지도가 사는 자리다. 쓰는 쪽이 읽어온 지도만 다시 적으면, 세션 대화를 하나
+	// 배정하는 것만으로 그 워크디렉토리의 위임 대화가 통째로 사라진다.
+	workDirPath := t.TempDir()
+
+	delegationConversation, err := AssignConversation(workDirPath, "proj-a", DelegationConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+	if _, err := AssignConversation(workDirPath, "main", SessionConversation); err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+
+	record := readConversationsFileWithDelegationsForTest(t, workDirPath)
+	if record.Delegations["proj-a"] != delegationConversation.ConversationID {
+		t.Errorf("delegations[proj-a] = %q, 세션 대화를 배정한 뒤에도 남아 있기를 기대 (파일 = %+v)",
+			record.Delegations["proj-a"], record)
+	}
+}
+
+func TestADelegationConversationIsResumedOnTheNextCall(t *testing.T) {
+	// 같은 레포에 두 번 위임하면 두 번째가 첫 번째를 기억한다(설계 문서 5.5).
+	workDirPath := t.TempDir()
+
+	first, err := AssignConversation(workDirPath, "proj-a", DelegationConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+	second, err := AssignConversation(workDirPath, "proj-a", DelegationConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+
+	if second.IsNewConversation {
+		t.Error("IsNewConversation = true, 둘째 위임은 첫째를 이어가기를 기대")
+	}
+	if second.ConversationID != first.ConversationID {
+		t.Errorf("둘째 대화 ID = %q, 첫째의 %q 와 같기를 기대", second.ConversationID, first.ConversationID)
+	}
+}
+
+func TestStartNewDelegationConversationReplacesOnlyTheDelegationRecord(t *testing.T) {
+	// --resume 이 실패했을 때 빠져나오는 길이다(설계 문서 5.5). 그때 같은 레포의 앱 세션 대화까지
+	// 끊을 이유는 없다.
+	workDirPath := t.TempDir()
+
+	sessionConversation, err := AssignConversation(workDirPath, "proj-a", SessionConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+	staleDelegation, err := AssignConversation(workDirPath, "proj-a", DelegationConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+
+	freshDelegation, err := StartNewConversation(workDirPath, "proj-a", DelegationConversation)
+	if err != nil {
+		t.Fatalf("StartNewConversation() 실패: %v", err)
+	}
+
+	if freshDelegation.ConversationID == staleDelegation.ConversationID {
+		t.Error("대화 ID 가 그대로입니다 — 이어갈 수 없게 된 대화를 버리지 못했습니다")
+	}
+
+	record := readConversationsFileWithDelegationsForTest(t, workDirPath)
+	if record.Delegations["proj-a"] != freshDelegation.ConversationID {
+		t.Errorf("delegations[proj-a] = %q, want %q", record.Delegations["proj-a"], freshDelegation.ConversationID)
+	}
+	if record.Conversations["proj-a"] != sessionConversation.ConversationID {
+		t.Errorf("conversations[proj-a] = %q, 위임을 새로 시작해도 세션 대화는 그대로이기를 기대",
+			record.Conversations["proj-a"])
+	}
+}
+
+func TestARecordWrittenBeforeDelegationsExistedIsStillRead(t *testing.T) {
+	// 필드를 더하는 변경으로는 판을 올리지 않는다. 그러므로 delegations 가 없는 기록 파일을
+	// 만나는 일이 실제로 있고, 그때 세션 대화는 그대로 이어져야 한다.
+	workDirPath := t.TempDir()
+	writeConversationsFileForTest(t, workDirPath, `{
+  "schemaVersion": 1,
+  "conversations": { "main": "d1b9d634-a927-4abf-ad80-5941671b08a8" }
+}`)
+
+	assignment, err := AssignConversation(workDirPath, "main", SessionConversation)
+	if err != nil {
+		t.Fatalf("AssignConversation() 실패: %v", err)
+	}
+
+	if assignment.IsNewConversation || assignment.ConversationID != "d1b9d634-a927-4abf-ad80-5941671b08a8" {
+		t.Errorf("배정 = %+v, 적혀 있던 대화를 이어가기를 기대", assignment)
 	}
 }
