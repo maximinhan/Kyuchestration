@@ -44,6 +44,13 @@ import java.nio.file.Path
 @Composable
 fun KyuchestrationDesktopScreen(
     versionLabel: String,
+    /**
+     * 진단 기록이 쌓이는 파일의 경로.
+     *
+     * 오류가 뜨는 자리마다 이 한 줄을 함께 보여준다. 실기기에서만 나는 오류를 원격으로 볼 때
+     * 사용자가 할 일이 "그 파일을 보내는 것" 하나로 정해져야, 진단이 화면 캡처 한 장에 걸리지 않는다.
+     */
+    diagnosticLogPathLabel: String,
     engineInstallationState: EngineInstallationState,
     engineDirectoryLabel: String,
     dashboardState: WorkDirDashboardState,
@@ -112,6 +119,7 @@ fun KyuchestrationDesktopScreen(
                             heldSessionTargets = heldSessions.map { it.target }.toSet(),
                             initializationState = initializationState,
                             terminalState = terminalState,
+                            diagnosticLogPathLabel = diagnosticLogPathLabel,
                             heldSessionTerminalWidgets = heldSessionTerminalWidgets,
                             onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                             onCloneRepositoriesRequested = onCloneRepositoriesRequested,
@@ -122,13 +130,14 @@ fun KyuchestrationDesktopScreen(
                         )
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
-                        RepositoryCloneDialog(repositoryCloneStateHolder)
+                        RepositoryCloneDialog(repositoryCloneStateHolder, diagnosticLogPathLabel)
                     }
 
                     is WorkDirDashboardState.FirstObservationFailed ->
                         ObservationFailureScreen(
                             workDirPath = dashboardState.workDirPath,
                             failure = dashboardState.failure,
+                            diagnosticLogPathLabel = diagnosticLogPathLabel,
                             onRetryRequested = onRefreshRequested,
                             onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
                         )
@@ -151,6 +160,7 @@ private fun DashboardWithTerminal(
     heldSessionTargets: Set<SessionTarget>,
     initializationState: WorkDirInitializationState,
     terminalState: EmbeddedTerminalState,
+    diagnosticLogPathLabel: String,
     heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
     onInitializeOpenedWorkDirRequested: () -> Unit,
     onCloneRepositoriesRequested: () -> Unit,
@@ -179,6 +189,7 @@ private fun DashboardWithTerminal(
             EmbeddedTerminalPane(
                 terminalState = terminalState,
                 heldSessionTerminalWidgets = heldSessionTerminalWidgets,
+                diagnosticLogPathLabel = diagnosticLogPathLabel,
                 onEndSessionRequested = onEndSessionRequested,
                 // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 카드를 누르는
                 // 것과 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
@@ -272,6 +283,7 @@ private fun FirstObservationRunningScreen(workDirPath: Path, onCancelRequested: 
 private fun ObservationFailureScreen(
     workDirPath: Path,
     failure: WorkDirObservationFailure,
+    diagnosticLogPathLabel: String,
     onRetryRequested: () -> Unit,
     onOpenAnotherWorkDirRequested: () -> Unit,
 ) {
@@ -295,6 +307,7 @@ private fun ObservationFailureScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onRetryRequested) { Text("다시 시도") }
             TextButton(onClick = onOpenAnotherWorkDirRequested) { Text("다른 워크디렉토리") }

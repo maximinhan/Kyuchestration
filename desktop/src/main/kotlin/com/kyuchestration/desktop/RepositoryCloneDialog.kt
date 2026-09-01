@@ -60,7 +60,10 @@ import java.time.format.DateTimeFormatter
  * "레포를 받아 온다" 하나이고, 그 사이의 물음들은 그 일의 부분이다.
  */
 @Composable
-fun RepositoryCloneDialog(repositoryCloneStateHolder: RepositoryCloneStateHolder) {
+fun RepositoryCloneDialog(
+    repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    diagnosticLogPathLabel: String,
+) {
     val cloneState by repositoryCloneStateHolder.state.collectAsState()
     if (cloneState is RepositoryCloneState.Closed) {
         return
@@ -87,7 +90,7 @@ fun RepositoryCloneDialog(repositoryCloneStateHolder: RepositoryCloneStateHolder
 
                     is RepositoryCloneState.StepRunning -> StepRunningBody(state.step)
 
-                    is RepositoryCloneState.StepFailed -> StepFailedBody(state)
+                    is RepositoryCloneState.StepFailed -> StepFailedBody(state, diagnosticLogPathLabel)
 
                     is RepositoryCloneState.ChoosingTokenProfile -> TokenProfileChoiceBody(
                         profiles = state.profiles,
@@ -200,7 +203,7 @@ private fun StepRunningBody(step: CloneStep) {
 }
 
 @Composable
-private fun StepFailedBody(state: RepositoryCloneState.StepFailed) {
+private fun StepFailedBody(state: RepositoryCloneState.StepFailed, diagnosticLogPathLabel: String) {
     Text(state.failure.message.orEmpty(), style = MaterialTheme.typography.bodyMedium)
     Text(
         // kyu 가 stderr 에 적은 사람 말 그대로다. 앱이 다시 지어낸 문구보다 정확하다.
@@ -210,6 +213,7 @@ private fun StepFailedBody(state: RepositoryCloneState.StepFailed) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.heightIn(max = LIST_MAX_HEIGHT).verticalScroll(rememberScrollState()),
     )
+    DiagnosticLogPathNotice(diagnosticLogPathLabel)
 }
 
 @Composable
