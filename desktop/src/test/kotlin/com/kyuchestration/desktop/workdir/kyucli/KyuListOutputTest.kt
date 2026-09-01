@@ -12,14 +12,14 @@ import kotlin.test.assertTrue
 class KyuListOutputTest {
 
     @Test
-    fun `문서의 워크디렉토리와 메인 세션과 계획 경고를 그대로 옮긴다`() {
+    fun `문서의 워크디렉토리와 계획 경고를 그대로 옮긴다`() {
         val snapshot = parseKyuListOutput(
             """
             {
               "schemaVersion": 1,
               "workDir": { "name": "WorkDir-featureX", "absolutePath": "/home/me/work/WorkDir-featureX" },
               "repos": [],
-              "mainSession": { "alive": true },
+              "mainSession": { "alive": false, "hasRecordedConversation": true },
               "planWarnings": ["plan.md 를 읽지 못했습니다"]
             }
             """.trimIndent(),
@@ -27,7 +27,7 @@ class KyuListOutputTest {
 
         assertEquals("WorkDir-featureX", snapshot.name)
         assertEquals("/home/me/work/WorkDir-featureX", snapshot.absolutePath)
-        assertTrue(snapshot.mainSessionAlive)
+        assertTrue(snapshot.mainSessionHasRecordedConversation)
         assertEquals(listOf("plan.md 를 읽지 못했습니다"), snapshot.planWarnings)
         assertEquals(emptyList(), snapshot.repos)
     }
@@ -68,18 +68,18 @@ class KyuListOutputTest {
 
     @Test
     fun `고를 작업이 없는 레포는 작업이 없는 것으로 남는다`() {
-        val snapshot = parseKyuListOutput(oneRepoDocument(state = "RUNNING", taskJson = "null"))
+        val snapshot = parseKyuListOutput(oneRepoDocument(state = "IDLE", taskJson = "null"))
 
         assertNull(snapshot.repos.single().task)
     }
 
     @Test
-    fun `계약에 있는 네 가지 상태를 모두 알아본다`() {
-        val states = listOf("RUNNING", "DIRTY", "AHEAD", "IDLE").map {
+    fun `계약에 있는 세 가지 상태를 모두 알아본다`() {
+        val states = listOf("DIRTY", "AHEAD", "IDLE").map {
             parseKyuListOutput(oneRepoDocument(state = it, taskJson = "null")).repos.single().state
         }
 
-        assertEquals(listOf(RepoState.Running, RepoState.Dirty, RepoState.Ahead, RepoState.Idle), states)
+        assertEquals(listOf(RepoState.Dirty, RepoState.Ahead, RepoState.Idle), states)
     }
 
     @Test
@@ -90,14 +90,26 @@ class KyuListOutputTest {
     }
 
     @Test
-    fun `모르는 필드가 늘어도 읽어낸다`() {
+    fun `RUNNING 을 답하는 낡은 엔진을 만나도 목록은 산다`() {
+        // 세션이 엔진의 일이 아니게 되면서 계약에서 사라진 낱말이다. 그래도 사용자가 PATH 에
+        // 놓아 둔 옛 kyu 가 그것을 답하는 머신이 있고, 그때 카드가 하나도 안 뜨는 것보다
+        // 회색 칩 하나로 뜨는 편이 낫다.
+        val state = parseKyuListOutput(oneRepoDocument(state = "RUNNING", taskJson = "null")).repos.single().state
+
+        assertEquals(RepoState.Unrecognized("RUNNING"), state)
+    }
+
+    @Test
+    fun `읽지 않는 필드가 섞여 있어도 읽어낸다`() {
+        // `alive` 도 이제 이쪽이다. 계약은 그 필드를 그대로 두지만 앱은 읽지 않는다 — 세션이
+        // 돌고 있는지는 앱이 자기 보유 목록에서 답한다.
         val snapshot = parseKyuListOutput(
             """
             {
               "schemaVersion": 1,
               "workDir": { "name": "W", "absolutePath": "/w", "createdAt": "2026-01-01" },
               "repos": [],
-              "mainSession": { "alive": false, "sessionName": "kyu-W-main" },
+              "mainSession": { "alive": true, "sessionName": "kyu-W-main" },
               "planWarnings": [],
               "observedAt": "2026-01-01T00:00:00Z"
             }

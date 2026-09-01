@@ -63,6 +63,14 @@ import java.time.format.DateTimeFormatter
 fun RepositoryCloneDialog(
     repositoryCloneStateHolder: RepositoryCloneStateHolder,
     diagnosticLogPathLabel: String,
+    /**
+     * 앱이 지금 메인 세션을 보유하고 있는가. 결과 화면이 "새로 받은 레포가 그 세션에 붙지
+     * 않는다" 를 말할지 여기서 갈린다.
+     *
+     * 엔진에게 묻지 않는다. 세션을 띄우는 것이 앱뿐이라 엔진에게는 볼 세션이 없고, 이 사실을
+     * 아는 것은 자기 보유 목록을 들고 있는 앱이다.
+     */
+    mainSessionHeld: Boolean,
 ) {
     val cloneState by repositoryCloneStateHolder.state.collectAsState()
     if (cloneState is RepositoryCloneState.Closed) {
@@ -127,7 +135,7 @@ fun RepositoryCloneDialog(
                         onSelectionToggled = repositoryCloneStateHolder::toggleRepositorySelection,
                     )
 
-                    is RepositoryCloneState.CloneFinished -> CloneResultBody(state)
+                    is RepositoryCloneState.CloneFinished -> CloneResultBody(state, mainSessionHeld)
                 }
             }
         },
@@ -493,7 +501,7 @@ private fun RemoteRepositoryRow(
 }
 
 @Composable
-private fun CloneResultBody(state: RepositoryCloneState.CloneFinished) {
+private fun CloneResultBody(state: RepositoryCloneState.CloneFinished, mainSessionHeld: Boolean) {
     LazyColumn(
         modifier = Modifier.heightIn(max = LIST_MAX_HEIGHT),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -528,13 +536,13 @@ private fun CloneResultBody(state: RepositoryCloneState.CloneFinished) {
             }
         }
 
-        if (state.outcome.mainSessionRestartNeeded) {
+        if (mainSessionHeld && state.outcome.results.any { it.status == CloneStatus.Cloned }) {
             item {
                 // 세션이 실행할 명령은 세션을 만드는 순간 정해진다. 조용히 넘어가면 사용자는 방금
                 // 받은 레포가 메인 세션에서 왜 안 보이는지 알 수 없다.
                 Text(
-                    text = "새로 받은 레포는 이미 떠 있는 메인 세션에 붙지 않습니다 — 세션의 --add-dir 목록은 " +
-                        "만들 때 정해집니다. 반영하려면 kyu kill main 뒤에 메인 세션을 다시 띄우세요.",
+                    text = "새로 받은 레포는 지금 떠 있는 메인 세션에 붙지 않습니다 — 세션의 --add-dir 목록은 " +
+                        "만들 때 정해집니다. 반영하려면 그 세션을 끝내고 카드를 다시 누르세요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MAIN_SESSION_NOTICE_COLOR,
                     modifier = Modifier.padding(top = 8.dp),

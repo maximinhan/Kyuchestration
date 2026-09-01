@@ -15,7 +15,7 @@ class ChildProcessEnvironmentTest {
             wellKnownDirectories = emptyList(),
         )
 
-        // 터미널에서 kyu 와 tmux 를 부를 때 실제로 걸리는 순서가 로그인 셸의 것이다. 앱 안에서
+        // 터미널에서 kyu 와 claude 를 부를 때 실제로 걸리는 순서가 로그인 셸의 것이다. 앱 안에서
         // 부르는 것도 그 순서와 같아야 "터미널에서는 되는데" 가 없어진다.
         assertEquals(searchPathOf("/opt/homebrew/bin", "/usr/bin", "/bin"), searchPath)
     }
@@ -54,7 +54,7 @@ class ChildProcessEnvironmentTest {
         )
 
         // 맨 뒤라 이미 찾히던 것의 순서를 바꾸지 않는다. brew 가 넣은 자리를 .zshrc 에서만
-        // 여는 사람(로그인 셸은 그 파일을 읽지 않는다)에게는 이 한 자리가 tmux 를 찾아 준다.
+        // 여는 사람(로그인 셸은 그 파일을 읽지 않는다)에게는 이 한 자리가 claude 를 찾아 준다.
         assertEquals(searchPathOf("/usr/bin", "/bin", "/opt/homebrew/bin"), searchPath)
     }
 

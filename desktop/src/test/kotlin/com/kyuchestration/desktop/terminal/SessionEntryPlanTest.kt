@@ -52,31 +52,25 @@ class SessionEntryPlanTest {
     fun `터미널 종류를 xterm-256color 로 고정한다`() {
         val plan = planFor(baseEnvironment = mapOf("TERM" to "dumb"))
 
-        // 사이에 tmux 가 없어져서 이 값을 claude 가 직접 읽는다.
+        // 앱과 claude 사이에 아무것도 없어서 이 값을 claude 가 직접 읽는다.
         assertEquals("xterm-256color", plan.environment["TERM"])
     }
 
     @Test
-    fun `부모에게 붙어 있던 세션 표식은 자식에게 넘기지 않는다`() {
-        val plan = planFor(
-            baseEnvironment = mapOf(
-                "TMUX" to "/tmp/tmux-1000/default,1234,0",
-                "KYU_SESSION" to "kyu-WorkDir-featureX-proj-a",
-            ),
-        )
+    fun `사용자의 tmux 안에서 앱을 띄웠어도 그 표식은 자식에게 넘기지 않는다`() {
+        val plan = planFor(baseEnvironment = mapOf("TMUX" to "/tmp/tmux-1000/default,1234,0"))
 
-        // 이 값들은 GUI 프로세스가 어디서 떴는지에 대한 사실이지 앱 안 PTY 의 사실이 아니다.
-        // 그대로 넘기면 claude 가 자기가 tmux 안에 있다고 믿는다(claude --help 의 --tmux).
+        // GUI 프로세스가 어디서 떴는지에 대한 사실이지 앱 안 PTY 의 사실이 아니다. 그대로 넘기면
+        // claude 가 자기가 tmux 안에 있다고 믿는다(claude --help 의 --tmux).
         assertFalse("TMUX" in plan.environment)
-        assertFalse("KYU_SESSION" in plan.environment)
     }
 
     @Test
     fun `앱이 보유한 세션임을 자식 환경에 남긴다`() {
         val plan = planFor(target = SessionTarget.Repo("proj-a"))
 
-        // 앱이 죽었는데 SIGHUP 을 무시하고 살아남은 자식은 kyu list 에도 앱에도 보이지 않는다.
-        // 그때 그 프로세스를 찾을 수 있는 자리가 ps 뿐이라 표식을 남긴다(설계 문서 8 절 1 번).
+        // 앱이 죽었는데 SIGHUP 을 무시하고 살아남은 자식은 앱 어디에도 보이지 않는다. 그때 그
+        // 프로세스를 찾을 수 있는 자리가 ps 뿐이라 표식을 남긴다(설계 문서 8 절 1 번).
         assertEquals("WorkDir-featureX-proj-a", plan.environment["KYU_APP_SESSION"])
     }
 

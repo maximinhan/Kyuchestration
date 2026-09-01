@@ -144,7 +144,7 @@ private fun runDesktopApplication(
         onCloseRequest = {
             // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
             // 같이한다(설계 원칙 5 개정). JVM 이 끝나면 PTY 가 닫혀 자식에게 SIGHUP 이 가지만,
-            // 그것을 무시하는 프로그램은 살아남아 kyu list 에도 앱에도 보이지 않는 고아가 된다 —
+            // 그것을 무시하는 프로그램은 살아남아 어디에도 보이지 않는 고아가 된다 —
             // 그래서 정리를 프로세스 종료에 맡기지 않고 여기서 명시적으로 끝낸다.
             terminalStateHolder.endAllSessions()
             exitApplication()

@@ -30,8 +30,8 @@ class KyuCliSessionCommandSourceTest {
 
         KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE)
 
-        // kyu attach 는 메인 세션도 이름으로 가리키지만 이쪽은 kyu start 와 같은 문법이다.
-        // main 을 붙이면 main 이라는 이름의 레포를 찾다가 "없는 레포입니다" 로 끝난다.
+        // 메인 세션은 이름이 아니라 인자가 없는 것으로 가리킨다. main 을 붙이면 main 이라는
+        // 이름의 레포를 찾다가 "없는 레포입니다" 로 끝난다.
         assertEquals(listOf(listOf("session-command", "--json")), runner.receivedArguments)
     }
 

@@ -70,7 +70,7 @@ dependencies {
     implementation(libs.kotlinxCoroutinesCore)
 
     // 앱 안의 터미널. JediTerm 이 화면과 터미널 에뮬레이션을, pty4j 가 그 아래의 진짜 PTY 를 맡는다.
-    // 이 둘이 있어야 kyu attach 가 요구하는 TTY 가 앱 안에 생긴다.
+    // 이 둘이 있어야 claude 가 요구하는 TTY 가 앱 안에 생긴다 — 앱이 세션을 직접 보유하는 근거다.
     implementation(libs.jeditermUi)
     implementation(libs.jeditermCore)
     implementation(libs.pty4j)
@@ -364,9 +364,9 @@ val bundledEngineForRun = providers.gradleProperty("bundledEngineForRun")
  * `build` · `test` 는 그대로 Go 와 무관하다 — 여기서 거는 것은 run 하나뿐이다.
  *
  * 윈도우 네이티브에서 Go 를 가진 채로 run 하면 buildBundledEngine 이 "이 호스트에서는 엔진을
- * 동봉하지 않습니다 — WSL 안에서 쓰세요" 로 멈춘다. 감수하는 쪽을 골랐다: 그 머신에서는 엔진이
- * 목록을 낼 때 찾는 tmux 가 없어 앱이 떠도 아무것도 되지 않으므로, 조용히 뜨는 것보다 그 자리에서
- * 이유를 듣는 편이 낫다.
+ * 동봉하지 않습니다 — WSL 안에서 쓰세요" 로 멈춘다. 감수하는 쪽을 골랐다: 릴리스가 윈도우 엔진
+ * 바이너리를 내지 않아 그 머신에서는 앱이 떠도 부를 kyu 가 없으므로(EngineInstallationFailure 의
+ * WindowsNeedsWsl), 조용히 뜨는 것보다 그 자리에서 이유를 듣는 편이 낫다.
  */
 tasks.matching { it.name == "run" }.configureEach {
     when {
@@ -408,9 +408,9 @@ compose.desktop {
             // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
             // 일어난다(.github/workflows/release.yml).
             //
-            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 하는데, 그 kyu 는 목록을
-            // 낼 때 tmux 를 찾는다 — 윈도우 네이티브에는 그 tmux 가 없으므로(설계 문서 10 절
-            // 로드맵 v4) 설치는 되고 아무것도 되지 않는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
+            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 하는데, 릴리스가 윈도우
+            // 엔진 바이너리를 내지 않아(release.yml 의 크로스 컴파일 목록) 설치는 되고 부를 것이
+            // 없는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
 
             // 설치 패키지 이름은 파일 이름과 설치 경로(/opt/kyuchestration · /Applications)에

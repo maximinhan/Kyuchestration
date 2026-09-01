@@ -27,8 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.dashboard.CardSessionFacts
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
-import com.kyuchestration.desktop.dashboard.mergeMainCardSessionFacts
-import com.kyuchestration.desktop.dashboard.mergeRepoCardSessionFacts
+import com.kyuchestration.desktop.dashboard.mergeCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -141,12 +140,9 @@ private fun PlanFileMissingBanner(
 }
 
 /**
- * 앱 세션이 CLI 와 갈린다는 사실을 화면이 먼저 말하는 자리(설계 원칙 12).
+ * 세션의 수명이 앱의 수명이라는 사실을 화면이 먼저 말하는 자리.
  *
- * 감추면 사용자는 터미널에서 `kyu list` 를 쳤을 때, 또는 `kyu kill` 이 듣지 않을 때 그것을 알게
- * 된다. 그때는 이미 "앱이 고장났다" 로 읽힌다.
- *
- * **앱을 끌 때 할 말도 여기서 미리 한다.** 끄는 순간에 확인 창을 띄우지 않는 것이 결정이고
+ * **앱을 끌 때 할 말을 여기서 미리 한다.** 끄는 순간에 확인 창을 띄우지 않는 것이 결정이고
  * (설계 문서 8 절 4 번), 그렇다면 그 사실은 끄기 전에 이미 화면에 있어야 한다 — 세션이 도는 동안
  * 계속 보이는 이 배너가 그 자리다. 물을 것이 없는 이유도 함께 적는다: 끄는 것은 대화를 버리는
  * 일이 아니라 진행 중이던 턴 하나를 잃는 일이다.
@@ -156,11 +152,10 @@ private fun PlanFileMissingBanner(
 @Composable
 private fun AppSessionBanner(appSessionCount: Int) {
     NoticeBanner(
-        accentColor = APP_SESSION_COLOR,
-        title = "앱 세션 ${appSessionCount}개는 이 앱 안에서만 삽니다",
+        accentColor = SESSION_COLOR,
+        title = "세션 ${appSessionCount}개가 이 앱 안에서 돌고 있습니다",
         lines = listOf(
-            "터미널에서 kyu list 를 쳐도 이 세션들은 보이지 않고, kyu kill 로 끝낼 수 없습니다. " +
-                "끝내는 길은 터미널의 세션 끝내기 버튼이나 앱 종료입니다.",
+            "세션은 앱이 직접 보유합니다. 끝내는 길은 터미널의 세션 끝내기 버튼이나 앱 종료입니다.",
             "앱을 끄면 함께 끝나지만 대화는 워크디렉토리에 남습니다(.coord/conversations.json). " +
                 "잃는 것은 진행 중이던 턴이고, 다음에 앱을 켜서 그 카드를 누르면 대화가 이어집니다.",
         ),
@@ -184,11 +179,8 @@ private fun WorkDirHeader(
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // 두 수를 갈라 센다. 합쳐 놓으면 "세션 3 개" 중 어느 것을 이 앱이 끝낼 수 있는지
-            // 화면이 말하지 않게 된다.
             Text(
-                text = "레포 ${snapshot.repos.size}개 · 앱 세션 ${appSessionCount}개 · " +
-                    "CLI 세션 ${snapshot.cliSessionCount}개",
+                text = "레포 ${snapshot.repos.size}개 · 세션 ${appSessionCount}개",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -231,8 +223,8 @@ private fun RepoCardList(
         items(snapshot.repos, key = { it.absolutePath }) { repo ->
             RepoCard(
                 repo = repo,
-                sessionFacts = mergeRepoCardSessionFacts(
-                    engineReportedState = repo.state,
+                sessionFacts = mergeCardSessionFacts(
+                    gitState = repo.state,
                     hasRecordedConversation = repo.hasRecordedConversation,
                     appSessionHeld = SessionTarget.Repo(repo.name) in heldSessionTargets,
                 ),
@@ -253,8 +245,9 @@ private fun RepoCardList(
 
         item {
             MainSessionRow(
-                sessionFacts = mergeMainCardSessionFacts(
-                    mainSessionAlive = snapshot.mainSessionAlive,
+                sessionFacts = mergeCardSessionFacts(
+                    // 워크디렉토리 최상위는 레포가 아니라 git 상태가 없다(설계 문서 5.4).
+                    gitState = null,
                     hasRecordedConversation = snapshot.mainSessionHasRecordedConversation,
                     appSessionHeld = SessionTarget.Main in heldSessionTargets,
                 ),
@@ -320,52 +313,27 @@ private fun RepoCard(
                     MaterialTheme.colorScheme.onSurface
                 },
             )
-
-            if (sessionFacts.cliSessionRunning) {
-                CliSessionNotice()
-            }
         }
     }
 }
 
 /**
- * 카드가 두 종류의 세션을 갈라 보여준다(설계 문서 5.4.2).
+ * 카드가 이 레포에 대해 아는 것을 칩으로 늘어놓는다.
  *
- * 앱 세션과 CLI 세션이 함께 뜰 수 있다. 그 레포에 `claude` 가 둘 돌고 있다는 뜻이고, 그것을
- * 한 칩으로 뭉치면 사용자는 자기가 만든 것이 몇 개인지 알 수 없다.
+ * 세션 칩이 맨 앞이다. 지금 돌고 있는 것 · 누르면 일어날 일 · git 이 본 것은 급한 정도가 다르고,
+ * 카드를 훑는 눈은 왼쪽부터 읽는다.
  */
 @Composable
 private fun SessionChips(sessionFacts: CardSessionFacts) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (sessionFacts.appSessionHeld) {
-            SessionChip("앱 세션", APP_SESSION_COLOR)
+            SessionChip("세션", SESSION_COLOR)
         }
-        if (sessionFacts.cliSessionRunning) {
-            SessionChip("CLI 세션", CLI_SESSION_COLOR)
-        }
-        // 돌고 있는 세션 칩보다 뒤에 둔다. 앞의 둘은 지금 일어나고 있는 일이고 이것은 누르면
-        // 일어날 일이라, 눈이 급한 것부터 읽게 한다.
         if (sessionFacts.conversationToResume) {
             SessionChip("이어갈 대화", RESUMABLE_CONVERSATION_COLOR)
         }
         sessionFacts.gitState?.let { SessionChip(it.rawValue, it.chipColor) }
     }
-}
-
-/**
- * 앱이 붙을 수 없는 세션이라는 사실을 카드가 먼저 말한다.
- *
- * 막지 않고 알린다(설계 문서 5.4.2). 막으면 이 카드에서 사용자가 할 수 있는 일이 아예 없어지고
- * (앱은 CLI 세션에 붙을 수도 죽일 수도 없다), 같은 레포에 `claude` 를 둘 띄우는 것 자체는
- * 사용자가 실제로 원할 수 있는 일이다.
- */
-@Composable
-private fun CliSessionNotice() {
-    Text(
-        text = "CLI 세션이 떠 있습니다 — 앱은 여기에 붙지 못합니다. 누르면 앱이 보유하는 새 세션이 열립니다.",
-        style = MaterialTheme.typography.bodySmall,
-        color = CLI_SESSION_COLOR,
-    )
 }
 
 /**
@@ -404,38 +372,32 @@ private fun MainSessionRow(
     onEnterSessionRequested: () -> Unit,
     onStartNewConversationRequested: () -> Unit,
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onEnterSessionRequested)
             .padding(top = 8.dp, start = 4.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SessionChips(sessionFacts)
-            // 칩이 하나도 없는 줄에서는 간격만 남아 이름이 밀려 보인다.
-            if (sessionFacts.anyChipShown) {
-                Spacer(Modifier.width(10.dp))
-            }
-            Text("main", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace)
+        SessionChips(sessionFacts)
+        // 칩이 하나도 없는 줄에서는 간격만 남아 이름이 밀려 보인다.
+        if (sessionFacts.anyChipShown) {
             Spacer(Modifier.width(10.dp))
-            Text(
-                text = if (sessionFacts.appSessionHeld || sessionFacts.cliSessionRunning) {
-                    "워크디렉토리 세션이 떠 있습니다"
-                } else {
-                    "워크디렉토리 세션 없음"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (sessionFacts.conversationToResume) {
-                Spacer(Modifier.weight(1f))
-                StartNewConversationButton(onStartNewConversationRequested)
-            }
         }
-
-        if (sessionFacts.cliSessionRunning) {
-            CliSessionNotice()
+        Text("main", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = if (sessionFacts.appSessionHeld) {
+                "워크디렉토리 세션이 떠 있습니다"
+            } else {
+                "워크디렉토리 세션 없음"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (sessionFacts.conversationToResume) {
+            Spacer(Modifier.weight(1f))
+            StartNewConversationButton(onStartNewConversationRequested)
         }
     }
 }
@@ -454,10 +416,10 @@ private fun StartNewConversationButton(onStartNewConversationRequested: () -> Un
 }
 
 /**
- * 이 줄에 그려질 칩이 하나라도 있는가. 메인 세션에는 git 상태가 없으므로 셋 중 하나다.
+ * 이 줄에 그려질 칩이 하나라도 있는가. 메인 세션에는 git 상태가 없으므로 둘 중 하나다.
  */
 private val CardSessionFacts.anyChipShown: Boolean
-    get() = appSessionHeld || cliSessionRunning || conversationToResume
+    get() = appSessionHeld || conversationToResume
 
 /**
  * @param trailingContent 배너 아래에 붙는 것. 안내만 하는 배너는 비워 두고, 사람이 그 자리에서
@@ -493,9 +455,6 @@ private fun NoticeBanner(
  */
 private val RepoState.chipColor: Color
     get() = when (this) {
-        // 엔진의 RUNNING 은 카드에서 CLI 세션 칩이 되므로 이 자리에 오지 않는다. when 이 값을
-        // 남김없이 덮어야 해서 남겨 두고, 색은 CLI 세션과 같게 둔다.
-        RepoState.Running -> CLI_SESSION_COLOR
         RepoState.Dirty -> Color(0xFFE65100)
         RepoState.Ahead -> Color(0xFF1565C0)
         RepoState.Idle -> NEUTRAL_COLOR
@@ -504,20 +463,13 @@ private val RepoState.chipColor: Color
 
 private val NEUTRAL_COLOR = Color(0xFF6B6B6B)
 
-/**
- * 두 세션의 색을 갈라 둔다.
- *
- * 앱 세션은 예전의 RUNNING 이 쓰던 초록을 그대로 이어받는다 — 사용자가 앱에서 여는 세션이
- * 그쪽이라 눈이 기대하는 자리가 같다. CLI 세션은 앱이 손댈 수 없는 것이라 다른 계열로 둬서,
- * 낱말을 읽기 전에 "이건 내 것이 아니다" 가 먼저 보이게 한다.
- */
-private val APP_SESSION_COLOR = Color(0xFF2E7D32)
-private val CLI_SESSION_COLOR = Color(0xFF6A1B9A)
+/** 세션이 돌고 있다는 표시. 예전의 RUNNING 이 쓰던 초록을 그대로 이어받는다. */
+private val SESSION_COLOR = Color(0xFF2E7D32)
 
 /**
  * 이어갈 대화가 있다는 표시.
  *
- * 두 세션 칩과 다른 계열로 둔다. 저 둘은 지금 `claude` 가 돌고 있다는 뜻이고 이것은 아직 아무것도
+ * 세션 칩과 다른 계열로 둔다. 저쪽은 지금 `claude` 가 돌고 있다는 뜻이고 이것은 아직 아무것도
  * 돌고 있지 않다는 뜻이라, 같은 계열로 두면 카드를 훑는 사람이 세션 수를 잘못 센다.
  */
 private val RESUMABLE_CONVERSATION_COLOR = Color(0xFF00695C)

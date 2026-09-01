@@ -10,7 +10,7 @@ import java.util.concurrent.TimeoutException
  * 사용자의 로그인 셸에게 PATH 를 물어본다. 묻지 못했거나 알아들을 수 없는 답이 오면 null.
  *
  * **왜 물어보는가.** Finder 에서 띄운 맥 GUI 앱은 로그인 셸을 거치지 않는다 — launchd 가 곧바로
- * 실행하므로 그 프로세스가 들고 있는 PATH 는 시스템 기본값뿐이다. brew 가 놓은 tmux
+ * 실행하므로 그 프로세스가 들고 있는 PATH 는 시스템 기본값뿐이다. brew 가 놓은 것들
  * (`/opt/homebrew/bin`)도 install.sh 가 놓은 kyu(`~/.local/bin`)도 거기에 없어서, 터미널에서는
  * 멀쩡히 도는 것들이 앱 안에서만 "없다" 가 된다. GUI 로 뜨는 개발 도구들이 같은 해법을 쓴다
  * (VS Code 의 셸 환경 해석).
@@ -72,7 +72,7 @@ internal fun searchPathInLoginShellOutput(shellOutput: String): String? =
  * 시간 제한이 있는 이유는 이 일이 앱이 뜨는 길 위에 있기 때문이다. 설정 파일이 망을 타는 머신
  * (nvm · rbenv 초기화)에서는 셸 한 번이 몇 초씩 걸리고, 그것을 그대로 기다리면 창이 그만큼 늦게
  * 뜬다. 못 물어본 실행은 잘 알려진 자리로 채워지므로([wellKnownSearchPathDirectories]) 여기서
- * 포기해도 tmux 와 kyu 를 찾는 길은 남는다.
+ * 포기해도 kyu 와 claude 를 찾는 길은 남는다.
  *
  * 실패를 전부 null 로 옮긴다. 이 탐색은 없어도 앱이 도는 보강이라, 셸이 없는 머신에서 예외를
  * 올리면 앱 자체가 뜨지 않는다.

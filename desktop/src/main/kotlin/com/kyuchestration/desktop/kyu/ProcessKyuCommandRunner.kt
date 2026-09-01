@@ -48,9 +48,9 @@ class ProcessKyuCommandRunner(
         val process = try {
             ProcessBuilder(listOf(executable.toString()) + arguments)
                 .directory(workingDirectory?.toFile())
-                // kyu 는 자기 자식으로 tmux 와 git 을 부른다. 그 둘을 찾는 PATH 가 여기서
-                // 정해진다 — Finder 로 띄운 맥 앱이 물려받은 PATH 를 그대로 넘기면 brew 로 넣은
-                // tmux 가 없는 것이 된다.
+                // kyu 는 자기 자식으로 git 을 부른다. 그것을 찾는 PATH 가 여기서 정해진다 —
+                // Finder 로 띄운 맥 앱이 물려받은 PATH 를 그대로 넘기면 brew 로 넣은 git 이
+                // 없는 것이 된다.
                 .withEnvironment(childProcessEnvironment)
                 .start()
         } catch (failure: IOException) {

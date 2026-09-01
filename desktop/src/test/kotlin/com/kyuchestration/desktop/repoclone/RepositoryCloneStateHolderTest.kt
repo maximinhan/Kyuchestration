@@ -436,7 +436,10 @@ class RepositoryCloneStateHolderTest {
             cloner.cloneRequests,
         )
         val finished = assertIs<RepositoryCloneState.CloneFinished>(holder.state.value)
-        assertTrue(finished.outcome.mainSessionRestartNeeded)
+        assertEquals(
+            listOf("maximinhan/proj-a", "maximinhan/proj-b"),
+            finished.outcome.results.map { it.repositoryFullName },
+        )
     }
 
     @Test
@@ -616,7 +619,6 @@ class RepositoryCloneStateHolderTest {
             cloneRequests.add(Triple(workDirPath, profileName, repositoryFullNames))
             return CloneOutcome(
                 results = repositoryFullNames.map { RepositoryCloneResult(it, CloneStatus.Cloned, "") },
-                mainSessionRestartNeeded = true,
             )
         }
     }
