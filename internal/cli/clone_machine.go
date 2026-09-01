@@ -7,7 +7,6 @@ import (
 
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
 // 이 파일은 묻지 않는 kyu clone 이다 — 무엇을 클론할지 미리 적어 보내는 길.
@@ -104,7 +103,7 @@ func parseRepositoryReference(value string) (repositoryReference, error) {
 }
 
 // cloneWithoutAsking 은 적어 보낸 레포를 그대로 클론한다.
-func cloneWithoutAsking(out, errOut io.Writer, request cloneRequest, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore, backend session.SessionBackend) error {
+func cloneWithoutAsking(out io.Writer, request cloneRequest, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore) error {
 	access, personalOwner, err := accessWithStoredToken(request.profileName, tokenStore, newAccess)
 	if err != nil {
 		return err
@@ -125,22 +124,16 @@ func cloneWithoutAsking(out, errOut io.Writer, request cloneRequest, location wo
 	}
 
 	if request.asJSON {
-		// 세션 안내를 문서 안으로 들여야 하므로 여기서 먼저 판정한다. 사람용은 같은 판정을
-		// finishClone 안에서 하고 stderr 한 줄로 낸다.
-		restartNeeded, err := runningMainSessionWouldMissNewRepos(location.name, backend, attempts)
-		if err != nil {
-			return err
-		}
 		// 실패가 섞여 있어도 문서를 먼저 낸다. 어느 레포가 왜 실패했는지는 이 문서에만 있으므로,
 		// 종료 코드만 돌려주면 앱은 사용자에게 아무것도 설명하지 못한다.
-		if err := writeCloneResultsAsJSON(out, attempts, restartNeeded); err != nil {
+		if err := writeCloneResultsAsJSON(out, attempts); err != nil {
 			return err
 		}
 		return failedCloneError(attempts)
 	}
 
 	writeCloneAttempts(out, attempts)
-	return finishClone(errOut, attempts, location.name, backend)
+	return failedCloneError(attempts)
 }
 
 // plannedClone 은 --repo 하나에 대해 무엇을 할지 정해진 상태다.

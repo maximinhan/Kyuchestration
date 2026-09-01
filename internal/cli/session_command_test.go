@@ -222,7 +222,7 @@ func TestSessionCommandGivesEachLabelItsOwnConversation(t *testing.T) {
 
 func TestSessionCommandOnlyAnswersAsAMachineDocument(t *testing.T) {
 	// 이 명령에는 사람용 흐름이 없다 — 답이 "사람이 읽고 무엇을 할 것" 이 아니라
-	// "기계가 실행할 것" 이기 때문이다(설계 문서 5.2). 사람이 세션을 띄우는 자리는 kyu start 다.
+	// "기계가 실행할 것" 이기 때문이다(설계 문서 5.2).
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
@@ -235,14 +235,14 @@ func TestSessionCommandOnlyAnswersAsAMachineDocument(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, 거절했을 때는 문서를 내지 않기를 기대", out.String())
 	}
-	if !strings.Contains(err.Error(), "kyu start") {
-		t.Errorf("에러 = %q, 사람이 세션을 띄우는 자리를 함께 알리기를 기대", err.Error())
+	if !strings.Contains(err.Error(), machineJSONOptionName) {
+		t.Errorf("에러 = %q, 어떤 옵션이 필요한지 함께 알리기를 기대", err.Error())
 	}
 }
 
 func TestSessionCommandRejectsRepoClaudeMdForARepoSession(t *testing.T) {
 	// 레포 세션은 자기 디렉토리의 CLAUDE.md 를 이미 읽는다. 조용히 무시하면 앱은 무언가 켜졌다고
-	// 믿고, 그 믿음은 세션이 지침을 어길 때까지 드러나지 않는다 — kyu start 와 같은 규칙이다.
+	// 믿고, 그 믿음은 세션이 지침을 어길 때까지 드러나지 않는다.
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)

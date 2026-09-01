@@ -1,6 +1,6 @@
 // Command kyu 는 여러 레포가 모인 워크디렉토리를 조율하는 CLI 다.
 //
-// 이 파일은 얇게 유지한다 — 인자를 명령으로 가르고, 세션 백엔드를 조립하고, 종료 코드를 정하는 것까지다.
+// 이 파일은 얇게 유지한다 — 인자를 명령으로 가르고, 명령이 쓸 것을 조립하고, 종료 코드를 정하는 것까지다.
 // 명령이 실제로 하는 일은 internal/cli 에 있다(설계 문서 9.1).
 //
 // 명령 파싱에 외부 프레임워크를 쓰지 않는다. 서브커맨드가 열 개 남짓이라 switch 한 번이면 끝나고,
@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/maximinhan/Kyuchestration/internal/cli"
 	"github.com/maximinhan/Kyuchestration/internal/github"
@@ -24,16 +23,11 @@ import (
 //
 // 이 도구가 무엇을 하는 도구인지가 이 한 화면에서 드러나야 하므로, 명령 목록을 여기 한 곳에만 둔다.
 // 명령별 자세한 사용법은 각 명령이 자기 거절 메시지에 함께 싣는다.
-const usageText = `사용법: kyu [명령] [인자]
-
-  kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
+const usageText = `사용법: kyu <명령> [인자]
 
   kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
   kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
   kyu list [path]        레포 목록 + 상태
-  kyu start [repo]       세션 시작. 인자 없으면 main — CLI 세션이라 tmux 가 필요하다
-  kyu attach <repo>      세션 진입. main 도 가능 — CLI 세션 전용
-  kyu kill [repo|--all]  세션 종료 — CLI 세션 전용
   kyu repos <owners|list>
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
   kyu session-command [repo]
@@ -42,9 +36,10 @@ const usageText = `사용법: kyu [명령] [인자]
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
 
-옵션 (kyu, kyu start, kyu session-command):
+옵션 (kyu session-command):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (메인 세션 전용)
+  --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다
 
 옵션 (kyu clone):
   --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
@@ -53,11 +48,9 @@ const usageText = `사용법: kyu [명령] [인자]
 옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
-환경변수:
-  ` + session.BackendSelectionEnvName + `    세션 백엔드 — tmux(기본) | supervisor(진행 중)
-
-start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유하는 세션은 앱의 PTY 안에 있어
-이 명령들에 보이지 않고, 반대로 앱도 CLI 세션에 붙지 못한다 — app-owned-sessions-design.md.`
+kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크톱 앱의 몫이다.
+세션을 만들고 붙고 죽이던 명령(start · attach · kill)과 인자 없는 진입은 은퇴했다
+(app-owned-sessions-design.md 6절).`
 
 func main() {
 	if err := runCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -75,17 +68,15 @@ func main() {
 // 입력도 받는다. kyu clone 은 처음부터 끝까지 대화라, 어디서 답을 읽을지가 진입점의 결정이어야
 // 표시 계층이 os.Stdin 을 직접 붙들지 않는다.
 func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
-	// 인자 없는 kyu 는 서브커맨드의 기본값이 아니라 그 자체로 하나의 명령이다 — 이 도구를 여는 문이다.
-	// 목록을 기본으로 두던 때(설계 문서 9.3)와 달라진 자리이고, 그 결정의 근거는 사용자가 이 도구
-	// 앞에서 실제로 하는 일이 "상태를 본다" 가 아니라 "여기서 작업을 시작한다" 였다는 것이다.
+	// 인자 없는 kyu 는 사용법으로 끝난다. 목록으로 보내지 않는 이유는 그것이 이 도구가 하는
+	// 일을 대표하지 않아서다 — kyu list 는 앱과 스크립트를 위한 읽기 표면이고, 사람이 이 도구
+	// 앞에서 하려던 일은 이제 앱에서 한다. 아무 디렉토리에서 친 kyu 가 그 디렉토리를 훑어
+	// 목록을 내면 "여기가 워크디렉토리다" 라고 답한 셈이 되는데, 그것을 정하는 것은 앱이다.
 	//
-	// 옵션으로 시작하는 인자도 이 문으로 보낸다. 진입 명령이 옵션을 받게 된 뒤로는 첫 인자가
-	// - 로 시작하는 실행이 "알 수 없는 명령: --bypass-permissions" 로 끝나서는 안 된다.
-	// 서브커맨드 이름은 - 로 시작하지 않으므로 이 갈림에 걸릴 명령은 없다.
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return withSessionBackendOrNoSessions(func(backend session.SessionBackend) error {
-			return cli.EnterWorkDir(out, errOut, args, backend)
-		})
+	// 진입 명령이 이 자리에 있던 때와 달리 - 로 시작하는 인자를 따로 받지 않는다. 남은 명령은
+	// 모두 이름으로 시작하므로, 옵션만 적힌 실행은 "알 수 없는 명령" 으로 끝나는 것이 맞다.
+	if len(args) == 0 {
+		return errors.New(usageText)
 	}
 
 	commandName, commandArgs := args[0], args[1:]
@@ -96,54 +87,33 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// 대시보드가 3 초마다 부르는 명령이 통째로 선다.
 	case "list":
 		return cli.ListWorkDir(out, errOut, commandArgs)
-	case "start":
-		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.StartSession(out, errOut, commandArgs, backend)
-		})
-	case "attach":
-		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.AttachSession(out, commandArgs, backend)
-		})
-	case "kill":
-		return withSessionBackend(func(backend session.SessionBackend) error {
-			return cli.KillSessions(out, commandArgs, backend)
-		})
 
-	// clone 은 세션 백엔드를 거친다. 클론이 끝난 뒤 "떠 있는 메인 세션은 새 레포를 보지 못한다" 를
-	// 알리려면 세션 생존을 물어야 하기 때문이다. 다만 그 물음 하나 때문에 클론 자체가 막히지는
-	// 않는다 — 백엔드가 없는 머신에는 그 안내를 받을 세션도 없다.
+	// clone 은 GitHub 에 붙어 레포를 받아 오는 일이라 세션과 무관하다. 클론이 끝난 뒤 떠 있는
+	// 메인 세션에 새 레포가 닿는지를 묻던 걸음이 있었지만, 그 세션은 이제 앱의 것이라 엔진이
+	// 물을 상대가 없다(app-owned-sessions-design.md 6절).
 	case "clone":
-		return withSessionBackendOrNoSessions(func(backend session.SessionBackend) error {
-			return withTokenStore(func(tokenStore secretstore.TokenStore) error {
-				return cli.CloneRepos(in, out, errOut, commandArgs, newGitHubAccess, tokenStore, backend)
-			})
+		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+			return cli.CloneRepos(in, out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
-	// repos 도 세션 백엔드를 거치지 않는다. GitHub 에 무엇이 있는지 묻기만 하는 명령이라
-	// 워크디렉토리도 tmux 도 보지 않는다 — 앱이 아직 워크디렉토리를 만들기 전에 부르는 자리다.
+	// repos 도 GitHub 에 무엇이 있는지 묻기만 하는 명령이라 워크디렉토리를 보지 않는다 —
+	// 앱이 아직 워크디렉토리를 만들기 전에 부르는 자리다.
 	case "repos":
 		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
 			return cli.BrowseGitHubRepositories(out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
-	// session-command 도 세션 백엔드를 거치지 않는다. 앱이 보유할 세션은 tmux 세션도 감독 세션도
-	// 아니라 엔진이 그것을 만들거나 죽이거나 셀 수단이 없고(설계 문서 5.1), 백엔드를 먼저 조립하면
-	// tmux 없는 머신에서 앱이 세션을 열지 못한다 — GUI 에서 tmux 의존이 빠지는 것이 이 전환의
-	// 보상 중 하나다(설계 문서 5.7).
+	// session-command 는 세션을 띄우지 않고 무엇을 띄울지 답한다. 앱이 보유할 세션은 엔진이
+	// 만들거나 죽이거나 셀 수 있는 것이 아니다(설계 문서 5.1).
 	case "session-command":
 		return cli.AnswerSessionCommand(out, errOut, commandArgs)
 
-	// auth 는 세션 백엔드를 거치지 않는다. 토큰을 등록하고 보고 지우는 일이라 tmux 와 무관하고,
-	// 백엔드를 먼저 조립하면 tmux 가 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
+	// auth 는 토큰을 등록하고 보고 지우는 일이다.
 	case "auth":
 		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
 			return cli.ManageTokenProfiles(in, out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
-	// init 과 version 은 세션 백엔드를 거치지 않는다. 초기화는 파일을 만드는 일이고 버전은
-	// 이 바이너리 자신에 대한 질문이라 둘 다 tmux 가 필요 없는데, 백엔드를 먼저 조립하면
-	// tmux 가 없는 머신에서 워크디렉토리를 만들지도, 무엇을 받았는지 확인하지도 못하게 된다.
-	// 릴리스 바이너리가 tmux 를 아직 깔지 않은 새 머신에 먼저 도착하는 것이 오히려 흔한 순서다.
 	case "init":
 		return cli.InitWorkDir(out, commandArgs)
 
@@ -157,68 +127,6 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	default:
 		return fmt.Errorf("알 수 없는 명령: %s\n\n%s", commandName, usageText)
-	}
-}
-
-// withSessionBackend 는 명령에 세션 백엔드를 조립해 넘긴다.
-//
-// 백엔드를 여기서 만드는 이유: 어느 플랫폼 구현을 쓸지는 진입점의 결정이다.
-// 그래야 internal/cli 가 tmux 를 모른 채로 남고, 백엔드가 늘어날 때 바뀌는 파일이 이 하나로 끝난다.
-//
-// 조립을 명령마다 되풀이하지 않고 한 곳으로 모은다. tmux 미설치 안내처럼 모든 명령이 똑같이
-// 해야 하는 일이 여기 있으므로, 새 명령이 그것을 빠뜨릴 자리 자체가 없다.
-//
-// 명령의 시그니처를 하나로 못박지 않고 클로저를 받는다. 진입·list·start 는 stderr 까지 쓰지만
-// attach·kill 은 그렇지 않은데, 공통 시그니처를 강요하면 두 명령이 쓰지도 않는 인자를 받게 된다.
-func withSessionBackend(command func(session.SessionBackend) error) error {
-	backend, err := newSessionBackend()
-	if err != nil {
-		return err
-	}
-	return command(backend)
-}
-
-// withSessionBackendOrNoSessions 는 백엔드를 세울 수 없는 머신에서도 명령을 서게 두지 않는다.
-//
-// 세울 수 없다는 사실을 실패가 아니라 답으로 바꿔 넘긴다. 세션은 백엔드를 거쳐야만 생기므로
-// 백엔드가 없는 머신에 CLI 세션이 없다는 것은 참인 답이고, 그것이 곧 이 명령들이 물은 것에 대한
-// 대답이다(설계 문서 5.7 의 구멍 · 8절 5번 (가)).
-//
-// 왜 모든 명령이 아니라 묻는 쪽만인가: start · attach · kill 은 백엔드 없이 할 일이 아예 없다.
-// 그쪽에 "세션 없음" 을 답으로 주면 attach 는 "kyu start 로 시작하세요" 라는 못 지킬 안내로
-// 끝나고, kill 은 죽인 것 없이 성공으로 끝난다 — 사용자가 다음에 할 일은 그것이 아니다.
-// 반대로 list · clone · 진입은 백엔드 없이도 할 일이 남아 있다. 진입은 그 남은 일을 다 한 뒤
-// 정말 세션을 만들어야 하는 걸음에서 같은 설치 안내로 끝난다.
-//
-// 백엔드가 아예 없는 경우에만 갈아탄다. 이름 오타나 감독 조립 실패는 "세션 없음" 이 아니라
-// 잘못된 실행이라, 그것까지 답으로 바꾸면 사용자는 자기 실수를 알아챌 자리를 잃는다.
-func withSessionBackendOrNoSessions(command func(session.SessionBackend) error) error {
-	backend, err := newSessionBackend()
-	if err != nil {
-		if !errors.Is(err, session.ErrTmuxNotInstalled) {
-			return err
-		}
-		backend = session.NewNoSessionsBackend(err)
-	}
-	return command(backend)
-}
-
-// newSessionBackend 는 이 실행에서 쓸 세션 백엔드를 고른다.
-//
-// 기본값은 아직 tmux 다. 감독 백엔드는 이제 세션을 띄우고 붙고 떼고 죽이는 데까지 오지만,
-// 두 백엔드가 같게 동작한다는 것이 증명되기 전까지는 환경변수로만 켠다 — 동등성이 증명되지
-// 않은 백엔드는 기본값이 될 수 없다(설계 원칙 8 · 문서 6절 · 9절 3~4 단계).
-func newSessionBackend() (session.SessionBackend, error) {
-	switch name := os.Getenv(session.BackendSelectionEnvName); name {
-	case "", session.TmuxBackendName:
-		return session.NewTmuxBackend()
-	case session.SupervisorBackendName:
-		return session.NewSupervisorBackend()
-	default:
-		// 모르는 이름을 조용히 기본값으로 흘리지 않는다. 오타를 알아채지 못하면 사용자는 자기가
-		// 고른 줄 알았던 백엔드가 아닌 것으로 세션을 만들고, 그 사실을 세션이 안 보일 때 알게 된다.
-		return nil, fmt.Errorf("모르는 세션 백엔드입니다: %s=%s (%s 또는 %s)",
-			session.BackendSelectionEnvName, name, session.TmuxBackendName, session.SupervisorBackendName)
 	}
 }
 

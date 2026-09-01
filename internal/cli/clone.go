@@ -14,7 +14,6 @@ import (
 
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
 // 이 파일은 kyu clone 이다 — 워크디렉토리를 채우는 명령.
@@ -22,10 +21,6 @@ import (
 // 워크디렉토리는 "필요한 레포를 클론해서 쓴다" 가 전제인데(설계 문서 1.1), 그 클론만은 사용자가
 // 손으로 하고 있었다. 이름을 하나씩 기억해 주소를 조립하는 일이라 오타가 나고, 무엇보다
 // "이 계정에 어떤 레포가 있더라" 를 GitHub 화면에서 확인하고 돌아와야 한다.
-//
-// 진입 플로우(인자 없는 kyu)에 끼우지 않는다. 클론은 워크디렉토리를 만들 때 한 번 하는 일이고,
-// 매번 진입할 때마다 GitHub 에 붙어 목록을 묻는 것은 사용자가 원한 적 없는 왕복이다.
-
 const cloneUsageText = `사용법: kyu clone [--profile <이름> --repo <owner/name> ...] [--json]
 
   kyu clone                                          GitHub 레포 목록에서 화살표로 골라 클론한다
@@ -62,21 +57,11 @@ const unknownUpdatedDateMark = "-"
 // 필요 없는데 열은 그만큼 넓어진다.
 const updatedDateLayout = "2006-01-02"
 
-// newReposNeedASessionRestartWarning 은 방금 클론한 레포가 떠 있는 메인 세션에 닿지 않는다는 안내다.
-//
-// 세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다(PR 10·12 와 같은 자리).
-// 조용히 넘어가면 사용자는 방금 클론한 레포가 세션에서 왜 안 보이는지 알 수 없다.
-const newReposNeedASessionRestartWarning = "새로 클론한 레포는 이미 떠 있는 메인 세션에 붙지 않습니다 — 세션의 --add-dir 목록은 만들 때 정해집니다.\n" +
-	"반영하려면 kyu kill main 뒤에 kyu 를 다시 실행하세요.\n"
-
 // CloneRepos 는 kyu clone 을 실행한다: 토큰 프로필 선택 → 소유자 선택 → 레포 목록 → 클론.
 //
 // 입력을 io.Reader 로 받는 이유는 테스트다. 이 명령은 처음부터 끝까지 대화이고, 그 대화가
 // 실제 터미널에서만 돌아간다면 검증할 수 있는 것은 아무것도 남지 않는다.
-//
-// 세션 백엔드를 받는 이유는 마지막 한 줄 때문이다 — 클론이 끝난 뒤 떠 있는 메인 세션이 있는지
-// 물어야, 새 레포가 그 세션에 닿지 않는다는 사실을 그 자리에서 알릴 수 있다.
-func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore, backend session.SessionBackend) error {
+func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore) error {
 	request, err := parseCloneArgs(args)
 	if err != nil {
 		return err
@@ -90,14 +75,14 @@ func CloneRepos(in io.Reader, out, errOut io.Writer, args []string, newAccess Re
 	// 무엇을 클론할지 이미 적어 보냈으면 아무것도 묻지 않는다. 그 갈림이 이 명령의 두 사용처를
 	// 가른다 — 사람은 목록을 보며 고르고, GUI 는 자기 화면에서 이미 고른 것을 건넨다.
 	if len(request.repositoryReferences) > 0 {
-		return cloneWithoutAsking(out, errOut, request, location, newAccess, tokenStore, backend)
+		return cloneWithoutAsking(out, request, location, newAccess, tokenStore)
 	}
 
-	return cloneByAsking(in, out, errOut, location, newAccess, tokenStore, backend)
+	return cloneByAsking(in, out, errOut, location, newAccess, tokenStore)
 }
 
 // cloneByAsking 은 목록을 보여주고 고르게 해서 클론한다 — 사람이 지나는 길이다.
-func cloneByAsking(in io.Reader, out, errOut io.Writer, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore, backend session.SessionBackend) error {
+func cloneByAsking(in io.Reader, out, errOut io.Writer, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore) error {
 	prompt := newInteractivePrompt(in, out)
 
 	access, personalOwner, err := authenticateWithTokenProfile(prompt, errOut, tokenStore, newAccess)
@@ -140,23 +125,6 @@ func cloneByAsking(in io.Reader, out, errOut io.Writer, location workDirLocation
 	attempts := cloneEachRow(access, selectedRows)
 	writeCloneAttempts(out, attempts)
 
-	return finishClone(errOut, attempts, location.name, backend)
-}
-
-// finishClone 은 클론이 끝난 뒤에 남은 두 가지를 처리한다 — 세션 안내와 종료 코드.
-//
-// 두 길이 함께 쓴다. 사람용은 안내를 stderr 한 줄로 내고 기계용은 문서의 필드로 담지만,
-// "떠 있는 메인 세션이 새 레포를 보지 못한다" 는 판정과 "실패가 있으면 종료 코드 1" 은 같다.
-func finishClone(errOut io.Writer, attempts []cloneAttempt, workDirName string, backend session.SessionBackend) error {
-	restartNeeded, err := runningMainSessionWouldMissNewRepos(workDirName, backend, attempts)
-	if err != nil {
-		return err
-	}
-	if restartNeeded {
-		if _, err := fmt.Fprint(errOut, newReposNeedASessionRestartWarning); err != nil {
-			return fmt.Errorf("세션 재시작 안내 출력 실패: %w", err)
-		}
-	}
 	return failedCloneError(attempts)
 }
 
@@ -433,33 +401,4 @@ func writeCloneAttempts(out io.Writer, attempts []cloneAttempt) {
 		parts = append(parts, fmt.Sprintf("실패 %d 개", failedCount))
 	}
 	fmt.Fprintf(out, "\n%s\n", strings.Join(parts, ", "))
-}
-
-// runningMainSessionWouldMissNewRepos 는 떠 있는 메인 세션이 방금 클론한 레포를 보지 못하는지다.
-//
-// 세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다(PR 10·12 와 같은 자리).
-// 조용히 넘어가면 사용자는 방금 클론한 레포가 세션에서 왜 안 보이는지 알 수 없다.
-func runningMainSessionWouldMissNewRepos(workDirName string, backend session.SessionBackend, attempts []cloneAttempt) (bool, error) {
-	// 하나도 클론되지 않았으면 세션이 보는 목록은 어긋나지 않았다. 세션 생존을 묻지도 않는다.
-	if !hasAnyClonedRepository(attempts) {
-		return false, nil
-	}
-
-	mainSessionName := session.MainSessionName(workDirName)
-	isAlive, err := backend.IsAlive(mainSessionName)
-	if err != nil {
-		return false, fmt.Errorf("메인 세션 생존 확인 실패 (%s): %w", mainSessionName, err)
-	}
-	// 떠 있지도 않은 세션을 다시 띄우라는 안내는 사용자를 헷갈리게 한다. 다음에 kyu 를 실행하면
-	// 그때 스캔한 목록으로 세션이 뜬다.
-	return isAlive, nil
-}
-
-func hasAnyClonedRepository(attempts []cloneAttempt) bool {
-	for _, attempt := range attempts {
-		if attempt.status == cloneAttemptCloned {
-			return true
-		}
-	}
-	return false
 }

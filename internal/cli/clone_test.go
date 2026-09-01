@@ -43,13 +43,11 @@ func TestCloneClonesEveryRepositoryTheUserSelectedIntoTheWorkDir(t *testing.T) {
 		makeRepository("proj-b", false, updatedAt),
 		makeRepository("proj-c", false, updatedAt),
 	)
-	backend := newRecordingSessionBackend()
-
 	// 프로필 선택 → 레포 선택. 소유자는 조직이 없으므로 묻지 않는다.
 	input := strings.NewReader("1\n1,3\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), backend); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -84,7 +82,7 @@ func TestCloneMarksAndSkipsRepositoriesThatAreAlreadyInTheWorkDir(t *testing.T) 
 	input := strings.NewReader("1\n1,2\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -112,7 +110,7 @@ func TestCloneShowsWhichRepositoriesArePrivateAndWhenTheyWereUpdated(t *testing.
 	input := strings.NewReader("1\n\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -135,7 +133,7 @@ func TestCloneWithAnEmptySelectionCancelsWithoutCloningAnything(t *testing.T) {
 	input := strings.NewReader("1\n\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 가 취소를 실패로 끝냈습니다: %v", err)
 	}
 
@@ -163,7 +161,7 @@ func TestCloneAsksWhichOwnerWhenTheAccountBelongsToOrganizations(t *testing.T) {
 	input := strings.NewReader("1\n2\n1\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -183,7 +181,7 @@ func TestCloneDoesNotAskWhichOwnerWhenThereIsNoOrganization(t *testing.T) {
 	input := strings.NewReader("1\n1\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -207,7 +205,7 @@ func TestCloneKeepsGoingAfterOneFailureAndReportsWhichOnesFailed(t *testing.T) {
 	input := strings.NewReader("1\n1,2\n")
 	var out, errOut bytes.Buffer
 
-	err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend())
+	err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t))
 	if err == nil {
 		t.Fatal("CloneRepos() 가 실패를 알리지 않고 끝났습니다")
 	}
@@ -220,46 +218,6 @@ func TestCloneKeepsGoingAfterOneFailureAndReportsWhichOnesFailed(t *testing.T) {
 	}
 }
 
-func TestCloneWarnsThatNewReposDoNotReachTheRunningMainSession(t *testing.T) {
-	// 세션의 --add-dir 목록은 세션을 만드는 순간 굳는다(PR 10·12 와 같은 자리). 이것을 알리지
-	// 않으면 사용자는 방금 클론한 레포가 세션에서 왜 안 보이는지 알 수 없다.
-	workDirPath := makeWorkDir(t)
-	t.Chdir(workDirPath)
-
-	gitHub := newTestGitHubWithRepos(makeRepository("proj-a", false, time.Now()))
-	backend := newRecordingSessionBackend("kyu-" + testWorkDirName + "-main")
-
-	input := strings.NewReader("1\n1\n")
-	var out, errOut bytes.Buffer
-
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), backend); err != nil {
-		t.Fatalf("CloneRepos() 실패: %v", err)
-	}
-
-	if !strings.Contains(errOut.String(), "kyu kill main") {
-		t.Errorf("errOut = %q, 세션을 다시 띄우는 방법 안내를 기대", errOut.String())
-	}
-}
-
-func TestCloneStaysQuietAboutTheMainSessionWhenNoneIsRunning(t *testing.T) {
-	// 떠 있지도 않은 세션을 다시 띄우라는 안내는 사용자를 헷갈리게 한다.
-	workDirPath := makeWorkDir(t)
-	t.Chdir(workDirPath)
-
-	gitHub := newTestGitHubWithRepos(makeRepository("proj-a", false, time.Now()))
-
-	input := strings.NewReader("1\n1\n")
-	var out, errOut bytes.Buffer
-
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
-		t.Fatalf("CloneRepos() 실패: %v", err)
-	}
-
-	if strings.Contains(errOut.String(), "kyu kill main") {
-		t.Errorf("errOut = %q, 세션이 없으면 재시작 안내를 하지 않기를 기대", errOut.String())
-	}
-}
-
 func TestCloneRefusesArgumentsWithItsOwnUsage(t *testing.T) {
 	// 이 명령은 인자를 받지 않는다. 조용히 무시하면 사용자는 자기가 적은 것이 반영됐다고 믿는다.
 	workDirPath := makeWorkDir(t)
@@ -267,7 +225,7 @@ func TestCloneRefusesArgumentsWithItsOwnUsage(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	err := CloneRepos(strings.NewReader(""), &out, &errOut, []string{"maximinhan"},
-		newTestGitHub().newAccess, storeWithOneProfile(t), newRecordingSessionBackend())
+		newTestGitHub().newAccess, storeWithOneProfile(t))
 
 	if err == nil {
 		t.Fatal("CloneRepos() 가 인자를 그대로 받았습니다")
@@ -289,7 +247,7 @@ func TestCloneContinuesWithThePersonalAccountWhenTheTokenCannotListOrganizations
 	input := strings.NewReader("1\n1\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -310,7 +268,7 @@ func TestCloneWithoutAnyRepositoryToShowSaysSoInsteadOfAskingForANumber(t *testi
 	input := strings.NewReader("1\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
@@ -333,7 +291,7 @@ func TestCloneAsksForNumbersInsteadOfDrawingAScreenWhenTheInputIsNotATerminal(t 
 	input := strings.NewReader("1\n2\n")
 	var out, errOut bytes.Buffer
 
-	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t), newRecordingSessionBackend()); err != nil {
+	if err := CloneRepos(input, &out, &errOut, nil, gitHub.newAccess, storeWithOneProfile(t)); err != nil {
 		t.Fatalf("CloneRepos() 실패: %v", err)
 	}
 
