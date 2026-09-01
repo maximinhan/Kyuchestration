@@ -89,9 +89,12 @@ private fun runDesktopApplication(
     // 자리에서 곧바로 받기 시작한다.
     val engineInstallationStateHolder = remember(applicationCoroutineScope) {
         EngineInstallationStateHolder(
-            engineInstaller = GitHubReleaseEngineInstaller(),
+            // 이 두 자리도 기록을 받는다. 여기서 걸린 실행은 설치 화면에 멈춰 서고 그 뒤로
+            // 엔진을 부르는 일이 하나도 없어서, 넘기지 않으면 그 실행의 기록이 "앱이 시작했다"
+            // 한 줄로 끝난다 — 맥이 격리해 둔 바이너리처럼 원격으로 봐야 하는 실패가 그렇게 끝난다.
+            engineInstaller = GitHubReleaseEngineInstaller(diagnosticLog = diagnosticLog),
             findEngineExecutable = ::findKyuExecutable,
-            placeBundledEngine = ::placeBundledEngineWhereItCanRun,
+            placeBundledEngine = { placeBundledEngineWhereItCanRun(diagnosticLog = diagnosticLog) },
             coroutineScope = applicationCoroutineScope,
         )
     }

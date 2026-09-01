@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.engine
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.kyu.KyuCommandFailure
 import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
 import java.nio.file.Path
@@ -16,10 +17,20 @@ import java.nio.file.Path
  * `version` 을 묻는 이유는 그것이 이 바이너리 자신에 대한 질문이라 바깥을 하나도 보지 않기
  * 때문이다 — 워크디렉토리도, git 도, 세션 백엔드도. 다른 명령으로 물으면 "엔진이 아니다" 와
  * "여기가 워크디렉토리가 아니다" 가 한 답으로 섞인다.
+ *
+ * @param diagnosticLog 이 확인이 실패하면 남길 자리.
+ *
+ *   **이 자리야말로 기록이 필요한 곳이다.** 여기서 걸리면 앱은 설치 화면에 멈춰 서고 그 뒤로
+ *   엔진을 부르는 일이 하나도 일어나지 않는다 — 기록을 남기지 않으면 그 실행에 대해 파일에
+ *   적히는 것은 "앱이 시작했다" 한 줄뿐이다. 받은 바이너리가 다른 플랫폼의 것이거나 맥이
+ *   격리(quarantine)해 둔 경우가 그렇게 끝나는데, 그것이 바로 원격으로 봐야 하는 실패다.
  */
-internal fun reasonEngineDoesNotRun(enginePath: Path): String? {
+internal fun reasonEngineDoesNotRun(
+    enginePath: Path,
+    diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
+): String? {
     val versionResult = try {
-        ProcessKyuCommandRunner(enginePath).run(listOf("version"))
+        ProcessKyuCommandRunner(enginePath, diagnosticLog = diagnosticLog).run(listOf("version"))
     } catch (failure: KyuCommandFailure) {
         return failure.message.orEmpty()
     }
