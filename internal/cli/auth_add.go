@@ -9,15 +9,11 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
 )
 
-// 이 파일은 kyu auth add 다 — 물음 없이 토큰 하나를 프로필로 만드는 길.
+// 이 파일은 kyu auth add 다 — 토큰 하나를 프로필로 만드는 유일한 길.
 //
-// 대화형 등록(auth.go 의 registerTokenProfile)이 이미 있는데 이것이 따로 필요한 이유는 GUI 다.
-// 앱은 "프로필 이름을 적으세요" 라는 물음에 답할 수 없다 — 자기 화면에서 이름과 토큰을 이미
-// 받아둔 채로, 그것을 엔진에 건네고 성공·실패만 돌려받아야 한다.
-//
-// 두 경로가 나눠 갖는 것은 대화뿐이다. 토큰을 확인하고 저장하는 순서(verifyAndStoreToken),
-// 평문 저장 경고, 저장했다는 안내 문구는 모두 공용이다. 그것들이 갈라지면 같은 머신에서
-// 같은 일을 하는데 어느 문으로 들어왔는지에 따라 다른 일이 벌어진다.
+// 물음 없이 받는 것이 이 표면의 전부다. 앱은 "프로필 이름을 적으세요" 라는 물음에 답할 수
+// 없다 — 자기 화면에서 이름과 토큰을 이미 받아둔 채로, 그것을 엔진에 건네고 성공·실패만
+// 돌려받아야 한다. 사람이 터미널에서 칠 때도 토큰은 stdin 으로 온다.
 
 // tokenMustComeFromStdinGuidance 는 토큰을 어디로 넘기는지 알린다.
 //
@@ -59,8 +55,7 @@ func addTokenProfile(in io.Reader, out, errOut io.Writer, args []string, newAcce
 	}
 
 	token, err := prompt.askHidden(tokenQuestion)
-	// 입력이 끝난 것은 이 명령에서는 취소가 아니다. 대화형 등록이라면 사용자가 그만둔 것이지만,
-	// 여기서는 건네겠다고 부른 토큰이 오지 않은 것이라 성공으로 끝나서는 안 된다.
+	// 입력이 끝난 것은 취소가 아니다. 건네겠다고 부른 토큰이 오지 않은 것이라 성공으로 끝나서는 안 된다.
 	if err != nil && !errors.Is(err, errInputClosed) {
 		return err
 	}
@@ -69,8 +64,7 @@ func addTokenProfile(in io.Reader, out, errOut io.Writer, args []string, newAcce
 	}
 
 	_, owner, err := verifyAndStoreToken(request.profileName, token, tokenStore, newAccess)
-	// 거절당했다는 사실만으로는 부르는 쪽이 "그래서 저장은 됐나" 를 알 수 없다. 대화형 등록은
-	// 그 자리에서 "저장하지 않았습니다" 라고 말하는데, 그 보장이 여기서만 사라져서는 안 된다.
+	// 거절당했다는 사실만으로는 부르는 쪽이 "그래서 저장은 됐나" 를 알 수 없다. 그 답까지 함께 준다.
 	if errors.Is(err, github.ErrInvalidToken) {
 		return fmt.Errorf("%s 프로필에 아무것도 저장하지 않았습니다: %w", request.profileName, err)
 	}

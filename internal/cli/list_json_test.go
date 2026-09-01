@@ -9,8 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
 // 아래 타입들은 --json 이 내보내는 문서를 테스트가 직접 다시 적어둔 모양이다.
@@ -71,11 +69,11 @@ type listJSONRunForTest struct {
 //
 // stdout 에 문서 하나뿐인지도 여기에서 함께 본다. 안내 한 줄이 섞이는 순간 읽는 쪽의 파싱이
 // 통째로 깨지므로, JSON 을 보는 모든 테스트가 그 사실을 같이 지켜야 한다.
-func runListJSONForTest(t *testing.T, args []string, backend session.SessionBackend) listJSONRunForTest {
+func runListJSONForTest(t *testing.T, args []string) listJSONRunForTest {
 	t.Helper()
 
 	var out, errOut bytes.Buffer
-	if err := ListWorkDir(&out, &errOut, args, backend); err != nil {
+	if err := ListWorkDir(&out, &errOut, args); err != nil {
 		t.Fatalf("ListWorkDir() 실패: %v", err)
 	}
 
@@ -144,12 +142,7 @@ tasks:
 본문은 도구가 읽지 않는다.
 `)
 
-	backend := newFakeSessionBackend(
-		session.RepoSessionName(testWorkDirName, "zeta-service"),
-		session.MainSessionName(testWorkDirName),
-	)
-
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, backend)
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	if run.document.SchemaVersion != listJSONSchemaVersion {
 		t.Errorf("schemaVersion = %d, want %d", run.document.SchemaVersion, listJSONSchemaVersion)
@@ -160,12 +153,14 @@ tasks:
 	if run.document.WorkDir.AbsolutePath != workDirPath {
 		t.Errorf("workDir.absolutePath = %q, want %q", run.document.WorkDir.AbsolutePath, workDirPath)
 	}
-	if !run.document.MainSession.Alive {
-		t.Errorf("mainSession.alive = false, 메인 세션이 떠 있으므로 true 를 기대")
+	// 엔진은 세션을 세지 않는다. 필드는 계약이라 남지만 값은 늘 거짓이고, 앱은 자기가 보유한
+	// 세션을 스스로 안다(설계 문서 5.4).
+	if run.document.MainSession.Alive {
+		t.Errorf("mainSession.alive = true, 엔진이 세션을 세지 않으므로 false 를 기대")
 	}
 
-	// 메인 세션은 레포가 아니다. 사람용 표에서 마지막 행을 차지하는 것과 달리, 여기서는 repos 에
-	// 섞이지 않고 자기 자리에만 있어야 읽는 쪽이 레포 수를 세는 데 걸리지 않는다.
+	// 메인 세션은 레포가 아니다. repos 에 섞이지 않고 자기 자리에만 있어야 읽는 쪽이
+	// 레포 수를 세는 데 걸리지 않는다.
 	wantRepoNames := []string{"alpha-commons", "beta-gateway", "zeta-service"}
 	var gotRepoNames []string
 	for _, repo := range run.document.Repos {
@@ -211,8 +206,8 @@ tasks:
 	}
 
 	zetaRepo := repoInDocument(t, run.document, "zeta-service")
-	if zetaRepo.State != "RUNNING" {
-		t.Errorf("zeta-service 의 state = %q, want %q", zetaRepo.State, "RUNNING")
+	if zetaRepo.State != "IDLE" {
+		t.Errorf("zeta-service 의 state = %q, want %q", zetaRepo.State, "IDLE")
 	}
 	if zetaRepo.Task == nil {
 		t.Fatalf("zeta-service 의 task = null, blocked 작업 하나를 기대")
@@ -258,7 +253,7 @@ tasks:
 ---
 `)
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	repo := repoInDocument(t, run.document, "alpha-commons")
 	if repo.Task == nil {
@@ -278,7 +273,7 @@ func TestListWorkDirAsJSONLeavesTheTaskNullWhenThePlanHasNothingForTheRepo(t *te
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	repo := repoInDocument(t, run.document, "alpha-commons")
 	if repo.Task != nil {
@@ -312,7 +307,7 @@ tasks:
 ---
 `)
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	if len(run.document.PlanWarnings) != 1 {
 		t.Fatalf("planWarnings = %q, 없는 레포에 대한 경고 한 줄을 기대", run.document.PlanWarnings)
@@ -337,13 +332,13 @@ tasks:
 func TestListWorkDirAsJSONWritesAnEmptyArrayWhenThereIsNoRepo(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	if len(run.document.Repos) != 0 {
 		t.Errorf("repos = %+v, 빈 목록을 기대", run.document.Repos)
 	}
 	if run.document.MainSession.Alive {
-		t.Errorf("mainSession.alive = true, 세션이 없으므로 false 를 기대")
+		t.Errorf("mainSession.alive = true, 엔진이 세션을 세지 않으므로 false 를 기대")
 	}
 
 	// 되읽은 값으로는 null 과 [] 가 구분되지 않으므로 원문에서 본다.
@@ -372,9 +367,9 @@ tasks:
 ---
 `)
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
-	for _, humanOnlyText := range []string{emptyWorkDirGuidance, attachGuidance, planWarningPrefix, "WorkDir:"} {
+	for _, humanOnlyText := range []string{emptyWorkDirGuidance, planWarningPrefix, "WorkDir:"} {
 		if strings.Contains(run.stdout, humanOnlyText) {
 			t.Errorf("stdout 에 사람용 문구 %q 가 있습니다\n--- stdout ---\n%s", humanOnlyText, run.stdout)
 		}
@@ -392,8 +387,8 @@ func TestListWorkDirTakesTheJSONOptionBeforeOrAfterThePath(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	afterPath := runListJSONForTest(t, []string{workDirPath, machineJSONOptionName}, newFakeSessionBackend())
-	beforePath := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	afterPath := runListJSONForTest(t, []string{workDirPath, machineJSONOptionName})
+	beforePath := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	if afterPath.stdout != beforePath.stdout {
 		t.Errorf("옵션 위치에 따라 출력이 다릅니다.\n--- 경로 뒤 ---\n%s\n--- 경로 앞 ---\n%s",
@@ -404,7 +399,7 @@ func TestListWorkDirTakesTheJSONOptionBeforeOrAfterThePath(t *testing.T) {
 func TestListWorkDirRejectsAnUnknownOption(t *testing.T) {
 	// 모르는 옵션을 경로로 흘려보내면 "워크디렉토리 읽기 실패 (--jsonn)" 이라는 엉뚱한 안내로 끝난다.
 	var out, errOut bytes.Buffer
-	err := ListWorkDir(&out, &errOut, []string{"--jsonn"}, newFakeSessionBackend())
+	err := ListWorkDir(&out, &errOut, []string{"--jsonn"})
 
 	if err == nil {
 		t.Fatalf("ListWorkDir() 가 에러를 반환하지 않음, 알 수 없는 옵션 에러를 기대")
@@ -431,7 +426,7 @@ func TestListWorkDirAsJSONTellsWhichLabelsHaveAConversationToResume(t *testing.T
 	runSessionCommandForTest(t, "alpha-commons")
 	runSessionCommandForTest(t)
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	if !repoInDocument(t, run.document, "alpha-commons").HasRecordedConversation {
 		t.Error("alpha-commons 의 hasRecordedConversation = false, 대화를 배정받은 레포이므로 true 를 기대")
@@ -450,7 +445,7 @@ func TestListWorkDirAsJSONRecordsNoConversationOfItsOwn(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath}, newFakeSessionBackend())
+	run := runListJSONForTest(t, []string{machineJSONOptionName, workDirPath})
 
 	if repoInDocument(t, run.document, "alpha-commons").HasRecordedConversation {
 		t.Error("alpha-commons 의 hasRecordedConversation = true, 기록이 없으므로 false 를 기대")

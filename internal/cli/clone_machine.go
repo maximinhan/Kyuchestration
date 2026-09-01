@@ -7,15 +7,13 @@ import (
 
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
-// 이 파일은 묻지 않는 kyu clone 이다 — 무엇을 클론할지 미리 적어 보내는 길.
+// 이 파일은 kyu clone 의 인자 해석과 실행이다 — 적어 보낸 이름을 GitHub 이 준 레포와 맞추고,
+// 하나씩 클론해 결말을 모은다.
 //
-// 대화형 흐름(clone.go)과 나눠 갖지 않는 것은 대화뿐이다. 일회성 credential helper 로 토큰을
-// 디스크에 남기지 않는 것, 같은 이름이 이미 있으면 건너뛰는 것, 하나가 실패해도 나머지를 계속
-// 시도하는 것 — 클론이 실제로 하는 일은 전부 공용 코드(cloneOneRow)가 한다. 그것들이 갈라지면
-// 앱으로 클론한 레포와 손으로 클론한 레포가 다른 규칙 아래 놓인다.
+// 클론이 실제로 하는 일(일회성 credential helper 로 토큰을 디스크에 남기지 않는 것, 같은 이름이
+// 이미 있으면 건너뛰는 것)은 clone.go 의 cloneOneRow 가 쥔다.
 
 // repositoryReference 는 --repo 로 받은 owner/name 하나다.
 type repositoryReference struct {
@@ -33,7 +31,7 @@ type repositoryReference struct {
 type cloneRequest struct {
 	profileName string
 
-	// repositoryReferences 는 묻지 않고 클론할 레포다. 비어 있으면 대화형 흐름으로 간다.
+	// repositoryReferences 는 클론할 레포다. 하나도 없는 실행은 거절한다.
 	repositoryReferences []repositoryReference
 
 	asJSON bool
@@ -69,24 +67,20 @@ func parseCloneArgs(args []string) (cloneRequest, error) {
 			argIndex++
 
 		default:
-			// 옛 거절 문구를 그대로 둔다. 인자를 붙여 부르는 실행(kyu clone maximinhan)은
-			// 이 명령이 처음부터 거절해온 것이고, 옵션이 생겼다고 그 안내가 달라질 이유가 없다.
+			// 인자를 붙여 부르는 실행(kyu clone maximinhan)은 이 명령이 처음부터 거절해온 것이다.
 			return cloneRequest{}, fmt.Errorf("clone 은 인자를 받지 않습니다 (%s 를 받음)\n\n%s", args[argIndex], cloneUsageText)
 		}
 	}
 
+	// 무엇을 클론할지 적지 않은 실행을 목록으로 데려가지 않는다. 고를 후보를 보여주던 화면은
+	// 앱으로 옮겨갔고, 엔진에는 물어볼 상대가 없다 — 무엇이 있는지는 kyu repos 가 답한다.
 	if len(request.repositoryReferences) == 0 {
-		// 옵션만 적힌 실행을 대화형으로 흘려보내지 않는다. 프로필을 골라 보낸 사용자는 그것이
-		// 쓰였다고 믿는데, 대화형 흐름은 프로필을 다시 묻는다.
-		if request.profileName != "" || request.asJSON {
-			return cloneRequest{}, fmt.Errorf("묻지 않는 클론에는 %s 가 필요합니다 — %s 없이 실행하면 목록에서 고릅니다\n\n%s",
-				repoOptionName, repoOptionName, cloneUsageText)
-		}
-		return request, nil
+		return cloneRequest{}, fmt.Errorf("clone 은 무엇을 클론할지 알아야 합니다 — %s <owner/name> (고를 후보는 kyu repos 가 답합니다)\n\n%s",
+			repoOptionName, cloneUsageText)
 	}
 
 	if request.profileName == "" {
-		return cloneRequest{}, fmt.Errorf("묻지 않는 클론은 어느 토큰으로 붙을지 알아야 합니다 — %s <이름>\n\n%s", profileOptionName, cloneUsageText)
+		return cloneRequest{}, fmt.Errorf("clone 은 어느 토큰으로 붙을지 알아야 합니다 — %s <이름>\n\n%s", profileOptionName, cloneUsageText)
 	}
 	return request, nil
 }
@@ -103,8 +97,8 @@ func parseRepositoryReference(value string) (repositoryReference, error) {
 	return repositoryReference{ownerLogin: ownerLogin, repositoryName: repositoryName, asTyped: value}, nil
 }
 
-// cloneWithoutAsking 은 적어 보낸 레포를 그대로 클론한다.
-func cloneWithoutAsking(out, errOut io.Writer, request cloneRequest, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore, backend session.SessionBackend) error {
+// cloneRequestedRepositories 는 적어 보낸 레포를 그대로 클론한다.
+func cloneRequestedRepositories(out io.Writer, request cloneRequest, location workDirLocation, newAccess RepositoryAccessFactory, tokenStore secretstore.TokenStore) error {
 	access, personalOwner, err := accessWithStoredToken(request.profileName, tokenStore, newAccess)
 	if err != nil {
 		return err
@@ -125,22 +119,16 @@ func cloneWithoutAsking(out, errOut io.Writer, request cloneRequest, location wo
 	}
 
 	if request.asJSON {
-		// 세션 안내를 문서 안으로 들여야 하므로 여기서 먼저 판정한다. 사람용은 같은 판정을
-		// finishClone 안에서 하고 stderr 한 줄로 낸다.
-		restartNeeded, err := runningMainSessionWouldMissNewRepos(location.name, backend, attempts)
-		if err != nil {
-			return err
-		}
 		// 실패가 섞여 있어도 문서를 먼저 낸다. 어느 레포가 왜 실패했는지는 이 문서에만 있으므로,
 		// 종료 코드만 돌려주면 앱은 사용자에게 아무것도 설명하지 못한다.
-		if err := writeCloneResultsAsJSON(out, attempts, restartNeeded); err != nil {
+		if err := writeCloneResultsAsJSON(out, attempts); err != nil {
 			return err
 		}
 		return failedCloneError(attempts)
 	}
 
 	writeCloneAttempts(out, attempts)
-	return finishClone(errOut, attempts, location.name, backend)
+	return failedCloneError(attempts)
 }
 
 // plannedClone 은 --repo 하나에 대해 무엇을 할지 정해진 상태다.
@@ -159,7 +147,7 @@ type plannedClone struct {
 //
 // 이름으로 클론 주소를 조립하지 않는다. github 패키지가 적어둔 이유와 같다 — 조립하면 GitHub
 // Enterprise 처럼 호스트가 다른 곳에서 엉뚱한 주소를 만든다. API 가 준 CloneURL 을 그대로 쓰려면
-// 그 레포를 목록에서 찾아내는 수밖에 없고, 그 목록은 대화형 흐름이 보는 것과 같은 것이다.
+// 그 레포를 목록에서 찾아내는 수밖에 없고, 그 목록은 kyu repos 가 앱에 보여주는 것과 같은 것이다.
 //
 // 소유자마다 목록을 한 번씩만 받아온다. 레포마다 물으면 같은 계정에 대해 같은 왕복을 되풀이하고,
 // 100 개를 넘는 계정에서는 그 목록 하나가 여러 페이지다.

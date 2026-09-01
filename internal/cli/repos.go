@@ -11,12 +11,11 @@ import (
 
 // 이 파일은 kyu repos 다 — GitHub 에 무엇이 있는지만 묻고 아무것도 바꾸지 않는 명령.
 //
-// kyu clone 이 대화 안에서 하던 걸음(어느 계정의 레포를 볼까)을 밖으로 꺼낸 것이다. GUI 는 그
-// 걸음을 자기 화면으로 그려야 하는데, 대화형 흐름은 답을 표로만 내보내므로 앱이 그 표를
-// 되파싱하는 수밖에 없었다.
+// kyu clone 이 대화 안에서 하던 걸음(어느 계정의 레포를 볼까)을 밖으로 꺼낸 것이다. 앱은 그
+// 걸음을 자기 화면으로 그리고, 사용자가 고른 이름을 kyu clone --repo 에 그대로 넘긴다.
 //
 // 이름이 kyu list 와 겹쳐 보이지만 보는 곳이 다르다 — kyu list 는 이 머신의 워크디렉토리를 훑고,
-// kyu repos 는 GitHub 에 묻는다. 그래서 이 명령에는 워크디렉토리도 세션 백엔드도 필요 없다.
+// kyu repos 는 GitHub 에 묻는다. 그래서 이 명령에는 워크디렉토리가 필요 없다.
 
 const reposUsageText = `사용법: kyu repos <owners|list> --profile <이름> [--owner <로그인>] --json
 
@@ -24,7 +23,7 @@ const reposUsageText = `사용법: kyu repos <owners|list> --profile <이름> [-
   kyu repos list --profile <이름> --owner <로그인> --json    그 소유자의 레포 (github.com 과 같은 최근 갱신 순)
 
 이 명령은 --json 으로만 답한다 — GUI·스크립트가 엔진을 부르는 자리다.
-사람이 레포를 골라 클론하는 자리는 kyu clone 이다.`
+여기서 얻은 이름을 kyu clone --repo 에 넘긴다.`
 
 // profileOptionName 은 어느 토큰으로 GitHub 에 붙을지 고르는 옵션이다.
 //
@@ -154,7 +153,7 @@ func parseReposArgs(subcommand string, args []string) (reposRequest, error) {
 			ownerOptionName, reposOwnersSubcommand, reposUsageText)
 	}
 	if !asJSON {
-		return reposRequest{}, fmt.Errorf("repos 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 사람이 레포를 골라 클론하는 자리는 kyu clone 입니다\n\n%s",
+		return reposRequest{}, fmt.Errorf("repos 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 여기서 얻은 이름을 kyu clone --repo 에 넘깁니다\n\n%s",
 			machineJSONOptionName, reposUsageText)
 	}
 	return request, nil
@@ -178,9 +177,8 @@ func optionValueAt(args []string, optionIndex int, optionName, usageText string)
 
 // listOwnersTheTokenCanSee 는 개인 계정과 소속 조직을 한 목록으로 모은다. 개인 계정이 늘 첫 자리다.
 //
-// 대화형 clone 의 소유자 선택(chooseRepositoryOwner)도 이 함수를 쓴다. 403 을 통과시키는 규칙이
-// 두 곳에 각자 적혀 있으면, fine-grained 토큰을 쓰는 사용자가 어느 문으로 들어왔는지에 따라
-// 한쪽에서만 막히게 된다.
+// fine-grained 토큰의 403 을 통과시키는 규칙이 이 함수 안에만 있다. 밖으로 새면 같은 토큰이
+// 어느 물음에서는 통과하고 어느 물음에서는 막히게 된다.
 func listOwnersTheTokenCanSee(errOut io.Writer, access github.RepositoryAccess, personalOwner github.Owner) ([]github.Owner, error) {
 	organizations, err := access.Organizations()
 

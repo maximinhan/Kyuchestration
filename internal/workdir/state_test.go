@@ -1,41 +1,11 @@
 package workdir
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
-
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
-
-// testSessionName 은 상태 추론에 넘기는 세션 이름이다.
-// 실제 규칙(kyu-<workdir>-<repo>)을 따르지만, 이 패키지는 이름을 해석하지 않고 그대로 전달만 한다.
-const testSessionName = "kyu-test-workdir-proj-a"
-
-// stubSessionBackend 는 세션 생존 여부만 지정해 넣는 테스트용 SessionBackend 다.
-//
-// 상태 추론이 세션 계층에 묻는 것은 IsAlive 하나뿐이라, tmux 를 실제로 띄우지 않고도
-// RUNNING 판정을 검증할 수 있다. 인터페이스를 둔 값이 여기서 회수된다.
-//
-// SessionBackend 를 nil 인 채로 묻어두고(embed) IsAlive 만 덮어쓴다. 상태 추론이 IsAlive
-// 외의 메서드를 부르는 순간 nil 인터페이스 역참조로 그 자리에서 패닉이 나므로,
-// "도구는 세션 내부에 개입하지 않는다"(설계 원칙 3)가 테스트로 고정된다.
-type stubSessionBackend struct {
-	session.SessionBackend
-	reportIsAlive func(sessionName string) (bool, error)
-}
-
-func (b stubSessionBackend) IsAlive(sessionName string) (bool, error) {
-	return b.reportIsAlive(sessionName)
-}
-
-func newStubSessionBackend(alive bool) stubSessionBackend {
-	return stubSessionBackend{
-		reportIsAlive: func(string) (bool, error) { return alive, nil },
-	}
-}
 
 // isolateGitFromUserConfig 는 테스트가 실행 머신의 git 설정에 좌우되지 않게 한다.
 //
@@ -93,50 +63,10 @@ func newCleanGitRepo(t *testing.T) Repo {
 	return Repo{Name: filepath.Base(repoPath), AbsolutePath: repoPath}
 }
 
-func TestInferRepoStateReturnsRunningWhenSessionIsAlive(t *testing.T) {
+func TestInferRepoStateReturnsIdleWhenNothingIsLeftBehind(t *testing.T) {
 	repo := newCleanGitRepo(t)
 
-	backend := stubSessionBackend{
-		reportIsAlive: func(sessionName string) (bool, error) {
-			if sessionName != testSessionName {
-				t.Errorf("IsAlive 에 넘어온 세션 이름 = %q, want %q", sessionName, testSessionName)
-			}
-			return true, nil
-		},
-	}
-
-	got, err := InferRepoState(repo, testSessionName, backend)
-	if err != nil {
-		t.Fatalf("InferRepoState() 실패: %v", err)
-	}
-	if got != RepoStateRunning {
-		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateRunning)
-	}
-}
-
-func TestInferRepoStatePropagatesSessionLivenessFailure(t *testing.T) {
-	repo := newCleanGitRepo(t)
-
-	livenessFailure := errors.New("tmux 를 실행할 수 없음")
-	backend := stubSessionBackend{
-		reportIsAlive: func(string) (bool, error) { return false, livenessFailure },
-	}
-
-	got, err := InferRepoState(repo, testSessionName, backend)
-	// %w 로 감싸 전파하는지 확인한다. %v 로 문자열화하면 호출부가 원인을 판별할 수 없다.
-	if !errors.Is(err, livenessFailure) {
-		t.Fatalf("InferRepoState() 에러 = %v, 원인이 %v 로 풀리기를 기대", err, livenessFailure)
-	}
-	// 판정하지 못했으면 그럴듯한 상태를 지어내지 않는다. 어느 상태도 아닌 영 값이어야 한다.
-	if got != "" {
-		t.Errorf("InferRepoState() = %q, 판정 실패 시 빈 값을 기대", got)
-	}
-}
-
-func TestInferRepoStateReturnsIdleWhenSessionIsGoneAndNothingIsLeftBehind(t *testing.T) {
-	repo := newCleanGitRepo(t)
-
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -164,7 +94,7 @@ func TestInferRepoStateReturnsDirtyWhenTrackedFileIsModified(t *testing.T) {
 	repo := newCleanGitRepo(t)
 	writeFileInRepo(t, repo.AbsolutePath, "README.md", "고친 내용\n")
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -180,7 +110,7 @@ func TestInferRepoStateReturnsDirtyWhenUntrackedFileExists(t *testing.T) {
 	// 이것을 빠뜨리면 작업 결과가 통째로 남아있는 레포가 IDLE 로 보인다.
 	writeFileInRepo(t, repo.AbsolutePath, "새-파일.txt", "아직 add 하지 않은 파일\n")
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -189,37 +119,10 @@ func TestInferRepoStateReturnsDirtyWhenUntrackedFileExists(t *testing.T) {
 	}
 }
 
-func TestInferRepoStateReturnsRunningEvenWhenWorkingTreeIsDirty(t *testing.T) {
-	repo := newCleanGitRepo(t)
-	writeFileInRepo(t, repo.AbsolutePath, "README.md", "세션 안에서 고치는 중\n")
-
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(true))
-	if err != nil {
-		t.Fatalf("InferRepoState() 실패: %v", err)
-	}
-	if got != RepoStateRunning {
-		t.Errorf("InferRepoState() = %q, 세션이 살아있으면 git 상태보다 우선하므로 %q 를 기대", got, RepoStateRunning)
-	}
-}
-
-func TestInferRepoStateSkipsGitEntirelyWhenSessionIsAlive(t *testing.T) {
-	// git 이 반드시 실패하는 디렉토리인데도 RUNNING 이 나온다면, 세션이 살아있을 때
-	// git 을 아예 부르지 않는다는 뜻이다. 레포 하나당 git 프로세스 두 개를 아끼는 문제이기도 하다.
-	repo := newBrokenGitRepo(t)
-
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(true))
-	if err != nil {
-		t.Fatalf("InferRepoState() 실패: %v", err)
-	}
-	if got != RepoStateRunning {
-		t.Errorf("InferRepoState() = %q, want %q", got, RepoStateRunning)
-	}
-}
-
 func TestInferRepoStatePropagatesGitFailure(t *testing.T) {
 	repo := newBrokenGitRepo(t)
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err == nil {
 		t.Fatalf("InferRepoState() = %q, 에러 없이 끝남. git 실패는 전파되어야 한다", got)
 	}
@@ -260,7 +163,7 @@ func TestInferRepoStateReturnsAheadWhenLocalCommitsAreNotPushed(t *testing.T) {
 	repo := newGitRepoWithUpstream(t)
 	commitInRepo(t, repo, "기능.txt", "구현 완료\n", "기능 구현")
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -272,7 +175,7 @@ func TestInferRepoStateReturnsAheadWhenLocalCommitsAreNotPushed(t *testing.T) {
 func TestInferRepoStateReturnsIdleWhenBranchMatchesUpstream(t *testing.T) {
 	repo := newGitRepoWithUpstream(t)
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -286,7 +189,7 @@ func TestInferRepoStateReturnsIdleWhenBranchHasNoUpstreamEvenWithUnpushedCommits
 	repo := newCleanGitRepo(t)
 	commitInRepo(t, repo, "기능.txt", "구현 완료\n", "기능 구현")
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -301,7 +204,7 @@ func TestInferRepoStateReturnsIdleWhenUpstreamRefIsGone(t *testing.T) {
 	repo := newGitRepoWithUpstream(t)
 	runGitForTest(t, repo.AbsolutePath, "update-ref", "-d", "refs/remotes/origin/main")
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}
@@ -317,7 +220,7 @@ func TestInferRepoStateReturnsDirtyWhenBranchIsAheadAndWorkingTreeIsDirty(t *tes
 	commitInRepo(t, repo, "기능.txt", "구현 완료\n", "기능 구현")
 	writeFileInRepo(t, repo.AbsolutePath, "README.md", "아직 커밋하지 않은 수정\n")
 
-	got, err := InferRepoState(repo, testSessionName, newStubSessionBackend(false))
+	got, err := InferRepoState(repo)
 	if err != nil {
 		t.Fatalf("InferRepoState() 실패: %v", err)
 	}

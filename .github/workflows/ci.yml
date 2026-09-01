@@ -21,17 +21,7 @@ jobs:
           # go.mod 의 go 지시자를 단일 출처로 삼는다. 버전을 여기에 또 적으면 갈라진다.
           go-version-file: go.mod
 
-      - name: tmux 설치
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tmux
-
-      # 세션 계층 테스트는 tmux 가 없으면 t.Skip 으로 넘어간다. 즉 설치가 조용히 실패하면
-      # tmux 를 한 줄도 검증하지 않은 채 CI 가 초록으로 통과한다. 여기서 먼저 끊는다.
-      - name: tmux 설치 확인
-        run: tmux -V
-
-      # 상태 추론 테스트도 git 이 없으면 t.Skip 으로 넘어간다. 게다가 판정이 git 의 종료 코드에
+      # 상태 추론 테스트는 git 이 없으면 t.Skip 으로 넘어간다. 게다가 판정이 git 의 종료 코드에
       # 기대고 있으므로(업스트림 없음 1, 레포 손상 128), 어느 버전으로 검증했는지 로그에 남긴다.
       - name: git 설치 확인
         run: git --version

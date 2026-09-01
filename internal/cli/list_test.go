@@ -10,15 +10,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maximinhan/Kyuchestration/internal/session"
 	"github.com/maximinhan/Kyuchestration/internal/workdir"
 )
 
 // testWorkDirName 은 테스트가 만드는 워크디렉토리의 이름이다.
 //
 // t.TempDir() 이 준 경로를 그대로 워크디렉토리로 쓰지 않는다. 그 마지막 요소는 "001" 같은
-// 일련번호인데, 워크디렉토리 이름은 세션 이름(kyu-<workdir>-<repo>)과 헤더에 그대로 드러나는 값이라
-// 기대값을 적으려면 테스트가 이름을 직접 정해야 한다.
+// 일련번호인데, 워크디렉토리 이름은 헤더에 그대로 드러나는 값이라 기대값을 적으려면
+// 테스트가 이름을 직접 정해야 한다.
 const testWorkDirName = "WorkDir-featureX"
 
 // 이 파일의 git 헬퍼는 internal/workdir 의 테스트와 모양이 겹친다. 그런데도 공용 패키지로 뽑지 않았다.
@@ -73,7 +72,7 @@ func makeWorkDir(t *testing.T) string {
 }
 
 // makeCleanRepo 는 커밋 하나가 들어있고 워킹 트리가 깨끗하며 업스트림이 없는 레포를 만든다.
-// 세션이 없으면 IDLE 로 판정되는 상태다.
+// IDLE 로 판정되는 상태다.
 func makeCleanRepo(t *testing.T, workDirPath, repoName string) {
 	t.Helper()
 
@@ -115,31 +114,7 @@ func writeFileInRepo(t *testing.T, repoPath, fileName, content string) {
 	}
 }
 
-// fakeSessionBackend 는 어떤 이름의 세션이 살아있는지를 지정해 넣는 테스트용 SessionBackend 다.
-//
-// SessionBackend 를 nil 인 채로 묻어두고(embed) IsAlive 만 덮어쓴다. 목록이 IsAlive 외의 메서드를
-// 부르는 순간 nil 인터페이스 역참조로 그 자리에서 패닉이 나므로, "도구는 세션 내부에 개입하지 않는다"
-// (설계 원칙 3)가 테스트로 고정된다.
-type fakeSessionBackend struct {
-	session.SessionBackend
-	aliveSessionNames   map[string]bool
-	queriedSessionNames []string
-}
-
-func (backend *fakeSessionBackend) IsAlive(sessionName string) (bool, error) {
-	backend.queriedSessionNames = append(backend.queriedSessionNames, sessionName)
-	return backend.aliveSessionNames[sessionName], nil
-}
-
-func newFakeSessionBackend(aliveSessionNames ...string) *fakeSessionBackend {
-	alive := make(map[string]bool, len(aliveSessionNames))
-	for _, sessionName := range aliveSessionNames {
-		alive[sessionName] = true
-	}
-	return &fakeSessionBackend{aliveSessionNames: alive}
-}
-
-func TestInspectWorkDirCollectsRepoStatesInNameOrderAndPutsMainLast(t *testing.T) {
+func TestInspectWorkDirCollectsRepoStatesInNameOrder(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 
 	// 만드는 순서를 이름순과 어긋나게 둔다. 결과가 이름순이면 생성 순서에 기대지 않는다는 뜻이다.
@@ -147,9 +122,7 @@ func TestInspectWorkDirCollectsRepoStatesInNameOrderAndPutsMainLast(t *testing.T
 	makeRepoWithUncommittedChange(t, workDirPath, "beta-gateway")
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	backend := newFakeSessionBackend(session.RepoSessionName(testWorkDirName, "zeta-service"))
-
-	listing, err := inspectWorkDir(workDirPath, backend)
+	listing, err := inspectWorkDir(workDirPath)
 	if err != nil {
 		t.Fatalf("inspectWorkDir() 실패: %v", err)
 	}
@@ -158,84 +131,22 @@ func TestInspectWorkDirCollectsRepoStatesInNameOrderAndPutsMainLast(t *testing.T
 		t.Errorf("workDirName = %q, want %q", listing.workDirName, testWorkDirName)
 	}
 
+	// 메인 행이 없다. 워크디렉토리 최상위는 레포가 아니라 git 에게 물을 것이 없고, 세션 생존은
+	// 엔진이 더는 답하지 않는다 — 남는 값이 없는 행은 목록에 두지 않는다.
 	want := []listRow{
 		{label: "alpha-commons", state: workdir.RepoStateIdle},
 		{label: "beta-gateway", state: workdir.RepoStateDirty},
-		{label: "zeta-service", state: workdir.RepoStateRunning},
-		{label: "main", state: workdir.RepoStateIdle},
+		{label: "zeta-service", state: workdir.RepoStateIdle},
 	}
 	if got := listing.displayRows(); !slices.Equal(got, want) {
 		t.Errorf("displayRows() = %+v, want %+v", got, want)
-	}
-	if got := listing.liveSessionCount(); got != 1 {
-		t.Errorf("liveSessionCount() = %d, want 1", got)
-	}
-}
-
-func TestInspectWorkDirCountsMainSessionAsLiveWhenItIsAlive(t *testing.T) {
-	workDirPath := makeWorkDir(t)
-	makeCleanRepo(t, workDirPath, "alpha-commons")
-
-	backend := newFakeSessionBackend(session.MainSessionName(testWorkDirName))
-
-	listing, err := inspectWorkDir(workDirPath, backend)
-	if err != nil {
-		t.Fatalf("inspectWorkDir() 실패: %v", err)
-	}
-
-	want := listRow{label: "main", state: workdir.RepoStateRunning}
-	if got := listing.mainDisplayRow(); got != want {
-		t.Errorf("mainDisplayRow() = %+v, want %+v", got, want)
-	}
-	// 메인도 이 워크디렉토리의 세션이므로 숫자에 들어간다(설계 문서 9.3 의 "2 sessions" 가 메인을 포함한다).
-	if got := listing.liveSessionCount(); got != 1 {
-		t.Errorf("liveSessionCount() = %d, 메인 세션도 세어 1 을 기대", got)
-	}
-}
-
-func TestInspectWorkDirDoesNotJudgeGitStateOfMainRow(t *testing.T) {
-	// 메인 세션이 뜨는 곳은 워크디렉토리 최상위이고 그곳은 레포가 아니다(설계 문서 5.4).
-	// 최상위에 커밋되지 않은 변경처럼 보이는 파일이 있어도 메인 행은 DIRTY 가 되지 않는다.
-	workDirPath := makeWorkDir(t)
-	writeFileInRepo(t, workDirPath, "메모.txt", "워크디렉토리 최상위 메모\n")
-
-	listing, err := inspectWorkDir(workDirPath, newFakeSessionBackend())
-	if err != nil {
-		t.Fatalf("inspectWorkDir() 실패: %v", err)
-	}
-
-	want := listRow{label: "main", state: workdir.RepoStateIdle}
-	if got := listing.mainDisplayRow(); got != want {
-		t.Errorf("mainDisplayRow() = %+v, want %+v", got, want)
-	}
-}
-
-func TestInspectWorkDirAsksOnlyForSessionNamesScopedToThisWorkDir(t *testing.T) {
-	// 세션 이름에 워크디렉토리 이름이 빠지면, 같은 이름의 레포를 가진 다른 워크디렉토리의 세션을
-	// 자기 것으로 착각한다(설계 문서 11절 4번). 물어본 이름 자체를 고정한다.
-	workDirPath := makeWorkDir(t)
-	makeCleanRepo(t, workDirPath, "alpha-commons")
-	makeCleanRepo(t, workDirPath, "beta-gateway")
-
-	backend := newFakeSessionBackend()
-	if _, err := inspectWorkDir(workDirPath, backend); err != nil {
-		t.Fatalf("inspectWorkDir() 실패: %v", err)
-	}
-
-	want := []string{
-		"kyu-WorkDir-featureX-alpha-commons",
-		"kyu-WorkDir-featureX-beta-gateway",
-		"kyu-WorkDir-featureX-main",
-	}
-	if !slices.Equal(backend.queriedSessionNames, want) {
-		t.Errorf("생존을 물어본 세션 이름 = %q, want %q", backend.queriedSessionNames, want)
 	}
 }
 
 func TestInspectWorkDirOnMissingWorkDirReturnsUnwrappableNotExistError(t *testing.T) {
 	missingWorkDirPath := filepath.Join(t.TempDir(), "존재하지-않는-워크디렉토리")
 
-	_, err := inspectWorkDir(missingWorkDirPath, newFakeSessionBackend())
+	_, err := inspectWorkDir(missingWorkDirPath)
 	if err == nil {
 		t.Fatalf("inspectWorkDir() 가 에러를 반환하지 않음, 워크디렉토리 부재 에러를 기대")
 	}
@@ -252,7 +163,7 @@ func TestInspectWorkDirNamesTheRepoWhoseStateCouldNotBeJudged(t *testing.T) {
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	makeBrokenRepo(t, workDirPath, "beta-gateway")
 
-	_, err := inspectWorkDir(workDirPath, newFakeSessionBackend())
+	_, err := inspectWorkDir(workDirPath)
 	if err == nil {
 		t.Fatalf("inspectWorkDir() 가 에러를 반환하지 않음, 상태 판정 실패를 기대")
 	}
@@ -265,11 +176,11 @@ func TestInspectWorkDirNamesTheRepoWhoseStateCouldNotBeJudged(t *testing.T) {
 //
 // 계획이 없거나 멀쩡하면 stderr 는 비어 있어야 한다. stdout 만 비교하면 목록은 맞는데 매번
 // 경고가 함께 찍히는 상태를 아무도 잡지 못한다.
-func runListForTest(t *testing.T, args []string, backend session.SessionBackend) string {
+func runListForTest(t *testing.T, args []string) string {
 	t.Helper()
 
 	var out, errOut bytes.Buffer
-	if err := ListWorkDir(&out, &errOut, args, backend); err != nil {
+	if err := ListWorkDir(&out, &errOut, args); err != nil {
 		t.Fatalf("ListWorkDir() 실패: %v", err)
 	}
 	if errOut.Len() != 0 {
@@ -291,45 +202,17 @@ func assertListOutput(t *testing.T, got, want string) {
 	}
 }
 
-func TestListWorkDirWritesEachRepoWithMarkerAndStateInAlignedColumns(t *testing.T) {
+func TestListWorkDirWritesEachRepoWithItsStateInAlignedColumns(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	makeRepoWithUncommittedChange(t, workDirPath, "beta-gateway")
 	makeCleanRepo(t, workDirPath, "zeta-service")
 
-	backend := newFakeSessionBackend(session.RepoSessionName(testWorkDirName, "zeta-service"))
+	assertListOutput(t, runListForTest(t, []string{workDirPath}), `WorkDir: WorkDir-featureX   (3 repos)
 
-	assertListOutput(t, runListForTest(t, []string{workDirPath}, backend), `WorkDir: WorkDir-featureX   (3 repos, 1 session)
-
-  ○  alpha-commons  IDLE
-  ○  beta-gateway   DIRTY
-  ●  zeta-service   RUNNING
-  ○  main           IDLE
-
-kyu attach <repo> 로 진입
-`)
-}
-
-func TestListWorkDirCountsEveryLiveSessionIncludingMain(t *testing.T) {
-	workDirPath := makeWorkDir(t)
-	makeCleanRepo(t, workDirPath, "alpha-commons")
-	makeCleanRepo(t, workDirPath, "beta-gateway")
-	makeCleanRepo(t, workDirPath, "zeta-service")
-
-	backend := newFakeSessionBackend(
-		session.RepoSessionName(testWorkDirName, "alpha-commons"),
-		session.RepoSessionName(testWorkDirName, "zeta-service"),
-		session.MainSessionName(testWorkDirName),
-	)
-
-	assertListOutput(t, runListForTest(t, []string{workDirPath}, backend), `WorkDir: WorkDir-featureX   (3 repos, 3 sessions)
-
-  ●  alpha-commons  RUNNING
-  ○  beta-gateway   IDLE
-  ●  zeta-service   RUNNING
-  ●  main           RUNNING
-
-kyu attach <repo> 로 진입
+  alpha-commons  IDLE
+  beta-gateway   DIRTY
+  zeta-service   IDLE
 `)
 }
 
@@ -338,29 +221,19 @@ func TestListWorkDirWritesSingularNounsWhenThereIsExactlyOne(t *testing.T) {
 	workDirPath := makeWorkDir(t)
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 
-	backend := newFakeSessionBackend(session.MainSessionName(testWorkDirName))
+	assertListOutput(t, runListForTest(t, []string{workDirPath}), `WorkDir: WorkDir-featureX   (1 repo)
 
-	assertListOutput(t, runListForTest(t, []string{workDirPath}, backend), `WorkDir: WorkDir-featureX   (1 repo, 1 session)
-
-  ○  alpha-commons  IDLE
-  ●  main           RUNNING
-
-kyu attach <repo> 로 진입
+  alpha-commons  IDLE
 `)
 }
 
 func TestListWorkDirGuidesToCloneWhenThereIsNoRepo(t *testing.T) {
 	// 빈 목록만 보여주면 사용자는 도구가 레포를 못 찾은 것인지 아직 아무것도 없는 것인지 모른다.
-	// 메인 행은 그대로 둔다 — 레포가 하나도 없어도 메인 세션은 떠 있을 수 있다.
 	workDirPath := makeWorkDir(t)
 
-	assertListOutput(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()), `WorkDir: WorkDir-featureX   (0 repos, 0 sessions)
+	assertListOutput(t, runListForTest(t, []string{workDirPath}), `WorkDir: WorkDir-featureX   (0 repos)
 
   레포 없음 — 이 디렉토리 아래에 git 레포를 클론하세요
-
-  ○  main  IDLE
-
-kyu attach <repo> 로 진입
 `)
 }
 
@@ -370,12 +243,9 @@ func TestListWorkDirWithoutArgumentsListsCurrentDirectory(t *testing.T) {
 
 	t.Chdir(workDirPath)
 
-	assertListOutput(t, runListForTest(t, nil, newFakeSessionBackend()), `WorkDir: WorkDir-featureX   (1 repo, 0 sessions)
+	assertListOutput(t, runListForTest(t, nil), `WorkDir: WorkDir-featureX   (1 repo)
 
-  ○  alpha-commons  IDLE
-  ○  main           IDLE
-
-kyu attach <repo> 로 진입
+  alpha-commons  IDLE
 `)
 }
 
@@ -383,7 +253,7 @@ func TestListWorkDirRejectsMoreThanOnePath(t *testing.T) {
 	// 경로를 두 개 받으면 어느 쪽을 보여줘야 할지 알 수 없다. 하나를 골라 나머지를 조용히 버리면
 	// 사용자는 자기가 지정한 워크디렉토리를 보고 있다고 착각한다.
 	var out, errOut bytes.Buffer
-	err := ListWorkDir(&out, &errOut, []string{"첫-번째-경로", "두-번째-경로"}, newFakeSessionBackend())
+	err := ListWorkDir(&out, &errOut, []string{"첫-번째-경로", "두-번째-경로"})
 
 	if err == nil {
 		t.Fatalf("ListWorkDir() 가 에러를 반환하지 않음, 인자 개수 에러를 기대")

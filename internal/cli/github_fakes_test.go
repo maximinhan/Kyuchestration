@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"slices"
+	"testing"
 	"time"
 
 	"github.com/maximinhan/Kyuchestration/internal/github"
@@ -149,4 +150,22 @@ func makeRepository(name string, isPrivate bool, updatedAt time.Time) github.Rep
 		IsPrivate:     isPrivate,
 		LastUpdatedAt: updatedAt,
 	}
+}
+
+// newTestGitHubWithRepos 는 프로필 하나로 곧장 붙을 수 있는 GitHub 대역을 만든다.
+func newTestGitHubWithRepos(repositories ...github.Repository) *fakeGitHub {
+	gitHub := newTestGitHub()
+	gitHub.repositoriesByOwnerLogin = map[string][]github.Repository{"maximinhan": repositories}
+	return gitHub
+}
+
+// storeWithOneProfile 은 프로필이 하나 등록된 저장소다. --profile 개인 으로 부를 수 있게 한다.
+func storeWithOneProfile(t *testing.T) *fakeTokenStore {
+	t.Helper()
+
+	tokenStore := newFakeTokenStore(secretstore.StorageKeychain)
+	if err := tokenStore.SaveToken("개인", validTestToken); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	return tokenStore
 }
