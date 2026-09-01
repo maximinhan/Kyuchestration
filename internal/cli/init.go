@@ -76,8 +76,8 @@ const planFilePermission = 0o644
 
 // InitWorkDir 는 kyu init 을 실행한다. 워크디렉토리에 .coord/plan.md 템플릿을 만든다.
 //
-// 세션 백엔드를 받지 않는다. 초기화는 파일을 만드는 일이라 tmux 가 필요 없는데, 백엔드를 받으면
-// 진입점이 그것을 먼저 조립하느라 tmux 가 없는 머신에서 초기화조차 못 하게 된다.
+// 바깥 명령을 하나도 부르지 않는다. 파일을 만드는 일이라 부를 이유가 없고, 부르기 시작하면
+// 그것이 없는 머신에서 워크디렉토리를 만들지도 못하게 된다 — 갓 설치한 머신이 흔히 그렇다.
 func InitWorkDir(out io.Writer, args []string) error {
 	workDirPath, err := workDirPathFromInitArgs(args)
 	if err != nil {

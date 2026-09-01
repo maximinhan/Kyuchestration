@@ -16,7 +16,6 @@ import (
 	"github.com/maximinhan/Kyuchestration/internal/cli"
 	"github.com/maximinhan/Kyuchestration/internal/github"
 	"github.com/maximinhan/Kyuchestration/internal/secretstore"
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
 // usageText 는 이 도구의 명령 전부다(설계 문서 9.3).
@@ -82,9 +81,9 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	commandName, commandArgs := args[0], args[1:]
 
 	switch commandName {
-	// list 는 세션 백엔드를 거치지 않는다. 무엇이 떠 있는지를 묻던 명령이었지만 이제는 레포와
-	// git 만 보므로(app-owned-sessions-design.md 6절), 백엔드를 먼저 조립하면 tmux 없는 머신에서
-	// 대시보드가 3 초마다 부르는 명령이 통째로 선다.
+	// list 는 무엇이 떠 있는지를 묻던 명령이었지만 이제는 레포와 git 만 본다
+	// (app-owned-sessions-design.md 6절). 대시보드가 3 초마다 부르는 자리라, 여기가 무언가를
+	// 먼저 조립하기 시작하면 그것이 없는 머신에서 앱이 목록을 통째로 잃는다.
 	case "list":
 		return cli.ListWorkDir(out, errOut, commandArgs)
 
@@ -119,11 +118,6 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	case "version":
 		return cli.PrintVersion(out, commandArgs)
-
-	// 감독 프로세스의 본문이다. 세션 백엔드를 조립하지 않는다 — 이 프로세스가 그 백엔드가
-	// 말을 거는 상대이지 그것을 쓰는 쪽이 아니다. 사용자가 부를 명령이 아니라 usage 에도 없다.
-	case session.SuperviseCommandName:
-		return session.RunSupervisor(commandArgs)
 
 	default:
 		return fmt.Errorf("알 수 없는 명령: %s\n\n%s", commandName, usageText)

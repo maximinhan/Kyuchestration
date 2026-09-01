@@ -18,7 +18,7 @@ const secretToolItemLabel = "kyu GitHub token"
 
 // secretVault 는 비밀 값 하나를 이름으로 넣고 꺼내는 플랫폼 의존부다.
 //
-// 이 인터페이스 뒤가 이 패키지의 유일한 플랫폼 의존부다(internal/session 의 SessionBackend 와 같은 자리).
+// 이 인터페이스 뒤가 이 패키지의 유일한 플랫폼 의존부다.
 // 부르는 쪽은 어느 저장소인지 모른 채 프로필 이름으로만 말한다.
 type secretVault interface {
 	// kind 는 이 저장소의 종류다. 프로필 목록에 기록되고 사용자에게도 보인다.

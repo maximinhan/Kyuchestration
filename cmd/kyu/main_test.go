@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/maximinhan/Kyuchestration/internal/session"
 )
 
 // 라우팅은 함수 호출로 검증하지 않고 바이너리를 띄워서 확인한다.
@@ -48,7 +46,7 @@ func TestVersionReportsTheVersionInjectedByTheReleaseBuild(t *testing.T) {
 
 	binaryPath := buildKyuBinary(t, "-ldflags", "-X "+versionLdflagsSymbolPath+"="+injectedTestVersion)
 	command := exec.Command(binaryPath, "version")
-	// tmux 없이도 답해야 한다. 릴리스 바이너리는 tmux 를 아직 깔지 않은 새 머신에 먼저 도착한다.
+	// PATH 가 비어도 답해야 한다. 릴리스 바이너리는 아무것도 갖추지 않은 새 머신에 먼저 도착한다.
 	command.Env = append(os.Environ(), "PATH=")
 
 	var stdout, stderr bytes.Buffer
@@ -220,13 +218,13 @@ func TestUnknownCommandPrintsUsageToStderrAndExitsWithCodeOne(t *testing.T) {
 }
 
 func TestInitCreatesThePlanFileWithoutNeedingTmux(t *testing.T) {
-	// init 은 파일을 만드는 일이라 세션 백엔드를 거치지 않는다. tmux 를 건너뛰는지까지 여기서 고정한다
-	// — 라우팅이 다른 명령과 같은 길로 지나가면 tmux 없는 머신에서 초기화조차 못 하게 된다.
+	// init 은 파일을 만드는 일이라 바깥 명령을 하나도 부르지 않는다. 그 사실을 여기서 고정한다 —
+	// 라우팅이 무언가를 먼저 조립하기 시작하면 갓 설치한 머신에서 초기화조차 못 하게 된다.
 	workDirPath := t.TempDir()
 
 	command := exec.Command(buildKyuBinary(t), "init")
 	command.Dir = workDirPath
-	// PATH 를 비워 tmux 를 찾을 수 없게 만든다. 그래도 성공해야 백엔드를 거치지 않는다는 뜻이다.
+	// PATH 를 비워 아무 명령도 찾을 수 없게 만든다. 그래도 성공해야 한다.
 	command.Env = append(os.Environ(), "PATH=")
 
 	var stdout, stderr bytes.Buffer
@@ -252,7 +250,7 @@ func TestCloneRefusesArgumentsWithItsOwnUsageAndExitsWithCodeOne(t *testing.T) {
 	command.Dir = t.TempDir()
 	// 저장소를 뒤지더라도 사용자의 실제 설정 디렉토리를 건드리지 않게 홈을 옮긴다.
 	command.Env = append(os.Environ(),
-		"HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir(), searchPathWithoutTmux(t))
+		"HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir(), searchPathWithOnly(t))
 
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -273,13 +271,13 @@ func TestCloneRefusesArgumentsWithItsOwnUsageAndExitsWithCodeOne(t *testing.T) {
 }
 
 func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
-	// auth 는 저장해둔 토큰을 보고 지우는 일이라 tmux 와 무관하다. 라우팅이 다른 명령과 같은 길로
-	// 지나가면 tmux 없는 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
+	// auth 는 저장해둔 토큰을 보고 지우는 일이다. 라우팅이 다른 명령과 같은 길로 지나가면
+	// 갓 설치한 머신에서 자기 토큰 목록조차 볼 수 없게 된다.
 	configDirectoryPath := t.TempDir()
 
 	command := exec.Command(buildKyuBinary(t), "auth", "list")
 	command.Dir = t.TempDir()
-	// PATH 를 비워 tmux 도 security 도 secret-tool 도 찾을 수 없게 만든다.
+	// PATH 를 비워 security 도 secret-tool 도 찾을 수 없게 만든다.
 	command.Env = append(os.Environ(), "PATH=", "HOME="+configDirectoryPath, "XDG_CONFIG_HOME="+configDirectoryPath)
 
 	var stdout, stderr bytes.Buffer
@@ -296,11 +294,10 @@ func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
 }
 
 func TestSessionCommandAnswersOnAMachineWithoutTmux(t *testing.T) {
-	// 앱은 claude 를 자기 PTY 에서 직접 띄운다 — 이 명령이 세션 백엔드를 거치면 tmux 가 없는
-	// 머신에서 앱이 세션을 열지 못한다. GUI 에서 tmux 의존이 빠지는 것이 이 전환의 보상 중
-	// 하나이므로(설계 문서 5.7), 그 사실을 라우팅 자리에서 고정한다.
+	// 앱은 claude 를 자기 PTY 에서 직접 띄운다. 이 명령은 그 앞에서 "무엇을 띄울까" 에만 답하므로
+	// 바깥 명령을 하나도 부르지 않아야 하고, 그 사실을 라우팅 자리에서 고정한다(설계 문서 5.2).
 	//
-	// PATH 를 비워 실행한다. tmux 도 git 도 없는 상태이고, 그래도 답이 나와야 한다.
+	// PATH 를 비워 실행한다. git 도 없는 상태이고, 그래도 답이 나와야 한다.
 	workDirPath := t.TempDir()
 
 	command := exec.Command(buildKyuBinary(t), "session-command", "--json")
@@ -345,45 +342,12 @@ func TestSessionCommandAnswersOnAMachineWithoutTmux(t *testing.T) {
 	}
 }
 
-func TestUsageDoesNotAdvertiseTheHiddenSuperviseCommand(t *testing.T) {
-	// 감독을 띄우는 하위 명령은 사용자가 부를 것이 아니다 — 기동은 세션 생성이 알아서 한다.
-	// 사용법에 실리면 사용자가 그것을 직접 부르는 길이 생기고, 그 길에는 준비 파이프도
-	// 부모도 없다(설계 문서 5.1).
-	if strings.Contains(usageText, session.SuperviseCommandName) {
-		t.Errorf("사용법에 숨은 하위 명령 %s 가 실려 있습니다", session.SuperviseCommandName)
-	}
-}
-
-func TestSuperviseCommandIsRoutedToTheSupervisorInsteadOfBeingUnknown(t *testing.T) {
-	// 감독은 이 바이너리 자신을 다시 실행한 것이다. 라우팅이 없으면 세션 생성이 "알 수 없는
-	// 명령" 으로 끝나는데, 그 실패는 감독의 기록 파일 안에만 남아 찾기 어렵다.
-	command := exec.Command(buildKyuBinary(t), session.SuperviseCommandName)
-
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-
-	err := command.Run()
-
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("kyu %s 실행 결과 = %v, 종료 코드로 끝나기를 기대", session.SuperviseCommandName, err)
-	}
-	if strings.Contains(stderr.String(), "알 수 없는 명령") {
-		t.Errorf("stderr = %q, 라우팅이 이어지지 않았습니다", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "--name") {
-		t.Errorf("stderr = %q, 인자가 없다는 감독의 거절을 기대", stderr.String())
-	}
-}
-
-// searchPathWithoutTmux 는 tmux 만 빠진 PATH 를 만든다.
+// searchPathWithOnly 는 적어준 명령만 들어 있는 PATH 를 만든다.
 //
-// 다른 시험들처럼 PATH 를 통째로 비우면 tmux 와 함께 git 도 사라져서, "목록이 tmux 없이
-// 답하는가" 를 묻던 시험이 "git 을 찾을 수 없습니다" 로 끝난다. 그러면 무엇을 증명한 것인지
-// 알 수 없으므로, 필요한 명령만 심볼릭 링크로 모은 디렉토리 하나를 PATH 로 준다 —
-// tmux 가 없다는 것 하나만 실제 머신과 다른 환경이 된다.
-func searchPathWithoutTmux(t *testing.T, requiredCommands ...string) string {
+// PATH 를 통째로 비우면 필요한 것(git)까지 사라져서, 시험이 "git 을 찾을 수 없습니다" 로 끝난다.
+// 그러면 무엇을 증명한 것인지 알 수 없으므로, 필요한 명령만 심볼릭 링크로 모은 디렉토리 하나를
+// PATH 로 준다 — 나머지가 하나도 없다는 것이 이 환경이 말하는 사실이다.
+func searchPathWithOnly(t *testing.T, requiredCommands ...string) string {
 	t.Helper()
 
 	searchDirectoryPath := t.TempDir()
@@ -420,15 +384,15 @@ func initGitRepoForListing(t *testing.T, repoAbsolutePath string) {
 	}
 }
 
-func TestListAnswersOnAMachineWithoutTmux(t *testing.T) {
+func TestListAnswersWithNothingButGitOnThePath(t *testing.T) {
 	// 대시보드가 3 초마다 부르는 명령이다. 이 자리가 종료 코드 1 로 끝나면 앱은 목록을 통째로
-	// 잃는다. tmux 를 뺀 PATH 로 부르는 것은 엔진이 그것을 다시 요구하게 되는 날을 막기 위해서다.
+	// 잃는다. git 만 있는 PATH 로 부르는 것은 목록이 다른 무엇도 요구하게 되는 날을 막기 위해서다.
 	workDirPath := t.TempDir()
 	initGitRepoForListing(t, filepath.Join(workDirPath, "proj-a"))
 
 	command := exec.Command(buildKyuBinary(t), "list", "--json")
 	command.Dir = workDirPath
-	command.Env = append(os.Environ(), searchPathWithoutTmux(t, "git"))
+	command.Env = append(os.Environ(), searchPathWithOnly(t, "git"))
 
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -437,8 +401,8 @@ func TestListAnswersOnAMachineWithoutTmux(t *testing.T) {
 	if err := command.Run(); err != nil {
 		t.Fatalf("kyu list --json 실행 실패: %v (%s)", err, stderr.String())
 	}
-	if strings.Contains(stderr.String(), "tmux") {
-		t.Errorf("stderr = %q, 목록은 tmux 를 화제로 삼지 않아야 한다", stderr.String())
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, 목록은 할 말이 없으면 아무것도 쓰지 않아야 한다", stderr.String())
 	}
 
 	// 앱이 하는 일이 이것이다 — stdout 을 통째로 JSON 으로 읽는다.
