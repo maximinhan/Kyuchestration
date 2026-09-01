@@ -1,6 +1,9 @@
 package com.kyuchestration.desktop.terminal
 
 import com.jediterm.terminal.TtyConnector
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import kotlin.test.Test
@@ -327,6 +330,162 @@ class EmbeddedTerminalStateHolderTest {
         assertFalse(ended.resumeFailureSuspected)
     }
 
+    @Test
+    fun `세션을 보유하기 시작하면 기록에 남는다`() = runTest {
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(RecordingSessionTerminalOpener(), diagnosticLog)
+
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        assertEquals(
+            listOf<DiagnosticLogEntry>(DiagnosticLogEntry.SessionStarted("main", resumingConversation = false)),
+            diagnosticLog.recordedEntries,
+        )
+    }
+
+    @Test
+    fun `이어가기로 연 세션은 그 사실까지 기록에 남는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener().apply { resumedConversationId = RECORDED_CONVERSATION_ID }
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        // 대화 ID 자체는 남기지 않는다. 이어갔는지 여부가 뒤에 오는 종료를 읽는 근거이고,
+        // ID 는 그 판단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다.
+        assertEquals(
+            listOf<DiagnosticLogEntry>(DiagnosticLogEntry.SessionStarted("proj-a", resumingConversation = true)),
+            diagnosticLog.recordedEntries,
+        )
+    }
+
+    @Test
+    fun `진입에 실패하면 그 이유가 기록에 남는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener().apply {
+            respondWith { throw TerminalSessionFailure.KyuExecutableNotFound() }
+        }
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        val recorded = assertIs<DiagnosticLogEntry.SessionEntryFailed>(diagnosticLog.recordedEntries.single())
+        assertEquals("proj-a", recorded.targetLabel)
+        assertTrue(recorded.failureMessage.isNotBlank())
+    }
+
+    @Test
+    fun `사용자가 끝낸 세션은 기록에 남기지 않는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        holder.endSession()
+        runCurrent()
+
+        // 사용자가 시킨 일이라 진단할 것이 없다. 이것까지 남기면 기록이 정상적인 사용으로 찬다.
+        assertEquals(
+            listOf<DiagnosticLogEntry>(DiagnosticLogEntry.SessionStarted("main", resumingConversation = false)),
+            diagnosticLog.recordedEntries,
+        )
+    }
+
+    @Test
+    fun `스스로 잘 끝난 세션도 기록에 남기지 않는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        // 사용자가 세션 안에서 /exit 한 자리다. 진단할 것이 없다.
+        opener.lastSessionExit.complete(0)
+        runCurrent()
+
+        assertEquals(
+            listOf<DiagnosticLogEntry>(DiagnosticLogEntry.SessionStarted("main", resumingConversation = false)),
+            diagnosticLog.recordedEntries,
+        )
+    }
+
+    @Test
+    fun `0 이 아닌 코드로 끝난 세션은 대상과 종료 코드를 남긴다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        opener.lastSessionExit.complete(137)
+        runCurrent()
+
+        assertEquals(
+            DiagnosticLogEntry.SessionEndedUnexpectedly(
+                targetLabel = "proj-a",
+                exitCode = 137,
+                resumeFailureSuspected = false,
+            ),
+            diagnosticLog.recordedEntries.last(),
+        )
+    }
+
+    @Test
+    fun `이어가던 대화를 열지 못한 것으로 보이면 그 사실까지 남긴다`() = runTest {
+        val opener = RecordingSessionTerminalOpener().apply { resumedConversationId = RECORDED_CONVERSATION_ID }
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        opener.lastSessionExit.complete(1)
+        runCurrent()
+
+        assertEquals(
+            DiagnosticLogEntry.SessionEndedUnexpectedly(
+                targetLabel = "proj-a",
+                exitCode = 1,
+                resumeFailureSuspected = true,
+            ),
+            diagnosticLog.recordedEntries.last(),
+        )
+    }
+
+    /**
+     * 화면에 없는 세션이 죽어도 남는다.
+     *
+     * 이 갈래가 화면과 기록이 갈라지는 자리다. 화면은 보고 있는 세션만 고쳐 그리지만, 뒤에서
+     * 죽은 세션은 사용자가 그 카드로 돌아갈 때까지 아무 데도 드러나지 않는다 — 기록이 없으면
+     * 그 죽음은 영영 보이지 않는다.
+     */
+    @Test
+    fun `화면에 없는 세션이 죽어도 기록에는 남는다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(opener, diagnosticLog)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+        val backgroundSessionExit = opener.lastSessionExit
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-b"))
+        runCurrent()
+
+        backgroundSessionExit.complete(1)
+        runCurrent()
+
+        assertEquals(
+            DiagnosticLogEntry.SessionEndedUnexpectedly(
+                targetLabel = "proj-a",
+                exitCode = 1,
+                resumeFailureSuspected = false,
+            ),
+            diagnosticLog.recordedEntries.last(),
+        )
+    }
+
     /**
      * 카드를 그냥 누른 자리. 이 시험 대부분이 재는 것이 그 흐름이라 갈래를 매번 적지 않는다 —
      * 새로 시작을 재는 시험만 그것을 직접 적는다.
@@ -334,9 +493,13 @@ class EmbeddedTerminalStateHolderTest {
     private fun EmbeddedTerminalStateHolder.enterSessionContinuingConversation(target: SessionTarget) =
         enterSession(WORK_DIR_PATH, target, SessionConversationChoice.ContinueRecordedConversation)
 
-    private fun TestScope.stateHolder(opener: SessionTerminalOpener) = EmbeddedTerminalStateHolder(
+    private fun TestScope.stateHolder(
+        opener: SessionTerminalOpener,
+        diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
+    ) = EmbeddedTerminalStateHolder(
         sessionTerminalOpener = opener,
         coroutineScope = backgroundScope,
+        diagnosticLog = diagnosticLog,
         // 앱에서는 PTY 를 여는 동안 화면이 멎지 않도록 IO 디스패처로 나간다.
         sessionEntryDispatcher = StandardTestDispatcher(testScheduler),
     )
