@@ -9,6 +9,7 @@
 - 구현 확정 사항: 기본 명령은 `list` 가 아닌 원스텝 진입 — 인자 없는 `kyu` 는 초기화·메인 세션 생성·진입까지 한 번에 한다 (사용자 결정, PR 10)
 - 구현 확정 사항: 레포 클론 명령 `kyu clone` 추가 — 진입 플로우와 분리된 독립 명령이고, 인증은 사용자가 등록한 토큰 프로필만 쓴다 (머신의 `GITHUB_TOKEN`·`gh` 로그인을 읽지 않는다) (사용자 요구, PR 13)
 - 구현 확정 사항: GUI 의 세션 계층은 데스크톱 앱이 보유한다 — 앱은 `kyu attach` 도 tmux 도 거치지 않고 자기 PTY 에서 `claude` 를 띄우고, 원칙 5 는 그에 맞게 개정됐다 ([app-owned-sessions-design.md](app-owned-sessions-design.md), 사용자 결정, PR 41~44)
+- 구현 확정 사항 (2026-09-01, maximinhan 결정): **`kyu` 는 순수 엔진이 된다.** 세션을 만들고 붙고 죽이던 표면(`kyu start` · `kyu attach` · `kyu kill` · 인자 없는 진입)과 세션 계층(`internal/session`)이 은퇴했고, 대화형 `kyu clone` 도 함께 사라졌다. 그래서 아래 본문의 **원스텝 진입 · 세션 명령 · SessionBackend · tmux 위임에 대한 서술은 역사다** — 소급 수정하지 않고 그때의 근거를 그대로 남긴다 ([app-owned-sessions-design.md](app-owned-sessions-design.md) 6 절, PR 48)
 
 ---
 

@@ -76,16 +76,6 @@ jobs:
 
       # 아래 검사는 ci.yml 과 같은 것을 되풀이한다. 태그는 아무 커밋에나 붙일 수 있어서
       # "그 커밋에는 CI 가 이미 돌았다" 를 전제할 수 없다. 릴리스 관문은 스스로 다시 지나야 한다.
-      - name: tmux 설치
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tmux
-
-      # 세션 계층 테스트는 tmux 가 없으면 t.Skip 으로 넘어간다. 즉 설치가 조용히 실패하면
-      # tmux 를 한 줄도 검증하지 않은 채 릴리스가 나간다. 여기서 먼저 끊는다.
-      - name: tmux 설치 확인
-        run: tmux -V
-
       - name: go vet
         run: go vet ./...
 
@@ -128,9 +118,9 @@ jobs:
           # 아니라 여기서 드러나게 한다.
           if-no-files-found: error
 
-  # 리눅스 · WSL 용 설치 패키지. 윈도우 네이티브용 msi 는 만들지 않는다 — 앱은 화면일 뿐이고 실제
-  # 일은 엔진인 kyu 가 tmux 위에서 하는데, 윈도우 네이티브에는 그 tmux 가 없다(설계 문서 10 절
-  # 로드맵 v4). 윈도우 사용자는 WSL 안에서 이 deb 를 쓴다.
+  # 리눅스 · WSL 용 설치 패키지. 윈도우 네이티브용 msi 는 만들지 않는다 — PTY 를 여는 pty4j 가
+  # ConPTY 위에서 실제로 도는지 아무도 확인한 적이 없다(app-owned-sessions-design.md 부록 A).
+  # 윈도우 사용자는 WSL 안에서 이 deb 를 쓴다.
   desktop-deb:
     needs: resolve-version
     runs-on: ubuntu-latest

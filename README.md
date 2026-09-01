@@ -8,7 +8,7 @@
 
 - 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md)
 - 핵심 원칙: **프로세스는 격리, 지식은 공유**
-- 스택: Go — CLI 세션은 tmux 백엔드 위에서 돌고, 데스크톱 앱은 세션을 자기 PTY 로 직접 보유한다
+- 스택: Go — `kyu` 는 엔진이고, 세션을 열고 화면을 그리는 것은 데스크톱 앱이다
 - 터미널 대신 창으로 쓰려면: [데스크톱 앱](#데스크톱-앱)
 
 ## 이 도구가 하는 일
@@ -25,34 +25,27 @@ WorkDir-featureX/
 ```
 
 각 레포에서 세션을 따로 띄워야 그 레포의 `.mcp.json`·`CLAUDE.md`·에이전트 설정이 살아난다.
-`kyu` 는 그 세션들을 한 화면에서 띄우고, 보고, 오가게 한다.
+`kyu` 는 그 세션이 무엇을 실행해야 하는지 답하고, 워크디렉토리에 무엇이 있고 무엇이 남았는지를
+관찰해 알려준다. 세션을 실제로 열어 한 화면에 늘어놓는 것은 [데스크톱 앱](#데스크톱-앱)이다.
 
 ## 요구사항
 
 | 프로그램 | 쓰이는 곳 | 없으면 |
 |---|---|---|
 | git | 레포 발견 · 상태 판정 · `kyu clone` 의 클론 | 상태를 판정하지 못하고 클론도 못 함 |
-| claude CLI | 세션 안에서 실행되는 명령 | 세션은 뜨지만 바로 끝남 |
-| tmux | **CLI 세션을 만들고 붙고 죽일 때** — `kyu start` · `kyu attach` · `kyu kill` · 인자 없는 `kyu` | 그 명령들이 안내와 함께 종료. 나머지는 그대로 동작하고, `kyu list` · `kyu clone` 은 **"CLI 세션 없음" 을 기준으로 답한다** |
+| claude CLI | 세션 안에서 실행되는 명령 (엔진이 아니라 [앱](#데스크톱-앱)이 띄운다) | 앱이 세션을 열지 못함. 엔진의 명령은 전부 그대로 동작 |
 | Go | 소스에서 설치할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | 릴리스 바이너리를 받는다 (설치 방식 A) |
 
-macOS 와 Windows(WSL) 에서 쓴다. tmux 는 자동 설치하지 않는다 — `brew install tmux` 또는
-`sudo apt install tmux`.
+macOS 와 Windows(WSL) 에서 쓴다.
 
-**tmux 는 세션을 만들고 붙고 죽이는 일의 것이지 이 도구 전체의 전제가 아니다.** GitHub 에 묻는
-일(`kyu repos` · `kyu auth`)과 파일을 만드는 일(`kyu init`)과 앱이 무엇을 띄울지 묻는
-일(`kyu session-command`)은 물론, **무엇이 떠 있는지 묻기만 하는 일(`kyu list` · `kyu clone`)도
-tmux 를 보지 않는다.** 세션은 백엔드를 거쳐야만 생기므로, 백엔드가 없는 머신에 CLI 세션이 없다는
-것은 추측이 아니라 참인 답이다 — 그래서 그 자리는 실패가 아니라 "세션 없음" 으로 끝난다.
+**엔진이 부르는 바깥 명령은 `git` 하나다.** 세션을 만들고 붙고 죽이던 명령이 은퇴하면서
+`tmux` 의존이 함께 사라졌다 — 엔진 코드에서 그것을 부르는 자리가 하나도 남지 않았다
+([app-owned-sessions-design.md](app-owned-sessions-design.md) 6 절).
 
-**데스크톱 앱은 tmux 없는 머신에서 그대로 돈다.** 앱은 `kyu attach` 를 거치지 않고 자기 PTY 에서
-`claude` 를 직접 띄우고([app-owned-sessions-design.md](app-owned-sessions-design.md)), 앱이 부르는
-엔진 명령(`version` · `list` · `session-command` · `init` · `clone` · `repos` · `auth`)은 하나도
-세션 백엔드를 요구하지 않는다.
-
-**CLI 의 tmux 의존은 걷어낼 예정이다** — 세션마다 `kyu` 자신의 감독 프로세스를 하나 두는 설계가
-[session-supervisor-design.md](session-supervisor-design.md) 에 있다(1~3 단계 구현 완료, 3.5 단계
-앞에서 중단).
+`git` 조차 필요 없는 명령이 있다. `kyu init` 은 파일을 만들고, `kyu version` 은 자기 자신에 대해
+답하고, `kyu auth` 는 저장해둔 토큰을 다루고, `kyu session-command` 는 앱이 무엇을 띄울지 답한다 —
+넷 다 PATH 가 비어 있어도 동작한다. 릴리스 바이너리가 아무것도 갖추지 않은 새 머신에 먼저
+도착하는 것이 오히려 흔한 순서다.
 
 ## 설치
 
@@ -120,36 +113,29 @@ mv kyu ~/.local/bin/        # PATH 에 들어있는 아무 디렉토리
 
 ## 빠른 시작
 
+**세션을 여는 자리는 [데스크톱 앱](#데스크톱-앱)이다.** 앱을 설치하면 엔진이 함께 들어오고,
+워크디렉토리를 여는 것부터 레포 클론과 세션 진입까지 창 안에서 끝난다.
+
+엔진만 직접 쓰려면 이렇게 시작한다.
+
 ```sh
 mkdir -p ~/work/WorkDir-featureX && cd ~/work/WorkDir-featureX
-kyu clone   # GitHub 목록에서 화살표로 골라 클론 (손으로 git clone 해도 된다)
-kyu
+kyu init
+git clone <proj-a 주소> proj-a     # kyu clone --profile <이름> --repo <owner/name> 도 같은 일을 한다
+kyu list
 ```
 
-`kyu` 한 번이 세 가지를 순서대로 한다.
+`kyu init` 이 `.coord/plan.md` 를 만들고, `kyu list` 가 그 아래의 레포와 각 레포에 무엇이 남았는지를
+보여준다. 설정 파일에 레포 목록을 적을 필요는 없다 — 클론하면 곧바로 인식된다.
 
-1. `.coord/plan.md` 가 없으면 만든다 (`kyu init` 과 같은 것)
-2. 메인 세션이 없으면 워크디렉토리 최상위에서 띄운다 (`kyu start` 와 같은 것 — 클론해둔 레포가
-   `--add-dir` 로 붙는다)
-3. 그 메인 세션에 들어간다 (`kyu attach main` 과 같은 것)
-
-**빠져나올 때는 `Ctrl-b d`** — `Ctrl` 과 `b` 를 함께 누르고 뗀 다음 `d` 를 누른다. 세션은 살아있고
-터미널만 빠져나온다. 다시 `kyu` 를 치면 같은 세션으로 돌아온다. 몇 번을 쳐도 결과가 같다.
-
-레포를 클론하기 전에 `kyu` 를 쳐도 된다 — 무엇을 클론할지 정하는 것부터가 메인 세션이 할 일이다.
-다만 `--add-dir` 목록은 세션을 만드는 순간 굳으므로, 세션 안에서 클론한 레포까지 붙이려면
-`kyu kill main` 뒤에 `kyu` 를 다시 실행한다.
-
-> 홈 디렉토리(`$HOME`)와 파일시스템 루트에서는 자동 초기화를 거절한다. `cd` 를 한 번 빠뜨린
-> 실행이 홈 전체를 워크디렉토리로 만들면 홈 아래의 모든 레포가 메인 세션에 붙고 `.coord/plan.md`
-> 가 홈에 남는다. 정말 그 자리를 워크디렉토리로 쓰려면 `kyu init` 을 직접 실행한다.
-
-지금 상태만 보고 싶을 때는 `kyu list` 다.
+**인자 없는 `kyu` 는 사용법으로 끝난다.** 초기화하고 세션을 띄우고 들어가던 자리였는데, 그 일은
+이제 앱이 한다. 아무 디렉토리에서 친 `kyu` 가 그 디렉토리를 훑어 목록을 내면 "여기가
+워크디렉토리다" 라고 답한 셈이 되는데, 그것을 정하는 것은 앱이거나 `kyu init` 이다.
 
 ## 처음부터 끝까지 한 번
 
-레포 두 개를 함께 고치는 작업을 예로 든다. 위의 `kyu` 한 번이 하는 일을 단계로 나누고, 레포마다
-세션을 따로 띄우는 데까지 이어간다.
+레포 두 개를 함께 고치는 작업을 예로 든다. 여기서는 엔진만 쓴다 — 같은 자리를 창으로 지나는
+길은 [데스크톱 앱](#데스크톱-앱)에 있다.
 
 **1. 워크디렉토리를 만든다**
 
@@ -166,10 +152,11 @@ cd WorkDir-featureX
 **2. 레포를 클론한다**
 
 ```sh
-kyu clone
+kyu clone --profile 개인 --repo maximinhan/proj-a --repo maximinhan/proj-b
 ```
 
-GitHub 목록에서 화살표로 고른다(아래 [`kyu clone`](#kyu-clone)). 손으로 해도 결과는 같다.
+무엇을 클론할지는 부르는 쪽이 적어 보낸다(아래 [`kyu clone`](#kyu-clone)). 어떤 레포가 있는지
+모르면 [`kyu repos`](#kyu-repos-ownerslist) 에게 먼저 묻는다. 손으로 해도 결과는 같다.
 
 ```sh
 git clone <proj-a 주소> proj-a
@@ -185,36 +172,22 @@ kyu list
 ```
 
 ```
-WorkDir: WorkDir-featureX   (2 repos, 0 sessions)
+WorkDir: WorkDir-featureX   (2 repos)
 
-  ○  proj-a  IDLE
-  ○  proj-b  IDLE
-  ○  main    IDLE
-
-kyu attach <repo> 로 진입
+  proj-a  IDLE
+  proj-b  IDLE
 ```
 
-**4. 레포 세션을 띄운다**
+**4. 세션을 연다**
+
+세션을 여는 것은 앱이다. 앱은 엔진에게 무엇을 띄울지 묻고([`kyu session-command`](#kyu-session-command-repo)),
+받은 명령을 자기 PTY 에서 실행한다. 터미널에서 그 답을 직접 확인할 수도 있다.
 
 ```sh
-kyu start proj-a
+kyu session-command proj-a --json
 ```
 
-`proj-a` 디렉토리에서 세션이 뜬다. 그 레포의 MCP 설정·지침·에이전트가 그대로 로드된다.
-
-**5. 세션에 들어간다**
-
-```sh
-kyu attach proj-a
-```
-
-**빠져나올 때는 `Ctrl-b d`** — `Ctrl` 과 `b` 를 함께 누르고 뗀 다음 `d` 를 누른다.
-세션은 살아있고 터미널만 빠져나온다. tmux 에서 알아야 할 것은 이 키 하나뿐이다.
-
-> `Ctrl-b d` 대신 창을 닫아도 세션은 살아있다. 다시 `kyu attach proj-a` 로 들어가면 된다.
-> 세션을 진짜로 끝내려면 `kyu kill` 을 쓴다.
-
-**6. 계획을 적는다**
+**5. 계획을 적는다**
 
 `.coord/plan.md` 를 열어 frontmatter 의 예시 주석을 풀고 내용을 바꿔 쓴다.
 
@@ -238,32 +211,18 @@ tasks:
 이제 `kyu list` 가 작업까지 함께 보여준다.
 
 ```
-WorkDir: WorkDir-featureX   (2 repos, 1 session)
+WorkDir: WorkDir-featureX   (2 repos)
 
-  ●  proj-a  RUNNING  [commons-event] done
-  ○  proj-b  DIRTY    [publish] doing
-  ○  main    IDLE
-
-kyu attach <repo> 로 진입
-```
-
-**7. 정리한다**
-
-```sh
-kyu kill --all
+  proj-a  IDLE   [commons-event] done
+  proj-b  DIRTY  [publish] doing
 ```
 
 ## 명령
 
 ```
-kyu                    이 디렉토리에서 작업 시작 — 초기화·메인 세션 생성·진입까지 한 번에
-
 kyu init [name]        워크디렉토리 초기화 (.coord/plan.md 생성)
-kyu clone [옵션]       GitHub 레포 목록에서 화살표로 골라 이 디렉토리에 클론
+kyu clone [옵션]       적어 보낸 GitHub 레포를 이 디렉토리에 클론 — 기계용
 kyu list [path]        레포 목록 + 상태
-kyu start [repo]       세션 시작. 인자 없으면 main — CLI 세션이라 tmux 가 필요하다
-kyu attach <repo>      세션 진입. main 도 가능 — CLI 세션 전용
-kyu kill [repo|--all]  세션 종료 — CLI 세션 전용
 kyu repos <owners|list>
                        GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
 kyu session-command [repo]
@@ -272,31 +231,27 @@ kyu auth <add|list|remove>
                        저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
 kyu version            이 바이너리의 버전
 
-옵션 (kyu, kyu start, kyu session-command):
+옵션 (kyu session-command):
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (메인 세션 전용)
-
-옵션 (kyu session-command):
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
 
 옵션 (kyu clone):
-  --profile <이름>       어느 토큰으로 붙을지 — 묻지 않는 클론에 필요
-  --repo <owner/name>    묻지 않고 클론할 레포. 여러 번 적을 수 있다
+  --profile <이름>       어느 토큰으로 붙을지 (필수)
+  --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
 옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
-환경변수:
-  KYU_SESSION_BACKEND    세션 백엔드 — tmux(기본) | supervisor(진행 중)
-
-start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유하는 세션은 앱의 PTY 안에 있어
-이 명령들에 보이지 않고, 반대로 앱도 CLI 세션에 붙지 못한다 — app-owned-sessions-design.md.
+kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크톱 앱의 몫이다. 인자 없이 부르면
+이 사용법이 나온다.
 ```
 
 ### 기계용 표면
 
-**이 CLI 는 데스크톱 GUI 와 스크립트의 엔진이기도 하다.** 사람이 지나는 대화형 흐름은 그대로 두고,
-같은 일을 물음 없이 시키고 결과를 문서 하나로 돌려받는 길을 명령마다 따로 열어뒀다.
+**이 CLI 는 데스크톱 GUI 와 스크립트의 엔진이다.** 물음 없이 일을 시키고 결과를 문서 하나로
+돌려받는 것이 명령 대부분의 유일한 사용법이다. 사람이 읽는 출력이 남아 있는 자리는 `kyu list` ·
+`kyu auth list` 처럼 읽기만 하는 곳뿐이다.
 
 | 명령 | 하는 일 | 문서 |
 |---|---|---|
@@ -304,7 +259,7 @@ start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유�
 | `kyu auth list --json` | 등록된 프로필과 저장 위치 | `{schemaVersion, profiles[]}` |
 | `kyu repos owners --profile <이름> --json` | 고를 수 있는 계정 (개인 + 조직) | `{schemaVersion, owners[]}` |
 | `kyu repos list --profile <이름> --owner <로그인> --json` | 그 계정의 레포 | `{schemaVersion, repos[]}` |
-| `kyu clone --profile <이름> --repo <owner/name> --json` | 묻지 않고 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
+| `kyu clone --profile <이름> --repo <owner/name> --json` | 적어 보낸 레포를 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
 
@@ -319,20 +274,6 @@ start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유�
 - **비어 있는 목록은 `null` 이 아니라 `[]` 다.** "없음" 을 두 모양으로 다루게 하지 않는다.
 - **토큰 값은 어느 문서에도 없다.** 이 출력은 로그와 파일에 그대로 남기 쉽다.
 
-### `kyu`
-
-인자 없이 실행하면 초기화 → 메인 세션 생성 → 진입을 한 번에 한다. 각 걸음은 이미 있는 것이면
-건너뛴다 — 계획 파일이 있으면 만들지 않고, 세션이 떠 있으면 만들지 않고 붙기만 한다.
-
-`kyu --bypass-permissions` 는 메인 세션의 claude 를 권한 확인 없이 띄운다
-([아래](#--bypass-permissions)). 이미 세션이 떠 있으면 그 세션에는 적용되지 않는다 —
-세션이 실행할 명령은 만드는 순간 정해지기 때문이다.
-
-이미 세션 안에서 실행하면 거절한다. `Ctrl-b d` 로 빠져나온 뒤 다시 실행한다.
-
-홈 디렉토리와 파일시스템 루트에서는 자동 초기화를 거절한다(위 [빠른 시작](#빠른-시작) 참고).
-이미 `kyu init` 으로 초기화해둔 자리라면 홈이라도 그대로 진입한다 — 거절하는 것은 자동 초기화뿐이다.
-
 ### `kyu init [name]`
 
 `.coord/plan.md` 템플릿을 만든다. 이름을 주면 그 디렉토리를 만들어(이미 있으면 그대로 쓴다)
@@ -341,109 +282,31 @@ start · attach · kill 은 CLI 세션의 것이다. 데스크톱 앱이 보유�
 계획 파일이 이미 있으면 아무것도 하지 않고 종료 코드 1 로 끝난다. 새로 만들려면 그 파일을
 직접 지우거나 옮긴다.
 
-파일을 만드는 일이라 **tmux 없이 동작한다.** 같은 이유로 `kyu version` · `kyu auth` ·
-`kyu repos` · `kyu session-command` 도 세션 백엔드를 거치지 않고, `kyu list` · `kyu clone` 은
-백엔드를 세우지 못하면 "CLI 세션 없음" 을 답으로 받아 계속 간다([요구사항](#요구사항)).
+파일을 만드는 일이라 **바깥 명령을 하나도 부르지 않는다.** `git` 조차 필요 없다 —
+`kyu version` · `kyu auth` · `kyu session-command` 도 마찬가지다([요구사항](#요구사항)).
 
 ### `kyu clone`
-
-```sh
-kyu clone
-```
-
-GitHub 레포 목록에서 화살표로 골라 **현재 디렉토리에** 클론한다. 워크디렉토리는 필요한 레포를
-클론해서 쓰는 자리인데(설계 문서 1.1) 그 클론만은 손으로 하고 있었다 — 주소를 하나씩 조립하는
-일이라 오타가 나고, "이 계정에 어떤 레포가 있더라" 를 GitHub 화면에서 확인하고 돌아와야 한다.
-
-진입 플로우(`kyu`)에 끼워 넣지 않았다. 클론은 워크디렉토리를 만들 때 한 번 하는 일이고, 매번
-진입할 때마다 GitHub 에 붙어 목록을 묻는 것은 원한 적 없는 왕복이다.
-
-흐름은 네 걸음이다.
-
-1. **토큰 프로필을 고른다** — 등록된 것이 없으면 그 자리에서 등록한다 ([아래](#kyu-clone-의-토큰))
-2. **소유자를 고른다** — 개인 계정과 소속 조직 중에서. 조직이 없으면 묻지 않는다
-3. **목록에서 고른다** — 화살표로 옮기고 스페이스로 켜고 엔터로 확정한다 (키는 [아래 표](#kyu-clone-의-키))
-4. **클론한다** — 하나가 실패해도 나머지는 계속하고, 마지막에 실패한 이름을 모아 알린다
-
-```
- maximinhan 의 레포 28 개 — 최근 갱신 순
-
-❯ [x] Kyuchestration     private  2026-08-27
-  [ ] my-bit                      2026-08-26  (이미 있음)
-  [x] photo-identify              2026-08-25
-  [ ] proj-alpha         private  2026-08-24
-  ...
-
-  ••
-
-  ↑/k 위 • ↓/j 아래 • / 검색 • space 선택 • enter 클론 • q 취소 • ? 더 보기
-```
-
-목록 순서는 **github.com 의 repositories 탭과 같다**(최근 갱신 순). 사용자가 "어떤 레포가
-있더라" 를 확인하는 곳이 그 화면이라, 거기서 위에 있던 레포가 여기서도 위에 있어야 목록을
-처음부터 다시 훑지 않는다.
-
-한 화면에 담기는 만큼만 보여주고 나머지는 쪽으로 넘긴다. 아래의 `••` 이 지금 몇 쪽인지다.
-
-#### `kyu clone` 의 키
-
-| 키 | 하는 일 |
-|---|---|
-| `↑` `↓` / `k` `j` | 커서를 위아래로 옮긴다 |
-| `←` `→` / `h` `l` | 이전 쪽 · 다음 쪽 |
-| `g` / `G` | 목록의 처음 · 끝 |
-| `space` | 커서가 있는 레포를 골랐다 껐다 한다 (`[x]` / `[ ]`) |
-| `enter` | 확정하고 클론한다. **고른 것이 없으면 커서가 있는 하나만** |
-| `/` | 목록 안에서 이름으로 검색. 치는 대로 좁혀진다 |
-| `esc` | 검색이 걸려 있으면 그 검색을 푼다. 아니면 취소하고 나간다 |
-| `q` | 취소하고 나간다 |
-| `?` | 도움말을 펼친다 |
-
-검색 중에는 `space` · `q` · `enter` 가 그대로 검색어로 들어간다. 그때의 스페이스는 검색어의
-공백이고 `q` 는 레포 이름의 글자이며 엔터는 검색어 확정이다 — 클론까지 가려면 검색어를 확정한
-뒤에 엔터를 한 번 더 누른다.
-
-같은 이름의 디렉토리가 이미 있으면 그 줄이 흐려지고 `(이미 있음)` 이 붙는다. 골라도 건너뛴다 —
-`git clone` 은 그 자리에서 실패하는데, 그 실패를 넘기는 대신 목록에서 미리 알린다.
-
-클론이 끝나면 **이미 떠 있는 메인 세션에는 새 레포가 붙지 않는다**고 알린다. 세션의 `--add-dir`
-목록은 만드는 순간 굳기 때문이다 — `kyu kill main` 뒤에 `kyu` 를 다시 실행하면 반영된다.
-
-목록을 보고 그만두는 것은 실패가 아니다. `q` 나 `esc` 로 나가면 종료 코드 0 으로 끝난다.
-
-#### 터미널이 아닐 때
-
-입력이나 출력이 터미널이 아니면(파이프·스크립트) 이 화면을 그리지 않고 **번호를 묻는다**.
-화면을 그리려면 커서를 옮기는 제어 문자를 내보내고 키를 한 글자씩 받아야 하는데, 파이프에는
-그럴 상대가 없고 그 제어 문자는 기록에 그대로 섞인다.
-
-```
-maximinhan 의 레포 3 개 — 최근 갱신 순
-
-  1)  Kyuchestration  private  2026-08-27  (이미 있음)
-  2)  proj-a                   2026-08-20
-  3)  proj-b          private  2026-08-11
-
-클론할 레포 (1,3,5-8 / 빈 줄이면 취소): 2,3
-
-  proj-a 클론 완료
-  proj-b 클론 완료
-
-클론 2 개
-```
-
-번호는 `1,3,5-8` 처럼 쉼표와 범위를 섞어 적는다. 빈 줄이면 취소다.
-
-#### 묻지 않는 `kyu clone`
-
-`--repo` 로 무엇을 클론할지 적어 보내면 아무것도 묻지 않는다. 데스크톱 앱이 자기 화면에서 이미
-고른 레포를 건네는 자리이고, 스크립트로 워크디렉토리를 한 번에 채울 때도 쓴다.
 
 ```sh
 kyu clone --profile 개인 \
           --repo maximinhan/proj-a \
           --repo maximinhan/proj-b \
           --json
+```
+
+**무엇을 클론할지 적어 보내면 그대로 현재 디렉토리에 클론한다.** 워크디렉토리는 필요한 레포를
+클론해서 쓰는 자리인데(설계 문서 1.1) 그 클론만은 손으로 하고 있었다 — 주소를 하나씩 조립하는
+일이라 오타가 나고, 무엇보다 "이 계정에 어떤 레포가 있더라" 를 GitHub 화면에서 확인하고 돌아와야 한다.
+
+**고르는 화면은 여기 없다.** 목록을 화살표로 훑어 고르던 화면이 있었지만, 그 일은 이제
+[데스크톱 앱](#레포-클론)의 클론 다이얼로그가 한다. 엔진에게는 물어볼 상대가 없으므로 후보를
+답하는 자리와 고른 것을 받아 클론하는 자리를 갈랐다 — 앞쪽이 [`kyu repos`](#kyu-repos-ownerslist),
+뒤쪽이 이 명령이다.
+
+`--repo` 없이 부르면 목록으로 데려가지 않고 그 사실을 알리며 거절한다.
+
+```
+clone 은 무엇을 클론할지 알아야 합니다 — --repo <owner/name> (고를 후보는 kyu repos 가 답합니다)
 ```
 
 ```json
@@ -453,12 +316,9 @@ kyu clone --profile 개인 \
     { "repo": "maximinhan/proj-a", "status": "cloned",  "message": "" },
     { "repo": "maximinhan/proj-b", "status": "skipped", "message": "같은 이름의 디렉토리가 이미 있습니다" }
   ],
-  "mainSessionRestartNeeded": true
+  "mainSessionRestartNeeded": false
 }
 ```
-
-클론이 실제로 하는 일은 대화형 흐름과 **같은 코드**다 — 일회성 credential helper, 같은 이름이
-이미 있으면 건너뛰기, 하나가 실패해도 나머지를 계속 시도하기. 나눠 갖지 않는 것은 대화뿐이다.
 
 | 필드 | 뜻 |
 |---|---|
@@ -466,17 +326,20 @@ kyu clone --profile 개인 \
 | `results[].repo` | 적어 보낸 `owner/name` 그대로. 앱이 자기가 보낸 줄과 결과를 맞추는 열쇠다 |
 | `results[].status` | `cloned` · `skipped` · `failed` |
 | `results[].message` | 왜 그렇게 끝났는지. 클론된 레포에서는 빈 문자열 |
-| `mainSessionRestartNeeded` | 떠 있는 메인 세션이 새 레포를 보지 못하는지. 사람용 모드에서 stderr 로 나가던 안내가 이 필드로 들어온다 |
+| `mainSessionRestartNeeded` | **늘 `false` 다.** 떠 있는 메인 세션이 새 레포를 보지 못하는지를 답하던 자리인데, 엔진에는 그 세션을 물을 상대가 없어졌다. 읽는 쪽이 이 이름을 필수로 알고 있어 필드는 남긴다 |
+
+같은 이름의 디렉토리가 이미 있으면 `skipped` 다 — `git clone` 은 그 자리에서 실패하는데, 그
+실패를 그대로 넘기는 대신 이유를 붙여 알린다. 하나가 실패해도 나머지는 계속 시도한다: 실패의
+흔한 이유(그 레포에 권한이 없다)는 다른 레포와 상관이 없다.
 
 `--repo` 는 **`owner/name` 꼴이어야 한다.** 이름만 적은 것을 개인 계정으로 대신 채워주지 않는다 —
 같은 이름의 조직 레포를 적었다고 믿는 사람이 엉뚱한 레포를 받는다. 목록에 없는 이름은 조용히
 건너뛰지 않고 `failed` 로 돌려준다. 오타는 흔한데, 건너뛰면 앱은 클론했다고 믿고 다음 걸음으로 간다.
 
-`--json` 은 출력 형태만 정한다. `--repo` 를 적은 실행은 사람이 부르든 앱이 부르든 묻지 않고,
-`--json` 없이 부르면 대화형 흐름과 같은 사람용 줄이 나온다. `--repo` 없이 부르면 지금까지와
-똑같이 목록에서 고른다. 하나라도 실패하면 종료 코드는 1 이다.
+`--json` 은 출력 형태만 정한다. 없이 부르면 같은 일을 하고 사람이 읽는 줄이 나온다.
+하나라도 실패하면 종료 코드는 1 이다.
 
-#### `kyu clone` 의 토큰
+#### 클론에 쓰는 토큰
 
 **이 토큰은 이 저장소가 아니라 여러분의 레포에 접근하기 위한 것이다.** Kyuchestration 은 공개라
 [설치](#설치)에 인증이 필요 없다. 여기서 묻는 토큰은 워크디렉토리에 클론할 여러분의 레포 —
@@ -484,14 +347,13 @@ kyu clone --profile 개인 \
 
 **머신에 굴러다니는 인증을 읽지 않는다.** `GITHUB_TOKEN` 환경변수도, `gh` 의 로그인도 쓰지 않는다.
 그런 것을 집어 쓰면 회사 토큰이 깔린 머신에서 개인 레포를 클론하려던 사람이 엉뚱한 계정의 목록을
-보게 되고, 무엇으로 인증했는지 화면에서 확인할 방법도 없다. 쓰는 것은 직접 등록한 토큰뿐이고,
-어느 프로필로 붙었는지는 매번 화면에 찍힌다.
+보게 되고, 무엇으로 인증했는지 확인할 방법도 없다. 쓰는 것은 `--profile` 로 직접 고른 토큰뿐이다.
 
-처음 실행하면 그 자리에서 등록을 물어본다. 토큰은 저장하기 전에 GitHub 에 한 번 확인하고,
-거절당하면 저장하지 않고 다시 묻는다.
+토큰을 등록하는 자리는 [`kyu auth add`](#kyu-auth-add-이름) 하나다. 저장하기 전에 GitHub 에
+한 번 확인하고, 거절당하면 아무것도 저장하지 않는다.
 
 ```
-프로필 이름 (예: 개인, 회사): 개인
+$ printf %s "$GITHUB_TOKEN" | kyu auth add 개인
 GitHub personal access token (입력은 보이지 않습니다):
 토큰 확인 완료 — maximinhan 계정입니다.
 토큰을 저장했습니다: 개인 (macOS 키체인)
@@ -539,40 +401,30 @@ git -c credential.helper= \
 
 ### `kyu list [path]`
 
-경로를 주면 그 워크디렉토리를 본다. 인자 없는 `kyu` 는 목록이 아니라 진입이므로, 목록은
-`kyu list` 로 명시해서 본다.
+경로를 주면 그 워크디렉토리를 본다. 인자 없이 부르면 현재 디렉토리다.
 
 ```
-WorkDir: WorkDir-featureX   (3 repos, 2 sessions)
+WorkDir: WorkDir-featureX   (3 repos)
 
-  ●  proj-a  RUNNING  [commons-schema] doing (done 1/2)
-  ○  proj-b  DIRTY    [publish] ready
-  ○  proj-c  IDLE     [consume] blocked ← needs commons-schema
-  ●  main    RUNNING
-
-kyu attach <repo> 로 진입
+  proj-a  AHEAD  [commons-schema] doing (done 1/2)
+  proj-b  DIRTY  [publish] ready
+  proj-c  IDLE   [consume] blocked ← needs commons-schema
 ```
 
-왼쪽 동그라미는 세션 생존이다. `●` 는 세션이 떠 있고 `○` 는 없다.
+**상태는 git 하나로 정해진다.** 세션 생존을 먼저 보던 자리가 있었지만, 엔진이 세션을 만들지도
+세지도 않게 되면서 그 물음에 답할 근거가 없어졌다. 값을 캐시하지 않고 매 조회마다 다시 계산한다 —
+사용자가 터미널에서 직접 커밋한 변화를 도구가 모르면 "관찰해서 얻는다" 가 "기억해둔 것을 말한다"
+로 바뀐다.
 
-상태는 도구가 세션 백엔드(tmux)와 git 에게 물어 매번 다시 계산한다. 세션이 자기 상태를 보고하지
-않는다.
-
-**세션 백엔드가 없는 머신에서도 답한다.** tmux 가 없으면 CLI 세션도 있을 수 없으므로, 목록은 그
-사실을 실패가 아니라 답으로 낸다 — 모든 행이 세션 없음(`○`)을 기준으로 판정된다. 대시보드가
-3 초마다 부르는 것이 이 명령이라, 여기가 서면 앱이 목록을 통째로 잃는다
-([app-owned-sessions-design.md](app-owned-sessions-design.md) 5.7 · 8 절 5 번).
-
-**데스크톱 앱이 보유한 세션은 여기 보이지 않는다.** 앱 세션은 tmux 세션도 감독 세션도 아니라
-엔진이 그것을 셀 수단이 없다 — 앱에서 작업 중인 레포가 이 목록에는 `DIRTY` 로 나온다
-([임베디드 터미널](#임베디드-터미널)).
+**세션은 여기 보이지 않는다.** 세션은 앱의 PTY 안에 있고 앱만 그것을 안다 — 앱에서 작업 중인
+레포도 이 목록에는 `DIRTY` 로 나온다([임베디드 터미널](#임베디드-터미널)). 값 하나가 가려지지
+않는다는 것이 얻은 쪽이다: 예전에는 세션이 떠 있으면 `RUNNING` 이 git 상태를 덮었다.
 
 | 상태 | 뜻 |
 |---|---|
-| `RUNNING` | 세션이 살아있다 |
-| `DIRTY` | 세션 없음 + 커밋하지 않은 변경이 있다 |
-| `AHEAD` | 세션 없음 + 워킹 트리는 깨끗한데 푸시하지 않은 커밋이 있다 |
-| `IDLE` | 세션도 없고 넘길 것도 없다 |
+| `DIRTY` | 커밋하지 않은 변경이 있다 |
+| `AHEAD` | 워킹 트리는 깨끗한데 푸시하지 않은 커밋이 있다 |
+| `IDLE` | 넘길 것이 남지 않았다 |
 
 오른쪽 칸은 `.coord/plan.md` 에 적어둔 작업이다. 한 레포에 작업이 여럿이면 **지금 볼 작업**
 하나만 보여준다 — `doing` → `ready` → `blocked` 순으로 고르고, 같은 상태면 계획에 먼저 적힌
@@ -610,10 +462,11 @@ kyu list ~/work/WorkDir-featureX --json
         "blockedBy": ["commons-schema"]
       },
       "doneTaskCount": 0,
-      "totalTaskCount": 1
+      "totalTaskCount": 1,
+      "hasRecordedConversation": false
     }
   ],
-  "mainSession": { "alive": true },
+  "mainSession": { "alive": false, "hasRecordedConversation": false },
   "planWarnings": []
 }
 ```
@@ -624,25 +477,26 @@ kyu list ~/work/WorkDir-featureX --json
 
 | 필드 | 뜻 |
 |---|---|
-| `schemaVersion` | 이 문서의 판. 필드가 늘어도 오르지 않고, 필드를 빼거나 뜻을 바꿀 때만 오른다 |
+| `schemaVersion` | 이 문서의 판. 필드가 늘어도 오르지 않고, 필드를 빼거나 뜻을 바꿀 때만 오른다. `RUNNING` 이 사라지고 `alive` 가 고정된 것은 값의 변화라 판을 올리지 않았다 |
 | `workDir` | 워크디렉토리의 `name` 과 `absolutePath` |
 | `repos[]` | 워크디렉토리 바로 아래의 레포, 이름순. 메인 세션은 여기 없다 |
-| `repos[].state` | `RUNNING` · `DIRTY` · `AHEAD` · `IDLE` (위 표와 같은 어휘) |
+| `repos[].state` | `DIRTY` · `AHEAD` · `IDLE` (위 표와 같은 어휘). `RUNNING` 은 세션을 보던 시절의 값이라 더는 나오지 않는다 |
 | `repos[].task` | 계획에서 고른 **지금 볼 작업**. 고를 것이 없으면 `null`. 고르는 규칙은 사람용 목록과 같다 |
 | `repos[].task.blockedBy` | 아직 끝나지 않은 선행의 id. `blocked` 가 아니면 빈 배열 |
 | `repos[].doneTaskCount`, `totalTaskCount` | 그 레포 작업의 진척. 표의 `(done 1/2)` 와 같은 사실 |
-| `mainSession.alive` | 메인 세션이 떠 있는지 |
+| `repos[].hasRecordedConversation` | 이 레포의 세션이 이어갈 대화가 적혀 있는지 (`state` 와 다른 축의 사실이다) |
+| `mainSession.alive` | **늘 `false` 다.** 엔진이 세션을 세지 않게 된 뒤로 참을 답할 근거가 없다. 읽는 쪽이 이 이름을 필수로 알고 있어 필드는 남긴다 |
+| `mainSession.hasRecordedConversation` | 메인 세션이 이어갈 대화가 적혀 있는지 |
 | `planWarnings[]` | 계획을 그대로 쓰지 못한 이유. 없으면 빈 배열 |
 
 ### `kyu repos <owners|list>`
 
 **GitHub 에 무엇이 있는지만 묻고 아무것도 바꾸지 않는다.** `kyu clone` 이 대화 안에서 하던 두
-걸음 — 어느 계정의 레포를 볼까, 그 계정에 무엇이 있나 — 을 밖으로 꺼낸 것이다. GUI 는 그 두
-걸음을 자기 화면으로 그려야 하는데, 대화형 흐름은 답을 표로만 내보내므로 그 표를 되파싱하는
-수밖에 없었다.
+걸음 — 어느 계정의 레포를 볼까, 그 계정에 무엇이 있나 — 을 밖으로 꺼낸 것이다. 앱은 그 두
+걸음을 자기 화면으로 그리고, 사용자가 고른 이름을 `kyu clone --repo` 에 그대로 넘긴다.
 
 이름이 `kyu list` 와 겹쳐 보이지만 **보는 곳이 다르다** — `kyu list` 는 이 머신의 워크디렉토리를
-훑고, `kyu repos` 는 GitHub 에 묻는다. 그래서 이 명령에는 워크디렉토리도 `tmux` 도 필요 없다.
+훑고, `kyu repos` 는 GitHub 에 묻는다. 그래서 이 명령에는 워크디렉토리가 필요 없다.
 
 ```sh
 kyu repos owners --profile 개인 --json
@@ -675,7 +529,7 @@ kyu repos list --profile 개인 --owner maximinhan --json
 
 | 필드 | 뜻 |
 |---|---|
-| `owners[]` | 개인 계정이 늘 첫 자리, 뒤는 소속 조직. 대화형 `kyu clone` 이 번호를 매겨 보여주는 그 순서다 |
+| `owners[]` | 개인 계정이 늘 첫 자리, 뒤는 소속 조직 |
 | `owners[].kind` | `user` 또는 `org`. 참·거짓이 아니라 낱말이라 종류가 셋이 되어도 늘릴 수 있다 |
 | `repos[]` | github.com 의 repositories 탭과 같은 최근 갱신 순. 페이지네이션도 같다 |
 | `repos[].fullName` | `owner/name`. `kyu clone --repo` 에 그대로 넣는 값이다 |
@@ -687,58 +541,74 @@ GitHub 에 다시 묻지 않고 이름 하나로 정한다 — 개인 레포 경
 늘고, fine-grained 토큰처럼 조직 목록에 권한이 없는 경우에는 이름을 정확히 아는 조직까지 거절하게 된다.
 
 이 토큰으로 조직 목록을 볼 수 없으면(fine-grained 403) `owners` 에는 개인 계정만 남고, 그 사실은
-**stderr 로** 알린다. 대화형 `kyu clone` 이 같은 자리에서 지키는 규칙과 같은 코드다.
+**stderr 로** 알린다. 403 을 통과시키는 규칙이 이 함수 안에만 있어, 같은 토큰이 어느 물음에서는
+통과하고 어느 물음에서는 막히는 일이 없다.
 
-이 명령은 **`--json` 으로만 답한다.** 사람이 레포를 골라 클론하는 화면은 이미 `kyu clone` 에 있고,
-같은 일을 하는 화면을 하나 더 만들면 둘이 어긋나기 시작한다.
+이 명령은 **`--json` 으로만 답한다.** 답을 받는 쪽이 사람이 아니라 앱이거나 스크립트다 —
+여기서 얻은 `fullName` 을 그대로 `kyu clone --repo` 에 넘긴다.
 
-### `kyu start [repo]`
+### `kyu session-command [repo]`
 
 ```sh
-kyu start proj-a                       # proj-a 디렉토리에서 세션을 띄운다
-kyu start                              # 워크디렉토리 최상위에서 메인 세션을 띄운다
-kyu start --repo-claude-md             # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
-kyu start proj-a --bypass-permissions  # 권한 확인 없이 띄운다 (아래 경고를 먼저 읽을 것)
+kyu session-command --json                        # 메인 세션이 실행할 것
+kyu session-command proj-a --json                 # 그 레포의 세션이 실행할 것
+kyu session-command --repo-claude-md --json       # 메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다
+kyu session-command proj-a --bypass-permissions --json
 ```
 
-**레포 세션**은 그 레포 디렉토리에서 뜬다. 설정은 오직 세션을 시작한 디렉토리에서만 오기 때문에,
-이 한 가지로 그 레포의 `.mcp.json`·`CLAUDE.md`·`.claude/agents/`·훅이 전부 살아난다.
+**세션을 띄우지 않고, 무엇을 띄울지 답한다.** 세션을 실제로 여는 것은 이 답을 받은
+[데스크톱 앱](#임베디드-터미널)이고, 앱은 이 명령이 준 `command` 를 자기 PTY 에서 그대로 실행한다.
+
+```json
+{
+  "schemaVersion": 1,
+  "command": ["claude", "--session-id", "d1b9d634-a927-4abf-ad80-5941671b08a8",
+              "--add-dir", "/home/me/work/WorkDir-featureX/proj-a"],
+  "cwd": "/home/me/work/WorkDir-featureX",
+  "env": {},
+  "resumedConversationId": null
+}
+```
+
+조립 지식이 엔진에 남는 것이 이 표면의 존재 이유다. `--add-dir` 목록과 옵션이 `claude` 의 어느
+플래그·환경변수로 옮겨지는지를 앱이 따로 알기 시작하면 그 지식이 두 곳에 놓이고, 갈라진 것을
+발견하는 자리는 "메인 세션이 레포 지침을 안 읽는다" 다.
+
+**레포 세션**은 그 레포 디렉토리에서 뜬다(`cwd`). 설정은 오직 세션을 시작한 디렉토리에서만 오기
+때문에, 이 한 가지로 그 레포의 `.mcp.json`·`CLAUDE.md`·`.claude/agents/`·훅이 전부 살아난다.
 
 **메인 세션**은 워크디렉토리 최상위에서 뜨고, 하위 레포를 `--add-dir` 로 자동으로 붙인다.
-목록을 손으로 관리하지 않는다 — 클론된 레포를 매번 다시 스캔해서 조립한다.
+목록을 손으로 관리하지 않는다 — 클론된 레포를 매번 다시 스캔해서 조립한다. 메인은 각 레포를 읽어
+현황을 파악하고, 인터페이스를 확정하고, 작업 순서를 `.coord/plan.md` 에 적는 자리다. 코드는 직접
+고치지 않는다. `--add-dir` 은 **파일 접근만 주고 설정은 주지 않기** 때문에 이 용도에 정확히 맞는다.
 
-```sh
-claude --add-dir /abs/path/WorkDir-featureX/proj-a --add-dir /abs/path/WorkDir-featureX/proj-b
-```
+| 필드 | 뜻 |
+|---|---|
+| `command[]` | 앱이 PTY 에서 실행할 argv. 순서가 곧 계약이다 |
+| `cwd` | 그 프로세스의 작업 디렉토리 |
+| `env` | 앱이 자기 바탕 환경에 **더할** 항목. 전체 환경이 아니다. 더할 것이 없으면 `{}` |
+| `resumedConversationId` | 이어가기로 연 대화의 ID. 새 대화면 `null` |
 
-메인은 각 레포를 읽어 현황을 파악하고, 인터페이스를 확정하고, 작업 순서를 `.coord/plan.md` 에
-적는 자리다. 코드는 직접 고치지 않는다. `--add-dir` 은 **파일 접근만 주고 설정은 주지 않기**
-때문에 이 용도에 정확히 맞는다.
+**묻는 것이 곧 기록하는 것이다.** 이 명령은 그 라벨이 쓸 대화를 정하고 그 자리에서
+`.coord/conversations.json` 에 적는다. 만들어 놓고 적지 않으면 다음 물음이 다른 ID 를 만들어,
+이어갈 대화가 매번 새로 생긴다. 화면을 그리려고 미리 부를 수 있는 명령이 아니라는 뜻이고,
+"이어갈 것이 있는가" 는 [`kyu list --json`](#kyu-list---json) 의 `hasRecordedConversation` 이 답한다.
 
-`--repo-claude-md` 는 그 예외를 연다. 이 옵션을 주면 메인 세션이 추가 디렉토리의 `CLAUDE.md` 와
-`.claude/rules/` 까지 읽는다(`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`). 붙인 레포 수만큼
-컨텍스트가 늘어나므로 기본은 꺼져 있다. 계획이 레포 컨벤션과 어긋나는 문제가 실제로 생겼을 때 켠다.
-레포 세션은 자기 디렉토리의 `CLAUDE.md` 를 이미 읽으므로 이 옵션을 함께 줄 수 없다.
+`--forget-conversation` 은 적혀 있는 대화를 버리고 새 대화로 답한다 — 화면의 **새 대화로 시작**
+이 이 옵션으로 온다. 이름이 하는 일 쪽(기록을 잊는다)인 이유는 되돌릴 수 없는 쪽이 그것이어서다.
 
-이미 떠 있는 세션에 `kyu start` 를 다시 실행해도 실패하지 않는다. 안내만 하고 끝난다.
+#### `--repo-claude-md`
 
-**이 명령이 만드는 것은 CLI 세션이다** — tmux 위에서 돌고, 터미널을 닫아도 남는다. 데스크톱 앱이
-보유하는 세션과는 서로 보이지 않는 별개의 것이다([임베디드 터미널](#임베디드-터미널)).
+메인 세션이 추가 디렉토리의 `CLAUDE.md` 와 `.claude/rules/` 까지 읽는다
+(`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` 이 `env` 에 들어간다). 붙인 레포 수만큼 컨텍스트가
+늘어나므로 기본은 꺼져 있다. 계획이 레포 컨벤션과 어긋나는 문제가 실제로 생겼을 때 켠다.
+레포 세션은 자기 디렉토리의 `CLAUDE.md` 를 이미 읽으므로 이 옵션을 함께 줄 수 없다 — 조용히
+무시하지 않고 거절한다.
 
-### `--bypass-permissions`
+#### `--bypass-permissions`
 
-```sh
-kyu --bypass-permissions               # 메인 세션을 권한 확인 없이 띄우고 진입한다
-kyu start --bypass-permissions         # 메인 세션만 띄운다
-kyu start proj-a --bypass-permissions  # 그 레포의 세션을 띄운다
-```
-
-세션의 `claude` 를 `--dangerously-skip-permissions` 와 함께 실행한다. 메인 세션과 레포 세션
-모두에서 쓸 수 있다 — 권한 확인은 세션이 어느 디렉토리에서 떴는지와 무관하기 때문이다.
-
-```sh
-claude --dangerously-skip-permissions --add-dir /abs/path/WorkDir-featureX/proj-a
-```
+세션의 `claude` 를 `--dangerously-skip-permissions` 와 함께 실행하도록 답한다. 메인 세션과 레포
+세션 모두에서 쓸 수 있다 — 권한 확인은 세션이 어느 디렉토리에서 떴는지와 무관하기 때문이다.
 
 > **경고.** 이 옵션으로 띄운 세션은 **확인 프롬프트 없이 파일을 고치고 명령을 실행한다.**
 > 레포 세션이면 그 레포 전체가, 메인 세션이면 `--add-dir` 로 붙은 모든 레포가 그 대상이다.
@@ -746,45 +616,6 @@ claude --dangerously-skip-permissions --add-dir /abs/path/WorkDir-featureX/proj-
 
 기본값으로 저장하는 길은 두지 않았다. 위험한 모드는 실행할 때마다 손으로 켜는 것이라,
 설정 파일에 한 번 적어두고 잊는 자리를 만들지 않는다.
-
-세션이 실행할 명령은 세션을 만드는 순간 정해지고 그 뒤로 바뀌지 않는다. 이미 떠 있는 세션에
-이 옵션을 다시 줘도 아무것도 바뀌지 않으므로, 그 사실을 stderr 로 알린다.
-
-```
---bypass-permissions 는 이미 실행 중인 main 세션에는 적용되지 않습니다 — 세션이 실행할 명령은 만들 때 정해집니다.
-이 옵션으로 다시 띄우려면 kyu kill main 뒤에 다시 실행하세요.
-```
-
-`kyu` 는 그 경고를 내고도 진입까지 이어간다. 사용자가 원한 것은 그 워크디렉토리에서 작업을
-시작하는 것이고, 떠 있는 세션이 그 요구를 이미 채우고 있다.
-
-### `kyu attach <repo>`
-
-```sh
-kyu attach proj-a
-kyu attach main
-```
-
-**빠져나오기는 `Ctrl-b d`.** 진입 직전에 이 안내가 한 줄 찍힌다.
-
-이미 세션 안에서 실행하면 거절한다 — 세션 안의 세션이 되면 어느 쪽에서 빠져나오는 것인지
-알 수 없다.
-
-**`kyu start` 가 띄운 CLI 세션에만 붙는다.** 데스크톱 앱이 보유한 세션에는 붙을 수 없다 — 그 세션은
-앱의 PTY 안에 있고 tmux 세션이 아니다. 반대로 앱도 CLI 세션에 붙지 못한다.
-
-### `kyu kill [repo|--all]`
-
-```sh
-kyu kill proj-a   # 하나만
-kyu kill main     # 메인 세션
-kyu kill --all    # 이 워크디렉토리의 세션 전부
-```
-
-`--all` 은 이 워크디렉토리의 세션만 종료한다. 다른 워크디렉토리의 세션, 직접 띄운 tmux 세션,
-그리고 **데스크톱 앱이 보유한 세션**은 건드리지 않는다 — 앱 세션은 엔진 눈에 보이지 않아 셀 수도
-죽일 수도 없다. 인자 없는 `kyu kill` 을 "전부"로 해석하지 않는다 — 이름을 빠뜨린 한 번으로
-다른 레포의 작업까지 날아가지 않게 한다.
 
 ### `kyu auth <add|list|remove>`
 
@@ -806,16 +637,16 @@ kyu auth remove 회사     # 프로필과 그 토큰을 지운다
 **토큰 값은 출력하지 않는다.** 목록을 띄운 채 화면을 공유하거나 캡처하는 일이 흔하고, 한 번 새
 나간 토큰은 폐기할 때까지 계속 유효하다. 이 명령은 저장소에 값을 물어보지도 않는다.
 
-저장된 토큰이 만료되면 `kyu clone` 이 그 사실을 알리고 같은 이름으로 다시 등록하게 해준다.
-지우고 다시 등록하는 두 걸음을 스스로 찾지 않아도 된다.
+저장된 토큰이 만료되면 그것을 쓰는 명령(`kyu clone` · `kyu repos`)이 실패로 끝난다. 그 자리에서
+되묻지 않는 이유는 되물을 상대가 없어서다 — 같은 이름으로 `kyu auth add` 를 다시 실행하면 덮인다.
 
-`tmux` 없이도 동작한다 — 토큰을 등록하고 보고 지우는 일은 세션과 무관하다.
+**바깥 명령을 하나도 부르지 않는다** — `git` 조차 필요 없다.
 
 #### `kyu auth add <이름>`
 
-등록하는 하위 명령이 뒤늦게 생긴 이유는 **GUI** 다. 사람이 지나는 길은 여전히 `kyu clone` 이
-필요한 자리에서 물어보는 것이지만, 앱은 "프로필 이름을 적으세요" 라는 물음에 답할 수 없다 —
+**토큰을 등록하는 유일한 길이다.** 앱은 "프로필 이름을 적으세요" 라는 물음에 답할 수 없다 —
 자기 화면에서 이름과 토큰을 이미 받아둔 채로, 그것을 엔진에 건네고 성공·실패만 돌려받아야 한다.
+사람이 터미널에서 칠 때도 토큰은 stdin 으로 온다.
 
 **토큰은 인자가 아니라 stdin 으로 받는다.** 인자는 같은 머신의 다른 사용자가 `ps` 로 읽는다.
 이름 뒤에 인자를 하나 더 붙이면 거절한다 — 조용히 무시하면 인자로 넘긴 토큰이 등록됐다고 믿게 된다.
@@ -835,10 +666,9 @@ printf %s "$GITHUB_TOKEN" | kyu auth add 개인 --json
 `login` 은 GitHub 이 확인해준 이 토큰의 주인이다. 이름만 돌려주면 앱은 "저장됐다" 까지만 알고
 "무엇이 저장됐는지" 는 모르는데, 회사 토큰을 개인 프로필로 등록하는 것은 그 값을 보여줘야만 막힌다.
 
-**확인하고 나서 저장한다.** 이 순서는 대화형 등록과 같은 코드다 — 거절당한 토큰이 프로필에 남으면
-다음 실행에서도 같은 실패가 반복된다. GitHub 이 거절하면 저장하지 않고 종료 코드 1 로 끝나며,
-그 에러는 "아무것도 저장하지 않았습니다" 까지 함께 말한다. 대화형 등록은 그 자리에서 다시 묻지만
-파이프 너머에는 다시 붙여넣을 상대가 없다.
+**확인하고 나서 저장한다.** 거절당한 토큰이 프로필에 남으면 다음 실행에서도 같은 실패가 반복된다.
+GitHub 이 거절하면 저장하지 않고 종료 코드 1 로 끝나며, 그 에러는 "아무것도 저장하지 않았습니다"
+까지 함께 말한다 — 거절당했다는 사실만으로는 부르는 쪽이 "그래서 저장은 됐나" 를 알 수 없다.
 
 ```
 $ printf %s "틀린-토큰" | kyu auth add 개인 --json
@@ -887,11 +717,11 @@ kyu v0.1.0 (a1b2c3d4e5f6)
 
 | 설치 방식 | `kyu version` 이 답하는 것 |
 |---|---|
-| 릴리스 바이너리 (A) | 릴리스 태그. 빌드할 때 링커가 박아 넣는다 |
+| 릴리스 바이너리 (A) | 릴리스 태그. 빌드할 때 링커가 새겨 넣는다 |
 | `go install` (B) | 모듈 버전. 태그가 없으면 커밋이 들어간 유사 버전 |
 | 소스 빌드 (C) | 유사 버전 + 커밋 |
 
-`tmux` 없이도 답한다. 릴리스 바이너리는 tmux 를 아직 깔지 않은 새 머신에 먼저 도착한다.
+PATH 가 비어 있어도 답한다. 릴리스 바이너리는 아무것도 갖추지 않은 새 머신에 먼저 도착한다.
 
 ## `.coord/plan.md`
 
@@ -940,8 +770,7 @@ tasks:
 ```
 cmd/kyu/         # 진입점, 명령 라우팅
 internal/
-    session/     # SessionBackend 인터페이스 + tmux · 감독 · "세션 없음" 구현 (유일한 플랫폼 의존부)
-    workdir/     # 스캔 · 상태 추론 · plan 파싱 (플랫폼 무관 핵심)
+    workdir/     # 스캔 · 상태 추론 · plan 파싱 · 대화 기록 (플랫폼 무관 핵심)
     github/      # GitHub REST API 조회 + 클론 (kyu clone · kyu repos 가 닿는 유일한 바깥 세계)
     secretstore/ # 토큰 프로필 저장 (키체인 · secret-service · 파일 폴백)
     cli/         # 명령 구현
@@ -959,8 +788,9 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
     terminal/pty/    # PTY 를 열어 엔진이 답한 명령(claude)을 직접 실행하는 어댑터 (앱 안의 유일한 TTY)
 ```
 
-`internal/session` 밖에서는 tmux 를 직접 호출하지 않는다. 이 규칙이 지켜지는 한 새 플랫폼
-지원은 파일 하나를 더하는 것으로 끝난다.
+엔진이 부르는 바깥 명령은 `git` 하나이고, 그것을 부르는 자리는 `internal/workdir` 과
+`internal/github` 뿐이다. 세션 계층(`internal/session`)이 있던 자리는 비어 있다 — 세션을 만들고
+붙고 죽이는 일이 앱으로 넘어가면서 함께 사라졌다.
 
 ## 데스크톱 앱
 
@@ -975,7 +805,7 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 앱이 그것에 자기 파싱을 맞춰두면 문구 하나를 고칠 때마다 함께 깨진다.
 
 **윈도우에서는 WSL 안의 리눅스 앱으로 쓴다.** 막고 있던 것이 tmux 이던 시절은 끝났다 — 앱은
-자기 PTY 에서 세션을 열고, 엔진도 목록을 낼 때 세션 백엔드를 요구하지 않는다. 남은 것은 아무도
+자기 PTY 에서 세션을 열고, 엔진에서는 tmux 자체가 사라졌다. 남은 것은 아무도
 윈도우 네이티브를 만들어 돌려본 적이 없다는 사실이다: 릴리스는 윈도우 바이너리를 내지 않고
 (`.github/workflows/release.yml` 의 크로스 컴파일 목록), 설치 패키지에도 msi 가 없으며
 (`desktop/build.gradle.kts` 의 `targetFormats`), PTY 를 여는 pty4j 가 ConPTY 위에서 실제로 도는지도
@@ -991,9 +821,8 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 | claude CLI | 세션 안에서 실제로 돌아가는 명령 |
 | JDK 21 | **방식 2 에서만.** 설치 패키지 안에는 앱이 쓸 자바 런타임이 이미 들어 있다 |
 
-**tmux 는 이 표에 없다.** 앱 세션은 앱의 PTY 안에서 tmux 없이 뜨고, 대시보드가 3 초마다 부르는
-[`kyu list`](#kyu-list-path) 도 세션 백엔드 없이 답한다. 터미널에서 `kyu start` 로 CLI 세션을
-띄울 때만 필요하다([요구사항](#요구사항)).
+**tmux 는 이 표에 없다.** 앱 세션은 앱의 PTY 안에서 뜨고, 엔진에도 그것을 요구하는 자리가
+하나도 남지 않았다([요구사항](#요구사항)).
 
 앱을 손에 넣는 길은 둘이다.
 
@@ -1154,16 +983,16 @@ Gradle 은 wrapper 가 저장소에 있어 따로 설치하지 않는다. 앱 �
 4. **레포 클론** 을 눌러 GitHub 에서 받아 온다 — 토큰 등록부터 레포 고르기까지 앱 안에서 끝난다
    ([레포 클론](#레포-클론)). 다음 갱신에서 받아 온 레포가 카드로 뜬다.
 5. **카드를 누른다** — 세션이 없으면 띄우고 들어간다. 열린 터미널에서 Claude 와 대화한다.
-6. **끝낼 때** — 터미널 닫기 · 다른 카드로 옮기기 · 앱 종료는 전부 detach 라 세션은 계속 돈다.
-   세션을 정말 끝내는 것은 [`kyu kill`](#kyu-kill-repo--all) 뿐이다.
+6. **끝낼 때** — 다른 카드로 옮기는 것은 화면만 갈아 끼우는 것이라 세션은 계속 돈다. 세션을 정말
+   끝내는 것은 터미널 머리말의 **세션 끝내기** 이고, 앱을 끄면 보유하던 세션이 전부 끝난다.
 
 **터미널을 한 번도 열지 않고 0 에서 작업을 시작할 수 있다** — 엔진 설치 · 워크디렉토리 열기 ·
 클론 · 세션 진입이 모두 창 안에 있다. 앱이 CLI 를 감추는 것이지 대신하는 것이 아니고, 그 넷을
 실제로 하는 것은 전부 엔진이다.
 
-터미널이 편하면 앱 없이 같은 자리에 닿는다 — 워크디렉토리에서 [`kyu`](#빠른-시작) 한 번이
-초기화부터 세션 진입까지를 대신하고, 레포별 세션은 [`kyu start`](#kyu-start-repo) ·
-[`kyu attach`](#kyu-attach-repo) 다.
+터미널에서는 엔진에게 직접 물을 수 있다 — [`kyu init`](#kyu-init-name) 으로 워크디렉토리를 열고,
+[`kyu list`](#kyu-list-path) 로 상태를 보고, [`kyu session-command`](#kyu-session-command-repo) 로
+그 세션이 무엇을 실행할지 확인한다. 세션을 실제로 여는 것은 앱이다.
 
 ### 앱은 엔진을 들고 온다
 
@@ -1253,8 +1082,6 @@ Go 를 찾는 자리는 `GOROOT` · `PATH` · Go 를 넣는 흔한 디렉토리�
 - **`claude` 설치** — 세션 안에서 실제로 도는 명령인데 앱이 대신 넣지 않는다. 넣은 뒤에 앱에서
   따로 할 일은 없다 — 앱은 로그인 셸(`.zprofile` · `.profile`)의 PATH 를 읽으므로, Finder 로 띄운
   맥 앱도 brew 가 `/opt/homebrew/bin` 에 놓은 것을 그대로 찾는다.
-  **tmux 는 이 목록에 없다 — 앱에 필요 없기 때문이다.** 터미널에서 `kyu start` 를 쓸 때만
-  `sudo apt install tmux`(WSL · 리눅스) · `brew install tmux`(맥) 로 넣는다.
 - **엔진 업데이트** — 동봉된 엔진은 앱을 새 판으로 설치할 때 함께 바뀐다. 소스에서 띄우며 받아
   둔 엔진은 한 번 받으면 그대로 쓰므로, 판을 올리려면 관리 디렉토리의 `kyu` 를 지우고 앱을 다시
   띄우거나 [설치](#설치)의 세 방식 중 하나로 덮는다.
@@ -1331,15 +1158,11 @@ Go 를 찾는 자리는 `GOROOT` · `PATH` · Go 를 넣는 흔한 디렉토리�
 (`[consume] blocked ← needs publish`), 그 레포의 진척(`done 1/2`). 아래에는 메인 세션 한 줄이
 붙고, 계획을 그대로 쓰지 못했으면 그 이유가 배너로 뜬다.
 
-**세션 칩이 둘로 갈려 있는 것이 중요하다.** `앱 세션` 은 이 앱이 보유하고 있는 것이고,
-`CLI 세션` 은 터미널에서 [`kyu start`](#kyu-start-repo) 로 띄운 것이다. 앱은 CLI 세션에 붙지도
-죽이지도 못하므로, 그 카드를 누르면 그 세션에 들어가는 것이 아니라 **앱이 보유하는 새 세션이
-열린다** — 같은 레포에 `claude` 가 둘 돌게 된다. 막지 않고 알린다: 그 카드에는 그 사실이 한 줄로
-적혀 있다.
+**세션 칩은 이 앱이 보유하고 있는 세션을 가리킨다.** 엔진은 세션을 세지 않으므로 카드에 뜨는
+세션은 전부 앱의 것이다.
 
-**앱 세션이 도는 레포는 git 상태도 함께 보인다.** `kyu list` 의 `state` 는 값 하나라 CLI 세션이
-떠 있으면 git 상태가 가려지는데, 앱 세션은 엔진 눈에 보이지 않으므로 엔진이 git 상태를 답한다.
-그래서 `앱 세션 · DIRTY` 가 한 카드에 함께 뜬다.
+**앱 세션이 도는 레포는 git 상태도 함께 보인다.** 엔진은 세션을 보지 않고 git 만 보므로,
+`앱 세션 · DIRTY` 가 한 카드에 함께 뜬다.
 
 **`이어갈 대화` 칩이 붙은 카드는 누르면 앞서 하던 대화가 이어진다.** 그 카드에는 **새 대화로
 시작** 도 함께 뜬다 — 대화가 길어졌거나 다른 일을 시작할 때 누르는 자리이고, 누르면 앞 대화를
@@ -1360,16 +1183,13 @@ Go 를 찾는 자리는 `GOROOT` · `PATH` · Go 를 넣는 흔한 디렉토리�
 메인 세션이다. 카드를 누르는 것 한 번으로 작업이 시작된다.
 
 **앱이 세션을 직접 보유한다.** 앱은 `kyu` 에게 무엇을 띄울지 묻고([`kyu session-command`](#기계용-표면)),
-받은 명령을 **자기 PTY 에서 그대로 실행한다** — 그 PTY 안의 자식이 곧 `claude` 다. `kyu attach` 도
-`tmux` 도 거치지 않으므로 **앱이 여는 세션에는 tmux 가 없다**(설계 문서
+받은 명령을 **자기 PTY 에서 그대로 실행한다** — 그 PTY 안의 자식이 곧 `claude` 다. 사이에 아무것도
+없으므로 **앱이 여는 세션에는 tmux 가 없다**(설계 문서
 [app-owned-sessions-design.md](app-owned-sessions-design.md) 2 단계).
 
-**목록 때문에 tmux 를 넣어야 하던 자리도 사라졌다.** 대시보드가 3 초마다 부르는
-[`kyu list`](#kyu-list-path) 는 CLI 세션의 생존을 물으려고 세션 백엔드를 조립하다가 tmux 가
-없으면 거기서 끝났었다. 이제는 백엔드가 없는 것을 실패가 아니라 "이 머신에 CLI 세션이 없다" 는
-답으로 받는다(설계 문서 5.7 · 8 절 5 번). **앱에 tmux 가 필요한 자리는 이것으로 하나도 남지
-않았다** — 그래도 [요구사항](#요구사항) 표를 갈라 적어 두는 것은 CLI 의 `kyu start` 에는 그대로
-필요하기 때문이다.
+**tmux 는 엔진에서도 사라졌다.** 대시보드가 3 초마다 부르는 [`kyu list`](#kyu-list-path) 는
+세션 생존을 물으려고 세션 백엔드를 조립하다가 tmux 가 없으면 거기서 끝났었다. 이제 목록은 레포와
+git 만 보고, 세션을 만들고 붙고 죽이던 명령은 은퇴했다(설계 문서 6 절).
 
 터미널 안은 터미널 창에서 그 디렉토리로 가 `claude` 를 띄운 것과 똑같다 — 키 입력도, 색도,
 스크롤백도 그대로다. 창 크기를 바꾸면 세션의 화면이 따라 커지고, 그 신호는 이제 홉 없이 `claude`
@@ -1397,14 +1217,11 @@ Go 를 찾는 자리는 `GOROOT` · `PATH` · Go 를 넣는 흔한 디렉토리�
 대화가 열린다. 자동으로 다시 열지 않는 이유는 그 판단이 짐작이기 때문이다: 세션이 다른 이유로
 죽어도 화면에는 같은 모양으로 남는다.
 
-**앱 세션은 `kyu list` 에 보이지 않고 `kyu kill` 로 끝낼 수 없다.** 앱 세션은 tmux 세션도 감독
-세션도 아니라 엔진이 그것을 셀 수단이 없다(설계 문서 5.4). 그래서 앱에서 작업 중인 레포가
-터미널의 `kyu list` 에는 `DIRTY` 로 보인다 — 틀린 것이 아니라 **다른 것을 보고 있는 것**이다.
-반대로 CLI 세션은 앱이 손댈 수 없다. 화면이 그 사실을 먼저 말하도록 카드가 두 종류의 세션을
-갈라 보여주고, 앱 세션이 하나라도 있으면 목록 위에 배너가 뜬다.
+**앱 세션은 `kyu list` 에 보이지 않는다.** 엔진에는 그것을 셀 수단이 없다(설계 문서 5.4).
+그래서 앱에서 작업 중인 레포가 터미널의 `kyu list` 에는 `DIRTY` 로 보인다 — 틀린 것이 아니라
+**다른 것을 보고 있는 것**이다. 앱 세션이 하나라도 있으면 목록 위에 배너가 뜬다.
 
-CLI 로 띄운 세션은 지금까지처럼 [`kyu attach`](#kyu-attach-repo) 로 들어가고
-[`kyu kill`](#kyu-kill-repo--all) 로 끝낸다. 그쪽은 이 전환으로 바뀌지 않았다.
+세션을 끝내는 자리는 앱 안에 있다. 엔진에는 세션을 죽이는 명령이 없다.
 
 ### 오류 기록 파일
 
