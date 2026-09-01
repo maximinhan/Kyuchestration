@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -433,4 +437,133 @@ func TestListAnswersWithNothingButGitOnThePath(t *testing.T) {
 	if answer.MainSession.Alive {
 		t.Error("mainSession.alive = true, 엔진이 세션을 세지 않으므로 false 를 기대")
 	}
+}
+
+// TestMCPServeSpeaksTheProtocolOverStdioToARealProcess 는 실제 프로세스와 줄을 주고받는다.
+//
+// 이 서버의 상대는 우리 코드가 아니라 claude 의 MCP 클라이언트다. 함수 호출로만 검증하면
+// "stdout 에 진단 한 줄이 섞였다" 나 "프로세스가 곧바로 끝난다" 같은, 이 표면에서 가장 흔한
+// 실패가 통째로 빠진다 — 그것들은 프로세스 경계에서만 드러난다.
+func TestMCPServeSpeaksTheProtocolOverStdioToARealProcess(t *testing.T) {
+	workDirPath := t.TempDir()
+	initGitRepoForListing(t, filepath.Join(workDirPath, "proj-a"))
+
+	command := exec.Command(buildKyuBinary(t), "mcp", "serve", workDirPath)
+	// 서버는 자기가 뜬 디렉토리를 보지 않는다. 인자로 받은 워크디렉토리를 훑는 것이 계약이고,
+	// 다른 곳에서 띄워도 같은 답이 나와야 그 계약이 성립한다.
+	command.Dir = t.TempDir()
+	command.Env = append(os.Environ(), searchPathWithOnly(t, "git"))
+
+	requestWriter, err := command.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin 파이프 생성 실패: %v", err)
+	}
+	answerReader, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout 파이프 생성 실패: %v", err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+
+	if err := command.Start(); err != nil {
+		t.Fatalf("kyu mcp serve 실행 실패: %v", err)
+	}
+
+	requestLines := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude","version":"2.1.252"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_repos","arguments":{}}}`,
+	}
+	for _, requestLine := range requestLines {
+		if _, err := fmt.Fprintln(requestWriter, requestLine); err != nil {
+			t.Fatalf("요청을 보내지 못했습니다: %v", err)
+		}
+	}
+
+	answers := readJSONRPCAnswers(t, answerReader, len(requestLines)-1)
+
+	// stdin 을 닫는 것이 claude 가 세션을 접는 자리다. 그때 서버도 끝나야 프로세스가 남지 않는다.
+	requestWriter.Close()
+	if err := command.Wait(); err != nil {
+		t.Fatalf("kyu mcp serve 가 깨끗하게 끝나지 않았습니다: %v (stderr %q)", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, 서버는 할 말이 없으면 아무것도 쓰지 않아야 한다", stderr.String())
+	}
+
+	if answers[0].Result.ServerInfo.Name != "kyu" {
+		t.Errorf("serverInfo.name = %q, want kyu", answers[0].Result.ServerInfo.Name)
+	}
+	if answers[0].Result.Capabilities.Tools == nil {
+		t.Error("capabilities.tools 가 없습니다 — 클라이언트가 도구를 묻지 않게 됩니다")
+	}
+
+	toolNames := make([]string, 0, len(answers[1].Result.Tools))
+	for _, tool := range answers[1].Result.Tools {
+		toolNames = append(toolNames, tool.Name)
+	}
+	if !slices.Contains(toolNames, "list_repos") {
+		t.Errorf("tools/list = %q, list_repos 를 기대", toolNames)
+	}
+
+	if len(answers[2].Result.Content) != 1 {
+		t.Fatalf("tools/call 의 content = %+v, 텍스트 한 덩어리를 기대", answers[2].Result.Content)
+	}
+	if !strings.Contains(answers[2].Result.Content[0].Text, "proj-a") {
+		t.Errorf("list_repos 의 답 = %q, 클론해 둔 proj-a 를 기대", answers[2].Result.Content[0].Text)
+	}
+}
+
+// jsonRPCAnswerForTest 는 서버가 내보낸 한 줄을 되읽은 것이다. 이 시험이 보는 필드만 담는다.
+type jsonRPCAnswerForTest struct {
+	JSONRPC string `json:"jsonrpc"`
+	Result  struct {
+		Capabilities struct {
+			Tools *struct{} `json:"tools"`
+		} `json:"capabilities"`
+		ServerInfo struct {
+			Name string `json:"name"`
+		} `json:"serverInfo"`
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"result"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// readJSONRPCAnswers 는 답 줄을 기대한 수만큼 읽는다.
+//
+// stdout 을 통째로 모아 마지막에 파싱하지 않는다. 서버가 끝나기 전에 답이 와야 한다는 것이
+// 이 시험이 확인하려는 것이고, 다 읽고 나서 보면 그 구분이 사라진다.
+func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) []jsonRPCAnswerForTest {
+	t.Helper()
+
+	reader := bufio.NewReader(answerReader)
+	answers := make([]jsonRPCAnswerForTest, 0, wantedCount)
+
+	for len(answers) < wantedCount {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("답을 %d 개까지 읽고 끊겼습니다: %v", len(answers), err)
+		}
+
+		var answer jsonRPCAnswerForTest
+		if err := json.Unmarshal([]byte(line), &answer); err != nil {
+			t.Fatalf("답한 줄을 JSON 으로 읽지 못했습니다: %v\n--- 줄 ---\n%s", err, line)
+		}
+		if answer.JSONRPC != "2.0" {
+			t.Errorf("jsonrpc = %q, want 2.0", answer.JSONRPC)
+		}
+		if answer.Error != nil {
+			t.Fatalf("서버가 거절했습니다: %s", answer.Error.Message)
+		}
+		answers = append(answers, answer)
+	}
+	return answers
 }
