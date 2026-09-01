@@ -161,16 +161,18 @@ func RunDelegation(ctx context.Context, workDirPath string, request DelegationRe
 		TimedOut: errors.Is(ctx.Err(), context.DeadlineExceeded),
 	}
 
-	// 실행 자체가 안 된 것만 에러로 올린다. claude 를 찾지 못한 것과 claude 가 거절한 것은
-	// 다른 사실이고, 앞엣것에는 메인에게 전할 위임 결과가 아예 없다. 그 경우 ProcessState 가
-	// 아예 없으므로 종료 코드를 묻기 전에 갈라야 한다.
-	var exitError *exec.ExitError
-	if runErr != nil && !errors.As(runErr, &exitError) && !outcome.TimedOut {
+	// 프로세스가 끝까지 가지 못한 것만 에러로 올린다. claude 를 찾지 못한 것과 claude 가 거절한
+	// 것은 다른 사실이고, 앞엣것에는 메인에게 전할 위임 결과가 아예 없다.
+	//
+	// 그 가름을 runErr 의 종류가 아니라 ProcessState 의 유무로 한다. Run 이 돌려주는 에러에는
+	// claude 의 거절(ExitError)만 오는 것이 아니라 출력 대기 상한 만료(ErrWaitDelay)도 오는데,
+	// 뒤엣것은 claude 가 답을 다 내고 0 으로 끝난 뒤 손자가 파이프를 붙들고 있을 때 온다 —
+	// 그것을 실행 실패로 읽으면 이미 받아둔 답을 통째로 버린다. ProcessState 가 있다는 것은
+	// 프로세스가 돌고 거둬졌다는 뜻이고, 그러면 종료 코드도 받아둔 출력도 전할 값이 있다.
+	if command.ProcessState == nil {
 		return DelegationOutcome{}, fmt.Errorf("위임 실행 실패 (%s): %w", request.Repo.Name, runErr)
 	}
-	if command.ProcessState != nil {
-		outcome.ExitCode = command.ProcessState.ExitCode()
-	}
+	outcome.ExitCode = command.ProcessState.ExitCode()
 
 	// 종료 코드가 0 이어도 답 문서를 읽어야 한다. 권한에 막힌 위임이 그 자리이고, 그것은
 	// permission_denials 배열에만 남아 있다(설계 문서 3.3).

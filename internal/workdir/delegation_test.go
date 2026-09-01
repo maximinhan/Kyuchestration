@@ -261,6 +261,42 @@ func TestDelegationThatRanOutOfTimeSaysSo(t *testing.T) {
 	}
 }
 
+func TestDelegationKeepsItsAnswerWhenAGrandchildOutlivesClaude(t *testing.T) {
+	// claude 가 답을 다 내고 0 으로 끝났는데 그것이 띄운 프로세스가 우리 파이프를 붙들고 있는
+	// 경우다. 출력을 기다리는 상한(WaitDelay)이 그때 만료되고, Wait 은 ExitError 가 아닌
+	// ErrWaitDelay 를 돌려준다 — 그것을 "실행 실패" 로 읽으면 이미 받아둔 답을 통째로 버린다.
+	fakeClaudeOnPath(t, `
+cat > /dev/null
+echo '{"subtype":"success","result":"고쳤습니다","session_id":"11111111-2222-4333-8444-555555555555","permission_denials":[]}'
+sleep 30 &
+exit 0
+`)
+
+	workDirPath, repo := delegationFixture(t)
+
+	outcome, err := RunDelegation(t.Context(), workDirPath, DelegationRequest{
+		Repo:           repo,
+		Prompt:         "고쳐줘",
+		ConversationID: "11111111-2222-4333-8444-555555555555",
+	})
+	if err != nil {
+		t.Fatalf("RunDelegation() 이 받아둔 답을 버렸습니다: %v", err)
+	}
+
+	if outcome.Result != "고쳤습니다" {
+		t.Errorf("결과 = %q, claude 가 이미 답한 것을 그대로 기대", outcome.Result)
+	}
+	if outcome.ExitCode != 0 {
+		t.Errorf("exitCode = %d, claude 는 0 으로 끝났습니다", outcome.ExitCode)
+	}
+	if outcome.TimedOut {
+		t.Error("timedOut = true, 시간 상한에 걸린 것이 아니라 손자가 파이프를 붙든 것입니다")
+	}
+	if outcome.LogPath == "" {
+		t.Error("logPath 가 비어 있습니다 — 원출력 기록은 이 경우에도 남아야 합니다")
+	}
+}
+
 func TestDelegationWritesTheRawAnswerWhereAPersonCanOpenIt(t *testing.T) {
 	// 결과가 도구의 답 안에서 요약되어 사라지면 나중에 "그때 무엇이 거절됐나" 를 알 길이 없다
 	// (설계 문서 5.4.3).
