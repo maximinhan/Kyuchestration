@@ -91,13 +91,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	commandName, commandArgs := args[0], args[1:]
 
 	switch commandName {
-	// list 는 백엔드를 세우지 못해도 답한다. 물은 것이 "지금 무엇이 떠 있는가" 이고, 백엔드가
-	// 없는 머신에서 그 답은 "아무것도 떠 있지 않다" 이지 실패가 아니다(설계 문서 8절 5번 (가)).
-	// 대시보드가 3 초마다 부르는 명령이라, 여기가 서면 앱이 tmux 없는 머신에서 목록을 통째로 잃는다.
+	// list 는 세션 백엔드를 거치지 않는다. 무엇이 떠 있는지를 묻던 명령이었지만 이제는 레포와
+	// git 만 보므로(app-owned-sessions-design.md 6절), 백엔드를 먼저 조립하면 tmux 없는 머신에서
+	// 대시보드가 3 초마다 부르는 명령이 통째로 선다.
 	case "list":
-		return withSessionBackendOrNoSessions(func(backend session.SessionBackend) error {
-			return cli.ListWorkDir(out, errOut, commandArgs, backend)
-		})
+		return cli.ListWorkDir(out, errOut, commandArgs)
 	case "start":
 		return withSessionBackend(func(backend session.SessionBackend) error {
 			return cli.StartSession(out, errOut, commandArgs, backend)

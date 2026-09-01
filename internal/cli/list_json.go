@@ -26,7 +26,7 @@ import (
 //	    {
 //	      "name": "proj-a",
 //	      "absolutePath": "/home/me/work/WorkDir-featureX/proj-a",
-//	      "state": "RUNNING",                      // RUNNING | DIRTY | AHEAD | IDLE
+//	      "state": "DIRTY",                        // DIRTY | AHEAD | IDLE
 //	      "task": {                                // 계획에서 고른 "지금 볼 작업". 고를 것이 없으면 null
 //	        "id": "consume",
 //	        "status": "blocked",                   // blocked | ready | doing | done
@@ -43,6 +43,10 @@ import (
 //
 // 실패는 이 문서에 담지 않는다. 워크디렉토리를 읽지 못했다면 관찰 자체가 없었다는 뜻이라
 // 빈 목록과 구분되어야 하고, 그 구분은 stderr 와 종료 코드 1 이 이미 하고 있다.
+//
+// state 에서 RUNNING 이 사라진 것은 필드가 아니라 값의 변화라 판을 올리지 않았다. 읽는 쪽은
+// 이미 그 값을 받아본 적 없는 실행(세션 백엔드가 없는 머신)을 겪었고, 못 받는 값이 생겼다고
+// 파싱이 깨지지는 않는다. 판을 올리는 것은 필드를 빼거나 이름·뜻을 바꿀 때다.
 
 // listJSONSchemaVersion 은 위 스키마의 판이다.
 //
@@ -95,11 +99,17 @@ type listJSONTask struct {
 	BlockedBy []string `json:"blockedBy"`
 }
 
-// listJSONMainSession 은 메인 세션의 상태다.
+// listJSONMainSession 은 메인 세션에 대해 엔진이 답할 수 있는 것이다.
 //
 // 참·거짓 하나를 굳이 객체로 감싼다. 메인 세션은 레포와 다른 종류의 자리라 repos 에 섞을 수 없고
 // (설계 문서 5.4), 최상위에 alive 라는 낱말만 놓으면 그것이 무엇의 생존인지가 이름에서 사라진다.
 type listJSONMainSession struct {
+	// Alive 는 이제 늘 거짓이다. 엔진이 세션을 만들지도 세지도 않게 된 뒤로 이 물음에 참을
+	// 답할 근거가 없어졌다 — 앱이 보유한 세션은 앱만 안다(설계 문서 5.4).
+	//
+	// 그래도 필드를 빼지 않는다. 읽는 쪽은 이 이름을 필수로 알고 있어(desktop 의 KyuListOutput)
+	// 빼는 순간 문서를 통째로 읽지 못하게 되는데, 값이 거짓으로 고정되는 것은 그쪽이 이미
+	// 겪어온 답이다 — 세션 백엔드가 없는 머신이 늘 그렇게 답해왔다.
 	Alive bool `json:"alive"`
 
 	// HasRecordedConversation 은 메인 세션이 이어갈 대화가 적혀 있는지다. 레포의 같은 이름
@@ -138,7 +148,7 @@ func newListJSONDocument(listing workDirListing) listJSONDocument {
 		},
 		Repos: repos,
 		MainSession: listJSONMainSession{
-			Alive:                   listing.mainSessionAlive,
+			Alive:                   false,
 			HasRecordedConversation: listing.mainHasRecordedConversation,
 		},
 		PlanWarnings: alwaysAnArray(listing.planWarnings),

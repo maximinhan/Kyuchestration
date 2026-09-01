@@ -70,14 +70,11 @@ tasks:
 본문은 도구가 읽지 않는다.
 `)
 
-	assertListOutput(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()), `WorkDir: WorkDir-featureX   (3 repos, 0 sessions)
+	assertListOutput(t, runListForTest(t, []string{workDirPath}), `WorkDir: WorkDir-featureX   (3 repos)
 
-  ○  alpha-commons  IDLE   [commons-event] done
-  ○  beta-gateway   DIRTY  [publish] ready
-  ○  zeta-service   IDLE   [consume] blocked ← needs publish
-  ○  main           IDLE
-
-kyu attach <repo> 로 진입
+  alpha-commons  IDLE   [commons-event] done
+  beta-gateway   DIRTY  [publish] ready
+  zeta-service   IDLE   [consume] blocked ← needs publish
 `)
 }
 
@@ -106,8 +103,8 @@ tasks:
 ---
 `)
 
-	assertListRow(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()),
-		"○ zeta-service IDLE [consume] blocked ← needs base-b")
+	assertListRow(t, runListForTest(t, []string{workDirPath}),
+		"zeta-service IDLE [consume] blocked ← needs base-b")
 }
 
 func TestListWorkDirOmitsTheNeedsArrowWhenEveryPrerequisiteIsDone(t *testing.T) {
@@ -131,8 +128,8 @@ tasks:
 ---
 `)
 
-	assertListRow(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()),
-		"○ zeta-service IDLE [consume] blocked")
+	assertListRow(t, runListForTest(t, []string{workDirPath}),
+		"zeta-service IDLE [consume] blocked")
 }
 
 func TestListWorkDirShowsTheTaskToLookAtWhenARepoHasSeveral(t *testing.T) {
@@ -162,8 +159,8 @@ tasks:
 ---
 `)
 
-	assertListRow(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()),
-		"○ alpha-commons IDLE [in-progress] doing (done 1/4)")
+	assertListRow(t, runListForTest(t, []string{workDirPath}),
+		"alpha-commons IDLE [in-progress] doing (done 1/4)")
 }
 
 func TestListWorkDirPrefersTheReadyTaskWhenNothingIsInProgress(t *testing.T) {
@@ -183,8 +180,8 @@ tasks:
 ---
 `)
 
-	assertListRow(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()),
-		"○ alpha-commons IDLE [startable] ready (done 0/2)")
+	assertListRow(t, runListForTest(t, []string{workDirPath}),
+		"alpha-commons IDLE [startable] ready (done 0/2)")
 }
 
 func TestListWorkDirSummarizesWhenEveryTaskOfARepoIsDone(t *testing.T) {
@@ -205,8 +202,8 @@ tasks:
 ---
 `)
 
-	assertListRow(t, runListForTest(t, []string{workDirPath}, newFakeSessionBackend()),
-		"○ alpha-commons IDLE done 2/2")
+	assertListRow(t, runListForTest(t, []string{workDirPath}),
+		"alpha-commons IDLE done 2/2")
 }
 
 func TestListWorkDirLeavesTheTaskColumnEmptyForRepoWithoutTask(t *testing.T) {
@@ -223,9 +220,9 @@ tasks:
 ---
 `)
 
-	listOutput := runListForTest(t, []string{workDirPath}, newFakeSessionBackend())
-	assertListRow(t, listOutput, "○ alpha-commons IDLE")
-	assertListRow(t, listOutput, "○ zeta-service IDLE [only-one] ready")
+	listOutput := runListForTest(t, []string{workDirPath})
+	assertListRow(t, listOutput, "alpha-commons IDLE")
+	assertListRow(t, listOutput, "zeta-service IDLE [only-one] ready")
 }
 
 func TestListWorkDirWarnsToStderrAboutPlanTasksPointingAtAMissingRepo(t *testing.T) {
@@ -253,7 +250,7 @@ tasks:
 `)
 
 	var out, errOut bytes.Buffer
-	if err := ListWorkDir(&out, &errOut, []string{workDirPath}, newFakeSessionBackend()); err != nil {
+	if err := ListWorkDir(&out, &errOut, []string{workDirPath}); err != nil {
 		t.Fatalf("ListWorkDir() 실패: %v", err)
 	}
 
@@ -270,7 +267,7 @@ tasks:
 	}
 
 	// 계획이 없는 레포를 가리켜도 목록 자체는 그대로 동작한다.
-	assertListRow(t, out.String(), "○ alpha-commons IDLE [here] ready")
+	assertListRow(t, out.String(), "alpha-commons IDLE [here] ready")
 }
 
 func TestListWorkDirWritesBrokenPlanWarningsToStderrAndKeepsListing(t *testing.T) {
@@ -288,7 +285,7 @@ tasks:
 `)
 
 	var out, errOut bytes.Buffer
-	if err := ListWorkDir(&out, &errOut, []string{workDirPath}, newFakeSessionBackend()); err != nil {
+	if err := ListWorkDir(&out, &errOut, []string{workDirPath}); err != nil {
 		t.Fatalf("ListWorkDir() 실패: %v", err)
 	}
 
@@ -300,11 +297,8 @@ tasks:
 	}
 
 	// 계획은 버렸지만 목록은 계획이 없을 때와 똑같이 나온다.
-	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (1 repo, 0 sessions)
+	assertListOutput(t, out.String(), `WorkDir: WorkDir-featureX   (1 repo)
 
-  ○  alpha-commons  IDLE
-  ○  main           IDLE
-
-kyu attach <repo> 로 진입
+  alpha-commons  IDLE
 `)
 }

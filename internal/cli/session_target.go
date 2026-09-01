@@ -36,7 +36,7 @@ func currentWorkDir() (workDirLocation, error) {
 // 규칙 자체는 설계 문서 5.2 가 정한 것이라 여기서 바꾸지 않고, main 을 메인 세션으로 못박는다 —
 // 조율용 세션은 어느 워크디렉토리에나 있지만 main 이라는 이름의 레포는 그렇지 않다.
 func sessionNameForLabel(workDirName, label string) string {
-	if label == mainRowLabel {
+	if label == mainSessionLabel {
 		return session.MainSessionName(workDirName)
 	}
 	return session.RepoSessionName(workDirName, label)

@@ -155,7 +155,7 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 
 // answerForMainSession 은 워크디렉토리 최상위에서 열 조율용 세션을 답한다(설계 문서 5.4).
 func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
-	conversation, err := conversationForLabel(errOut, location.absolutePath, mainRowLabel, request)
+	conversation, err := conversationForLabel(errOut, location.absolutePath, mainSessionLabel, request)
 	if err != nil {
 		return err
 	}

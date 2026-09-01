@@ -144,7 +144,7 @@ func parseStartArgs(args []string) (sessionRequest, error) {
 // startMainSession 은 워크디렉토리 최상위에서 조율용 세션을 띄운다(설계 문서 5.4).
 func startMainSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionRequest, backend session.SessionBackend) error {
 	return createSession(out, errOut, backend,
-		session.MainSessionName(location.name), mainRowLabel,
+		session.MainSessionName(location.name), mainSessionLabel,
 		location.absolutePath,
 		envWrappedCommand(sessionEnvironment(request), mainSessionCommand(repos, request, nil)),
 		request.bypassPermissions)

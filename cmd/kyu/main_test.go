@@ -423,7 +423,9 @@ func TestSuperviseCommandIsRoutedToTheSupervisorInsteadOfBeingUnknown(t *testing
 }
 
 func TestUnknownSessionBackendNamesTheChoicesInsteadOfFallingBackQuietly(t *testing.T) {
-	command := exec.Command(buildKyuBinary(t), "list")
+	// 세션을 만지는 명령으로 묻는다. 목록은 세션 백엔드를 조립하지 않으므로(레포와 git 만 본다)
+	// 이 갈림에 닿지 않는다.
+	command := exec.Command(buildKyuBinary(t), "attach", "main")
 	command.Dir = t.TempDir()
 	command.Env = append(os.Environ(), session.BackendSelectionEnvName+"=오타난이름")
 
@@ -449,7 +451,7 @@ func TestUnknownSessionBackendNamesTheChoicesInsteadOfFallingBackQuietly(t *test
 func TestSupervisorBackendIsChosenByEnvironmentAndDoesNotAskForTmux(t *testing.T) {
 	// tmux 를 걷어내는 것이 이 작업의 목적이므로, 감독 백엔드를 고른 실행은 tmux 가 없는
 	// 머신에서도 그 사실을 화제로 삼지 않아야 한다(설계 문서 1.2).
-	command := exec.Command(buildKyuBinary(t), "list")
+	command := exec.Command(buildKyuBinary(t), "attach", "main")
 	command.Dir = t.TempDir()
 	command.Env = append(os.Environ(),
 		"PATH=",
