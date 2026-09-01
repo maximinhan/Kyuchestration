@@ -44,10 +44,10 @@ func newInteractivePrompt(in io.Reader, out io.Writer) *interactivePrompt {
 	return prompt
 }
 
-// readsFromATerminal 은 답할 사람이 이 입력 너머에 있는지다.
+// readsFromATerminal 은 이 입력이 터미널인지다.
 //
-// 파이프와 터미널을 가르는 이 한 줄이 MCP 설정 승인 관문의 전부다(mcp_approve.go). 파이프
-// 너머에는 물음에 답할 상대가 없고, 그것을 읽어버리면 관문이 "y 를 흘려보내는 것" 으로 열린다.
+// "사람인지" 가 아니라 "터미널인지" 다. pty 를 붙인 프로그램도 참을 받으므로 사람의 존재를
+// 보증하지 않는다 — 이 값에 기대는 쪽(mcp_approve.go)이 그 한계를 자기 머리말에 적어두고 있다.
 func (prompt *interactivePrompt) readsFromATerminal() bool {
 	return prompt.inputFile != nil
 }

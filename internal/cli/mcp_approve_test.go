@@ -80,8 +80,11 @@ func TestRunInRepoNeverStopsForARepoWithoutAnMCPConfig(t *testing.T) {
 }
 
 func TestApproveRefusesToTakeAnAnswerThatDidNotComeFromATerminal(t *testing.T) {
-	// **이 시험이 관문의 전부다.** 파이프로 답을 흘려보낼 수 있으면 메인 세션의 모델이 자기
-	// Bash 도구로 자기 관문을 열 수 있고, 그러면 관문이 아니다.
+	// 파이프로 흘려보낸 답은 사람을 한 번도 지나지 않는다.
+	//
+	// 이 시험이 보증하는 범위를 정확히 적어둔다 — 파이프까지다. pty 를 붙인 프로그램
+	// (script · unbuffer)은 여기서 사람과 구분되지 않고, 구분하는 길이 이 계층에 없다
+	// (mcp_approve.go 머리말). 그것까지 막는 것은 메인 세션 자신의 도구 권한 확인의 몫이다.
 	workDirPath := workDirWithOneRepoForTest(t)
 	writeRepoMCPConfigForTest(t, workDirPath, "alpha-commons", `{"mcpServers":{}}`)
 	t.Chdir(workDirPath)

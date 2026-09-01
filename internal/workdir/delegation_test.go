@@ -472,3 +472,137 @@ func assertSamePathForTest(t *testing.T, actualPath, wantedPath string) {
 		t.Errorf("경로 = %q, want %q", actualRealPath, wantedRealPath)
 	}
 }
+
+func TestADelegationThatAnsweredNothingReadableSaysSo(t *testing.T) {
+	// 종료 코드 0 인데 stdout 이 답 문서가 아닌 경우다. 여기에 표시가 없으면 아무것도 하지 못한
+	// 위임이 "답이 빈 성공" 으로 보고된다 — 설계 5.4.2 가 권한 거절에 대해 막은 것과 같은 구멍이
+	// 다른 문으로 열린다. stdout 에 경고 한 줄이 섞이거나 답 문서의 모양이 바뀌면 이 길로 온다.
+	fakeClaudeOnPath(t, `
+cat > /dev/null
+echo 'Warning: 무언가 stdout 에 섞였다'
+exit 0
+`)
+
+	workDirPath, repo := delegationFixture(t)
+
+	outcome, err := RunDelegation(t.Context(), workDirPath, DelegationRequest{
+		Repo:           repo,
+		Prompt:         "고쳐줘",
+		ConversationID: "11111111-2222-4333-8444-555555555555",
+	})
+	if err != nil {
+		t.Fatalf("RunDelegation() 실패: %v", err)
+	}
+
+	if outcome.ExitCode != 0 {
+		t.Errorf("exitCode = %d, 0 으로 끝나는 것이 이 시험의 전제다", outcome.ExitCode)
+	}
+	if !outcome.AnswerWasUnreadable {
+		t.Error("AnswerWasUnreadable = false, 답 문서를 읽지 못했음을 알리기를 기대")
+	}
+}
+
+func TestADelegationThatAnsweredProperlyIsNotMarkedUnreadable(t *testing.T) {
+	fakeClaudeOnPath(t, `
+cat > /dev/null
+echo '{"subtype":"success","result":"했습니다","session_id":"11111111-2222-4333-8444-555555555555","permission_denials":[]}'
+`)
+
+	workDirPath, repo := delegationFixture(t)
+
+	outcome, err := RunDelegation(t.Context(), workDirPath, DelegationRequest{
+		Repo:           repo,
+		Prompt:         "고쳐줘",
+		ConversationID: "11111111-2222-4333-8444-555555555555",
+	})
+	if err != nil {
+		t.Fatalf("RunDelegation() 실패: %v", err)
+	}
+	if outcome.AnswerWasUnreadable {
+		t.Error("AnswerWasUnreadable = true, 제대로 읽은 답입니다")
+	}
+}
+
+func TestADelegationThatAlreadyRanIsNotThrownAwayWhenTheRecordCannotBeWritten(t *testing.T) {
+	// claude 는 이미 돌아서 파일을 고쳤다. 그 답을 에러로 바꿔 올리면 부르는 쪽은 "위임이 걸리지
+	// 않았다" 로 읽고 같은 프롬프트를 다시 건다 — 이미 고친 위임이 두 번 돈다.
+	fakeClaudeOnPath(t, `
+cat > /dev/null
+echo '{"subtype":"success","result":"파일을 고쳤습니다","session_id":"11111111-2222-4333-8444-555555555555","permission_denials":[]}'
+`)
+
+	workDirPath, repo := delegationFixture(t)
+
+	// runs 를 파일로 막아 기록만 실패시킨다.
+	coordDirectoryPath := filepath.Join(workDirPath, ".coord")
+	if err := os.MkdirAll(coordDirectoryPath, 0o755); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coordDirectoryPath, "runs"), nil, 0o644); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	outcome, err := RunDelegation(t.Context(), workDirPath, DelegationRequest{
+		Repo:           repo,
+		Prompt:         "고쳐줘",
+		ConversationID: "11111111-2222-4333-8444-555555555555",
+	})
+	if err != nil {
+		t.Fatalf("RunDelegation() 이 이미 돈 위임의 답을 에러로 바꿨습니다: %v", err)
+	}
+
+	if outcome.Result != "파일을 고쳤습니다" {
+		t.Errorf("결과 = %q, claude 가 이미 답한 것을 그대로 기대", outcome.Result)
+	}
+	// 사후 추적의 재료를 잃은 것은 조용히 넘길 일이 아니다.
+	if outcome.LogFailure == "" {
+		t.Error("LogFailure 가 비어 있습니다 — 원출력을 남기지 못했다는 사실도 함께 답해야 합니다")
+	}
+	if outcome.LogPath != "" {
+		t.Errorf("logPath = %q, 남기지 못했으면 가리킬 자리가 없기를 기대", outcome.LogPath)
+	}
+}
+
+func TestTwoDelegationsInTheSameSecondAreStillOrderedByTime(t *testing.T) {
+	// 이어가기 실패 폴백은 같은 초에 기록 둘을 남긴다 — 실패한 resume 과 성공한 재시도.
+	// 파일 이름의 시각이 초 단위면 그 둘의 순서를 무작위 대화 ID 가 정하게 되고,
+	// 카드가 "최근 위임" 으로 실패한 쪽을 보일 수 있다(설계 6.1).
+	fakeClaudeOnPath(t, `
+cat > /dev/null
+echo "{\"subtype\":\"success\",\"result\":\"$KYU_TEST_ANSWER\",\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"permission_denials\":[]}"
+`)
+
+	workDirPath, repo := delegationFixture(t)
+
+	// 앞선 것이 사전순으로 뒤에 오도록 대화 ID 를 골랐다 — 시각이 같으면 ID 가 순서를 정한다.
+	t.Setenv("KYU_TEST_ANSWER", "먼저")
+	if _, err := RunDelegation(t.Context(), workDirPath, DelegationRequest{
+		Repo:           repo,
+		Prompt:         "하나",
+		ConversationID: "ffffffff-2222-4333-8444-555555555555",
+	}); err != nil {
+		t.Fatalf("RunDelegation() 실패: %v", err)
+	}
+
+	t.Setenv("KYU_TEST_ANSWER", "나중")
+	newest, err := RunDelegation(t.Context(), workDirPath, DelegationRequest{
+		Repo:           repo,
+		Prompt:         "둘",
+		ConversationID: "00000000-2222-4333-8444-555555555555",
+	})
+	if err != nil {
+		t.Fatalf("RunDelegation() 실패: %v", err)
+	}
+
+	recent, err := MostRecentDelegation(workDirPath, repo.Name)
+	if err != nil {
+		t.Fatalf("MostRecentDelegation() 실패: %v", err)
+	}
+	if recent == nil {
+		t.Fatal("최근 위임 = null, 방금 돌린 둘을 기대")
+	}
+	if recent.LogPath != newest.LogPath {
+		t.Errorf("최근 위임 = %q, 나중에 끝난 %q 를 기대 — 같은 초의 두 기록이 대화 ID 순으로 갈렸습니다",
+			filepath.Base(recent.LogPath), filepath.Base(newest.LogPath))
+	}
+}

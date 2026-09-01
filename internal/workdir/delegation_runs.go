@@ -37,7 +37,12 @@ const delegationRunFilePermission = 0o644
 //
 // 사전순이 곧 시간순이 되도록 자릿수를 고정한다 — 가장 최근 위임을 찾는 일이 이름 정렬 하나로
 // 끝난다(MostRecentDelegation).
-const delegationRunFileTimeLayout = "20060102-150405"
+//
+// 초 아래까지 적는 이유는 이어가기 실패 폴백이다. 그 길은 같은 초에 기록 둘을 남기는데
+// (실패한 --resume 과 곧바로 이어지는 재시도) 초 단위로 자르면 그 둘의 순서를 파일 이름의
+// 다음 조각인 무작위 대화 ID 가 정하게 된다. 그러면 카드가 "최근 위임" 으로 실패한 쪽을
+// 보이는 일이 절반의 확률로 생긴다.
+const delegationRunFileTimeLayout = "20060102-150405.000000"
 
 // delegationRun 은 위임 한 번의 기록 한 벌이다.
 //

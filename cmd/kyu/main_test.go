@@ -578,10 +578,13 @@ func readJSONRPCAnswers(t *testing.T, answerReader io.Reader, wantedCount int) m
 }
 
 func TestMCPApproveCannotBeAnsweredThroughAPipe(t *testing.T) {
-	// 관문의 요점은 사람이 직접 본다는 것이다(orchestration-tools-design.md 5.6). 파이프로 y 를
-	// 흘려보내 통과할 수 있으면, 관문에 막힌 그 메인 세션이 자기 Bash 도구로 자기 관문을 연다.
+	// 관문의 요점은 사람이 직접 본다는 것이다(orchestration-tools-design.md 5.6). 파이프로 흘려보낸
+	// y 가 통과하면 승인이 사람을 한 번도 지나지 않고 저장된다.
 	//
 	// 프로세스로 확인한다 — 터미널인지 아닌지는 파일 서술자의 성질이라 함수 호출로는 재현되지 않는다.
+	//
+	// 보증 범위는 파이프까지다. pty 를 붙인 프로그램은 이 검사를 지나며, 그것을 가르는 길이 이
+	// 계층에 없다는 것을 internal/cli/mcp_approve.go 머리말이 적고 있다.
 	workDirPath := t.TempDir()
 	repoPath := filepath.Join(workDirPath, "proj-a")
 	initGitRepoForListing(t, repoPath)

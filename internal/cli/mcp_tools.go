@@ -114,8 +114,9 @@ func listReposToolAnswer(workDirPath string) (mcpserver.ToolResult, error) {
 
 	repos := make([]listReposRepo, 0, len(listing.repos))
 	for _, repo := range listing.repos {
-		// 위임 기록을 읽지 못한 것은 목록을 막지 않는다. 잃는 것은 "그때 무엇이 있었나" 한 줄이고,
-		// 그것 때문에 모델이 레포 목록 자체를 못 받으면 위임을 걸 길이 사라진다.
+		// 기록 파일 하나를 읽지 못한 것은 목록을 막지 않는다(MostRecentDelegation 이 건너뛴다).
+		// 여기로 올라오는 것은 기록 디렉토리 자체를 읽지 못한 경우뿐이고, 그것은 "위임한 적 없음"
+		// 과 다른 사실이라 그럴듯한 값으로 메우지 않는다.
 		recentDelegation, err := workdir.MostRecentDelegation(listing.workDirAbsolutePath, repo.name)
 		if err != nil {
 			return mcpserver.ToolResult{Text: err.Error(), IsError: true}, nil

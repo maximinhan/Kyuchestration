@@ -103,6 +103,21 @@ type DelegationOutcome struct {
 	// TimedOut 은 상한에 걸려 우리가 끊었는지다.
 	TimedOut bool
 
+	// AnswerWasUnreadable 은 stdout 을 claude 의 답 문서로 읽지 못했는지다.
+	//
+	// 종료 코드 0 과 함께 오는 경우가 이 필드의 존재 이유다. 그때 Result 도 비고 거절 목록도
+	// 비어 있어서, 이 표시가 없으면 아무것도 하지 못한 위임이 "답이 빈 성공" 으로 보고된다 —
+	// 설계 5.4.2 가 권한 거절에 대해 막은 구멍이 다른 문으로 열리는 자리다.
+	AnswerWasUnreadable bool
+
+	// LogFailure 는 원출력을 남기지 못한 이유다. 남겼으면 비어 있다.
+	//
+	// 기록 실패를 에러로 올리지 않는 이유가 이 필드다. claude 는 이미 돌아서 파일을 고쳤을 수
+	// 있는데 그 답을 에러로 바꾸면, 부르는 쪽이 "위임이 걸리지 않았다" 로 읽고 같은 프롬프트를
+	// 다시 건다 — 이미 고친 위임이 두 번 돈다. 잃은 것은 사후 추적의 재료 하나이고,
+	// 그것은 두 번 실행하는 것보다 작은 손해다.
+	LogFailure string
+
 	// Elapsed 는 위임이 실제로 걸린 벽시계 시간이다. 끊었을 때 "얼마 만에" 를 답하는 근거다.
 	Elapsed time.Duration
 
@@ -177,6 +192,7 @@ func RunDelegation(ctx context.Context, workDirPath string, request DelegationRe
 	// 종료 코드가 0 이어도 답 문서를 읽어야 한다. 권한에 막힌 위임이 그 자리이고, 그것은
 	// permission_denials 배열에만 남아 있다(설계 문서 3.3).
 	answer, answerIsJSON := parseDelegationAnswer(stdout.Bytes())
+	outcome.AnswerWasUnreadable = !answerIsJSON
 	if answerIsJSON {
 		outcome.Result = answer.Result
 		outcome.ConversationID = answer.SessionID
@@ -186,9 +202,12 @@ func RunDelegation(ctx context.Context, workDirPath string, request DelegationRe
 		outcome.PermissionDeniedTools = deniedToolNames(answer.PermissionDenials)
 	}
 
+	// 기록에 실패해도 결과는 살린다. 이 자리에 오기까지 claude 는 이미 돌았고, 그 답을 에러로
+	// 바꾸면 부르는 쪽이 위임을 다시 건다 — 파일을 고친 위임이 두 번 도는 것이 사후 추적 재료
+	// 하나를 잃는 것보다 나쁘다.
 	logPath, err := recordDelegationRun(workDirPath, request, outcome, commandArguments, stdout.Bytes(), answerIsJSON, startedAt)
 	if err != nil {
-		return DelegationOutcome{}, err
+		outcome.LogFailure = err.Error()
 	}
 	outcome.LogPath = logPath
 
