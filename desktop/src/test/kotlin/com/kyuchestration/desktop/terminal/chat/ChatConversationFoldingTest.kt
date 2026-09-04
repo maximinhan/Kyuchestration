@@ -45,6 +45,31 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `되돌아온 말은 기다리던 목록에서 빠진다`() {
+        // 앱이 보낸 것과 되돌아온 것을 잇는 근거는 텍스트 그대로다. 스트림이 주는 다른 열쇠가
+        // 없다 — 되돌아온 줄에는 앱이 붙일 수 있었던 식별자가 없다.
+        val waiting = ChatConversation(
+            target = SessionTarget.Main,
+            pendingUserMessages = listOf("README.txt 를 Read 도구로 읽고 첫 줄을 그대로 답해.", "그다음 것"),
+        )
+
+        val conversation = waiting.after(RecordedChatStreamLines.USER_MESSAGE_REPLAYED)
+
+        assertEquals(listOf("그다음 것"), conversation.pendingUserMessages)
+        assertIs<ChatEntry.UserSaid>(conversation.entries.single())
+    }
+
+    @Test
+    fun `기다리는 말이 남아 있으면 턴이 끝나도 기다림은 끝나지 않는다`() {
+        // 큐에 든 말의 턴이 시작됐다는 이벤트는 오지 않는다(3.11).
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
+
+        val conversation = waiting.after(RecordedChatStreamLines.RESULT_SUCCESS)
+
+        assertEquals(TurnState.Running, conversation.turnState)
+    }
+
+    @Test
     fun `글자 조각은 전사가 아니라 버퍼에 쌓인다`() {
         val conversation = conversationAfter(
             RecordedChatStreamLines.STREAM_TEXT_DELTA,

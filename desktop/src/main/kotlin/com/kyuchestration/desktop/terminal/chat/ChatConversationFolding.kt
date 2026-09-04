@@ -24,7 +24,12 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         modelName = event.modelName,
     )
 
-    is ChatSessionEvent.UserMessageEchoed -> copy(entries = entries + ChatEntry.UserSaid(event.text))
+    // 되돌아왔으므로 기다리던 목록에서 뺀다. 같은 말을 두 번 보냈으면 앞의 하나만 빠진다 —
+    // minus 가 첫 항목만 지우는 것이 여기서는 바라는 동작이다(둘째는 아직 안 돌아왔다).
+    is ChatSessionEvent.UserMessageEchoed -> copy(
+        entries = entries + ChatEntry.UserSaid(event.text),
+        pendingUserMessages = pendingUserMessages - event.text,
+    )
 
     // 완성본이 왔으므로 조각 버퍼를 버린다. 안쪽 대화(parentToolUseId 가 있는 것)의 완성본이어도
     // 버린다 — 조각에는 부모 정보가 실려 오지 않아(AssistantTextStreaming) 버퍼에 섞여 있다.
@@ -81,7 +86,9 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         // 턴이 끝났는데 조각이 남아 있다면 완성본이 오지 않은 것이다(중단된 턴이 그렇다).
         // 그 잘린 문장을 화면에 남겨 두면 다음 턴의 답 위에 계속 떠 있는다.
         streamingText = null,
-        turnState = TurnState.Idle,
+        // 큐에 든 말이 남아 있으면 이 턴이 끝나도 기다리는 것이 끝난 게 아니다. 그 말의 턴이
+        // 시작됐다는 이벤트는 오지 않으므로(3.11), 보낸 것과 되돌아온 것의 차이가 유일한 근거다.
+        turnState = if (pendingUserMessages.isEmpty()) TurnState.Idle else TurnState.Running,
         totalCostUsd = totalCostUsd + event.costUsd,
     )
 

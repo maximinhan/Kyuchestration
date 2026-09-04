@@ -135,14 +135,23 @@ class ChatSessionStateHolder(
      * **보낸 말을 전사에 직접 넣지 않는다.** 스트림을 한 바퀴 돌아 `UserMessageEchoed` 로
      * 돌아오고 전사는 그것으로 그린다(3.14) — 앱이 직접 넣으면 큐잉이나 중단이 끼는 순간
      * 순서가 어긋난다.
+     *
+     * **도는 중에도 보낼 수 있다.** `claude` 가 큐를 갖고 있고(3.11), 실측에서 큐에 든 말은
+     * 중단 뒤에도 살아남아 다음 턴으로 돌았다. 다만 되돌아오는 것은 그 턴이 시작할 때라,
+     * 그 사이의 공백을 [ChatConversation.pendingUserMessages] 가 메운다.
      */
     fun sendUserMessage(text: String) {
         val target = mutableState.value.target ?: return
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
 
-        // 잠금은 보내는 즉시다. 되돌아온 말을 기다려 잠그면 그 사이에 한 번 더 보낼 수 있고,
-        // 그 둘은 한 턴으로 합쳐져(3.11) 답이 하나만 온다.
-        updateConversation(target) { it.copy(turnState = TurnState.Running) }
+        updateConversation(target) {
+            it.copy(
+                // 끊어 달라고 말해 둔 턴이 있으면 그 갈래를 지운다. 그 턴의 result 가 아직 오지
+                // 않았고, 이 말은 그것과 상관없이 큐에 들어간다.
+                turnState = if (it.turnState == TurnState.Idle) TurnState.Running else it.turnState,
+                pendingUserMessages = it.pendingUserMessages + text,
+            )
+        }
 
         writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(text) }
     }
@@ -190,6 +199,9 @@ class ChatSessionStateHolder(
                 updateConversation(target) {
                     it.copy(
                         turnState = TurnState.Idle,
+                        // 기다리던 말도 함께 놓는다. stdin 이 닫혔다는 것은 이 세션이 끝났다는
+                        // 뜻이라, 그 말들은 되돌아오지 않는다 — 남겨 두면 영영 "대기 중" 이다.
+                        pendingUserMessages = emptyList(),
                         entries = it.entries + ChatEntry.EngineNotice(
                             "$failureNotice — 이 세션은 끝났습니다 (${failure.message})",
                         ),

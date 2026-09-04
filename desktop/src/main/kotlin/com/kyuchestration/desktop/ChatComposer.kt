@@ -26,6 +26,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.TurnState
@@ -36,15 +37,23 @@ import com.kyuchestration.desktop.terminal.chat.TurnState
  * | 정한 것 | 왜 |
  * |---|---|
  * | Enter 로 보내고 Shift+Enter 로 줄바꿈 | 대화창의 관례다. 보내는 일이 훨씬 잦다 |
- * | 턴이 도는 동안 잠근다 | **설계 6.5 와 다르다** — 아래 설명 |
+ * | 도는 중에도 보낼 수 있다 | 3.11 — `claude` 가 큐를 갖고 있다. 3 단계의 잠금을 여기서 푼다 |
+ * | 보낸 것이 되돌아올 때까지 "대기 중" 으로 선다 | 아래 설명 |
  * | 도는 동안 중단 버튼이 함께 선다 | 3.8 — 턴만 끊기고 대화는 산다 |
  * | 끝난 세션에서는 아예 없다 | 보낼 곳이 없는 입력창은 눌러도 아무 일이 없는 죽은 면이다 |
  *
- * **잠그는 쪽으로 정한 근거를 적어둔다.** 설계는 잠그지 않는 쪽이었다 — `claude` 가 큐를 갖고
- * 있어(3.11) 도는 중에 보내도 받아 주고, 잠그면 사용자가 생각난 것을 적어둘 자리가 사라진다.
- * 다만 3 단계에는 중단 버튼이 없다(4 단계). 열어 두면 큐에 쌓인 말을 되돌릴 길이 없고, 큐에
- * 들어간 둘이 한 턴으로 합쳐져 답이 하나만 오는 것도 화면이 설명하지 못한다. 중단이 서는
- * 4 단계에 이 판단을 다시 본다.
+ * **잠금을 푼 근거가 실측이다.** 3 단계는 잠갔다 — 중단 버튼이 없어 쌓아 둔 말을 되돌릴 길이
+ * 없어서였다(열린 질문 8). 그 버튼이 이 단계에 섰고, 큐에 든 말이 중단 뒤에도 살아남아 다음
+ * 턴으로 도는 것을 쟀다(2026-09-04). 그래서 잠글 이유가 사라졌다.
+ *
+ * **다만 열어 두는 것만으로는 모자랐다.** 같은 실측에서, 도는 중에 보낸 말은 그 턴이 끝나고
+ * 다음 턴이 시작할 때에야 되돌아왔다 — **보낸 지 78 초 뒤**다. 전사는 되돌아온 것으로만
+ * 그리므로(원칙 14), 그동안 사용자가 친 말은 화면 어디에도 없다. 그 공백을 입력창 위의
+ * "대기 중" 줄이 메운다 — 전사가 아니라 앱이 자기가 보낸 것을 아는 자리다(3.11 이 허락한 셈).
+ *
+ * **보내기와 중단이 같은 자리를 나눠 쓰지 않는다.** 설계 6.5 는 "같은 자리의 버튼이 중단으로
+ * 바뀐다" 였다. 입력창이 열려 있는 지금은 그럴 수 없다 — 도는 중에 친 말을 보낼 버튼이 그
+ * 자리에 있어야 하고, 하나가 두 일을 하면 보내려던 손이 턴을 끊는다.
  */
 @Composable
 internal fun ChatComposer(
@@ -58,8 +67,8 @@ internal fun ChatComposer(
     }
 
     var composerValue by remember(conversation.target) { mutableStateOf(TextFieldValue()) }
-    val turnRunning = conversation.turnState != TurnState.Idle
-    val sendable = !turnRunning && composerValue.text.isNotBlank()
+    val waitingForAnswer = conversation.turnState != TurnState.Idle
+    val sendable = composerValue.text.isNotBlank()
 
     val send = {
         if (sendable) {
@@ -71,9 +80,11 @@ internal fun ChatComposer(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
+        PendingUserMessages(conversation.pendingUserMessages)
+
         // 요청을 보냈다는 표시(6.6). 답이 오기 시작하기 전의 몇 초 동안 화면에 아무 일도 일어나지
         // 않는데, 그 사이를 이 줄이 메운다.
-        if (turnRunning) {
+        if (waitingForAnswer) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().heightIn(max = PROGRESS_LINE_HEIGHT))
         }
 
@@ -85,11 +96,10 @@ internal fun ChatComposer(
             OutlinedTextField(
                 value = composerValue,
                 onValueChange = { composerValue = it },
-                enabled = !turnRunning,
                 placeholder = {
                     Text(
-                        text = if (turnRunning) {
-                            "답이 오는 중입니다 — 끝나면 다시 보낼 수 있습니다"
+                        text = if (waitingForAnswer) {
+                            "지금 보내면 답이 오는 대로 이어서 답합니다"
                         } else {
                             "${conversation.target.label} 에게 말하기 (Enter 로 보내기 · Shift+Enter 로 줄바꿈)"
                         },
@@ -115,7 +125,7 @@ internal fun ChatComposer(
 
             // 도는 동안에만 선다. 늘 두면 누를 수 없는 버튼이 화면의 절반을 차지하고, 그것은
             // 이 자리에서 할 수 있는 일이 무엇인지를 흐린다.
-            if (turnRunning) {
+            if (waitingForAnswer) {
                 OutlinedButton(
                     onClick = onInterruptTurnRequested,
                     // 이미 말했으면 다시 누르지 못한다. 끝났다는 사실은 result 가 말하므로
@@ -127,6 +137,36 @@ internal fun ChatComposer(
             }
 
             Button(onClick = send, enabled = sendable) { Text("보내기") }
+        }
+    }
+}
+
+/**
+ * 보냈는데 아직 되돌아오지 않은 말들.
+ *
+ * **말풍선이 아니라 입력창 쪽에 둔다.** 전사는 스트림이 되돌려준 것만으로 그린다(원칙 14) —
+ * 앱이 자기가 보낸 것을 전사에 끼워 넣으면 큐에 든 둘이 한 턴으로 합쳐질 때(3.11) 순서가
+ * 어긋난다. 이 줄은 전사가 아니라 "지금 무엇을 기다리는가" 이고, 되돌아오는 순간 사라지면서
+ * 같은 말이 전사에 말풍선으로 선다.
+ */
+@Composable
+private fun PendingUserMessages(pendingUserMessages: List<String>) {
+    if (pendingUserMessages.isEmpty()) {
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        pendingUserMessages.forEach { pending ->
+            Text(
+                text = "대기 중 · $pending",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
