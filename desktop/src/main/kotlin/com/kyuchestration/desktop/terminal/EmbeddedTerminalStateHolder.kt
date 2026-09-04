@@ -130,6 +130,21 @@ class EmbeddedTerminalStateHolder(
     }
 
     /**
+     * 그 대상의 터미널 세션을 끝낸다. 화면에 보이지 않는 것도 끝난다.
+     *
+     * **한 세션은 한 종류다**(설계 문서 7 절). 같은 대화를 터미널과 챗이 동시에 열 수 없으므로,
+     * 챗으로 여는 자리가 먼저 이것을 부른다 — 남겨 두면 엔진이 `--session-id already in use` 로
+     * 거절하고, 사용자는 자기가 방금 누른 세션이 왜 안 열리는지 알 길이 없다.
+     */
+    fun endSessionFor(target: SessionTarget) {
+        if (mutableState.value.target == target) {
+            endSession()
+            return
+        }
+        endHeldSession(target)
+    }
+
+    /**
      * 보유한 세션을 전부 끝낸다 — 워크디렉토리를 바꾸거나 앱을 끌 때다.
      *
      * 앱이 그냥 죽어도 PTY 마스터가 닫히며 자식에게 SIGHUP 이 가지만, 그것을 무시하는 프로그램은

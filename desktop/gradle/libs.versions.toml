@@ -10,9 +10,19 @@ composeMaterial3 = "1.9.0"
 # 직렬화 런타임은 컴파일러 플러그인과 판을 맞출 필요가 없다 — 플러그인은 kotlin 버전을 따라가고,
 # 런타임은 그보다 새로워도 된다.
 kotlinxSerializationJson = "1.11.0"
-# Compose Multiplatform 1.12.0 이 코루틴 1.9.0 을 끌고 온다. 여기에 더 새 판을 적으면 테스트
-# 클래스패스만 올라가 실행 때와 다른 코루틴으로 시험하게 된다. 그래서 일부러 같은 판에 못 박는다.
-kotlinxCoroutines = "1.9.0"
+# 마크다운 렌더러(0.45.0)가 코루틴 1.11.0 을 요구한다. Compose Multiplatform 1.12.0 이 끌고 오는
+# 것은 1.9.0 이지만 해석되는 판은 어차피 1.11.0 이므로, 적힌 판과 도는 판이 갈리지 않게 여기에도
+# 그 값을 적는다 — 1.9.0 으로 두면 파일만 그렇게 보이고 실제로는 1.11.0 이 돈다.
+# 실행과 시험이 같은 판인 것은 그대로다. coroutines-core 가 -test 에 같은 판의 제약을 함께
+# 배포해서, 한쪽만 올라가는 일이 일어나지 않는다(gradlew dependencies 로 확인했다).
+kotlinxCoroutines = "1.11.0"
+# 모델의 답과 /context 같은 로컬 명령의 답이 마크다운으로 온다(설계 3.13 · 5.8). 0.45.0 은 이
+# 프로젝트와 같은 Kotlin 2.4.10 으로 배포됐고, 스트리밍 전용 API 가 이 선택의 결정적 이유다 —
+# 글자 조각이 올 때마다 전체를 다시 파싱하지 않고 확정 구간과 꼬리를 갈라 꼬리만 다시 읽는다.
+markdownRenderer = "0.45.0"
+# 코드 펜스 하이라이트. -code 모듈이 끌고 오지만 우리가 테마를 직접 넘기므로(이 앱의 다크는
+# 사용자가 고르는 것이라 isSystemInDarkTheme 이 답하지 못한다) 쓰는 것을 그대로 적는다.
+highlights = "1.1.0"
 # JediTerm 은 IntelliJ 의 터미널 위젯이다. 2.x 에서는 core·ui·pty 세 아티팩트였지만 3.x 는
 # jediterm-pty 를 더 내지 않는다(그쪽은 2.69 에서 멈췄다) — pty4j 를 잇는 커넥터는 각자 쓴다.
 jediterm = "3.74"
@@ -39,6 +49,13 @@ kotlinxCoroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-tes
 jeditermUi = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
 jeditermCore = { module = "org.jetbrains.jediterm:jediterm-core", version.ref = "jediterm" }
 pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
+# 마크다운 렌더러. core 는 0.13.0 부터 Material 테마를 모르므로 -m3 를 함께 넣어야 기본 스타일이
+# 붙고, -code 가 코드 펜스에 색을 넣는다(설계 3.15 의 함정 둘 중 첫째).
+markdownRenderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdownRenderer" }
+markdownRendererM3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
+markdownRendererCode = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "markdownRenderer" }
+highlights = { module = "dev.snipme:highlights", version.ref = "highlights" }
+
 # 위 둘이 자기 진단을 slf4j 로 흘리는데, 받을 구현이 없으면 그 말이 통째로 사라지고 실행할
 # 때마다 "No SLF4J providers were found" 경고가 세 줄 뜬다. 로그를 stderr 로 흘려보낸다.
 slf4jSimple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4jSimple" }

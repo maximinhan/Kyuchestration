@@ -31,11 +31,17 @@ import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
+import com.kyuchestration.desktop.terminal.SessionMode
+import com.kyuchestration.desktop.terminal.chat.ChatSessionStateHolder
+import com.kyuchestration.desktop.terminal.chat.ProcessChatSessionOpener
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.terminal.pty.PtySessionTerminalOpener
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * 조립이 일어나는 유일한 자리.
@@ -132,10 +138,22 @@ private fun runDesktopApplication(
             diagnosticLog = diagnosticLog,
         )
     }
+    val chatSessionStateHolder = remember(applicationCoroutineScope) {
+        ChatSessionStateHolder(
+            // 챗 모드로 묻는다. 엔진이 답하는 argv 가 터미널의 것과 통째로 다르고(설계 5.2),
+            // 어느 쪽을 묻는지는 이 자리가 정한다 — 화면이 정할 일이 아니다.
+            sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner, SessionMode.Chat),
+            chatSessionOpener = ProcessChatSessionOpener(),
+            coroutineScope = applicationCoroutineScope,
+            diagnosticLog = diagnosticLog,
+        )
+    }
     val engineInstallationState by engineInstallationStateHolder.state.collectAsState()
     val dashboardState by dashboardStateHolder.state.collectAsState()
     val initializationState by initializationStateHolder.state.collectAsState()
     val terminalState by terminalStateHolder.state.collectAsState()
+    val chatScreenState by chatSessionStateHolder.state.collectAsState()
+    val heldChatSessions by chatSessionStateHolder.heldSessions.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
     // 하나로 합치면 카드를 오갈 때마다 목록 전체가 다시 그려진다.
     val heldSessions by terminalStateHolder.heldSessions.collectAsState()
@@ -148,6 +166,11 @@ private fun runDesktopApplication(
     // 고른 것과 시스템이 답한 것을 합치는 판단만 순수 함수로 갈라 두었다(resolveDarkTheme).
     var themePreference by remember { mutableStateOf(ThemePreference.AlwaysDark) }
 
+    // 챗이 기본이고, 원시 터미널은 사용자가 챗 머리말에서 일부러 고른 동안만 그 자리에 선다
+    // (설계 7 절). 상태 홀더가 아니라 창이 드는 이유는 이것이 "사용자가 방금 무엇을 눌렀는가"
+    // 이지 어느 세션이 도는가가 아니어서다.
+    var conversationPaneContent by remember { mutableStateOf(ConversationPaneContent.Chat) }
+
     Window(
         onCloseRequest = {
             // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
@@ -155,6 +178,10 @@ private fun runDesktopApplication(
             // 그것을 무시하는 프로그램은 살아남아 어디에도 보이지 않는 고아가 된다 —
             // 그래서 정리를 프로세스 종료에 맡기지 않고 여기서 명시적으로 끝낸다.
             terminalStateHolder.endAllSessions()
+            // 파이프에 물린 claude 는 부모가 사라진 것을 모른 채 계속 산다 — PTY 와 달리 SIGHUP
+            // 조차 가지 않는다. 그래서 창이 닫히기 전에 여기서 기다린다. 프로세스는 stdin 이
+            // 닫히면 곧 끝나고, 그러지 않는 것만 이 자리가 붙잡는다(ProcessChatSession).
+            runBlocking { chatSessionStateHolder.endAllSessions() }
             exitApplication()
         },
         title = "뀨케스트레이션",
@@ -176,6 +203,9 @@ private fun runDesktopApplication(
             engineDirectoryLabel = engineDirectoryLabel,
             dashboardState = dashboardState,
             initializationState = initializationState,
+            chatScreenState = chatScreenState,
+            heldChatSessionTargets = heldChatSessions.map { it.target }.toSet(),
+            conversationPaneContent = conversationPaneContent,
             terminalState = terminalState,
             heldSessions = heldSessions,
             repositoryCloneStateHolder = repositoryCloneStateHolder,
@@ -210,8 +240,10 @@ private fun runDesktopApplication(
             onRefreshRequested = dashboardStateHolder::refreshNow,
             onCloseWorkDirRequested = {
                 // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 끝내지 않으면 다른
-                // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 터미널이 남는다.
+                // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 세션이 남는다.
                 terminalStateHolder.endAllSessions()
+                applicationCoroutineScope.launch { chatSessionStateHolder.endAllSessions() }
+                conversationPaneContent = ConversationPaneContent.Chat
                 // 초기화 실패 문구도, 고르던 레포도 그 워크디렉토리의 것이다. 같은 이유로 여기서
                 // 함께 놓는다 — 다른 워크디렉토리를 연 채로 앞 워크디렉토리에 받을 레포를 고르고
                 // 있으면, 받아 온 것이 화면에 없는 자리에 떨어진다.
@@ -220,9 +252,39 @@ private fun runDesktopApplication(
                 dashboardStateHolder.closeWorkDir()
             },
             onEnterSessionRequested = { target, conversationChoice ->
-                dashboardState.workDirPath?.let { terminalStateHolder.enterSession(it, target, conversationChoice) }
+                dashboardState.workDirPath?.let { workDirPath ->
+                    // 한 세션은 한 종류다(설계 7 절). 같은 대상의 터미널이 남아 있으면 대화 하나를
+                    // 두 프로세스가 열게 되고, 엔진이 그것을 거절한다.
+                    terminalStateHolder.endSessionFor(target)
+                    chatSessionStateHolder.enterSession(workDirPath, target, conversationChoice)
+                    conversationPaneContent = ConversationPaneContent.Chat
+                }
             },
-            onEndSessionRequested = terminalStateHolder::endSession,
+            onSendUserMessageRequested = chatSessionStateHolder::sendUserMessage,
+            onEndChatSessionRequested = {
+                applicationCoroutineScope.launch { chatSessionStateHolder.endOnScreenSession() }
+            },
+            onOpenRawTerminalRequested = { target ->
+                // 챗을 먼저 끝내고 그 프로세스가 실제로 끝난 뒤에 터미널을 연다. 순서를 뒤집으면
+                // 같은 대화를 두 프로세스가 열려 하고, 엔진이 뒤엣것을 거절한다(5.6).
+                applicationCoroutineScope.launch {
+                    chatSessionStateHolder.endOnScreenSession()
+                    dashboardState.workDirPath?.let { workDirPath ->
+                        terminalStateHolder.enterSession(
+                            workDirPath,
+                            target,
+                            SessionConversationChoice.ContinueRecordedConversation,
+                        )
+                        conversationPaneContent = ConversationPaneContent.RawTerminal
+                    }
+                }
+            },
+            onEndTerminalSessionRequested = {
+                terminalStateHolder.endSession()
+                // 터미널을 끝내면 대화 자리는 기본으로 돌아온다. 돌아갈 자리를 두지 않으면
+                // 사용자가 빈 터미널 화면에 남는다.
+                conversationPaneContent = ConversationPaneContent.Chat
+            },
         )
     }
 }

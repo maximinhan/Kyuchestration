@@ -177,6 +177,28 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `턴이 얼마나 걸렸는지도 그 줄에 있다`() {
+        // 화면의 턴 배지가 소요 시간을 말한다(6.3 의 TurnFooter). 앱이 직접 재는 길도 있지만,
+        // 큐잉으로 두 메시지가 한 턴으로 합쳐지면(3.11) 앱이 잰 시작점이 그 턴의 시작이 아니다.
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn(RecordedChatStreamLines.RESULT_SUCCESS),
+        )
+
+        assertEquals(6459, finished.durationMillis)
+    }
+
+    @Test
+    fun `소요 시간이 없는 턴은 0 으로 온다`() {
+        // 중단된 턴의 result 에는 duration_ms 가 없었다(A.9). 그 자리를 지어내지 않고 0 으로 두면
+        // 화면이 "잴 것이 없었다" 를 배지에서 빼는 것으로 말할 수 있다.
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn(FromDesignAppendix.RESULT_ABORTED),
+        )
+
+        assertEquals(0, finished.durationMillis)
+    }
+
+    @Test
     fun `중단된 턴은 실패가 아니라 중단으로 온다`() {
         // 중단은 이번 턴만 끊고 프로세스와 대화를 살려 둔다(3.8). 이것을 실패로 그리면 사용자는
         // 대화가 끝난 줄 알게 된다.
