@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
@@ -107,11 +108,14 @@ class ChatStreamLineReadingTest {
     @Test
     fun `거절된 도구 호출은 실패로 온다`() {
         val answered = assertIs<ChatSessionEvent.ToolCallAnswered>(
-            onlyEventIn(FromDesignAppendix.TOOL_RESULT_DENIED),
+            onlyEventIn(RecordedChatStreamLines.BASH_RESULT_REFUSED),
         )
 
         assertEquals(true, answered.failed)
-        assertEquals("사람이 거절했습니다 (프로브)", answered.modelVisibleText)
+        assertEquals("This command requires approval", answered.modelVisibleText)
+        // 거절된 호출의 곁가지는 객체가 아니라 문자열이다. 이것을 객체로만 읽으면 도구 카드가
+        // 거절을 만나는 순간 화면이 빈다.
+        assertIs<JsonPrimitive>(answered.typedResult)
     }
 
     @Test
@@ -148,7 +152,7 @@ class ChatStreamLineReadingTest {
         assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.STREAM_TOOL_BLOCK_STARTED))
         assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.SYSTEM_STATUS))
         assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.TASK_STARTED))
-        assertEquals(emptyList(), chatSessionEventsFrom(FromDesignAppendix.CONTROL_RESPONSE))
+        assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.CONTROL_RESPONSE))
     }
 
     @Test
@@ -188,14 +192,24 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
-    fun `소요 시간이 없는 턴은 0 으로 온다`() {
-        // 중단된 턴의 result 에는 duration_ms 가 없었다(A.9). 그 자리를 지어내지 않고 0 으로 두면
-        // 화면이 "잴 것이 없었다" 를 배지에서 빼는 것으로 말할 수 있다.
+    fun `소요 시간이 없는 줄은 0 으로 온다`() {
+        // 설계 부록 A.9 는 중단된 턴에 duration_ms 가 없다고 적었는데, 이 판(2.1.259)의 실측에는
+        // 실려 왔다(RESULT_ABORTED 는 4732 다). 그래도 없는 줄을 0 으로 두는 규칙은 그대로 둔다 —
+        // 없는 자리를 지어내지 않으면 화면이 "잴 것이 없었다" 를 배지에서 빼는 것으로 말한다.
         val finished = assertIs<ChatSessionEvent.TurnFinished>(
-            onlyEventIn(FromDesignAppendix.RESULT_ABORTED),
+            onlyEventIn("""{"type":"result","subtype":"success","total_cost_usd":0.01}"""),
         )
 
         assertEquals(0, finished.durationMillis)
+    }
+
+    @Test
+    fun `끊긴 턴의 소요 시간은 실려 온 그대로다`() {
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn(RecordedChatStreamLines.RESULT_ABORTED),
+        )
+
+        assertEquals(4732, finished.durationMillis)
     }
 
     @Test
@@ -203,7 +217,7 @@ class ChatStreamLineReadingTest {
         // 중단은 이번 턴만 끊고 프로세스와 대화를 살려 둔다(3.8). 이것을 실패로 그리면 사용자는
         // 대화가 끝난 줄 알게 된다.
         val finished = assertIs<ChatSessionEvent.TurnFinished>(
-            onlyEventIn(FromDesignAppendix.RESULT_ABORTED),
+            onlyEventIn(RecordedChatStreamLines.RESULT_ABORTED),
         )
 
         assertEquals(TurnOutcome.Interrupted, finished.outcome)

@@ -39,8 +39,12 @@ internal fun turnTokenLabel(usage: TurnUsage): String = buildString {
 /**
  * 그 턴이 걸린 시간. 잰 값이 없으면 null — 배지에서 이 칸이 통째로 빠진다.
  *
- * 0 을 "0.0초" 로 적지 않는다. 중단된 턴의 `result` 에는 `duration_ms` 가 없었고(A.9), 그것을
- * 0 초라고 적으면 재지 못한 것이 잰 것처럼 보인다.
+ * 0 을 "0.0초" 로 적지 않는다. 재지 못한 것을 0 초라고 적으면 잰 것처럼 보인다.
+ *
+ * **근거로 삼던 실측이 이 판에서는 달라졌다.** 설계 부록 A.9 는 중단된 턴에 `duration_ms` 가
+ * 없다고 적었는데, 2026-09-04 의 `claude` 2.1.259 는 끊긴 턴에도 그 값을 실어 보냈다
+ * (RecordedChatStreamLines.RESULT_ABORTED 가 4732 다). 규칙은 그대로 둔다 — 그 필드가 없는 줄이
+ * 판마다 있었다는 것이 이 방어의 이유이고, 있는 값을 적는 것은 아래 갈래가 이미 한다.
  */
 internal fun turnElapsedLabel(durationMillis: Long): String? = when {
     durationMillis <= 0 -> null

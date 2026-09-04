@@ -114,7 +114,7 @@ class ChatConversationFoldingTest {
         // 답 위에 잘린 문장이 계속 떠 있는다.
         val conversation = conversationAfter(
             RecordedChatStreamLines.STREAM_TEXT_DELTA,
-            FromDesignAppendix.RESULT_ABORTED,
+            RecordedChatStreamLines.RESULT_ABORTED,
         )
 
         assertNull(conversation.streamingText)
@@ -139,16 +139,14 @@ class ChatConversationFoldingTest {
     fun `거절된 도구 호출은 실패로 표시된다`() {
         // 접힌 카드만 보고도 무엇이 잘못됐는지 알아야 실패가 대화에 묻히지 않는다(6.3).
         val conversation = conversationAfter(
-            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use",""" +
-                """"id":"toolu_01EK4pNYexJLbkuiiosevhXq","name":"Write","input":{"file_path":"/tmp/x"}}]},""" +
-                """"parent_tool_use_id":null}""",
-            FromDesignAppendix.TOOL_RESULT_DENIED,
+            RecordedChatStreamLines.BASH_TOOL_USE_REFUSED,
+            RecordedChatStreamLines.BASH_RESULT_REFUSED,
         )
 
         val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
         val answer = assertNotNull(card.answer)
         assertTrue(answer.failed)
-        assertEquals("사람이 거절했습니다 (프로브)", answer.modelVisibleText)
+        assertEquals("This command requires approval", answer.modelVisibleText)
     }
 
     @Test
