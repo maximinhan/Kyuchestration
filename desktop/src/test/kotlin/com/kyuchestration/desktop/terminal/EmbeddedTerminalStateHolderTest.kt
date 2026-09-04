@@ -331,6 +331,39 @@ class EmbeddedTerminalStateHolderTest {
     }
 
     @Test
+    fun `대상으로 끝내면 화면에 없던 그 세션도 끝난다`() = runTest {
+        // 챗으로 그 세션을 여는 자리가 먼저 부르는 것이다. 남겨 두면 같은 대화를 두 화면이
+        // 동시에 열게 되고, 엔진이 그것을 거절한다(설계 문서 7 절 · 5.6).
+        val opener = RecordingSessionTerminalOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+        val offScreenConnector = opener.openedConnectors.single()
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-b"))
+        runCurrent()
+
+        holder.endSessionFor(SessionTarget.Repo("proj-a"))
+
+        assertEquals(1, offScreenConnector.closeCount)
+        // 보고 있던 세션은 그대로다 — 끝낸 것은 다른 대상이다.
+        assertEquals(SessionTarget.Repo("proj-b"), holder.state.value.target)
+        assertEquals(listOf(SessionTarget.Repo("proj-b")), holder.heldSessions.value.map { it.target })
+    }
+
+    @Test
+    fun `대상으로 끝낸 것이 화면에 있던 세션이면 화면도 함께 빈다`() = runTest {
+        val opener = RecordingSessionTerminalOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        holder.endSessionFor(SessionTarget.Main)
+
+        assertEquals(1, opener.openedConnectors.single().closeCount)
+        assertEquals(EmbeddedTerminalState.NoTerminalOpen, holder.state.value)
+    }
+
+    @Test
     fun `세션을 보유하기 시작하면 기록에 남는다`() = runTest {
         val diagnosticLog = RecordingDiagnosticLog()
         val holder = stateHolder(RecordingSessionTerminalOpener(), diagnosticLog)

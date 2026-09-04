@@ -54,6 +54,13 @@ internal fun ChatConversationPane(
     onSendUserMessageRequested: (String) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
+    /**
+     * 이 대화를 원시 터미널로 다시 여는 자리(설계 7 절).
+     *
+     * **챗 세션을 끝내고 같은 대화를 터미널로 여는 일이다.** 한 세션은 한 종류라 두 화면이 같은
+     * 대화를 동시에 열지 못한다(5.6) — 누르기 전에 그 사실을 알 수 있게 버튼 옆에 적어 둔다.
+     */
+    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (chatScreenState) {
@@ -78,6 +85,7 @@ internal fun ChatConversationPane(
                 onSendUserMessageRequested = onSendUserMessageRequested,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
+                onOpenRawTerminalRequested = onOpenRawTerminalRequested,
                 modifier = modifier,
             )
     }
@@ -89,10 +97,16 @@ private fun OpenedChat(
     onSendUserMessageRequested: (String) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
+    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        ChatHeader(conversation, onEndSessionRequested, onStartNewConversationRequested)
+        ChatHeader(
+            conversation = conversation,
+            onEndSessionRequested = onEndSessionRequested,
+            onStartNewConversationRequested = onStartNewConversationRequested,
+            onOpenRawTerminalRequested = onOpenRawTerminalRequested,
+        )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ChatTranscript(conversation, modifier = Modifier.weight(1f))
         ChatComposer(conversation, onSendUserMessageRequested)
@@ -112,6 +126,7 @@ private fun ChatHeader(
     conversation: ChatConversation,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
+    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
@@ -154,6 +169,11 @@ private fun ChatHeader(
         }
 
         if (conversation.alive) {
+            // 7 절이 정한 자리. 4 단계에 메뉴 안으로 내려가고, ❓ 셋(로그인 · MCP 승인 · 플랜 모드)이
+            // 챗에서 되는 것이 확인되면 7 단계에 사라진다.
+            TextButton(onClick = { onOpenRawTerminalRequested(conversation.target) }) {
+                Text("터미널로 보기")
+            }
             TextButton(onClick = onEndSessionRequested) { Text("세션 끝내기") }
         }
     }
