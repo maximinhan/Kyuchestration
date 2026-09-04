@@ -75,6 +75,25 @@ sealed class TerminalSessionFailure(
     )
 
     /**
+     * 챗 세션의 프로세스를 띄우지 못했다.
+     *
+     * [PtyFailedToOpen] 과 가르는 이유는 사람이 할 일이 다르기 때문이다. 그쪽은 앱이 도는 환경의
+     * 문제고(pty4j 의 네이티브·남은 PTY), 이쪽은 엔진이 답한 명령을 실행하지 못한 것이다 —
+     * `claude` 가 PATH 에 없거나, 답한 자리가 사라졌거나.
+     *
+     * 이름에 터미널이 들어간 타입에 챗의 갈래를 두는 것을 짚어둔다. 세션에 들어가지 못한 이유를
+     * 담는 자리가 하나여야 부르는 쪽이 두 벌을 잡지 않는다 — 챗 화면도 엔진에게 묻는 실패
+     * ([SessionCommandRefused] · [KyuExecutableNotFound])를 똑같이 만난다. 터미널이 사라지는
+     * 7 단계에 이 타입의 이름을 함께 옮긴다.
+     */
+    class ChatProcessFailedToStart(cause: Throwable) : TerminalSessionFailure(
+        message = "챗 세션의 claude 를 띄우지 못했습니다.",
+        guidance = "claude 가 PATH 에 있는지, 엔진이 답한 디렉토리가 그대로 있는지 확인하세요. " +
+            "원인: ${cause.message}",
+        cause = cause,
+    )
+
+    /**
      * PTY 를 열지 못했다.
      *
      * 세션 문제가 아니라 이 앱이 도는 환경의 문제다 — pty4j 가 자기 네이티브 라이브러리를
