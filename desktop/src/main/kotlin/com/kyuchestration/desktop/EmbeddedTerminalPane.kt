@@ -19,7 +19,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -27,6 +26,7 @@ import com.jediterm.terminal.TtyConnector
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import com.kyuchestration.desktop.theme.KyuTheme
 
 /**
  * 앱이 보유한 세션 중 지금 보고 있는 하나가 앱 안에서 보이는 자리.
@@ -126,7 +126,10 @@ private fun EmbeddedTerminalHeaderRow(
                 text = notice,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (terminalState.showsResumeFailure) {
-                    RESUME_FAILURE_COLOR
+                    // 이어가지 못했다는 말은 끝났다는 안내와 갈라 둔다. 앞의 것은 사용자가 방금
+                    // 한 일의 결과이고 이것은 사용자가 바라던 것이 일어나지 않았다는 말이라,
+                    // 같은 회색으로 두면 눈이 그 차이를 지나친다.
+                    KyuTheme.statusColors.caution
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
@@ -245,11 +248,3 @@ private fun CenteredNotice(content: @Composable () -> Unit) {
         }
     }
 }
-
-/**
- * 이어가지 못했다는 머리말의 색.
- *
- * 끝났다는 안내와 갈라 둔다. 앞의 것은 사용자가 방금 한 일의 결과이고 이것은 사용자가 바라던
- * 것이 일어나지 않았다는 말이라, 같은 회색으로 두면 눈이 그 차이를 지나친다.
- */
-private val RESUME_FAILURE_COLOR = Color(0xFFB26A00)

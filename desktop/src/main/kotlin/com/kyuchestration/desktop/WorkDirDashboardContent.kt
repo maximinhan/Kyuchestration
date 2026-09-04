@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,6 +31,7 @@ import com.kyuchestration.desktop.dashboard.mergeCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.workdir.RepoSnapshot
 import com.kyuchestration.desktop.workdir.RepoState
 import com.kyuchestration.desktop.workdir.RepoTask
@@ -77,7 +78,7 @@ fun WorkDirDashboardContent(
             // 목록은 그대로 두고 이 줄만 덧붙인다. 아래 카드들은 실패 직전에 본 것이라는 사실을
             // 여기서 밝혀 두면, 사용자는 오래된 값을 최신으로 착각하지 않는다.
             NoticeBanner(
-                accentColor = REFRESH_FAILURE_COLOR,
+                accentColor = KyuTheme.statusColors.failure,
                 title = "갱신하지 못했습니다 — 아래 목록은 마지막으로 읽은 상태입니다",
                 lines = listOfNotNull(failure.message, failure.guidance),
             )
@@ -85,7 +86,7 @@ fun WorkDirDashboardContent(
 
         if (observed.snapshot.planWarnings.isNotEmpty()) {
             NoticeBanner(
-                accentColor = PLAN_WARNING_COLOR,
+                accentColor = KyuTheme.statusColors.caution,
                 title = "계획을 그대로 쓰지 못했습니다",
                 lines = observed.snapshot.planWarnings,
             )
@@ -116,7 +117,7 @@ private fun PlanFileMissingBanner(
     onInitializeOpenedWorkDirRequested: () -> Unit,
 ) {
     NoticeBanner(
-        accentColor = PLAN_MISSING_COLOR,
+        accentColor = KyuTheme.statusColors.notice,
         title = "계획 파일이 없습니다",
         lines = listOf(
             "이 워크디렉토리에는 아직 .coord/plan.md 가 없습니다. 카드와 세션은 그대로 쓸 수 있고, " +
@@ -152,7 +153,7 @@ private fun PlanFileMissingBanner(
 @Composable
 private fun AppSessionBanner(appSessionCount: Int) {
     NoticeBanner(
-        accentColor = SESSION_COLOR,
+        accentColor = KyuTheme.statusColors.session,
         title = "세션 ${appSessionCount}개가 이 앱 안에서 돌고 있습니다",
         lines = listOf(
             "세션은 앱이 직접 보유합니다. 끝내는 길은 터미널의 세션 끝내기 버튼이나 앱 종료입니다.",
@@ -327,10 +328,10 @@ private fun RepoCard(
 private fun SessionChips(sessionFacts: CardSessionFacts) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (sessionFacts.appSessionHeld) {
-            SessionChip("세션", SESSION_COLOR)
+            SessionChip("세션", KyuTheme.statusColors.session)
         }
         if (sessionFacts.conversationToResume) {
-            SessionChip("이어갈 대화", RESUMABLE_CONVERSATION_COLOR)
+            SessionChip("이어갈 대화", KyuTheme.statusColors.resumableConversation)
         }
         sessionFacts.gitState?.let { SessionChip(it.rawValue, it.chipColor) }
     }
@@ -351,7 +352,7 @@ private fun taskLabel(task: RepoTask): String {
 private fun SessionChip(label: String, color: Color) {
     Row(
         modifier = Modifier
-            .background(color.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = CHIP_TINT_ALPHA), MaterialTheme.shapes.extraSmall)
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -359,7 +360,10 @@ private fun SessionChip(label: String, color: Color) {
         Spacer(Modifier.width(6.dp))
         Text(
             text = label,
-            color = color,
+            // 글자는 상태 색이 아니라 바탕 위의 기본 글자색으로 둔다. 뜻을 지는 것은 낱말이고
+            // 색은 그 옆의 점이 진다(설계 6.7 — 색만으로 가르지 않는다). 글자까지 상태 색으로
+            // 칠하면 밝은 바탕에서 DIRTY 주황이 3.6:1 까지 떨어져 작은 글자가 읽히지 않는다.
+            color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace,
         )
@@ -435,7 +439,7 @@ private fun NoticeBanner(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(accentColor.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+            .background(accentColor.copy(alpha = BANNER_TINT_ALPHA), MaterialTheme.shapes.small)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -448,34 +452,22 @@ private fun NoticeBanner(
 }
 
 /**
- * 상태마다 다른 색. 어두운 배경에서도 읽히도록 밝기를 낮춘 계열을 쓴다.
+ * 상태마다 다른 색. 어느 색인지는 테마가 정하고 여기서는 어느 뜻인지만 고른다.
  *
- * 모르는 상태는 IDLE 과 같은 회색으로 둔다. 없는 뜻을 색으로 지어내는 것보다, 낯선 낱말을
+ * 모르는 상태는 IDLE 과 같은 중립으로 둔다. 없는 뜻을 색으로 지어내는 것보다, 낯선 낱말을
  * 눈에 띄지 않게 보여주고 사용자가 kyu 쪽을 보게 하는 편이 낫다.
  */
 private val RepoState.chipColor: Color
+    @Composable
+    @ReadOnlyComposable
     get() = when (this) {
-        RepoState.Dirty -> Color(0xFFE65100)
-        RepoState.Ahead -> Color(0xFF1565C0)
-        RepoState.Idle -> NEUTRAL_COLOR
-        is RepoState.Unrecognized -> NEUTRAL_COLOR
+        RepoState.Dirty -> KyuTheme.statusColors.repoDirty
+        RepoState.Ahead -> KyuTheme.statusColors.repoAhead
+        RepoState.Idle -> KyuTheme.statusColors.neutral
+        is RepoState.Unrecognized -> KyuTheme.statusColors.neutral
     }
 
-private val NEUTRAL_COLOR = Color(0xFF6B6B6B)
+/** 칩과 배너는 색을 글자에 쓰고 바탕에는 그 색을 옅게 깐다. 두 옅기가 다른 것은 면적이 달라서다. */
+private const val CHIP_TINT_ALPHA = 0.14f
 
-/** 세션이 돌고 있다는 표시. 예전의 RUNNING 이 쓰던 초록을 그대로 이어받는다. */
-private val SESSION_COLOR = Color(0xFF2E7D32)
-
-/**
- * 이어갈 대화가 있다는 표시.
- *
- * 세션 칩과 다른 계열로 둔다. 저쪽은 지금 `claude` 가 돌고 있다는 뜻이고 이것은 아직 아무것도
- * 돌고 있지 않다는 뜻이라, 같은 계열로 두면 카드를 훑는 사람이 세션 수를 잘못 센다.
- */
-private val RESUMABLE_CONVERSATION_COLOR = Color(0xFF00695C)
-private val PLAN_WARNING_COLOR = Color(0xFFB26A00)
-private val REFRESH_FAILURE_COLOR = Color(0xFFB3261E)
-
-// 계획이 없는 것은 잘못이 아니라 아직 밟지 않은 걸음이다. 경고색(주황)이 아니라 안내하는
-// 파랑으로 둬서, 목록 위의 다른 배너들과 급한 정도가 다르다는 것이 색으로 먼저 읽히게 한다.
-private val PLAN_MISSING_COLOR = Color(0xFF1565C0)
+private const val BANNER_TINT_ALPHA = 0.10f
