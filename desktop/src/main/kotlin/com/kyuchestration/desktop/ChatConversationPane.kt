@@ -51,6 +51,7 @@ import com.kyuchestration.desktop.theme.KyuTheme
 internal fun ChatConversationPane(
     chatScreenState: ChatScreenState,
     diagnosticLogPathLabel: String,
+    onSendUserMessageRequested: (String) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     modifier: Modifier = Modifier,
@@ -74,6 +75,7 @@ internal fun ChatConversationPane(
         is ChatScreenState.ChatOnScreen ->
             OpenedChat(
                 conversation = chatScreenState.conversation,
+                onSendUserMessageRequested = onSendUserMessageRequested,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
                 modifier = modifier,
@@ -84,6 +86,7 @@ internal fun ChatConversationPane(
 @Composable
 private fun OpenedChat(
     conversation: ChatConversation,
+    onSendUserMessageRequested: (String) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     modifier: Modifier = Modifier,
@@ -92,6 +95,7 @@ private fun OpenedChat(
         ChatHeader(conversation, onEndSessionRequested, onStartNewConversationRequested)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ChatTranscript(conversation, modifier = Modifier.weight(1f))
+        ChatComposer(conversation, onSendUserMessageRequested)
     }
 }
 
