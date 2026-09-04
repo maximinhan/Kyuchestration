@@ -105,6 +105,54 @@ class RealClaudeChatConversationIntegrationTest {
         assertEquals(TurnState.Idle, conversation.turnState)
     }
 
+    /**
+     * 9 절 4 단계의 완료 확인 — **긴 답 도중 끊으면 턴만 끊기고 다음 말을 걸면 답한다**(3.8).
+     *
+     * 홀더까지 통과시켜야 답이 나오는 물음이다. 어댑터만 보면 `control_request` 가 나갔는지까지
+     * 알 수 있지만, 화면이 실제로 기다리는 것은 그다음이다 — 잠금이 풀리고, 배지가 중단으로
+     * 서고, 같은 프로세스가 다음 말을 받는가.
+     */
+    @Test
+    fun `긴 답을 끊어도 같은 대화가 다음 말에 답한다`(): Unit = runBlocking {
+        val holder = stateHolderOrSkip()
+
+        holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        waitUntilChatIsOnScreen(holder)
+
+        holder.sendUserMessage("$INTERRUPTED_TOPIC 에 대해 아주 길게, 열 문단으로 설명해라.")
+        // 글자가 흐르기 시작한 뒤에 끊는다. 그 전에 보내면 아직 시작하지 않은 턴에 대고 말하는
+        // 것이라, 이 검증이 무엇을 쟀는지가 흐려진다.
+        waitUntilTheAnswerIsFlowing(holder)
+
+        holder.interruptOnScreenTurn()
+        waitForFinishedTurns(holder, turnCount = 1)
+
+        val afterInterrupt = onScreenConversation(holder)
+        assertEquals(
+            TurnOutcome.Interrupted,
+            afterInterrupt.entries.filterIsInstance<ChatEntry.TurnEnded>().single().outcome,
+        )
+        // 잘린 문장이 화면에 남으면 다음 턴의 답 위에 계속 떠 있는다(5.3.2).
+        assertEquals(null, afterInterrupt.streamingText)
+        assertEquals(TurnState.Idle, afterInterrupt.turnState)
+        assertTrue(afterInterrupt.alive, "중단이 프로세스를 죽였습니다 — 그러면 이것은 세션 끝내기 버튼이다")
+
+        holder.sendUserMessage("방금 무슨 주제를 쓰고 있었지? 그 낱말만 답해.")
+        waitForFinishedTurns(holder, turnCount = 2)
+
+        val conversation = onScreenConversation(holder)
+        holder.endOnScreenSession()
+
+        val answerAfterInterrupt = conversation.entries
+            .dropWhile { it !is ChatEntry.TurnEnded }
+            .filterIsInstance<ChatEntry.AssistantSaid>()
+            .joinToString("\n") { it.text }
+        assertTrue(
+            INTERRUPTED_TOPIC in answerAfterInterrupt,
+            "끊긴 대화가 앞 맥락을 잃었습니다. 받은 답: $answerAfterInterrupt",
+        )
+    }
+
     private fun stateHolderOrSkip(): ChatSessionStateHolder {
         if (System.getenv(OPT_IN_VARIABLE) != "1") {
             abort<Unit>("$OPT_IN_VARIABLE=1 이 아니라 건너뜁니다 — 이 검증은 진짜 claude 를 부릅니다")
@@ -135,6 +183,18 @@ class RealClaudeChatConversationIntegrationTest {
             }
         }
 
+    /** 모델의 글자가 실제로 흐르기 시작할 때까지. 조각이든 완성본이든 하나라도 오면 그 턴은 살아 있다. */
+    private suspend fun waitUntilTheAnswerIsFlowing(holder: ChatSessionStateHolder) =
+        withTimeout(TURN_TIMEOUT_MILLIS) {
+            while (onScreenConversation(holder).let { conversation ->
+                    conversation.streamingText == null &&
+                        conversation.entries.none { it is ChatEntry.AssistantSaid }
+                }
+            ) {
+                delay(POLL_INTERVAL_MILLIS)
+            }
+        }
+
     private suspend fun waitForFinishedTurns(holder: ChatSessionStateHolder, turnCount: Int) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
             while (onScreenConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
@@ -151,6 +211,9 @@ class RealClaudeChatConversationIntegrationTest {
         const val OPT_IN_VARIABLE = "KYU_CLAUDE_CHAT_INTEGRATION"
 
         const val CONVERSATION_PASSPHRASE = "KYUCHAT-2026"
+
+        /** 끊긴 턴 뒤에도 대화가 살아 있는지를 가르는 낱말. 앞 턴에서만 나온 것이라야 근거가 된다. */
+        const val INTERRUPTED_TOPIC = "헥사고날"
 
         /**
          * 한 턴을 기다리는 시간.

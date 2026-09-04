@@ -163,6 +163,77 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
+    fun `도는 턴을 끊으면 그 요청이 세션에 실린다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("아주 긴 답을 줘")
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(1, opener.lastSession.interruptCount)
+        // 아직 끊긴 것이 아니라 끊어 달라고 말한 것이다. 여기서 곧바로 Idle 로 두면 화면은 턴이
+        // 끝났다고 말하는데 글자는 계속 흐른다 — 끝났다는 사실은 result 가 말한다(3.8).
+        assertEquals(TurnState.Interrupting, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `끊긴 턴이 배지로 남고 입력이 다시 열린다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("아주 긴 답을 줘")
+        runCurrent()
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        opener.lastSession.emit(finishedTurn(outcome = TurnOutcome.Interrupted))
+        runCurrent()
+
+        val conversation = onScreenConversation(holder)
+        assertEquals(TurnState.Idle, conversation.turnState)
+        assertEquals(
+            TurnOutcome.Interrupted,
+            conversation.entries.filterIsInstance<ChatEntry.TurnEnded>().single().outcome,
+        )
+    }
+
+    @Test
+    fun `턴이 돌지 않을 때는 끊어 달라고 말하지 않는다`() = runTest {
+        // 도는 턴이 없는데 제어 요청을 보내면 claude 는 다음 턴의 첫 낱말을 끊는다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(0, opener.lastSession.interruptCount)
+        assertEquals(TurnState.Idle, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `이미 끊어 달라고 말한 턴에 두 번 말하지 않는다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("아주 긴 답을 줘")
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(1, opener.lastSession.interruptCount)
+    }
+
+    @Test
     fun `띄우지 못하면 그 이유를 들고 있고 기록에 남긴다`() = runTest {
         val opener = RecordingChatSessionOpener()
         val commandSource = RecordingSessionCommandSource().apply {
@@ -295,8 +366,14 @@ class ChatSessionStateHolderTest {
         sessionEntryDispatcher = StandardTestDispatcher(testScheduler),
     )
 
-    private fun finishedTurn(costUsd: Double = 0.25) = ChatSessionEvent.TurnFinished(
-        outcome = TurnOutcome.Completed,
+    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
+        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+
+    private fun finishedTurn(
+        costUsd: Double = 0.25,
+        outcome: TurnOutcome = TurnOutcome.Completed,
+    ) = ChatSessionEvent.TurnFinished(
+        outcome = outcome,
         costUsd = costUsd,
         usage = TurnUsage(inputTokens = 3, outputTokens = 41, cacheReadInputTokens = 0, cacheCreationInputTokens = 0),
         permissionDenials = emptyList(),
@@ -359,6 +436,8 @@ class ChatSessionStateHolderTest {
         val sentMessages = mutableListOf<String>()
         var endSessionCount = 0
             private set
+        var interruptCount = 0
+            private set
 
         override val events: Flow<ChatSessionEvent> = incoming.receiveAsFlow()
 
@@ -370,7 +449,9 @@ class ChatSessionStateHolderTest {
             sentMessages.add(text)
         }
 
-        override suspend fun interruptCurrentTurn() = Unit
+        override suspend fun interruptCurrentTurn() {
+            interruptCount++
+        }
 
         override suspend fun endSession() {
             endSessionCount++

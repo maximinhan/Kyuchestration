@@ -261,6 +261,7 @@ private fun runDesktopApplication(
                 }
             },
             onSendUserMessageRequested = chatSessionStateHolder::sendUserMessage,
+            onInterruptTurnRequested = chatSessionStateHolder::interruptOnScreenTurn,
             onEndChatSessionRequested = {
                 applicationCoroutineScope.launch { chatSessionStateHolder.endOnScreenSession() }
             },

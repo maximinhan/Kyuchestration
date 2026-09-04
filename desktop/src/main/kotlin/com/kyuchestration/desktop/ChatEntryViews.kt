@@ -40,7 +40,10 @@ import kotlinx.serialization.json.JsonObject
 @Composable
 internal fun ChatEntryView(entry: ChatEntry) {
     when (entry) {
-        is ChatEntry.UserSaid -> UserMessageBubble(entry.text)
+        // 중단 안내가 사용자 메시지와 같은 모양으로 온다(3.8). 가르는 자리가 여기다 —
+        // 왜 어댑터가 아닌지는 isTurnInterruptionEcho 에 적혀 있다.
+        is ChatEntry.UserSaid ->
+            if (isTurnInterruptionEcho(entry.text)) TurnInterruptedNotice() else UserMessageBubble(entry.text)
         is ChatEntry.AssistantSaid -> AssistantMessageBlock(entry.text)
         is ChatEntry.AssistantThought -> ThinkingBlock(entry.text)
         is ChatEntry.ToolCall -> ToolCallCard(entry)
@@ -71,6 +74,22 @@ private fun UserMessageBubble(text: String) {
             )
         }
     }
+}
+
+/**
+ * 여기서 사용자가 턴을 끊었다는 줄(3.8).
+ *
+ * 오른쪽 말풍선으로 두지 않는 것이 요점이다. 이것은 사용자가 한 **말**이 아니라 사용자가 한
+ * **일**이고, 말풍선에 넣으면 다음 턴의 모델이 그 문장에 답한 것처럼 읽힌다.
+ */
+@Composable
+private fun TurnInterruptedNotice() {
+    Text(
+        text = "여기서 중단했습니다 — 대화는 그대로 이어집니다.",
+        style = MaterialTheme.typography.labelSmall,
+        color = KyuTheme.statusColors.caution,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**

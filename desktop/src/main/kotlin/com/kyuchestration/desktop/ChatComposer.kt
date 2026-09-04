@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ import com.kyuchestration.desktop.terminal.chat.TurnState
  * |---|---|
  * | Enter 로 보내고 Shift+Enter 로 줄바꿈 | 대화창의 관례다. 보내는 일이 훨씬 잦다 |
  * | 턴이 도는 동안 잠근다 | **설계 6.5 와 다르다** — 아래 설명 |
+ * | 도는 동안 중단 버튼이 함께 선다 | 3.8 — 턴만 끊기고 대화는 산다 |
  * | 끝난 세션에서는 아예 없다 | 보낼 곳이 없는 입력창은 눌러도 아무 일이 없는 죽은 면이다 |
  *
  * **잠그는 쪽으로 정한 근거를 적어둔다.** 설계는 잠그지 않는 쪽이었다 — `claude` 가 큐를 갖고
@@ -48,6 +50,7 @@ import com.kyuchestration.desktop.terminal.chat.TurnState
 internal fun ChatComposer(
     conversation: ChatConversation,
     onSendUserMessageRequested: (String) -> Unit,
+    onInterruptTurnRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (!conversation.alive) {
@@ -55,7 +58,7 @@ internal fun ChatComposer(
     }
 
     var composerValue by remember(conversation.target) { mutableStateOf(TextFieldValue()) }
-    val turnRunning = conversation.turnState == TurnState.Running
+    val turnRunning = conversation.turnState != TurnState.Idle
     val sendable = !turnRunning && composerValue.text.isNotBlank()
 
     val send = {
@@ -109,6 +112,19 @@ internal fun ChatComposer(
                         sendingKey
                     },
             )
+
+            // 도는 동안에만 선다. 늘 두면 누를 수 없는 버튼이 화면의 절반을 차지하고, 그것은
+            // 이 자리에서 할 수 있는 일이 무엇인지를 흐린다.
+            if (turnRunning) {
+                OutlinedButton(
+                    onClick = onInterruptTurnRequested,
+                    // 이미 말했으면 다시 누르지 못한다. 끝났다는 사실은 result 가 말하므로
+                    // (TurnState.Interrupting) 그때까지 이 버튼은 자기가 한 말을 보여준다.
+                    enabled = conversation.turnState == TurnState.Running,
+                ) {
+                    Text(if (conversation.turnState == TurnState.Running) "중단" else "끊는 중")
+                }
+            }
 
             Button(onClick = send, enabled = sendable) { Text("보내기") }
         }

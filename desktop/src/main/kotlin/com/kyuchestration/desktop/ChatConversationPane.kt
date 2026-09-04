@@ -52,6 +52,8 @@ internal fun ChatConversationPane(
     chatScreenState: ChatScreenState,
     diagnosticLogPathLabel: String,
     onSendUserMessageRequested: (String) -> Unit,
+    /** 도는 턴을 끊는 자리(설계 3.8 · 6.5). 세션을 끝내는 것과 다른 일이다 — 대화는 그대로 산다. */
+    onInterruptTurnRequested: () -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     /**
@@ -83,6 +85,7 @@ internal fun ChatConversationPane(
             OpenedChat(
                 conversation = chatScreenState.conversation,
                 onSendUserMessageRequested = onSendUserMessageRequested,
+                onInterruptTurnRequested = onInterruptTurnRequested,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
                 onOpenRawTerminalRequested = onOpenRawTerminalRequested,
@@ -95,6 +98,7 @@ internal fun ChatConversationPane(
 private fun OpenedChat(
     conversation: ChatConversation,
     onSendUserMessageRequested: (String) -> Unit,
+    onInterruptTurnRequested: () -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     onOpenRawTerminalRequested: (SessionTarget) -> Unit,
@@ -109,7 +113,7 @@ private fun OpenedChat(
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ChatTranscript(conversation, modifier = Modifier.weight(1f))
-        ChatComposer(conversation, onSendUserMessageRequested)
+        ChatComposer(conversation, onSendUserMessageRequested, onInterruptTurnRequested)
     }
 }
 

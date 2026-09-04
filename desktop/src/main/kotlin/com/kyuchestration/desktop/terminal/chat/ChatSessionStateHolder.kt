@@ -144,17 +144,54 @@ class ChatSessionStateHolder(
         // 그 둘은 한 턴으로 합쳐져(3.11) 답이 하나만 온다.
         updateConversation(target) { it.copy(turnState = TurnState.Running) }
 
+        writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(text) }
+    }
+
+    /**
+     * 화면에 떠 있는 대화의 도는 턴을 끊는다. **대화도 프로세스도 죽지 않는다**(3.8).
+     *
+     * 실측: 긴 글을 쓰던 중에 끊고 다음 말을 걸었더니 앞 맥락을 기억한 채로 답했다. 그래서 이
+     * 자리가 "세션 끝내기" 옆에 따로 설 수 있다 — 끊는 것과 끝내는 것은 다른 일이다.
+     *
+     * **도는 턴이 없으면 아무 말도 하지 않는다.** 제어 요청은 프로세스가 언제든 받는 줄이라,
+     * 턴이 없을 때 보내면 그다음에 시작하는 턴이 첫 낱말에서 끊긴다.
+     */
+    fun interruptOnScreenTurn() {
+        val target = mutableState.value.target ?: return
+        if (conversations[target]?.turnState != TurnState.Running) {
+            return
+        }
+        val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
+
+        // 두 번 눌러도 한 번만 간다. 갈래를 옮기는 것이 그 빗장이다.
+        updateConversation(target) { it.copy(turnState = TurnState.Interrupting) }
+
+        writeToSession(target, held, failureNotice = "끊지 못했습니다") { interruptCurrentTurn() }
+    }
+
+    /**
+     * 세션의 stdin 에 한 줄을 쓴다. 쓰지 못하면 그 사실을 대화에 적고 입력창을 연다.
+     *
+     * 사용자 메시지와 중단 요청이 이 자리를 함께 쓴다(원칙 4 의 두 번째 사용처). 둘 다 실패하는
+     * 이유가 하나뿐이라 — 프로세스가 이미 끝나 stdin 이 닫혔다 — 되살아나는 길도 같다. 그 사실은
+     * 곧 `SessionEnded` 로도 오지만, 잠긴 입력창을 그때까지 두면 사용자는 자기 말이 갔는지 모른
+     * 채 기다린다.
+     */
+    private fun writeToSession(
+        target: SessionTarget,
+        held: HeldChatSession,
+        failureNotice: String,
+        write: suspend OpenedChatSession.() -> Unit,
+    ) {
         coroutineScope.launch {
             try {
-                withContext(sessionEntryDispatcher) { held.session.sendUserMessage(text) }
+                withContext(sessionEntryDispatcher) { held.session.write() }
             } catch (failure: IOException) {
-                // 프로세스가 이미 끝나 stdin 이 닫힌 자리다. 그 사실은 곧 SessionEnded 로도 오지만,
-                // 잠긴 입력창을 그때까지 두면 사용자는 자기 말이 갔는지 모른 채 기다린다.
                 updateConversation(target) {
                     it.copy(
                         turnState = TurnState.Idle,
                         entries = it.entries + ChatEntry.EngineNotice(
-                            "보내지 못했습니다 — 이 세션은 끝났습니다 (${failure.message})",
+                            "$failureNotice — 이 세션은 끝났습니다 (${failure.message})",
                         ),
                     )
                 }
