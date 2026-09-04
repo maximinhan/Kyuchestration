@@ -65,14 +65,15 @@ internal sealed interface ToolCallCardContent {
 
     /**
      * 그 밖의 전부 — 아직 결과가 오지 않은 호출과, 모르는 도구와, 거절되어 곁가지가 문자열로
-     * 온 호출.
+     * 온 호출. 인자 JSON 과 결과 전문을 그대로 보인다.
      *
      * **이것이 기본값인 것이 뜻이다.** MCP 도구는 얼마든지 새로 붙고(설계 6.3), 새 도구가 붙는
      * 날 화면이 비는 것보다 인자와 결과를 그대로 보이는 편이 낫다.
      *
-     * @param toolLabel 화면에 적을 이름. MCP 도구는 `서버 · 도구` 로 갈라 적는다.
+     * 이름을 담지 않는다. 카드의 이름은 갈래와 무관하게 도구 이름 하나이고([toolLabel]), 그것을
+     * 이 갈래만 따로 들면 같은 값이 두 자리에 있게 된다.
      */
-    data class AnyTool(val toolLabel: String) : ToolCallCardContent
+    data object AnyTool : ToolCallCardContent
 }
 
 /** diff 한 덩이. `structuredPatch` 의 항목 하나가 이것이다. */
@@ -111,12 +112,12 @@ internal fun toolCallCardContentOf(
         )
 
         toolName in FILE_CHANGING_TOOL_NAMES && typedResultFields != null ->
-            fileChangedIn(typedResultFields) ?: ToolCallCardContent.AnyTool(toolLabel(toolName))
+            fileChangedIn(typedResultFields) ?: ToolCallCardContent.AnyTool
 
         toolName == READ_TOOL_NAME && typedResultFields != null ->
-            fileReadIn(typedResultFields) ?: ToolCallCardContent.AnyTool(toolLabel(toolName))
+            fileReadIn(typedResultFields) ?: ToolCallCardContent.AnyTool
 
-        else -> ToolCallCardContent.AnyTool(toolLabel(toolName))
+        else -> ToolCallCardContent.AnyTool
     }
 }
 

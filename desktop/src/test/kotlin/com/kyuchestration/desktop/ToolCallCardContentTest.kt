@@ -126,11 +126,10 @@ class ToolCallCardContentTest {
     fun `모르는 도구는 일반 카드로 떨어진다`() {
         // MCP 도구는 얼마든지 새로 붙는다(6.3). 새 도구가 붙는 날 화면이 비는 것보다 인자와
         // 결과를 그대로 보이는 편이 낫다.
-        val content = assertIs<ToolCallCardContent.AnyTool>(
+        assertEquals(
+            ToolCallCardContent.AnyTool,
             toolCallCardContentOf("Skill", input = emptyJsonObject(), typedResult = null),
         )
-
-        assertEquals("Skill", content.toolLabel)
     }
 
     @Test

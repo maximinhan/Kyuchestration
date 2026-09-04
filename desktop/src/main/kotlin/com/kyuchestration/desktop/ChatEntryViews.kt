@@ -146,7 +146,7 @@ private fun ToolCallCard(entry: ChatEntry.ToolCall) {
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         header = {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                ToolCallSummary(cardContent)
+                ToolCallSummary(toolLabel(entry.toolName), cardContent)
                 Spacer(Modifier.width(10.dp))
                 ToolCallStatus(entry.answer)
             }
@@ -174,11 +174,15 @@ private fun ToolCallCard(entry: ChatEntry.ToolCall) {
  *
  * 이름은 굵게, 그 도구가 다룬 것은 보통 굵기로 둔다 — 한 줄 안에서 "무슨 도구인가" 와 "무엇에
  * 대해서인가" 가 갈려 읽힌다.
+ *
+ * **이름은 갈래와 무관하게 `claude` 가 부른 도구 이름 그대로다.** 아는 도구만 우리 낱말로
+ * 옮기면 같은 줄에 "편집" 과 `Skill` 이 섞여 서고, 사용자가 전사에서 본 이름으로 검색할 수도
+ * 없다. 옮기는 것은 MCP 이름의 마디를 가르는 것 하나뿐이다(toolLabel).
  */
 @Composable
-private fun ToolCallSummary(cardContent: ToolCallCardContent) {
-    val (name, detail) = when (cardContent) {
-        is ToolCallCardContent.ShellCommand -> "Bash" to cardContent.command.lineSequence().first()
+private fun ToolCallSummary(toolLabel: String, cardContent: ToolCallCardContent) {
+    val detail = when (cardContent) {
+        is ToolCallCardContent.ShellCommand -> cardContent.command.lineSequence().first()
 
         is ToolCallCardContent.FileChanged -> {
             val counts = if (cardContent.createdFile) {
@@ -186,17 +190,17 @@ private fun ToolCallSummary(cardContent: ToolCallCardContent) {
             } else {
                 "+${cardContent.addedLineCount} −${cardContent.removedLineCount}"
             }
-            "편집" to "${fileName(cardContent.filePath)} $counts"
+            "${fileName(cardContent.filePath)} $counts"
         }
 
         is ToolCallCardContent.FileRead ->
-            "읽기" to fileName(cardContent.filePath) + cardContent.totalLineCount?.let { " · ${it}줄" }.orEmpty()
+            fileName(cardContent.filePath) + cardContent.totalLineCount?.let { " · ${it}줄" }.orEmpty()
 
-        is ToolCallCardContent.AnyTool -> cardContent.toolLabel to ""
+        is ToolCallCardContent.AnyTool -> ""
     }
 
     Text(
-        text = name,
+        text = toolLabel,
         style = MaterialTheme.typography.labelLarge,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
@@ -223,6 +227,8 @@ private fun ToolCallSummary(cardContent: ToolCallCardContent) {
  */
 @Composable
 private fun ToolCallDetail(cardContent: ToolCallCardContent, entry: ChatEntry.ToolCall) {
+    val toolLabel = toolLabel(entry.toolName)
+
     when (cardContent) {
         is ToolCallCardContent.ShellCommand -> {
             MonospaceBlock(cardContent.command, detailTitle = "명령")
@@ -255,8 +261,8 @@ private fun ToolCallDetail(cardContent: ToolCallCardContent, entry: ChatEntry.To
         }
 
         is ToolCallCardContent.AnyTool -> {
-            MonospaceBlock(prettyPrintedToolInput(entry.input), detailTitle = "${cardContent.toolLabel} 인자")
-            entry.answer?.let { MonospaceBlock(it.modelVisibleText, detailTitle = "${cardContent.toolLabel} 결과") }
+            MonospaceBlock(prettyPrintedToolInput(entry.input), detailTitle = "$toolLabel 인자")
+            entry.answer?.let { MonospaceBlock(it.modelVisibleText, detailTitle = "$toolLabel 결과") }
         }
     }
 }
