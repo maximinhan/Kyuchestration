@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -72,5 +73,16 @@ sealed interface ChatEntry {
  * @param failed 실패했거나 거절됐다. 접힌 카드에서도 이 사실이 보여야 실패가 대화에 묻히지 않는다(6.3).
  * @param modelVisibleText 모델이 읽은 텍스트. **마크다운으로 그리지 않는다** — 파일 내용이나
  *   명령 출력에 마크다운 문법처럼 보이는 글자가 있으면 화면이 원본과 달라진다(5.8).
+ * @param typedResult `tool_use_result` 곁가지 — 그 도구가 실제로 한 일이 도구마다 다른 모양으로
+ *   들어 있다(3.4). **카드의 갈래를 정하는 것이 이 값이다**(6.3): Bash 의 `stdout`, Edit 의
+ *   `structuredPatch`, Read 의 파일 메타가 전부 여기서 온다.
+ *
+ *   갈래를 여기서 나누지 않고 원래 값을 그대로 들고 있는다. 무엇을 어떤 카드로 그릴지는 그리는
+ *   쪽의 판단이고(ToolCallCardContent), 모양이 도구마다 다른 값을 상태 쪽에서 미리 좁히면
+ *   그 좁힘에 안 맞는 도구가 붙는 날 화면이 아니라 상태를 고쳐야 한다.
  */
-data class ToolCallAnswer(val failed: Boolean, val modelVisibleText: String)
+data class ToolCallAnswer(
+    val failed: Boolean,
+    val modelVisibleText: String,
+    val typedResult: JsonElement? = null,
+)

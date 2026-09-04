@@ -67,7 +67,11 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
     is ChatSessionEvent.ToolCallAnswered -> copy(
         entries = entries.withToolCallAnswered(
             toolUseId = event.toolUseId,
-            answer = ToolCallAnswer(failed = event.failed, modelVisibleText = event.modelVisibleText),
+            answer = ToolCallAnswer(
+                failed = event.failed,
+                modelVisibleText = event.modelVisibleText,
+                typedResult = event.typedResult,
+            ),
         ),
     )
 
