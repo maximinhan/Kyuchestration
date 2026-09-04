@@ -143,7 +143,9 @@ class ChatSessionStateHolderTest {
         // 보낸 말을 앱이 전사에 직접 넣지 않는다 — 되돌아온 것으로만 그린다(3.14).
         val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
         assertEquals(emptyList(), conversation.entries)
-        assertEquals(TurnState.Running, conversation.turnState)
+        assertEquals(listOf("README 를 읽어줘"), conversation.pendingUserMessages)
+        // 보낸 것은 아직 시작한 턴이 아니다. 시작은 이 말이 되돌아올 때다.
+        assertEquals(TurnState.Idle, conversation.turnState)
     }
 
     @Test
@@ -221,9 +223,7 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
-    fun `대기 중인 말이 남아 있으면 턴이 끝나도 도는 중이다`() = runTest {
-        // 큐에 든 말의 턴이 시작됐다는 이벤트는 오지 않는다(3.11). 앱이 보낸 것과 되돌아온 것의
-        // 차이가 "아직 답을 기다리는 말이 있다" 는 유일한 근거다.
+    fun `되돌아온 말이 그 턴의 시작이다`() = runTest {
         val opener = RecordingChatSessionOpener()
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
@@ -231,18 +231,42 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("긴 답을 줘")
         holder.sendUserMessage("사과의 색은?")
         runCurrent()
+
         opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
         runCurrent()
-
-        opener.lastSession.emit(finishedTurn())
-        runCurrent()
-
         assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
 
+        // 첫 턴이 끝났다. 둘째 말은 아직 되돌아오지 않았으므로 그 턴은 시작하지 않았다 —
+        // 기다리는 중이라는 사실은 대기 목록이 말하고, 도는 턴은 없다.
+        opener.lastSession.emit(finishedTurn())
+        runCurrent()
+        val betweenTurns = onScreenConversation(holder)
+        assertEquals(TurnState.Idle, betweenTurns.turnState)
+        assertEquals(listOf("사과의 색은?"), betweenTurns.pendingUserMessages)
+
         opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("사과의 색은?"))
+        runCurrent()
+        assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `큐에 든 말만 있을 때는 끊을 턴이 없다`() = runTest {
+        // 시작하지 않은 턴에 대고 제어 요청을 보내면 그 말이 시작하자마자 첫 낱말에서 끊긴다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("긴 답을 줘")
+        holder.sendUserMessage("큐에 드는 말")
+        runCurrent()
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(0, opener.lastSession.interruptCount)
         assertEquals(TurnState.Idle, onScreenConversation(holder).turnState)
     }
 
@@ -253,6 +277,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
         runCurrent()
 
         holder.interruptOnScreenTurn()
@@ -309,6 +334,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
         runCurrent()
 
         holder.interruptOnScreenTurn()
@@ -449,6 +475,9 @@ class ChatSessionStateHolderTest {
         baseEnvironment = emptyMap(),
         // 앱에서는 엔진에게 묻고 프로세스를 띄우는 동안 화면이 멎지 않도록 IO 로 나간다.
         sessionEntryDispatcher = StandardTestDispatcher(testScheduler),
+        // stdin 쓰기도 시험의 시계 위에 올린다. 앱에서는 한 번에 하나씩 도는 자리이고, 여기서도
+        // 한 줄씩 차례로 도는 것은 같다 — 다른 것은 그 차례를 시험이 진행시킨다는 것뿐이다.
+        standardInputDispatcher = StandardTestDispatcher(testScheduler),
     )
 
     private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =

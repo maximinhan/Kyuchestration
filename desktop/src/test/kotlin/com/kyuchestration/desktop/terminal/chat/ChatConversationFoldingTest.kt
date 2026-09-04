@@ -60,13 +60,33 @@ class ChatConversationFoldingTest {
     }
 
     @Test
-    fun `기다리는 말이 남아 있으면 턴이 끝나도 기다림은 끝나지 않는다`() {
-        // 큐에 든 말의 턴이 시작됐다는 이벤트는 오지 않는다(3.11).
+    fun `되돌아온 말이 그 턴의 시작이다`() {
+        // 큐에 든 말은 그 턴이 시작할 때에야 되돌아온다(3.11). 그래서 되돌아옴이 "도는 턴이
+        // 생겼다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.
+        val conversation = conversationAfter(RecordedChatStreamLines.USER_MESSAGE_REPLAYED)
+
+        assertEquals(TurnState.Running, conversation.turnState)
+    }
+
+    @Test
+    fun `기다리는 말이 남아 있어도 턴이 끝나면 도는 턴은 없다`() {
+        // 그 말의 턴은 아직 시작하지 않았다. 도는 것으로 읽으면 그 사이에 누른 중단이 그 말의
+        // 첫 낱말을 끊는다.
         val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
 
         val conversation = waiting.after(RecordedChatStreamLines.RESULT_SUCCESS)
 
-        assertEquals(TurnState.Running, conversation.turnState)
+        assertEquals(TurnState.Idle, conversation.turnState)
+        assertEquals(listOf("큐에 든 말"), conversation.pendingUserMessages)
+    }
+
+    @Test
+    fun `세션이 끝나면 되돌아올 말도 없다`() {
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
+
+        val conversation = waiting.after(ChatSessionEvent.SessionEnded(exitCode = 0))
+
+        assertEquals(emptyList(), conversation.pendingUserMessages)
     }
 
     @Test

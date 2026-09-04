@@ -14,6 +14,7 @@ import java.nio.file.Path
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -41,14 +42,28 @@ import kotlinx.coroutines.withContext
  * @param baseEnvironment 자식에게 물려줄 바탕 환경. PTY 어댑터와 같은 것을 쓴다 — 엔진의 답에
  *   실행 파일 경로가 아니라 `claude` 라는 이름이 들어 있어서, 그것을 찾는 PATH 가 이 값이다.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatSessionStateHolder(
     private val sessionCommandSource: SessionCommandSource,
     private val chatSessionOpener: ChatSessionOpener,
     private val coroutineScope: CoroutineScope,
     private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
-    /** 엔진에게 묻고 프로세스를 띄우고 stdin 에 쓰는 동안 화면이 멎지 않도록 나가는 자리. */
+    /** 엔진에게 묻고 프로세스를 띄우고 끝내는 동안 화면이 멎지 않도록 나가는 자리. */
     private val sessionEntryDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * stdin 에 쓰는 일이 나가는 자리. **한 번에 하나씩만 돈다.**
+     *
+     * 입력창이 열려 있는 지금은 쓰기 둘이 겹칠 수 있다 — 빠르게 두 번 보내거나, 보내고 곧바로
+     * 끊는 자리다. 화면 스레드에서 순서대로 띄워도 그 안에서 [Dispatchers.IO] 로 나가는 순간
+     * 실행 순서는 정해지지 않고, 뒤집히면 두 말이 반대 순서로 큐에 들어가거나 중단 요청이 아직
+     * 나가지 않은 말보다 먼저 닿는다. `ProcessChatSession` 의 자물쇠는 줄이 섞이는 것만 막지
+     * **순서는 지키지 않는다.**
+     *
+     * 세션 전부가 이 한 자리를 함께 쓴다. 쓰기는 파이프에 한 줄을 흘려보내는 짧은 일이라 서로를
+     * 기다리게 하지 않는다 — 세션마다 자리를 두는 것은 그 기다림이 실제로 문제가 될 때 정한다.
+     */
+    private val standardInputDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
 ) {
 
     private val mutableState = MutableStateFlow<ChatScreenState>(ChatScreenState.NoChatOpen)
@@ -144,14 +159,9 @@ class ChatSessionStateHolder(
         val target = mutableState.value.target ?: return
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
 
-        updateConversation(target) {
-            it.copy(
-                // 끊어 달라고 말해 둔 턴이 있으면 그 갈래를 지운다. 그 턴의 result 가 아직 오지
-                // 않았고, 이 말은 그것과 상관없이 큐에 들어간다.
-                turnState = if (it.turnState == TurnState.Idle) TurnState.Running else it.turnState,
-                pendingUserMessages = it.pendingUserMessages + text,
-            )
-        }
+        // 턴 갈래를 여기서 옮기지 않는다. 보낸 것은 아직 시작한 턴이 아니고, 시작은 이 말이
+        // 되돌아올 때다(3.11) — 그때까지 이 말은 "기다리는 말" 이다.
+        updateConversation(target) { it.copy(pendingUserMessages = it.pendingUserMessages + text) }
 
         writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(text) }
     }
@@ -194,7 +204,7 @@ class ChatSessionStateHolder(
     ) {
         coroutineScope.launch {
             try {
-                withContext(sessionEntryDispatcher) { held.session.write() }
+                withContext(standardInputDispatcher) { held.session.write() }
             } catch (failure: IOException) {
                 updateConversation(target) {
                     it.copy(

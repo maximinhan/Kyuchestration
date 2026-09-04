@@ -67,7 +67,10 @@ internal fun ChatComposer(
     }
 
     var composerValue by remember(conversation.target) { mutableStateOf(TextFieldValue()) }
-    val waitingForAnswer = conversation.turnState != TurnState.Idle
+    // 도는 턴과 큐에 든 말은 다른 사실이고(TurnState.Running 의 주석), 기다린다는 점에서만 같다.
+    // 진행 줄은 그 "같은 점" 을 그리고, 중단 버튼은 도는 턴 하나만 본다.
+    val waitingForAnswer = conversation.turnState != TurnState.Idle ||
+        conversation.pendingUserMessages.isNotEmpty()
     val sendable = composerValue.text.isNotBlank()
 
     val send = {
@@ -123,9 +126,9 @@ internal fun ChatComposer(
                     },
             )
 
-            // 도는 동안에만 선다. 늘 두면 누를 수 없는 버튼이 화면의 절반을 차지하고, 그것은
-            // 이 자리에서 할 수 있는 일이 무엇인지를 흐린다.
-            if (waitingForAnswer) {
+            // 끊을 턴이 있을 때만 선다. 늘 두면 누를 수 없는 버튼이 화면의 절반을 차지하고,
+            // 큐에 든 말만 있을 때 두면 아직 시작하지도 않은 턴을 끊게 된다.
+            if (conversation.turnState != TurnState.Idle) {
                 OutlinedButton(
                     onClick = onInterruptTurnRequested,
                     // 이미 말했으면 다시 누르지 못한다. 끝났다는 사실은 result 가 말하므로
