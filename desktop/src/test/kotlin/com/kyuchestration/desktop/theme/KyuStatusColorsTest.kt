@@ -50,10 +50,23 @@ class KyuStatusColorsTest {
 
             assertTrue(dark.luminance() > light.luminance(), "$name 이 어두운 바탕에서 밝아지지 않았다")
 
+            // 색상까지 옮겨 가면 뜻이 바뀐다 — 초록이던 것이 다크에서 청록으로 읽히면 사용자는
+            // 그것을 다른 표시로 센다. 목업이 고른 넷은 사람 손을 거쳐 조금씩 돌아가 있으므로
+            // "같은 계열" 이라고 부를 만한 폭까지 허용한다.
             val lightHue = KyuTonalPalette.fromSeed(light).hue
             val darkHue = KyuTonalPalette.fromSeed(dark).hue
             val hueGap = abs(lightHue - darkHue).let { minOf(it, 360f - it) }
-            assertTrue(hueGap < HUE_TOLERANCE_DEGREES, "$name 의 색상이 바뀌었다: $lightHue → $darkHue")
+            assertTrue(hueGap < HUE_TOLERANCE_DEGREES, "$name 의 색상이 계열을 벗어났다: $lightHue → $darkHue")
+        }
+    }
+
+    @Test
+    fun `목업이 정한 넷은 그대로 실린다`() {
+        with(KyuStatusColors.Dark) {
+            assertEquals(Color(0xFF5FCF72), session)
+            assertEquals(Color(0xFF6FD3C8), resumableConversation)
+            assertEquals(Color(0xFFFF9E5C), repoDirty)
+            assertEquals(Color(0xFFFF7B72), failure)
         }
     }
 
@@ -121,7 +134,12 @@ class KyuStatusColorsTest {
 
         const val WCAG_OFFSET = 0.05f
 
-        /** 회색(채도 0)의 색상은 0 도로 잡히므로 두 값이 정확히 같다. 나머지도 변환 오차 안이다. */
-        const val HUE_TOLERANCE_DEGREES = 1f
+        /**
+         * 같은 계열이라고 부를 수 있는 폭.
+         *
+         * 색상환에서 15 도는 초록과 청록 사이가 벌어지기 시작하는 자리보다 좁다. 목업이 고른
+         * 네 색이 라이트 짝에서 최대 이만큼 돌아가 있다.
+         */
+        const val HUE_TOLERANCE_DEGREES = 15f
     }
 }

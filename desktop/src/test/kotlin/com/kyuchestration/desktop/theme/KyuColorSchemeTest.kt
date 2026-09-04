@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.theme
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -74,6 +75,22 @@ class KyuColorSchemeTest {
     }
 
     @Test
+    fun `다크 스킴이 목업이 준 색을 재현한다`() {
+        // 목업의 색을 손으로 옮겨 적는 대신 씨앗 둘과 톤 번호로 뽑는다. 이 검사가 그 대체가
+        // 성립한다는 근거다 — 톤 번호를 잘못 적으면 여기서 걸린다.
+        with(KyuDarkColorScheme) {
+            assertNear(Color(0xFFF5B544), primary, "강조 앰버")
+            assertNear(Color(0xFF1A1200), onPrimary, "앰버 위 글자")
+            assertNear(Color(0xFF131615), surface, "가장 어두운 배경")
+            assertNear(Color(0xFF161A19), surfaceContainer, "레일과 패널의 바탕")
+            assertNear(Color(0xFF1A1F1D), surfaceContainerHigh, "카드의 바탕")
+            assertNear(Color(0xFFE6E9E7), onSurface, "본문 글자")
+            assertNear(Color(0xFFA4ACA8), onSurfaceVariant, "보조 글자")
+            assertNear(Color(0xFF2C3331), outlineVariant, "테두리")
+        }
+    }
+
+    @Test
     fun `다크의 바탕이 라이트의 바탕보다 어둡다`() {
         assertTrue(
             KyuDarkColorScheme.surface.luminance() < KyuLightColorScheme.surface.luminance(),
@@ -112,6 +129,21 @@ class KyuColorSchemeTest {
         }
     }
 
+    /**
+     * 두 색이 눈으로는 같은 색인가. 각 성분이 255 단계에서 다섯 칸 안이면 그렇다.
+     *
+     * 정확히 같기를 요구하지 않는 이유는 목업의 색이 사람이 고른 값이고 우리 것은 계단에서
+     * 뽑은 값이어서다. 같은 톤을 가리키지만 마지막 한두 칸은 어긋난다.
+     */
+    private fun assertNear(expected: Color, actual: Color, role: String) {
+        val gap = maxOf(
+            abs(expected.red - actual.red),
+            abs(expected.green - actual.green),
+            abs(expected.blue - actual.blue),
+        )
+        assertTrue(gap <= CHANNEL_TOLERANCE, "$role 이 목업에서 벗어났다: 최대 ${(gap * 255).toInt()} 칸")
+    }
+
     private fun assertReadable(foreground: Color, background: Color, role: String) {
         val ratio = contrastRatio(foreground, background)
         assertTrue(ratio >= MIN_CONTRAST_RATIO, "$role 의 대비가 부족하다: %.2f : 1".format(ratio))
@@ -138,5 +170,8 @@ class KyuColorSchemeTest {
 
         /** 0 도(빨강)에서 이만큼 안쪽이면 사람이 "붉다" 고 읽는다. */
         const val RED_BAND_DEGREES = 25f
+
+        /** 255 단계에서 다섯 칸. */
+        const val CHANNEL_TOLERANCE = 5f / 255f
     }
 }

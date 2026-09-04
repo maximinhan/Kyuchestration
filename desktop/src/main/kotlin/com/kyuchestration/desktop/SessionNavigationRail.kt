@@ -44,7 +44,7 @@ internal fun SessionNavigationRail(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = modifier.fillMaxHeight().width(RAIL_WIDTH),
     ) {
         Column(

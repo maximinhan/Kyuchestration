@@ -60,33 +60,33 @@ data class KyuStatusColors(
         )
 
         /**
-         * 같은 뜻, 어두운 바탕용 밝기.
+         * 어두운 바탕 위의 같은 뜻들. **목업이 준 넷은 그대로, 나머지 다섯은 라이트에서 뽑는다.**
          *
-         * 손으로 아홉 색을 더 고르지 않고 라이트 값에서 뽑는다. 뜻은 색상이 지고 밝기는 바탕이
-         * 정하는 것이라, 두 벌을 따로 적어 두면 언젠가 한쪽만 고쳐진다.
+         * 손으로 아홉 색을 다 고르지 않는 이유는 뜻은 색상이 지고 밝기는 바탕이 정하기 때문이다 —
+         * 두 벌을 처음부터 끝까지 따로 적어 두면 언젠가 한쪽만 고쳐진다. 목업이 정한 넷은
+         * 사람이 실제로 견주어 고른 값이라 뽑은 것으로 대신하지 않는다.
          */
-        val Dark = Light.onDarkSurfaces()
+        val Dark = KyuStatusColors(
+            session = Color(0xFF5FCF72),
+            resumableConversation = Color(0xFF6FD3C8),
+            repoDirty = Color(0xFFFF9E5C),
+            repoAhead = Light.repoAhead.forDarkSurface(),
+            neutral = Light.neutral.forDarkSurface(),
+            caution = Light.caution.forDarkSurface(),
+            failure = Color(0xFFFF7B72),
+            // 클론이 끝났다는 표시. 세션이 돈다는 표시와 같은 초록을 쓰던 자리라 함께 옮긴다.
+            success = Color(0xFF5FCF72),
+            notice = Light.notice.forDarkSurface(),
+        )
     }
 }
-
-private fun KyuStatusColors.onDarkSurfaces() = KyuStatusColors(
-    session = session.forDarkSurface(),
-    resumableConversation = resumableConversation.forDarkSurface(),
-    repoDirty = repoDirty.forDarkSurface(),
-    repoAhead = repoAhead.forDarkSurface(),
-    neutral = neutral.forDarkSurface(),
-    caution = caution.forDarkSurface(),
-    failure = failure.forDarkSurface(),
-    success = success.forDarkSurface(),
-    notice = notice.forDarkSurface(),
-)
 
 private fun Color.forDarkSurface(): Color = KyuTonalPalette.fromSeed(this).tone(DARK_SURFACE_TONE)
 
 /**
  * 어두운 바탕 위의 상태 색이 서는 톤.
  *
- * Material 3 이 다크 스킴에서 강조에 쓰는 것과 같은 80 이다. 상태 색도 어두운 면 위의 글자와
- * 점이라 같은 처지고, 라이트에서 쓰던 40 언저리를 그대로 어두운 바탕에 올리면 읽히지 않는다.
+ * 목업이 준 넷이 놓인 자리(67~78)의 가운데쯤이다. 뽑아 쓰는 다섯이 목업의 넷과 같은 무게로
+ * 보여야, 한 줄에 나란히 놓였을 때 어느 쪽이 더 급한 말인지가 색의 밝기에서 잘못 읽히지 않는다.
  */
-private const val DARK_SURFACE_TONE = 80
+private const val DARK_SURFACE_TONE = 74

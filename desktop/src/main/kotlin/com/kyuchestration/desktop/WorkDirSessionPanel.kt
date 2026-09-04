@@ -79,7 +79,7 @@ internal fun WorkDirSessionPanel(
     onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier.fillMaxHeight()) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxHeight()) {
         Column(modifier = Modifier.fillMaxHeight()) {
             WorkDirPanelHeader(observed.snapshot, heldSessionTargets.size)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -238,14 +238,16 @@ private fun OrchestrationSessionBlock(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.primaryContainer)
+            // 카드의 바탕 위에 강조를 옅게 깐다. primaryContainer 를 그대로 채우지 않는 것은,
+            // 목업이 정한 어두운 화면에서 그 한 덩어리가 패널의 다른 모든 것을 눌러 버리기
+            // 때문이다 — 이 블록은 위계를 말해야지 화면의 주인공이 되어서는 안 된다.
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = ORCHESTRATION_TINT_ALPHA))
             .border(
                 width = if (onScreen) 2.dp else 1.dp,
-                color = if (onScreen) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.outlineVariant
-                },
+                color = MaterialTheme.colorScheme.primary.copy(
+                    alpha = if (onScreen) 1f else ORCHESTRATION_BORDER_ALPHA,
+                ),
                 shape = MaterialTheme.shapes.medium,
             )
             .clickable(onClick = onEnterSessionRequested)
@@ -253,21 +255,21 @@ private fun OrchestrationSessionBlock(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OrchestrationHubIcon(MaterialTheme.colorScheme.onPrimaryContainer)
+            OrchestrationHubIcon(MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(10.dp))
             Text(
                 text = SessionTarget.Main.label,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
 
         Text(
             text = "조율 세션 · 레포 ${repoCount}개를 위임으로 부립니다",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = SUBTITLE_ALPHA),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         if (sessionFacts.anyChipShown) {
@@ -569,8 +571,11 @@ private const val CHIP_TINT_ALPHA = 0.14f
 
 private const val BANNER_TINT_ALPHA = 0.10f
 
-/** 조율 블록의 부제. onPrimaryContainer 를 그대로 쓰면 제목과 무게가 같아 보인다. */
-private const val SUBTITLE_ALPHA = 0.78f
+/** 조율 블록에 까는 강조의 옅기. 칩·배너와 같은 자세다 — 색은 뜻이고 면은 바탕이다. */
+private const val ORCHESTRATION_TINT_ALPHA = 0.12f
+
+/** 열려 있지 않을 때의 테두리. 이 블록은 늘 테두리를 갖되, 열렸을 때만 또렷해진다. */
+private const val ORCHESTRATION_BORDER_ALPHA = 0.4f
 
 /** 레포들을 조율 블록에 매다는 선. 굵으면 목록을 가르는 벽처럼 읽힌다. */
 private val GUIDE_LINE_WIDTH = 1.dp

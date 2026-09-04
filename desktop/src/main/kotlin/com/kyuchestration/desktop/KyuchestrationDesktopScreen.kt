@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -91,7 +90,9 @@ fun KyuchestrationDesktopScreen(
     val liveConnectors = heldSessions.map { it.ttyConnector } + listOfNotNull(onScreenConnector(terminalState))
     SideEffect { heldSessionTerminalWidgets.dropWidgetsOtherThan(liveConnectors.toSet()) }
 
-    KyuTheme(darkTheme = isSystemInDarkTheme()) {
+    // 앱은 다크로 뜬다. 라이트 스킴도 서 있지만 목업이 확정한 것은 다크 쪽이고, 고르는 자리는
+    // 다음 걸음에서 붙는다.
+    KyuTheme(darkTheme = true) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
             // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
