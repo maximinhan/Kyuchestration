@@ -74,18 +74,14 @@ private fun UserMessageBubble(text: String) {
 }
 
 /**
- * 모델이 완성한 텍스트 블록. 말풍선 없이 폭 전체를 쓴다(6.3).
+ * 모델이 완성한 텍스트 블록. 말풍선 없이 폭 전체를 쓰고 마크다운으로 그린다(6.3 · 5.8).
  *
- * 마크다운은 다음 걸음에서 붙는다(5.8) — 지금은 온 글자 그대로다.
+ * 말풍선을 두지 않는 것이 뜻이다. 표와 코드 블록이 든 답이 흔한데, 말풍선 안에 넣으면 그것들이
+ * 폭에 눌린다 — 사용자의 말과 가르는 일은 오른쪽 말풍선 쪽이 이미 하고 있다.
  */
 @Composable
 private fun AssistantMessageBlock(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    AssistantMarkdown(text)
 }
 
 /** 모델의 사고 블록. 접힌 채로 서고, 눌러야 펴진다. */
