@@ -72,6 +72,11 @@ class ChatSessionStateHolder(
      * 흐름이 아니라 보통의 맵인 것이 뜻이다 — 이 값을 구독하는 화면이 없다. 화면이 보는 것은
      * [state] 하나이고, 이 맵은 그 뒤에서 "돌아왔을 때 두고 온 전사가 그대로인" 근거일 뿐이다.
      * 고치는 자리가 [updateConversation] 하나뿐이라 흐름 둘이 어긋날 자리도 없다.
+     *
+     * **한 번에 한 코루틴만 이것을 만진다는 전제 위에 있다.** 이 홀더의 상태를 고치는 일은 전부
+     * [coroutineScope] 안에서 일어나고, 앱이 넘기는 그 스코프는 화면을 그리는 단일 스레드다
+     * (Main.kt 의 rememberCoroutineScope). 여러 스레드가 도는 스코프를 넘기면 세션 하나의 전사가
+     * 조용히 샌다 — 터미널 홀더가 보유 목록에 대해 두는 전제와 같다.
      */
     private val conversations = mutableMapOf<SessionTarget, ChatConversation>()
 
