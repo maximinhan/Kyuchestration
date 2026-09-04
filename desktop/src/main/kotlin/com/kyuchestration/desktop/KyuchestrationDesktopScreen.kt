@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.HeldSession
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 
@@ -88,7 +90,7 @@ fun KyuchestrationDesktopScreen(
     val liveConnectors = heldSessions.map { it.ttyConnector } + listOfNotNull(onScreenConnector(terminalState))
     SideEffect { heldSessionTerminalWidgets.dropWidgetsOtherThan(liveConnectors.toSet()) }
 
-    MaterialTheme {
+    KyuTheme(darkTheme = isSystemInDarkTheme()) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
             // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
