@@ -2,8 +2,10 @@ package com.kyuchestration.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -31,6 +33,7 @@ import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.terminal.pty.PtySessionTerminalOpener
+import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
 
@@ -140,6 +143,11 @@ private fun runDesktopApplication(
     // 읽을 이유가 없다.
     val engineDirectoryLabel = remember { managedEngineDirectory().toString() }
 
+    // 테마만 상태 홀더 없이 여기 둔다. 다른 상태들은 포트를 부르고 그 결과를 갈래로 옮기는
+    // 일이 있어 홀더가 필요하지만, 이것은 사용자가 고른 값 하나이고 옮길 갈래가 없다 —
+    // 고른 것과 시스템이 답한 것을 합치는 판단만 순수 함수로 갈라 두었다(resolveDarkTheme).
+    var themePreference by remember { mutableStateOf(ThemePreference.AlwaysDark) }
+
     Window(
         onCloseRequest = {
             // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
@@ -150,9 +158,12 @@ private fun runDesktopApplication(
             exitApplication()
         },
         title = "뀨케스트레이션",
-        // 목록과 터미널이 위아래로 함께 뜨는 창이라 세로가 넉넉해야 한다. 터미널 쪽이 스무 줄은
-        // 되어야 세션 안의 화면을 읽을 수 있다.
-        state = rememberWindowState(size = DpSize(1100.dp, 860.dp)),
+        // 레일 80 과 세션 패널 320 이 왼쪽을 먹고, 남는 폭을 터미널이 쓴다. 1100 이던 폭을
+        // 키운 것이 그 400 을 메우기 위해서다 — 세션 안의 화면은 여전히 80 칸을 기준으로
+        // 그려지고, 그 폭이 나오지 않으면 줄이 접힌다(설계 1.3). 1360 이면 터미널이 백 칸
+        // 넘게 쓴다. 1440 까지 키우지 않은 것은 13 인치 맥의 화면이 정확히 1440 이라, 창이
+        // 화면에 딱 붙어 뜨는 자리를 만들지 않기 위해서다.
+        state = rememberWindowState(size = DpSize(1360.dp, 880.dp)),
     ) {
         // 대화상자의 주인 창을 넘겨 준다. 주인이 없으면 창이 화면 한가운데에 홀로 뜨고,
         // 작업 표시줄에서 본 창과 별개로 잡힌다.
@@ -168,6 +179,8 @@ private fun runDesktopApplication(
             terminalState = terminalState,
             heldSessions = heldSessions,
             repositoryCloneStateHolder = repositoryCloneStateHolder,
+            themePreference = themePreference,
+            onThemePreferenceChosen = { themePreference = it },
             onRetryEngineInstallationRequested = engineInstallationStateHolder::installEngine,
             onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
             onOpenWorkDirRequested = {

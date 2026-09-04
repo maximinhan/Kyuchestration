@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -26,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +45,7 @@ import com.kyuchestration.desktop.repoclone.RepositoryCloneResult
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.repoclone.TokenStorage
+import com.kyuchestration.desktop.theme.KyuTheme
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -295,7 +296,7 @@ private fun TokenProfileChoiceBody(
                     // 평문 파일에 놓인 토큰은 눈에 띄어야 한다. 사용자가 그 사실을 알고 쓰는 것과
                     // 모른 채 쓰는 것은 다르다.
                     color = if (profile.storage == TokenStorage.ConfigFile) {
-                        PLAINTEXT_STORAGE_COLOR
+                        KyuTheme.statusColors.caution
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -479,7 +480,7 @@ private fun RemoteRepositoryRow(
         )
         if (repository.isPrivate) {
             Spacer(Modifier.width(8.dp))
-            Text("private", style = MaterialTheme.typography.labelSmall, color = PRIVATE_REPOSITORY_COLOR)
+            Text("private", style = MaterialTheme.typography.labelSmall, color = KyuTheme.statusColors.caution)
         }
         if (alreadyCloned) {
             Spacer(Modifier.width(8.dp))
@@ -515,7 +516,7 @@ private fun CloneResultBody(state: RepositoryCloneState.CloneFinished, mainSessi
                         fontFamily = FontFamily.Monospace,
                         color = result.status.resultColor,
                         modifier = Modifier
-                            .background(result.status.resultColor.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                            .background(result.status.resultColor.copy(alpha = RESULT_TINT_ALPHA), MaterialTheme.shapes.extraSmall)
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     )
                     Spacer(Modifier.width(10.dp))
@@ -544,7 +545,7 @@ private fun CloneResultBody(state: RepositoryCloneState.CloneFinished, mainSessi
                     text = "새로 받은 레포는 지금 떠 있는 메인 세션에 붙지 않습니다 — 세션의 --add-dir 목록은 " +
                         "만들 때 정해집니다. 반영하려면 그 세션을 끝내고 카드를 다시 누르세요.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MAIN_SESSION_NOTICE_COLOR,
+                    color = KyuTheme.statusColors.notice,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -593,12 +594,14 @@ private val OwnerKind.label: String
     }
 
 private val CloneStatus.resultColor: Color
+    @Composable
+    @ReadOnlyComposable
     get() = when (this) {
-        CloneStatus.Cloned -> Color(0xFF2E7D32)
+        CloneStatus.Cloned -> KyuTheme.statusColors.success
         // 건너뛴 것은 실패가 아니다 — 같은 이름이 이미 있었을 뿐이라 붉게 칠하지 않는다.
-        CloneStatus.Skipped -> Color(0xFF6B6B6B)
-        CloneStatus.Failed -> Color(0xFFB3261E)
-        is CloneStatus.Unrecognized -> Color(0xFF6B6B6B)
+        CloneStatus.Skipped -> KyuTheme.statusColors.neutral
+        CloneStatus.Failed -> KyuTheme.statusColors.failure
+        is CloneStatus.Unrecognized -> KyuTheme.statusColors.neutral
     }
 
 /**
@@ -619,6 +622,5 @@ private val LOCAL_DATE_FORMAT: DateTimeFormatter =
  */
 private val LIST_MAX_HEIGHT = 300.dp
 
-private val PRIVATE_REPOSITORY_COLOR = Color(0xFFB26A00)
-private val PLAINTEXT_STORAGE_COLOR = Color(0xFFB26A00)
-private val MAIN_SESSION_NOTICE_COLOR = Color(0xFF1565C0)
+/** 클론 결과 한 줄의 바탕. 대시보드 칩과 같은 자세로, 색은 글자에 쓰고 바탕에는 옅게 깐다. */
+private const val RESULT_TINT_ALPHA = 0.12f

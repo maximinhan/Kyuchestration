@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,13 +10,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -32,6 +34,9 @@ import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
 import com.kyuchestration.desktop.terminal.HeldSession
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.theme.KyuTheme
+import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.theme.resolveDarkTheme
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 
@@ -69,6 +74,14 @@ fun KyuchestrationDesktopScreen(
      * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
      */
     repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    /**
+     * 사용자가 테마에 대해 고른 것. 앱을 띄우는 자리가 들고 있다.
+     *
+     * 화면이 스스로 들지 않는 이유는 이 값이 창 전체에 걸리기 때문이다 — 여기서 remember 로
+     * 두면 셸이 다시 세워질 때(워크디렉토리를 바꿀 때) 함께 되돌아간다.
+     */
+    themePreference: ThemePreference,
+    onThemePreferenceChosen: (ThemePreference) -> Unit,
     onRetryEngineInstallationRequested: () -> Unit,
     onLookForEngineAgainRequested: () -> Unit,
     onOpenWorkDirRequested: () -> Unit,
@@ -88,7 +101,7 @@ fun KyuchestrationDesktopScreen(
     val liveConnectors = heldSessions.map { it.ttyConnector } + listOfNotNull(onScreenConnector(terminalState))
     SideEffect { heldSessionTerminalWidgets.dropWidgetsOtherThan(liveConnectors.toSet()) }
 
-    MaterialTheme {
+    KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
             // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
@@ -114,7 +127,7 @@ fun KyuchestrationDesktopScreen(
                         FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
 
                     is WorkDirDashboardState.WorkDirObserved -> {
-                        DashboardWithTerminal(
+                        OrchestrationShell(
                             observed = dashboardState,
                             heldSessionTargets = heldSessions.map { it.target }.toSet(),
                             initializationState = initializationState,
@@ -127,6 +140,8 @@ fun KyuchestrationDesktopScreen(
                             onCloseWorkDirRequested = onCloseWorkDirRequested,
                             onEnterSessionRequested = onEnterSessionRequested,
                             onEndSessionRequested = onEndSessionRequested,
+                            themePreference = themePreference,
+                            onThemePreferenceChosen = onThemePreferenceChosen,
                         )
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
@@ -152,14 +167,18 @@ fun KyuchestrationDesktopScreen(
 }
 
 /**
- * 목록과 터미널이 위아래로 나뉜다.
+ * 셸이 좌우 셋으로 나뉜다 — 레일 · 세션 패널 · 대화 자리.
  *
- * 좌우가 아니라 위아래인 이유는 터미널이 폭을 먹기 때문이다. 세션 안의 화면은 80 칸을 기준으로
- * 그려지는데, 창을 반으로 갈라 오른쪽에 두면 그 폭이 나오지 않아 줄이 접힌다. 목록 쪽은 카드가
- * 세로로 쌓이므로 높이를 나눠 갖는 편이 덜 아쉽다.
+ * **위아래였던 이유가 사라지는 중이다.** 예전 주석은 "터미널이 폭을 먹기 때문" 이라고 적었다:
+ * 세션 안의 화면은 80 칸을 기준으로 그려지는데 창을 반으로 갈라 오른쪽에 두면 그 폭이 나오지
+ * 않았다. 챗은 폭에 맞춰 흐르므로 그 제약이 없고(설계 6.2), 그래서 자리를 먼저 좌우로 옮긴다.
+ *
+ * **다만 지금 오른쪽에 있는 것은 아직 터미널이다.** 이 걸음에서 바뀌는 것은 자리이고 화면
+ * 모델은 그대로다(설계 9 절 1 단계). 80 칸이 여전히 필요하므로 창 기본 폭을 함께 키웠다 —
+ * 레일 80 과 패널 320 을 빼고도 터미널이 백 칸 넘게 쓴다(Main.kt 의 창 크기).
  */
 @Composable
-private fun DashboardWithTerminal(
+private fun OrchestrationShell(
     observed: WorkDirDashboardState.WorkDirObserved,
     heldSessionTargets: Set<SessionTarget>,
     initializationState: WorkDirInitializationState,
@@ -172,38 +191,89 @@ private fun DashboardWithTerminal(
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
+    themePreference: ThemePreference,
+    onThemePreferenceChosen: (ThemePreference) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(DASHBOARD_HEIGHT_WEIGHT)) {
-            WorkDirDashboardContent(
-                observed = observed,
-                heldSessionTargets = heldSessionTargets,
-                initializationState = initializationState,
-                onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
-                onCloneRepositoriesRequested = onCloneRepositoriesRequested,
-                onRefreshRequested = onRefreshRequested,
-                onCloseWorkDirRequested = onCloseWorkDirRequested,
-                onEnterSessionRequested = onEnterSessionRequested,
-            )
-        }
+    Row(modifier = Modifier.fillMaxSize()) {
+        SessionNavigationRail(
+            diagnosticLogPathLabel = diagnosticLogPathLabel,
+            themePreference = themePreference,
+            onThemePreferenceChosen = onThemePreferenceChosen,
+            onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
+            onCloneRepositoriesRequested = onCloneRepositoriesRequested,
+            onRefreshRequested = onRefreshRequested,
+        )
+        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        // 아무 세션에도 들어가지 않았으면 목록이 창을 다 쓴다.
-        if (terminalState != EmbeddedTerminalState.NoTerminalOpen) {
-            HorizontalDivider()
-            EmbeddedTerminalPane(
-                terminalState = terminalState,
-                heldSessionTerminalWidgets = heldSessionTerminalWidgets,
-                diagnosticLogPathLabel = diagnosticLogPathLabel,
-                onEndSessionRequested = onEndSessionRequested,
-                // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 카드를 누르는
-                // 것과 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
-                onStartNewConversationRequested = { target ->
-                    onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
-                },
-                modifier = Modifier.weight(TERMINAL_HEIGHT_WEIGHT),
-            )
-        }
+        WorkDirSessionPanel(
+            observed = observed,
+            heldSessionTargets = heldSessionTargets,
+            onScreenTarget = terminalState.target,
+            initializationState = initializationState,
+            onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
+            onEnterSessionRequested = onEnterSessionRequested,
+            modifier = Modifier.width(SESSION_PANEL_WIDTH),
+        )
+        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        ConversationPane(
+            terminalState = terminalState,
+            heldSessionTerminalWidgets = heldSessionTerminalWidgets,
+            diagnosticLogPathLabel = diagnosticLogPathLabel,
+            onEndSessionRequested = onEndSessionRequested,
+            onEnterSessionRequested = onEnterSessionRequested,
+            modifier = Modifier.weight(1f),
+        )
     }
+}
+
+/**
+ * 셸의 오른쪽 자리. 3 단계부터 여기에 대화가 들어온다.
+ *
+ * 지금은 세션의 터미널이 그대로 뜬다. 자리 이름을 터미널이 아니라 대화로 둔 것은, 이 자리가
+ * 무엇을 위한 자리인지가 채워질 것보다 먼저 정해져 있기 때문이다 — 3 단계에서 바뀌는 것은
+ * 이 함수 안이지 셸의 모양이 아니다.
+ */
+@Composable
+private fun ConversationPane(
+    terminalState: EmbeddedTerminalState,
+    heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
+    diagnosticLogPathLabel: String,
+    onEndSessionRequested: () -> Unit,
+    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (terminalState == EmbeddedTerminalState.NoTerminalOpen) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(32.dp),
+            ) {
+                Text("아직 연 세션이 없습니다", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "왼쪽에서 조율(main)이나 레포를 고르면 그 세션이 여기서 열립니다.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        return
+    }
+
+    EmbeddedTerminalPane(
+        terminalState = terminalState,
+        heldSessionTerminalWidgets = heldSessionTerminalWidgets,
+        diagnosticLogPathLabel = diagnosticLogPathLabel,
+        onEndSessionRequested = onEndSessionRequested,
+        // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 왼쪽 줄을 누르는
+        // 것과 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
+        onStartNewConversationRequested = { target ->
+            onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
+        },
+        modifier = modifier,
+    )
 }
 
 /**
@@ -331,7 +401,10 @@ private fun CenteredColumn(content: @Composable () -> Unit) {
 }
 
 /**
- * 창을 나눠 갖는 비율. 터미널 쪽을 조금 크게 둔다 — 그쪽이 사람이 실제로 일하는 자리다.
+ * 세션 패널의 폭.
+ *
+ * 고정 폭인 것이 뜻이다. 비율로 두면 창을 넓힐 때 목록도 함께 넓어지는데, 목록이 보여주는 것은
+ * 이름과 칩 몇 개라 그 폭이 남아돌고 정작 넓어져야 할 대화 자리가 덜 넓어진다. 320dp 는 레포
+ * 이름 대부분과 칩 둘이 한 줄에 드는 폭이다.
  */
-private const val DASHBOARD_HEIGHT_WEIGHT = 0.45f
-private const val TERMINAL_HEIGHT_WEIGHT = 0.55f
+private val SESSION_PANEL_WIDTH = 320.dp
