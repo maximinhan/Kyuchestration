@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonObject
 
 /**
  * 도구 호출 하나가 어느 카드로 그려지는가(설계 6.3).
@@ -110,6 +111,31 @@ class ToolCallCardContentTest {
     }
 
     @Test
+    fun `같은 내용으로 덮어쓴 Write 는 새 파일이 아니다`() {
+        // 패치가 비었는지로 짐작하면 이 결과가 "새 파일 +2" 로 선다. 곁가지의 type 이 update 라고
+        // 스스로 말한다(실측).
+        val content = assertIs<ToolCallCardContent.FileChanged>(cardContentAfter(
+            RecordedChatStreamLines.WRITE_TOOL_USE_SAME,
+            RecordedChatStreamLines.WRITE_RESULT_SAME,
+        ))
+
+        assertEquals(false, content.createdFile)
+        assertEquals(0, content.addedLineCount)
+        assertEquals(0, content.removedLineCount)
+    }
+
+    @Test
+    fun `빈 내용으로 만든 파일은 더해진 줄이 없다`() {
+        val content = assertIs<ToolCallCardContent.FileChanged>(cardContentAfter(
+            RecordedChatStreamLines.WRITE_TOOL_USE_EMPTY,
+            RecordedChatStreamLines.WRITE_RESULT_EMPTY,
+        ))
+
+        assertTrue(content.createdFile)
+        assertEquals(0, content.addedLineCount, "빈 문자열을 한 줄로 세면 없는 줄이 화면에 선다")
+    }
+
+    @Test
     fun `Read 는 파일과 줄 수를 보인다`() {
         val content = assertIs<ToolCallCardContent.FileRead>(cardContentAfter(
             RecordedChatStreamLines.ASSISTANT_TOOL_USE,
@@ -152,5 +178,5 @@ class ToolCallCardContentTest {
         return toolCallCardContentOf(toolCall.toolName, toolCall.input, toolCall.answer?.typedResult)
     }
 
-    private fun emptyJsonObject() = kotlinx.serialization.json.JsonObject(emptyMap())
+    private fun emptyJsonObject() = JsonObject(emptyMap())
 }

@@ -94,7 +94,7 @@ internal object RecordedChatStreamLines {
     const val BASH_TOOL_USE_REFUSED: String =
         """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011CeiEMSczSUuLB9FXDXpkQ","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01CkVYHpUpAxcjbgrPSzkmFR","name":"Bash","input":{"command":"sh -c \"exit 3\"","description":"Run a command exiting with code 3"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":115,"cache_read_input_tokens":17169,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":115},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":null,"session_id":"24bb485d-b648-40e7-ac1b-c4177e9f8e30","uuid":"6c3fa003-c5d5-4f1c-b100-d80a6d0d8850","timestamp":"2026-09-04T10:20:26.533Z","request_id":"req_011CeiEMRuah7NMF4KyUEpyB"}"""
 
-    /** 거절된 도구 결과. **곁가지가 객체가 아니라 문자열이다** — `"Error: …"`. 카드가 이 모양을 만나면 일반 카드로 떨어진다. */
+    /** 거절된 도구 결과. **곁가지가 객체가 아니라 문자열이다** — `"Error: …"`. 카드는 그 모양에서 읽을 것이 없으므로 인자와 이 문구로만 그린다. */
     const val BASH_RESULT_REFUSED: String =
         """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"This command requires approval","is_error":true,"tool_use_id":"toolu_01CkVYHpUpAxcjbgrPSzkmFR"}]},"parent_tool_use_id":null,"session_id":"24bb485d-b648-40e7-ac1b-c4177e9f8e30","uuid":"2a48d4d3-9abf-41a9-8367-cd8501fb4768","timestamp":"2026-09-04T10:20:26.544Z","tool_use_result":"Error: This command requires approval","tool_result_meta":[{"id":"toolu_01CkVYHpUpAxcjbgrPSzkmFR","non_execution_kind":"user-rejected"}]}"""
 
@@ -121,6 +121,22 @@ internal object RecordedChatStreamLines {
     /** 덮어쓴 Write 결과. `type: "update"` 이고 패치가 실려 온다 — Edit 과 같은 모양이다. */
     const val WRITE_RESULT_UPDATED: String =
         """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01EJ6JyD7tCwfFcLfVpY94Yt","type":"tool_result","content":"The file /tmp/fakerepo/overwrite.txt has been updated successfully. (file state is current in your context — no need to Read it back)"}]},"parent_tool_use_id":null,"session_id":"dfe67b0d-66b2-44a9-83c6-647b70bc87a1","uuid":"48ab449c-272a-497a-bafb-26c141198591","timestamp":"2026-09-04T10:24:00.704Z","tool_use_result":{"type":"update","filePath":"/tmp/fakerepo/overwrite.txt","content":"첫째 줄\n바뀐 둘째 줄\n셋째 줄\n넷째 줄\n","structuredPatch":[{"oldStart":1,"oldLines":3,"newStart":1,"newLines":4,"lines":[" 첫째 줄","-둘째 줄","+바뀐 둘째 줄"," 셋째 줄","+넷째 줄"]}],"originalFile":"첫째 줄\n둘째 줄\n셋째 줄\n","userModified":false}}"""
+
+    /** 이미 있는 파일에 **같은 내용**을 다시 쓰는 Write 호출. */
+    const val WRITE_TOOL_USE_SAME: String =
+        """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011CeiJZ7PQQJD8ZYymFD3Ff","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01NyAVJ6YGFCwD6pqAzezsj4","name":"Write","input":{"file_path":"/tmp/fakerepo/same.txt","content":"첫째 줄\n둘째 줄\n"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":613,"cache_read_input_tokens":16835,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":613},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":null,"session_id":"3d78f6d7-4510-46b1-a25f-4f6f31240cfc","uuid":"62cb4365-1200-4552-b34b-87f0e0189c29","timestamp":"2026-09-04T11:15:32.935Z","request_id":"req_011CeiJZ6WZiZftxmSiXtiEd"}"""
+
+    /** 그 결과. `type: "update"` 인데 **패치가 비어 있다** — 빈 패치를 "새 파일" 로 읽으면 안 되는 근거다. */
+    const val WRITE_RESULT_SAME: String =
+        """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01NyAVJ6YGFCwD6pqAzezsj4","type":"tool_result","content":"The file /tmp/fakerepo/same.txt has been updated successfully. (file state is current in your context — no need to Read it back)"}]},"parent_tool_use_id":null,"session_id":"3d78f6d7-4510-46b1-a25f-4f6f31240cfc","uuid":"b1bb6cd8-6808-4fd9-b677-525802f69c86","timestamp":"2026-09-04T11:15:32.958Z","tool_use_result":{"type":"update","filePath":"/tmp/fakerepo/same.txt","content":"첫째 줄\n둘째 줄\n","structuredPatch":[],"originalFile":"첫째 줄\n둘째 줄\n","userModified":false}}"""
+
+    /** 빈 내용으로 새 파일을 만드는 Write 호출. */
+    const val WRITE_TOOL_USE_EMPTY: String =
+        """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011CeiJZ7PQQJD8ZYymFD3Ff","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_015yxv8kMoX3v2sbpcev5wqK","name":"Write","input":{"file_path":"/tmp/fakerepo/empty.txt","content":""},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":613,"cache_read_input_tokens":16835,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":613},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":null,"session_id":"3d78f6d7-4510-46b1-a25f-4f6f31240cfc","uuid":"08be01e4-6e0f-4667-8ba6-172a5c82f232","timestamp":"2026-09-04T11:15:33.512Z","request_id":"req_011CeiJZ6WZiZftxmSiXtiEd"}"""
+
+    /** 그 결과. `type: "create"` 이고 `content` 가 빈 문자열이다 — 더해진 줄이 0 이라야 한다. */
+    const val WRITE_RESULT_EMPTY: String =
+        """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_015yxv8kMoX3v2sbpcev5wqK","type":"tool_result","content":"File created successfully at: /tmp/fakerepo/empty.txt (file state is current in your context — no need to Read it back)"}]},"parent_tool_use_id":null,"session_id":"3d78f6d7-4510-46b1-a25f-4f6f31240cfc","uuid":"b3518f04-477a-4488-bbd9-be698cbeb3b7","timestamp":"2026-09-04T11:15:33.543Z","tool_use_result":{"type":"create","filePath":"/tmp/fakerepo/empty.txt","content":"","structuredPatch":[],"originalFile":null,"userModified":false}}"""
 
     /** 중단 안내(3.8). **사용자 메시지와 같은 모양으로 온다** — 다른 것은 `isReplay` 가 없다는 것뿐이다. */
     const val INTERRUPTION_ECHOED: String =

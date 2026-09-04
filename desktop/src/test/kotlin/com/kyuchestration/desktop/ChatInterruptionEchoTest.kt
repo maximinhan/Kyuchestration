@@ -1,7 +1,11 @@
 package com.kyuchestration.desktop
 
+import com.kyuchestration.desktop.terminal.chat.ChatSessionEvent
+import com.kyuchestration.desktop.terminal.chat.RecordedChatStreamLines
+import com.kyuchestration.desktop.terminal.chat.chatSessionEventsFrom
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -13,9 +17,14 @@ import kotlin.test.assertTrue
 class ChatInterruptionEchoTest {
 
     @Test
-    fun `실측으로 온 문구를 알아본다`() {
-        // 2026-09-04 프로브: 긴 답 도중 control_request 를 보내면 이 텍스트가 user 이벤트로 왔다.
-        assertTrue(isTurnInterruptionEcho("[Request interrupted by user]"))
+    fun `실측으로 온 줄을 알아본다`() {
+        // 문구를 손으로 적지 않는다. 녹화한 줄을 어댑터에 통과시켜 나온 텍스트를 그대로 넣어야,
+        // 그 문구가 바뀌는 날 이 검증이 먼저 깨진다.
+        val echoed = assertIs<ChatSessionEvent.UserMessageEchoed>(
+            chatSessionEventsFrom(RecordedChatStreamLines.INTERRUPTION_ECHOED).single(),
+        )
+
+        assertTrue(isTurnInterruptionEcho(echoed.text))
     }
 
     @Test

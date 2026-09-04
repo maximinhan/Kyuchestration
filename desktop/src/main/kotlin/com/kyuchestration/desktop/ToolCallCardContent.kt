@@ -64,8 +64,10 @@ internal sealed interface ToolCallCardContent {
     ) : ToolCallCardContent
 
     /**
-     * 그 밖의 전부 — 아직 결과가 오지 않은 호출과, 모르는 도구와, 거절되어 곁가지가 문자열로
-     * 온 호출. 인자 JSON 과 결과 전문을 그대로 보인다.
+     * 그 밖의 전부 — 모르는 도구와, 결과를 기다리는 호출과, 곁가지가 우리가 아는 모양이 아닌
+     * 호출(거절되면 문자열로 온다). 인자 JSON 과 결과 전문을 그대로 보인다.
+     *
+     * Bash 는 여기로 오지 않는다 — 결과가 없어도, 거절되어도 명령은 인자에 있다.
      *
      * **이것이 기본값인 것이 뜻이다.** MCP 도구는 얼마든지 새로 붙고(설계 6.3), 새 도구가 붙는
      * 날 화면이 비는 것보다 인자와 결과를 그대로 보이는 편이 낫다.
@@ -86,8 +88,9 @@ internal enum class DiffLineKind { Added, Removed, Context }
 /**
  * 이 도구 호출을 어느 카드로 그릴 것인가.
  *
- * @param typedResult `tool_use_result` 곁가지. 아직 결과가 오지 않았으면 null 이고, 그때는
- *   [ToolCallCardContent.AnyTool] 이다 — 도는 중인 카드가 보여줄 수 있는 것은 이름과 인자뿐이다.
+ * @param typedResult `tool_use_result` 곁가지. 아직 결과가 오지 않았으면 null 이다 — 그때 카드가
+ *   보여줄 수 있는 것은 이름과 인자뿐이라 대개 [ToolCallCardContent.AnyTool] 이지만, Bash 는
+ *   인자에 명령이 통째로 있어 결과 없이도 명령 카드로 선다.
  */
 internal fun toolCallCardContentOf(
     toolName: String,
@@ -134,29 +137,49 @@ internal fun toolCallCardContentOf(
  */
 private fun fileChangedIn(typedResult: JsonObject): ToolCallCardContent.FileChanged? {
     val filePath = typedResult.stringOrNull("filePath") ?: return null
-    val patchHunks = typedResult["structuredPatch"] as? JsonArray
+    // **곁가지가 스스로 말한다.** 패치가 비었는지로 짐작하면 같은 내용으로 덮어쓴 Write 가
+    // "새 파일" 로 서고, 실제로 그런 결과가 온다(WRITE_RESULT_UNCHANGED).
+    val createdFile = typedResult.stringOrNull("type") == CREATED_FILE_RESULT_TYPE
+    val hunks = patchHunksIn(typedResult)
 
-    val hunks = patchHunks
+    if (hunks.isNotEmpty()) {
+        return ToolCallCardContent.FileChanged(filePath = filePath, createdFile = createdFile, hunks = hunks)
+    }
+
+    // 새로 만든 파일은 패치가 비어 있다(실측) — 더해진 줄은 쓴 내용 전체다. 그 밖의 빈 패치는
+    // 바뀐 줄이 없다는 뜻이고, 그것도 사용자가 알아야 하는 사실이라 카드는 그대로 선다.
+    val addedLines = if (createdFile) {
+        typedResult.stringOrNull("content").orEmpty()
+            .trimEnd('\n')
+            .takeIf { it.isNotEmpty() }
+            ?.lines()
+            ?.map { DiffLine(DiffLineKind.Added, it) }
+            .orEmpty()
+    } else {
+        emptyList()
+    }
+
+    return ToolCallCardContent.FileChanged(
+        filePath = filePath,
+        createdFile = createdFile,
+        hunks = if (addedLines.isEmpty()) emptyList() else listOf(DiffHunk(addedLines)),
+    )
+}
+
+/** `structuredPatch` 의 덩이들. 없으면 빈 목록 — 거절된 호출과 새로 만든 파일이 그렇다. */
+private fun patchHunksIn(typedResult: JsonObject): List<DiffHunk> =
+    (typedResult["structuredPatch"] as? JsonArray)
         ?.filterIsInstance<JsonObject>()
         ?.mapNotNull { hunk ->
             (hunk["lines"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                // 유니파이드 diff 의 `\ No newline at end of file` 은 파일의 줄이 아니라 패치의
+                // 주석이다. 맥락 줄로 그리면 사용자가 쓴 적 없는 줄이 파일에 있는 것처럼 보인다.
+                ?.filterNot { it.startsWith(PATCH_NOTE_MARKER) }
                 ?.map(::diffLineOf)
                 ?.let(::DiffHunk)
         }
         .orEmpty()
-
-    if (hunks.isNotEmpty()) {
-        return ToolCallCardContent.FileChanged(filePath = filePath, createdFile = false, hunks = hunks)
-    }
-
-    val writtenContent = typedResult.stringOrNull("content") ?: return null
-    return ToolCallCardContent.FileChanged(
-        filePath = filePath,
-        createdFile = true,
-        hunks = listOf(DiffHunk(writtenContent.trimEnd('\n').lines().map { DiffLine(DiffLineKind.Added, it) })),
-    )
-}
 
 /**
  * 패치 한 줄의 첫 글자가 그 줄이 무엇인지 말한다 — `" 첫째 줄"` · `"-둘째 줄"` · `"+둘째 줄 고침"`.
@@ -209,6 +232,12 @@ private val FILE_CHANGING_TOOL_NAMES = setOf("Edit", "Write")
 private const val MCP_TOOL_NAME_PREFIX = "mcp__"
 
 private const val MCP_TOOL_NAME_SEPARATOR = "__"
+
+/** 없던 파일에 쓴 Write 의 곁가지가 스스로 말하는 값. 덮어쓴 것은 `update` 다(실측). */
+private const val CREATED_FILE_RESULT_TYPE = "create"
+
+/** 파일의 줄이 아니라 패치가 스스로에 대해 다는 주석의 표식. */
+private const val PATCH_NOTE_MARKER = "\\"
 
 private fun JsonObject.stringOrNull(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 

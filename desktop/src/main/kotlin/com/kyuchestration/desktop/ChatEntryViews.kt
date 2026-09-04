@@ -2,10 +2,10 @@ package com.kyuchestration.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -140,20 +140,25 @@ private fun ThinkingBlock(text: String) {
  */
 @Composable
 private fun ToolCallCard(entry: ChatEntry.ToolCall) {
-    val cardContent = toolCallCardContentOf(entry.toolName, entry.input, entry.answer?.typedResult)
+    // 글자가 흐르는 동안 대화가 프레임마다 새로 나므로, 곁가지를 그때마다 다시 파면 보이는 카드
+    // 전부가 패치를 새로 만든다. 이 값을 정하는 것은 셋뿐이라 그 셋을 열쇠로 든다.
+    val cardContent = remember(entry.toolName, entry.input, entry.answer) {
+        toolCallCardContentOf(entry.toolName, entry.input, entry.answer?.typedResult)
+    }
+    val toolLabel = remember(entry.toolName) { toolLabel(entry.toolName) }
 
     CollapsibleBlock(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         header = {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                ToolCallSummary(toolLabel(entry.toolName), cardContent)
+                ToolCallSummary(toolLabel, cardContent)
                 Spacer(Modifier.width(10.dp))
                 ToolCallStatus(entry.answer)
             }
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            ToolCallDetail(cardContent, entry)
+            ToolCallDetail(cardContent, entry, toolLabel)
 
             // 안쪽에서 일어난 것들 — 서브에이전트의 대화가 여기 접혀 있다(3.10). 카드 안이라는
             // 것을 들여쓰기로 말한다.
@@ -226,9 +231,7 @@ private fun ToolCallSummary(toolLabel: String, cardContent: ToolCallCardContent)
  * 둔다 — 모르는 도구에 대해 화면이 할 수 있는 정직한 일이 그것뿐이다.
  */
 @Composable
-private fun ToolCallDetail(cardContent: ToolCallCardContent, entry: ChatEntry.ToolCall) {
-    val toolLabel = toolLabel(entry.toolName)
-
+private fun ToolCallDetail(cardContent: ToolCallCardContent, entry: ChatEntry.ToolCall, toolLabel: String) {
     when (cardContent) {
         is ToolCallCardContent.ShellCommand -> {
             MonospaceBlock(cardContent.command, detailTitle = "명령")
@@ -276,6 +279,12 @@ private fun ToolCallDetail(cardContent: ToolCallCardContent, entry: ChatEntry.To
 @Composable
 private fun DiffBlock(hunks: List<DiffHunk>) {
     var showingFullDiff by remember(hunks) { mutableStateOf(false) }
+    // 한 줄이 폭에 눌려 잘리는 것도 전문을 볼 이유다. 어느 줄이든 잘렸으면 그 사실을 든다.
+    var anyLineTruncated by remember(hunks) { mutableStateOf(false) }
+
+    // **상한을 카드 전체에 건다.** 덩이마다 걸면 다섯 줄짜리 덩이 마흔 개가 전사에 그대로 펴진다.
+    val shownRows = diffRows(hunks).take(DIFF_LINES_SHOWN_IN_CARD)
+    val hiddenRowCount = diffRows(hunks).size - shownRows.size
 
     Column(
         modifier = Modifier
@@ -283,45 +292,46 @@ private fun DiffBlock(hunks: List<DiffHunk>) {
             .background(MaterialTheme.colorScheme.surfaceContainerLowest, MaterialTheme.shapes.small)
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        hunks.forEachIndexed { hunkOrdinal, hunk ->
-            // 덩이 사이가 붙어 있으면 떨어진 두 자리의 변경이 한 덩이로 읽힌다.
-            if (hunkOrdinal > 0) {
-                Text(
+        shownRows.forEach { row ->
+            when (row) {
+                // 덩이 사이가 붙어 있으면 떨어진 두 자리의 변경이 한 덩이로 읽힌다.
+                null -> Text(
                     text = "⋯",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
 
-            hunk.lines.take(DIFF_LINES_SHOWN_IN_CARD).forEach { line ->
-                val (marker, color) = when (line.kind) {
-                    DiffLineKind.Added -> "+" to KyuTheme.statusColors.success
-                    DiffLineKind.Removed -> "−" to KyuTheme.statusColors.failure
-                    DiffLineKind.Context -> " " to MaterialTheme.colorScheme.onSurfaceVariant
+                else -> {
+                    val (marker, color) = when (row.kind) {
+                        DiffLineKind.Added -> "+" to KyuTheme.statusColors.success
+                        DiffLineKind.Removed -> "−" to KyuTheme.statusColors.failure
+                        DiffLineKind.Context -> " " to MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+
+                    Text(
+                        text = "$marker ${row.text}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = color,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { if (it.hasVisualOverflow) anyLineTruncated = true },
+                    )
                 }
-
-                Text(
-                    text = "$marker ${line.text}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = color,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
+        }
 
-            if (hunk.lines.size > DIFF_LINES_SHOWN_IN_CARD) {
-                Text(
-                    text = "…그 밖에 ${hunk.lines.size - DIFF_LINES_SHOWN_IN_CARD}줄",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        if (hiddenRowCount > 0) {
+            Text(
+                text = "…그 밖에 ${hiddenRowCount}줄",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 
-    if (hunks.any { it.lines.size > DIFF_LINES_SHOWN_IN_CARD }) {
+    if (hiddenRowCount > 0 || anyLineTruncated) {
         FullTextPanelButton("바뀐 줄") { showingFullDiff = true }
     }
 
@@ -329,6 +339,12 @@ private fun DiffBlock(hunks: List<DiffHunk>) {
         FullTextPanel("바뀐 줄", plainTextDiff(hunks)) { showingFullDiff = false }
     }
 }
+
+/** 덩이들을 한 줄기로 편다. 덩이 사이의 null 이 "여기가 떨어진 자리" 다. */
+private fun diffRows(hunks: List<DiffHunk>): List<DiffLine?> =
+    hunks.flatMapIndexed { hunkOrdinal, hunk ->
+        if (hunkOrdinal == 0) hunk.lines else listOf(null) + hunk.lines
+    }
 
 /**
  * 상세 패널에 넣을 diff 한 벌.
@@ -345,8 +361,14 @@ private fun plainTextDiff(hunks: List<DiffHunk>): String = hunks.joinToString("\
     }
 }
 
-/** 카드에는 파일 이름만 둔다. 전체 경로는 펼친 자리에 있다 — 접힌 줄에서는 이름이 먼저 읽힌다. */
-private fun fileName(filePath: String): String = filePath.substringAfterLast('/')
+/**
+ * 카드에는 파일 이름만 둔다. 전체 경로는 펼친 자리에 있다 — 접힌 줄에서는 이름이 먼저 읽힌다.
+ *
+ * 구분자 둘을 다 본다. 이 앱은 윈도우에서도 도는 것을 전제로 두고 있고, 그 판의 경로에는
+ * `\` 가 온다 — `/` 만 보면 접힌 줄에 전체 경로가 통째로 선다.
+ */
+private fun fileName(filePath: String): String =
+    filePath.substringAfterLast('/').substringAfterLast('\\')
 
 /**
  * 그 도구 호출이 어떻게 됐는가.
@@ -491,6 +513,10 @@ private fun MonospaceBlock(
     textColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     var showingFullText by remember(text) { mutableStateOf(false) }
+    // **줄 수로 세지 않는다.** 상한은 줄바꿈된 화면 줄에 걸리므로, 줄바꿈 없는 거대한 한 줄
+    // (한 줄로 뭉친 JSON 이 그렇다)은 잘리면서도 원문의 줄 수는 하나다 — 그렇게 세면 전문을
+    // 볼 길이 없는 잘린 카드가 생긴다. 실제로 잘렸는지는 배치가 말해 준다.
+    var truncated by remember(text) { mutableStateOf(false) }
 
     Text(
         text = text,
@@ -499,13 +525,14 @@ private fun MonospaceBlock(
         color = textColor,
         maxLines = MONOSPACE_BLOCK_MAX_LINES,
         overflow = TextOverflow.Ellipsis,
+        onTextLayout = { truncated = it.hasVisualOverflow },
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerLowest, MaterialTheme.shapes.small)
             .padding(horizontal = 10.dp, vertical = 8.dp),
     )
 
-    if (text.lineSequence().count() > MONOSPACE_BLOCK_MAX_LINES) {
+    if (truncated) {
         FullTextPanelButton(detailTitle) { showingFullText = true }
     }
 

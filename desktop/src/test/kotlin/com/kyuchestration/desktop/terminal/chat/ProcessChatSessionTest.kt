@@ -201,7 +201,6 @@ class ProcessChatSessionTest {
     private suspend fun OpenedChatSession.eventsUntilItEnds(): List<ChatSessionEvent> =
         withTimeout(COLLECT_TIMEOUT_MILLIS) { events.toList() }
 
-
     private companion object {
         const val COLLECT_TIMEOUT_MILLIS = 15_000L
     }
