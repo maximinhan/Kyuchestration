@@ -3,12 +3,13 @@
 > 지금 앱은 `claude` 가 그린 터미널 화면을 그대로 띄운다. 이 설계는 그것을 그만두고 **앱이 `claude` 의 구조화된 이벤트를 받아 자기 화면을 직접 그리는 것**으로 바꾼다. 그러면 도구 호출이 카드가 되고, 권한 요청이 버튼이 되고, 비용이 배지가 된다 — 터미널 안에서는 할 수 없던 것들이다.
 
 - 작성일: 2026-09-04
-- 상태: **실측 완료 — 설계 절은 이 커밋 다음이다.** 구현 미착수
+- 상태: **설계 확정 전 — 실측 완료, 사용자 승인 대기.** 구현 미착수
 - 선행 문서: [workdir-orchestrator-design.md](workdir-orchestrator-design.md) — 특히 1.3(설정은 세션을 시작한 디렉토리에서만 온다), 원칙 3·5
 - 선행 문서: [app-owned-sessions-design.md](app-owned-sessions-design.md) — 특히 5.2(`kyu session-command`), 5.3(앱이 세션을 여는 길), 5.5(대화 이어가기), 원칙 11·12
 - 선행 문서: [orchestration-tools-design.md](orchestration-tools-design.md) — 특히 5.2(`--mcp-config` 등록), 5.4(위임 실행), 원칙 13
 - 전제: **앱이 `claude` 를 직접 보유한다.** 그 전환은 PR #42 로 끝났고(app-owned 7.0), 이 설계는 "보유한 프로세스와 무엇을 주고받는가" 만 바꾼다. 엔진(`kyu`)은 여전히 순수 엔진이고 세션을 띄우지 않는다
 - **이 문서는 선행 문서가 기각한 안을 다시 꺼낸다.** app-owned 3.4 가 *"앱이 `claude` 를 기계 프로토콜로 몰고 화면을 직접 그린다"* 를 세 사유로 기각했다. 사용자의 요구가 정확히 그 안이므로, 2 절이 그 세 사유를 하나씩 다시 본다 — **둘은 아직 유효하고 하나는 뒤집힌다.** 그 판단이 이 문서의 뼈대다
+- 이 문서가 열지 않는 것: 색상 팔레트의 세부. 사용자에게 별도 시각 목업이 가는 중이고, 6 절은 **구조·토큰 자리·컴포넌트 목록**까지만 정한다
 
 ---
 
@@ -458,6 +459,587 @@ implementation("com.mikepenz:multiplatform-markdown-renderer-code:0.45.0")
 
 ---
 
+## 4. 설계 원칙 — 상속과 추가 둘
+
+workdir 4 절의 원칙 1~6(원칙 5 는 app-owned 가 개정), app-owned 의 원칙 11·12, orchestration 의 원칙 13 을 그대로 상속한다. 이 설계가 특히 계속 부딪히는 셋을 먼저 적어둔다.
+
+> 3. **세션 내부에 개입하지 않는다** — 챗 UI 는 이 원칙의 경계에 선다. 2.1 이 그 경계를 어디에 긋는지 정했다.
+> 11. **조립 지식은 엔진에 하나만 둔다** — 챗 모드의 argv 도 `kyu session-command` 가 답한다(5.2).
+> 13. **위임이 메인보다 넓은 권한을 갖지 않는다** — 승인 브리지가 이 원칙의 새 통로가 된다(5.4).
+
+**추가**
+
+14. **전사는 한 물줄기에서만 온다** — 화면에 보이는 대화의 모든 조각은 `claude` 의 출력 스트림에서 나온다. 사용자가 방금 친 말도 마찬가지다(3.14). 앱이 자기가 아는 것을 스트림에 섞어 넣기 시작하면 순서가 어긋날 자리가 생기고, 그 어긋남은 사용자가 스크롤을 올릴 때까지 드러나지 않는다.
+
+15. **못 그리는 것을 그린 척하지 않는다** — 이벤트로 오지 않는 것은 화면에 없다. 위임 진행이 그 예다(3.10). 앱이 추측으로 진행 막대를 그리면 그 막대는 사실이 아니고, 사용자는 그것이 사실이 아니라는 것을 위임이 실패했을 때 알게 된다. **모르는 것은 "도는 중" 으로 둔다.**
+
+---
+
+## 5. 아키텍처
+
+### 5.1 배치
+
+```
+┌─ 데스크톱 앱 (Compose Multiplatform) ────────────────────────────┐
+│                                                                 │
+│  화면          ChatTranscriptPane · ToolCallCard ·               │
+│                PermissionRequestCard · ChatComposer   (6 절)     │
+│                        ↑ 상태                                    │
+│  상태 홀더     ChatSessionStateHolder            (5.5)           │
+│                        ↑ 포트                                    │
+│  포트          ChatSessionOpener · SessionCommandSource ·        │
+│                PermissionRequestSource           (5.3 · 5.4)     │
+│                        ↑ 어댑터                                  │
+│  어댑터        ProcessChatSession (파이프 + JSON 줄)  (5.3)      │
+│                PermissionBridgeServer (유닉스 소켓 수신) (5.4)    │
+└──────────────────┬───────────────────────┬──────────────────────┘
+                   │ argv 를 묻는다        │ 소켓
+                   ↓                       │
+        ┌── kyu session-command ──┐        │
+        │   --json --chat         │        │
+        └──────────┬──────────────┘        │
+                   │ 답한 argv 를 실행     │
+                   ↓                       │
+        ┌── claude (파이프 3 개) ──────────┐│
+        │   stdin  ← 사용자 메시지·제어    ││
+        │   stdout → 이벤트 스트림         ││
+        │   stderr → 진단                  ││
+        │      │ 자식으로 띄운다           ││
+        │      ├─ kyu mcp serve <workdir>  ││  (메인 세션만 — 위임 도구)
+        │      └─ kyu mcp ask <소켓 경로> ─┼┘  (모든 챗 세션 — 승인 도구)
+        └──────────────────────────────────┘
+```
+
+**바뀌는 것은 앱 안쪽뿐이다.** 엔진은 여전히 답만 하고, `claude` 는 여전히 앱의 자식이고, 레포 설정은 여전히 cwd 에서 온다. 새로 생기는 것은 **`kyu mcp ask` 라는 두 번째 MCP 서버 하나와 그것이 부모에게 묻는 소켓 하나**다.
+
+### 5.2 엔진 표면 — `session-command` 에 챗 모드를 더한다
+
+원칙 11 그대로다. 챗 모드의 argv 도 엔진이 조립한다.
+
+```
+kyu session-command [repo] --json --chat --approval-socket <경로>
+```
+
+**왜 앱이 소켓 경로를 넘기는가.** 소켓을 여는 것은 앱이다 — 앱이 결정을 내리는 쪽이므로. 엔진은 그 경로를 argv 의 어느 자리에 넣을지만 안다. 엔진이 경로를 스스로 정하면 앱이 그것을 되읽어야 하고, 그러면 답 문서에 필드가 하나 늘면서 "엔진이 정하고 앱이 따른다" 와 "앱이 정하고 엔진이 옮긴다" 가 섞인다.
+
+조립되는 것(메인 세션):
+
+```
+claude -p
+  --input-format stream-json --output-format stream-json --verbose
+  --include-partial-messages          # 3.3
+  --replay-user-messages              # 3.14 · 원칙 14
+  --session-id <UUID> | --resume <UUID>
+  --permission-prompt-tool mcp__kyu-ask__request_permission
+  --mcp-config '{"mcpServers":{"kyu":{…serve…},"kyu-ask":{…ask…}}}'
+  --add-dir <레포 절대경로>...
+```
+
+레포 세션은 `--add-dir` 이 없고 `--mcp-config` 에 `kyu` 오케스트레이션 서버가 빠진다 — orchestration 5.2.1 이 정한 그대로다. `kyu-ask` 는 **둘 다** 받는다. 승인은 위임의 문제가 아니라 화면의 문제라서다.
+
+**`--bypass-permissions` 가 켜져 있으면 `kyu-ask` 를 등록하지 않고 `--permission-prompt-tool` 도 붙이지 않는다.** 3.6 이 `bypassPermissions` 에서 승인 도구가 한 번도 불리지 않는 것을 보였다 — 등록해봐야 프로세스 하나가 놀 뿐이다. 붙이지 않는 편이 "bypass 로 열었는데 승인 카드가 뜰지도 모른다" 는 물음 자체를 없앤다.
+
+**`--permission-mode` 는 넣지 않는다.** 지금 터미널 세션이 사용자 설정을 상속하는 것과 같게 둔다. 챗 모드가 관문을 강제로 켜면 사용자가 자기 `settings.json` 에 적어둔 선택이 화면 종류에 따라 달라지고, 그것은 이 전환이 바꿀 일이 아니다. **승인 카드는 관문이 열릴 때 뜨고, 관문이 언제 열리는지는 계속 사용자 설정이 정한다.**
+
+#### 5.2.1 판(schemaVersion)은 올리지 않는다
+
+답 문서(`session_command_json.go`)의 모양은 그대로다 — `command`·`cwd`·`env`·`resumedConversationId`.
+
+담기는 값이 달라진 것은 **조립이 바뀐 것이지 문서의 모양이 바뀐 것이 아니다.** 같은 판단을 orchestration 5.2 가 `--mcp-config` 를 더할 때 이미 했다. 판 규약은 그대로다 — 필드를 빼거나 이름·의미를 바꿀 때만 올린다.
+
+**앱이 모드를 헷갈릴 자리도 없다.** `--chat` 을 붙여 물은 것은 앱이고, 답을 파이프로 실행할지 PTY 로 실행할지는 물은 쪽이 이미 안다.
+
+#### 5.2.2 `kyu mcp ask` — 세 번째 하위 명령
+
+```
+kyu mcp <serve|approve|ask>
+```
+
+| 하위 명령 | 하는 일 | 누가 부르나 |
+|---|---|---|
+| `serve <워크디렉토리>` | 오케스트레이션 도구(`list_repos`·`run_in_repo`) | `claude` 가 자식으로 |
+| `approve <repo>` | 레포의 실행 유발 설정을 사람에게 보이고 승인받는다 | 사람이 터미널에서 |
+| `ask <소켓 경로>` | **승인 물음을 앱에게 중계한다** | `claude` 가 자식으로 |
+
+**`approve` 와 `ask` 의 이름이 가깝다.** 둘 다 승인이지만 대상이 다르다 — `approve` 는 **레포를 한 번 승인**하는 것이고(orchestration 5.6), `ask` 는 **도구 호출 하나를 그때그때 묻는** 것이다. 이 가까움이 실제로 헷갈림을 낳는지는 10 절의 열린 질문으로 둔다. `ask` 를 `relay-permissions` 처럼 길게 두는 길도 있는데, 이 이름은 사용법 문구에만 나오고 사람이 칠 일이 없어서 짧은 쪽을 먼저 시도한다.
+
+`ask` 가 여는 도구는 하나다.
+
+| 도구 | 인자 | 답 |
+|---|---|---|
+| `request_permission` | `tool_name` · `input` · `tool_use_id` (3.5 가 잰 그대로) | `{"behavior":"allow","updatedInput":{…}}` 또는 `{"behavior":"deny","message":"…"}` |
+
+이 도구는 **모델에게 보이지 않는다** — 3.5 가 잰 사실이고, `--permission-prompt-tool` 로 지정되는 한 그렇다.
+
+**서버 이름의 하이픈은 도구 이름에 그대로 남는다.** `kyu-ask` 라는 이름으로 서버를 붙였더니 도구가 `mcp__kyu-ask__approve` 로 보였다 — 콜론이 밑줄로 바뀌는 것(`plugin:context7:context7` → `plugin_context7_context7`)과 다르다. 그래서 `--permission-prompt-tool` 에 넘길 문자열은 `mcp__kyu-ask__request_permission` 그대로다. **이것을 재보지 않고 밑줄로 적었으면 승인 도구가 한 번도 안 불리고, 그 실패는 "관문이 원래 잘 안 열리나 보다" 로 오래 숨었을 자리다.**
+
+### 5.3 Kotlin 어댑터 — 프로세스와 이벤트 모델
+
+#### 5.3.1 포트
+
+```kotlin
+/** 앱이 챗 세션 하나를 여는 통로. PTY 를 여는 SessionTerminalOpener 와 같은 자리다. */
+interface ChatSessionOpener {
+    suspend fun openChatSession(plan: SessionEntryPlan): OpenedChatSession
+}
+
+/** 열린 세션 하나. */
+interface OpenedChatSession {
+    val events: Flow<ChatSessionEvent>
+    suspend fun sendUserMessage(text: String)
+    suspend fun interruptCurrentTurn()
+    suspend fun endSession()
+}
+```
+
+`SessionEntryPlan` 은 이미 있다(`desktop/src/main/kotlin/com/kyuchestration/desktop/terminal/SessionEntryPlan.kt`) — `kyu session-command` 의 답을 담는 타입이다. 챗 모드에서도 같은 타입을 쓴다. **엔진이 답한 argv·cwd·env 를 실행한다는 사실은 안 바뀌고, 그것을 PTY 에 넣느냐 파이프에 넣느냐만 다르다.**
+
+#### 5.3.2 이벤트 모델 — sealed interface
+
+스트림의 JSON 을 그대로 화면에 흘리지 않는다. 화면이 `event.subtype == "task_progress"` 같은 문자열을 알기 시작하면 `claude` 의 판이 바뀔 때 고칠 자리가 화면 곳곳이 된다.
+
+```kotlin
+sealed interface ChatSessionEvent {
+    /** system/init — 턴마다 온다. 세션 시작이 아니다(3.1). */
+    data class SessionDescribed(
+        val conversationId: String,
+        val modelName: String,
+        val availableSlashCommands: List<String>,
+        val connectedMcpServers: List<McpServerStatus>,
+    ) : ChatSessionEvent
+
+    /** --replay-user-messages 가 되돌려준 사용자 메시지(3.14 · 원칙 14). */
+    data class UserMessageEchoed(val text: String) : ChatSessionEvent
+
+    data class AssistantTextArrived(val text: String, val parentToolUseId: String?) : ChatSessionEvent
+    data class AssistantThinkingArrived(val text: String, val parentToolUseId: String?) : ChatSessionEvent
+
+    /** stream_event 의 글자 조각. 완성본은 AssistantTextArrived 로 다시 온다(3.3). */
+    data class AssistantTextStreaming(val chunk: String) : ChatSessionEvent
+
+    data class ToolCallRequested(
+        val toolUseId: String, val toolName: String,
+        val input: JsonObject, val parentToolUseId: String?,
+    ) : ChatSessionEvent
+
+    data class ToolCallAnswered(
+        val toolUseId: String, val failed: Boolean,
+        val modelVisibleText: String, val typedResult: JsonElement?,
+    ) : ChatSessionEvent
+
+    /** system/task_* — 서브에이전트만 온다. MCP 도구는 오지 않는다(3.10). */
+    data class DelegationProgressed(
+        val taskId: String, val toolUseId: String,
+        val description: String, val lastToolName: String?,
+    ) : ChatSessionEvent
+
+    data class TurnFinished(
+        val outcome: TurnOutcome,              // Completed · Interrupted · Failed
+        val costUsd: Double, val usage: TurnUsage,
+        val permissionDenials: List<PermissionDenial>,
+    ) : ChatSessionEvent
+
+    data class UsageWindowsObserved(val windows: List<RateLimitWindow>) : ChatSessionEvent
+
+    /** stderr 한 줄, 또는 0 이 아닌 종료 코드(3.9 의 resume 실패가 여기로 온다). */
+    data class EngineSpoke(val line: String) : ChatSessionEvent
+    data class SessionEnded(val exitCode: Int) : ChatSessionEvent
+}
+```
+
+**`AssistantTextStreaming` 과 `AssistantTextArrived` 를 가르는 이유**: 조각은 화면을 부드럽게 하려고 있는 것이고 전사의 사실은 완성본이다. 상태 홀더는 조각을 임시 버퍼에 쌓다가 완성본이 오면 버퍼를 버리고 완성본으로 바꾼다. **조각만으로 전사를 만들면 중단된 턴의 잘린 문장이 영구히 전사에 남는다.**
+
+`parentToolUseId` 가 채워진 이벤트는 그 도구 카드 안으로 접힌다(3.10).
+
+#### 5.3.3 어댑터
+
+`ProcessChatSession` 이 `ProcessBuilder` 로 프로세스를 띄우고 파이프 셋을 읽고 쓴다. `PtySessionTerminalOpener` 가 있는 자리(`desktop/src/main/kotlin/com/kyuchestration/desktop/terminal/pty/`) 옆에 `chat/` 을 둔다.
+
+세 가지를 이 어댑터 하나가 안다.
+
+| 아는 것 | 왜 여기인가 |
+|---|---|
+| JSON 줄 ↔ `ChatSessionEvent` 매핑 | 이 매핑을 아는 곳이 하나여야 판이 바뀔 때 고칠 자리가 하나다 |
+| stdin 에 쓰는 두 모양 — 사용자 메시지와 `control_request` | 3.1 · 3.8 |
+| stdout 이 아무 때나 끊길 수 있다는 것 | `claude` 가 죽으면 `SessionEnded` 로 바꾼다 |
+
+**stdout 읽기는 전용 코루틴 하나가 한다.** 파이프 버퍼가 차면 자식이 쓰기에서 멎는데, 이 앱은 그 함정을 이미 한 번 만났다 — `EmbeddedTerminalStateHolder` 의 주석이 *"아무 위젯도 그 통로를 읽지 않는 세션이 하나 생기고, PTY 버퍼가 차는 순간 그 안의 `claude` 가 쓰기에서 멎는다"* 라고 적어두었다(`EmbeddedTerminalStateHolder.kt:63`). **챗 모드에서도 화면에 안 보이는 세션의 stdout 을 계속 읽어야 한다.**
+
+### 5.4 권한 브리지 — 채널을 무엇으로 할 것인가
+
+`kyu mcp ask` 는 `claude` 의 자식이고 결정은 앱에 있다. 셋을 검토했다.
+
+| 후보 | 성립하나 | 판단 |
+|---|---|---|
+| **유닉스 도메인 소켓** | ✅ 3.7 에서 150 초 왕복까지 쟀다 | **채택** |
+| TCP 루프백 | 성립하지만 같은 머신의 다른 프로세스도 붙는다. 막으려면 비밀 토큰이 필요하고, 그 토큰은 `--mcp-config` 를 타고 argv 에 실려 `ps` 에 보인다 — orchestration 5.2 가 이미 *"이 문자열은 프로세스 인자로 들어가 `ps` 에 보이므로, 비밀이 생기면 이 자리를 다시 정해야 한다"* 라고 적어두었다. 그 날이 이 날이 되게 하지 않는다 | 기각 |
+| 파일 폴링 | 요청 파일을 쓰고 답 파일을 기다린다. 지연이 폴링 주기만큼 붙고, 앱이 죽었는지 아직 고민 중인지 구분할 방법이 없다 | 기각 |
+
+**윈도우 전망**: 이 채널은 윈도우 네이티브 목표를 막지 않는다.
+
+| 쪽 | 수단 | 근거 |
+|---|---|---|
+| 앱(JVM) 이 듣는다 | `ServerSocketChannel.open(StandardProtocolFamily.UNIX)` | JDK 16 이상. 이 프로젝트는 툴체인을 21 로 고정해 두었다(`desktop/build.gradle.kts`) |
+| 엔진(Go) 이 건다 | `net.Dial("unix", …)` | Go 는 윈도우에서도 `AF_UNIX` 를 지원한다 |
+
+윈도우 10 1803 이상이면 `AF_UNIX` 가 OS 에 있다. **양쪽 다 한 벌의 코드로 리눅스·맥·윈도우를 덮는다** — 명명 파이프를 따로 만들 이유가 지금은 없다. 원칙 4 그대로다.
+
+**소켓 자리는 워크디렉토리가 아니다.** 3.7 이 잰 107 바이트 한계 때문이다.
+
+| OS | 자리 |
+|---|---|
+| 리눅스 | `$XDG_RUNTIME_DIR/kyuchestration/<세션 짧은 id>.sock` (없으면 `/tmp/kyuchestration-$UID/`) |
+| 맥 | `$TMPDIR/kyuchestration/<세션 짧은 id>.sock` |
+| 윈도우 | `%LOCALAPPDATA%\Kyuchestration\run\<세션 짧은 id>.sock` |
+
+파일 권한은 `0600` 으로 만든다. 윈도우에는 그 개념이 없고 담는 디렉토리의 ACL 이 그 몫을 한다 — 사용자별 `%LOCALAPPDATA%` 아래 두는 이유가 그것이다.
+
+**세션마다 소켓 하나다.** 하나를 공유하면 어느 세션의 물음인지를 메시지 안에 담아야 하고, 그러면 그 식별자를 누가 정하고 누가 검증하는지가 새로 생긴다. 세션마다 열면 **연결 자체가 곧 어느 세션인지다.**
+
+#### 5.4.1 무엇이 오가는가
+
+```
+kyu mcp ask  →  앱 :  {"toolName":"Write","input":{…},"toolUseId":"toolu_…"}
+앱  →  kyu mcp ask :  {"decision":"allow","updatedInput":{…}}
+                   |  {"decision":"deny","reason":"사용자가 거절했습니다"}
+```
+
+**줄 단위 JSON 이다.** `kyu` 의 MCP 서버가 이미 줄 단위 JSON-RPC 를 말하고(`internal/mcpserver/protocol.go`), 새 인코딩을 들일 이유가 없다.
+
+**앱이 답하지 않으면 어떻게 되는가.** 앱이 죽으면 소켓이 닫히고 `ask` 는 읽기에서 EOF 를 받는다. 그때 `deny` 로 답한다 — 앱이 사라진 뒤에 도구가 실행되는 것보다 낫다. 앱이 살아 있는데 사람이 답하지 않는 것은 **막지 않는다**. 3.7 이 150 초를 쟀고, 상한을 우리가 정하면 그 숫자보다 오래 고민한 사용자가 이유 없이 거절당한다.
+
+#### 5.4.2 원칙 13 이 여기서 다시 걸린다
+
+*"위임이 메인보다 넓은 권한을 갖지 않는다."*
+
+위임(`run_in_repo`)은 자기 `claude` 를 띄운다(orchestration 5.4). 그 안쪽 `claude` 가 승인이 필요한 일을 하면 지금은 `--permission-mode auto` 나 bypass 표식으로 처리된다. **챗 브리지가 생겼다고 위임의 승인을 사용자에게 올리지 않는다.** 올리면 사용자는 자기가 안 보는 레포에서 나온 물음에 답하게 되고, 그 물음의 맥락은 화면에 없다.
+
+**v1 에서 승인 브리지는 사용자가 보고 있는 세션의 것만 나른다.** 위임 안쪽의 권한 정책은 orchestration 5.4.1 그대로 둔다. 10 절의 열린 질문이다.
+
+### 5.5 상태 홀더 — 세션마다 대화 하나
+
+`EmbeddedTerminalStateHolder` 가 앉은 자리에 `ChatSessionStateHolder` 가 선다. 그 홀더가 쥐는 것이 늘어난다 — 지금은 `TtyConnector` 하나였고, 이제는 대화 전체다.
+
+```kotlin
+data class ChatConversation(
+    val target: SessionTarget,
+    val conversationId: String?,          // system/init 이 알려준다
+    val resumedConversationId: String?,   // 3.9 · app-owned 5.5.4
+    val entries: List<ChatEntry>,         // 전사
+    val streamingText: String?,           // 3.3 의 조각 버퍼 — 완성본이 오면 버린다
+    val turnState: TurnState,             // Idle · Running · Interrupting
+    val pendingPermission: PermissionRequest?,
+    val lastTurnCost: TurnCost?,
+    val usageWindows: List<RateLimitWindow>,
+)
+```
+
+`ChatEntry` 는 화면에 그릴 단위다 — 사용자 말풍선, 모델 말풍선, 사고 블록, 도구 카드(안에 자식 항목들), 오류. `ToolCallRequested` 가 카드를 만들고 같은 `toolUseId` 의 `ToolCallAnswered` 가 그 카드를 채운다.
+
+**보유는 그대로다.** `EmbeddedTerminalStateHolder` 의 판단 — *"카드를 옮겨도 앞 세션은 계속 돈다"*(`EmbeddedTerminalStateHolder.kt:18`) — 이 챗에서도 성립하고, 오히려 더 쉬워진다. 터미널 시절에는 화면에 없는 세션의 위젯을 살려둬야 상태를 안 잃었지만, 챗에서는 전사가 데이터로 홀더 안에 있어서 화면이 없어도 아무것도 잃지 않는다. **살려둬야 하는 것은 stdout 을 읽는 코루틴 하나뿐이다**(5.3.3).
+
+**전사를 어디까지 들고 있을 것인가.** v1 은 메모리에만 둔다. 앱을 닫으면 사라지고, 다시 열면 `--resume` 으로 대화는 이어지지만 **화면의 전사는 비어 있다** — `claude` 는 앞 대화를 알지만 앱은 모른다. 이 어긋남을 화면이 먼저 말한다(원칙 12): 이어가기로 연 챗의 맨 위에 "이 대화에는 앞선 내용이 있습니다 — 화면에는 이번 실행부터 보입니다" 를 둔다. **전사를 파일로 남기는 것은 v1 밖이다**(10 절).
+
+### 5.6 대화 이어가기와 `conversations.json`
+
+바뀌는 것이 없다. `kyu session-command` 가 `.coord/conversations.json` 에서 대화를 정하고(`internal/cli/session_command.go` 의 `conversationForLabel`), `--session-id` 또는 `--resume` 을 argv 에 넣어 답한다. 챗 모드도 같은 답을 받아 같은 플래그로 실행한다 — 3.9 가 그 모드에서도 도는 것을 쟀다.
+
+**세션 지도의 낱말이 하나 더 갈릴 뻔했다.** `workdir.SessionConversation` 과 `workdir.DelegationConversation` 이 있는데(orchestration 5.5.1), 챗 세션은 **`SessionConversation` 그대로**다. 화면이 터미널이든 챗이든 사용자가 여는 그 세션이고, 대화 하나를 두 화면이 동시에 열면 `--session-id already in use` 로 거절되는 것도 그대로다. **낱말을 늘리지 않는다.**
+
+### 5.7 위임이 메인 챗에 보이는 길
+
+3.10 이 잰 사실 그대로 그린다.
+
+**v1 — 도구 카드 하나.** 메인 세션이 `run_in_repo` 를 부르면 `ToolCallRequested(toolName = "mcp__kyu__run_in_repo")` 가 오고, 몇 분 뒤 `ToolCallAnswered` 가 온다. 그 사이 카드가 보여줄 수 있는 것은 셋이다.
+
+| 보이는 것 | 출처 |
+|---|---|
+| 어느 레포에 무엇을 시켰나 | `input.repo` · `input.task` |
+| 경과 시간 | 앱이 잰다 — 두 이벤트 사이 |
+| 끝난 뒤의 결과와 원출력 파일 | `ToolCallAnswered` · orchestration 5.4.3 의 `.coord/runs/` |
+
+**진행 막대는 없다.** 원칙 15 다. MCP 진행 알림이 오지 않는 것을 쟀고, 오지 않는 것을 그린 척하지 않는다.
+
+**두 번째 걸음의 후보를 적어둔다 — 지금 만들지 않는다.** `kyu mcp serve` 가 위임 진행을 **승인 브리지가 이미 쓰는 앱 소켓으로** 밀어 넣는 길이 있다. 채널이 이미 있으므로 새로 만들 것은 메시지 종류 하나뿐이고, 그것이 원칙 4 가 말하는 "두 번째 사용처" 다. 다만 **첫 번째 사용처(승인)가 실제로 서기 전에는 만들지 않는다.** 승인 브리지를 쓰면서 채널의 모양이 바뀔 수 있고, 그때 사용처가 둘이면 둘 다 고쳐야 한다.
+
+**서브에이전트는 다르다.** 메인 세션이 `Task` 를 띄우면 `system/task_*` 가 오고 `--forward-subagent-text` 로 안쪽 대화까지 온다. **그것은 v1 부터 그린다** — 이벤트가 오는 것을 그리는 데는 아무 결정도 필요 없다.
+
+### 5.8 마크다운을 어디서 그리는가
+
+`AssistantTextArrived` 의 텍스트와 `/context` 같은 로컬 명령의 답이 마크다운이다(3.13).
+
+- 완성된 텍스트는 `com.mikepenz.markdown.m3.Markdown` 으로 그린다.
+- 스트리밍 중에는 `rememberStreamingMarkdownState()` 에 조각을 append 한다(3.15).
+- 코드 펜스의 언어 문자열은 우리 매핑을 한 번 거쳐 넘긴다 — `bash`→`SHELL`, `js`→`JAVASCRIPT` 등. 매핑에 없으면 하이라이트 없이 그린다.
+- **아주 긴 코드 블록이 스트리밍되는 동안에는 하이라이트를 끈다.** `-code` 모듈은 코드 문자열을 키로 하이라이팅을 다시 도는데, 블록이 한 글자 늘 때마다 전체를 다시 칠한다. 블록이 닫힌 뒤 하이라이트 컴포넌트로 교체한다.
+
+**도구 결과는 마크다운으로 그리지 않는다.** Bash 의 출력이나 파일 내용에 마크다운 문법처럼 보이는 글자가 들어 있을 수 있고, 그것을 렌더링하면 화면이 원본과 달라진다. 도구 결과는 고정폭 평문이다.
+
+---
+
+## 6. UI 설계 — Material 3
+
+> **이 절은 구조까지만 정한다.** 사용자에게 별도 시각 목업이 가는 중이고, 색상 세부는 목업이 확정된 뒤 이 절을 갱신한다. 지금 정하는 것은 **토큰이 놓일 자리**·**셸의 골격**·**컴포넌트의 목록**이다.
+
+### 6.1 테마 — 지금 비어 있는 한 줄을 채운다
+
+`MaterialTheme { }`(`KyuchestrationDesktopScreen.kt:91`)이 셋을 받게 된다.
+
+```kotlin
+MaterialTheme(
+    colorScheme = if (darkTheme) KyuDarkColorScheme else KyuLightColorScheme,
+    typography = KyuTypography,
+    shapes = KyuShapes,
+) { … }
+```
+
+| 토큰 | v1 의 자세 |
+|---|---|
+| **색** | 시드 색 하나에서 라이트·다크 두 스킴을 만든다. Material 3 의 `SurfaceContainer` 층(`surfaceContainerLowest`~`Highest`)을 실제로 쓴다 — 챗의 깊이(배경 / 말풍선 / 도구 카드 / 카드 안 코드)가 정확히 이 층에 대응한다 |
+| **다크 모드** | v1 부터 넣는다. 데스크톱은 OS 설정을 읽을 표준 통로가 없으므로 **창의 토글 하나**로 두고 선택을 남긴다 |
+| **타이포** | Material 3 의 스케일을 그대로 쓰되 **본문과 고정폭 두 계열**을 정한다. 대화 본문은 비례폭, 코드·도구 출력·경로는 고정폭 |
+| **셰이프** | 말풍선과 카드가 다른 반경을 갖는다 — 대화의 것과 기계의 것을 모양으로 가른다 |
+| **밀도** | 창 폭에 따라 두 단계. 좁으면 도구 카드가 접힌 채로 시작한다 |
+
+**한글 폰트를 지금 정해둔다.** 지금은 시스템 기본이고, 리눅스와 윈도우에서 다르게 보인다. 목업이 확정될 때 함께 정한다.
+
+### 6.2 레이아웃 셸 — 좌우 3 분할
+
+지금은 위아래다. 그 근거가 `KyuchestrationDesktopScreen.kt:157` 의 주석에 있다.
+
+> *"좌우가 아니라 위아래인 이유는 터미널이 폭을 먹기 때문이다. 세션 안의 화면은 80 칸을 기준으로 그려지는데, 창을 반으로 갈라 오른쪽에 두면 그 폭이 나오지 않아 줄이 접힌다."*
+
+**챗은 폭에 맞춰 흐른다.** 그 제약이 사라지므로 좌우로 나눈다.
+
+```
+┌──────────┬────────────────────────────────┬──────────────────┐
+│ 내비게이션 │  대화                          │  상세            │
+│ 레일      │                                │                  │
+│          │  ┌──────────────────────────┐  │  선택한 도구      │
+│ 워크디렉토리│  │ 사용자 말풍선             │  │  호출의 전문      │
+│ ─────────│  └──────────────────────────┘  │  (전체 명령 ·    │
+│ ● 메인    │  ┌──────────────────────────┐  │   전체 diff ·   │
+│ ○ proj-a │  │ 모델 말풍선 (마크다운)     │  │   전체 출력)    │
+│ ○ proj-b │  ├──────────────────────────┤  │                  │
+│ ○ proj-c │  │ ▸ Bash  git status       │  │  또는 세션 정보   │
+│          │  │   ✓ 12 줄               │  │  (모델 · MCP ·   │
+│ ─────────│  ├──────────────────────────┤  │   컨텍스트 · 한도)│
+│ + 클론    │  │ ⚠ 권한 요청              │  │                  │
+│          │  │   [허용] [수정] [거절]    │  │                  │
+│          │  └──────────────────────────┘  │                  │
+│          │  ┌──────────────────────────┐  │                  │
+│          │  │ 입력창          [중단]    │  │                  │
+│          │  └──────────────────────────┘  │                  │
+└──────────┴────────────────────────────────┴──────────────────┘
+```
+
+| 자리 | 담는 것 |
+|---|---|
+| **내비게이션 레일** | 워크디렉토리 이름, 메인 + 레포 세션 목록. 각 항목에 `kyu list --json` 이 주는 상태(`DIRTY`·`AHEAD`·`IDLE`)와 앱 세션 보유 표시 — 지금 대시보드 카드가 보이는 것 그대로다 |
+| **대화** | 6.3 |
+| **상세** | 접을 수 있다. 좁은 창에서는 기본으로 접힌다 |
+
+**대시보드 카드가 레일로 접힌다.** 지금 카드가 보이는 것(레포 상태·계획 작업·최근 위임)은 레일 항목의 보조 줄과 상세 패널로 나뉜다. **카드를 없애는 것이 아니라 대화가 주인공인 셸로 자리를 옮기는 것이다.**
+
+### 6.3 메시지 컴포넌트
+
+| 컴포넌트 | 그리는 이벤트 | 모양 |
+|---|---|---|
+| `UserMessageBubble` | `UserMessageEchoed` | 오른쪽 정렬, `secondaryContainer`. 답을 아직 못 받은 것은 흐리게(3.11) |
+| `AssistantMessageBlock` | `AssistantTextArrived` · `AssistantTextStreaming` | 말풍선 없이 폭 전체. 마크다운(5.8) |
+| `ThinkingBlock` | `AssistantThinkingArrived` | 기본 접힘. 헤더에 `system/thinking_tokens` 의 추정 토큰 |
+| `ToolCallCard` | `ToolCallRequested` + `ToolCallAnswered` | 아래 표 |
+| `PermissionRequestCard` | 브리지가 올린 물음(5.4) | 6.4 |
+| `DelegationCard` | `run_in_repo` 호출 | 레포 이름·작업·경과 시간. 진행 막대 없음(5.7) |
+| `SubagentCard` | `DelegationProgressed` + `parentToolUseId` 자식들 | 안쪽 대화를 접어 담는다 |
+| `TurnFooter` | `TurnFinished` | 비용·토큰·소요 시간 배지. 중단·실패면 그 사유 |
+| `PermissionDenialNotice` | `TurnFinished.permissionDenials` | 3.6 의 `dontAsk` 가 여기로 온다 |
+| `EngineNotice` | `EngineSpoke` · `SessionEnded` | resume 실패가 여기로 온다(3.9) |
+
+`ToolCallCard` 의 갈래는 도구 이름으로 정한다. **모르는 도구는 일반 카드로 떨어진다** — MCP 도구가 얼마든지 새로 붙을 수 있으므로 이것이 기본값이어야 한다.
+
+| 갈래 | 접힌 모습 | 펼친 모습 |
+|---|---|---|
+| Bash | 명령 한 줄 + 종료 표시 | 전체 명령과 출력(고정폭) |
+| Edit · Write | 파일 이름 + `+n −m` | diff. 추가·삭제를 `tertiary`·`error` 계열로 |
+| Read | 파일 이름 + 줄 수 | 읽은 구간. `tool_use_result.file` 이 준다(3.4) |
+| Glob · Grep | 패턴 + 결과 수 | 경로 목록 |
+| MCP 도구 | `서버 · 도구` + 결과 한 줄 | 인자 JSON 과 결과 전문 |
+| 일반 | 도구 이름 + 성공·실패 | 인자 JSON 과 결과 전문 |
+
+**실패한 도구 호출은 접힌 상태에서도 이유가 보인다.** `is_error: true` 의 `content` 첫 줄을 헤더에 둔다 — 접힌 카드만 보고 무엇이 잘못됐는지 알 수 있어야, 실패가 대화에 묻히지 않는다.
+
+### 6.4 권한 승인 — 인라인 카드
+
+브리지가 물음을 올리면 대화의 맨 아래에 카드가 뜬다. **다이얼로그가 아니라 인라인이다** — 물음의 맥락(직전에 모델이 무엇을 하겠다고 했는지)이 바로 위에 있어야 사용자가 판단할 수 있고, 다이얼로그는 그것을 가린다.
+
+| 버튼 | 브리지가 보내는 답 |
+|---|---|
+| **허용** | `{"decision":"allow","updatedInput":<원본>}` |
+| **수정 후 허용** | 인자를 편집한 뒤 `updatedInput` 에 그것을 싣는다 — 3.5 가 실제로 도는 것을 쟀다 |
+| **거절** | `{"decision":"deny","reason":"…"}`. 이유를 적을 수 있고, 그 이유가 모델에게 그대로 간다 |
+
+카드가 보여주는 것: 도구 이름, 인자(Write 면 대상 경로와 내용, Bash 면 명령 전문), 그리고 **이 세션의 cwd**. 마지막 것이 중요하다 — 챗이 여럿 열려 있으면 어느 레포의 물음인지가 판단의 절반이다.
+
+**"항상 허용" 을 v1 에 두지 않는다.** 그것을 두면 어딘가에 규칙을 적어야 하고, 그 자리는 사용자의 `settings.json` 이다. 앱이 사용자 설정 파일을 고치기 시작하는 것은 이 전환이 결정할 일이 아니다. 10 절의 열린 질문이다.
+
+### 6.5 입력창
+
+| 항목 | 정한 것 |
+|---|---|
+| 멀티라인 | Enter 로 보내고 Shift+Enter 로 줄바꿈 |
+| 전송 ↔ 중단 | 턴이 도는 동안 같은 자리의 버튼이 중단으로 바뀐다. 중단은 `control_request`(3.8) |
+| 턴 중 입력 | 막지 않는다(3.11). 보낸 것은 흐린 말풍선으로 쌓인다 |
+| 슬래시 자동완성 | `SessionDescribed.availableSlashCommands` 로 만든다(3.13) |
+| 파일 경로 | v1 밖 |
+
+### 6.6 스트리밍 표시
+
+| 상태 | 화면 |
+|---|---|
+| 요청을 보냈다 (`system/status`) | 입력창 위의 얇은 진행선 |
+| 생각 중 (`system/thinking_tokens`) | 추정 토큰이 오르는 사고 블록 헤더 |
+| 글자가 오는 중 | 마지막 문단 뒤의 커서. `AssistantTextStreaming` |
+| 도구 인자를 만드는 중 | 카드 헤더에 도구 이름만, 인자 자리는 자리표시자 (3.3 — 이름이 먼저 온다) |
+| 도구가 도는 중 | 카드에 경과 시간 |
+| 끝 (`result`) | 진행선이 사라지고 `TurnFooter` 가 붙는다 |
+
+### 6.7 밀도와 접근성
+
+| 항목 | 정한 것 |
+|---|---|
+| 대비 | Material 3 의 `on*` 색을 그대로 쓴다. 도구 카드의 성공·실패를 **색만으로 가르지 않는다** — 아이콘과 문구를 함께 |
+| 폰트 크기 | 창 설정에서 본문 배율을 정한다. 코드 블록도 함께 따라간다 |
+| 키보드 | 대화 목록·레일·입력창을 Tab 으로 돈다. 승인 카드가 뜨면 포커스가 그리로 간다 |
+| 긴 출력 | 도구 결과는 접힌 상태에서 상한 줄 수까지만. "전문 보기" 가 상세 패널을 연다 |
+| 선택·복사 | 전사 전체가 선택 가능해야 한다. 코드 블록에는 복사 버튼 |
+
+---
+
+## 7. 터미널 뷰의 처지
+
+**결론: 한 단계 동안 "원시 터미널로 보기" 로 남기고, 삭제 조건을 지금 적어둔다.**
+
+원칙은 미사용 코드를 즉시 지우라고 말한다. 그런데 지금 그 코드는 **쓰이고 있고**, 챗이 그 자리를 다 덮는지는 3 절이 아직 답하지 못한 부분이 있다.
+
+| 터미널이 하던 것 | 챗에서 |
+|---|---|
+| 슬래시 명령 | ✅ 3.13 — 커스텀·내장 둘 다 돈다 |
+| 권한 승인 | ✅ 3.5 · 6.4 |
+| 도구 호출 보기 | ✅ 더 잘 된다 |
+| 중단 | ✅ 3.8 |
+| 대화 이어가기 | ✅ 3.9 |
+| `/login` · OAuth 흐름 | **❓ 못 쟀다** — 터미널 안에서 브라우저를 열고 코드를 받아 치는 흐름이다 |
+| `/mcp` 의 서버 승인 프롬프트 | **❓ 못 쟀다** — orchestration 3.2 가 헤드리스는 그 관문을 안 탄다고 쟀으니 프롬프트 자체가 안 뜰 수 있지만, 그러면 승인이 필요한 서버는 그냥 안 붙는다 |
+| 플랜 모드의 승인 화면 | **❓ 못 쟀다** — `ExitPlanMode` 가 도구로 보이므로 카드가 될 가능성이 크다 |
+| `AskUserQuestion` | 도구 목록에 있다. 카드가 될 것이다 |
+
+**❓ 셋이 남아 있는 동안 터미널을 지우면, 그 셋을 만난 사용자가 할 수 있는 일이 없다.** 그래서 남긴다 — 다만 **보조로**, 그리고 조건을 걸고.
+
+| 무엇 | 언제 |
+|---|---|
+| 챗이 기본이 된다 | 8 절 4 단계 |
+| 터미널은 세션 헤더의 "원시 터미널로 보기" 로만 열린다 | 4 단계 |
+| **터미널 코드를 삭제한다** | ❓ 셋이 챗에서 되는 것이 확인된 뒤 — 8 절 7 단계 |
+
+**두 화면 모델을 오래 끌지 않는 이유**를 적어둔다. `HeldSession` 이 지금 `TtyConnector` 를 쥐고 있고(`HeldSession.kt:17`), 챗 세션은 대화를 쥔다. 둘을 같은 홀더가 다루면 "이 세션이 어느 종류인가" 를 묻는 자리가 앱 곳곳에 생기고, 그 물음을 빠뜨린 자리가 곧 결함이다. **한 세션은 한 종류다** — 같은 대화를 터미널로도 챗으로도 동시에 열지 못한다(5.6 의 `already in use` 가 어차피 그것을 막는다). "원시 터미널로 보기" 는 **챗 세션을 끝내고 같은 대화를 터미널로 다시 여는 것**이다. 그 사실을 화면이 먼저 말한다(원칙 12).
+
+---
+
+## 8. 검토한 대안과 기각 사유
+
+**가장 큰 대안은 "이 전환을 하지 않는 것" 이고, 그것은 2 절이 다뤘다.** 여기는 "챗으로 간다" 를 정한 뒤에 갈리는 길들이다.
+
+### 8.1 Agent SDK 사이드카 (Node)
+
+`@anthropic-ai/claude-agent-sdk` 를 쓰는 Node 프로세스를 앱이 띄우고, 앱은 그것과 이야기한다. 스트림 파싱과 권한 콜백을 SDK 가 이미 해준다.
+
+**기각.** 셋이다.
+
+1. **런타임이 하나 는다.** 지금 설치는 "앱을 깔면 엔진이 함께 온다" 한 걸음이다(`desktop/build.gradle.kts` 가 `kyu` 를 패키지에 담는다). Node 가 끼면 그것을 배포하거나 사용자에게 요구해야 하고, 윈도우 네이티브 목표에서 특히 비싸다.
+2. **계층이 하나 는다.** 앱 → 사이드카 → `claude`. 사이드카가 죽었는지 `claude` 가 죽었는지를 가르는 일이 새로 생긴다.
+3. **SDK 가 해주는 일이 우리에게 크지 않다.** 3 절이 잰 것이 그 증거다 — 줄 단위 JSON 파싱과 소켓 왕복 하나다. 그 대가로 런타임과 계층을 들이는 것은 맞지 않는다.
+
+**다만 SDK 의 문서는 계속 본다.** 스트림의 이벤트 모양이 바뀌면 SDK 가 먼저 그것을 반영한다.
+
+### 8.2 기존 터미널 유지 + 오버레이
+
+터미널은 그대로 두고, 앱이 별도로 `claude` 의 전사 파일을 읽어 옆에 도구 카드를 그린다.
+
+**기각.** 전사 파일은 `claude` 의 내부 저장 형식이다. app-owned 5.5.1 이 `--session-id` 를 "알아내는 것이 아니라 정해주는 것" 으로 만든 근거가 그대로 여기 걸린다 — *"알아내는 길이었다면 claude 의 내부 저장 형식에 기대게 되고, 그것은 계약이 아니라 구현 세부라 판이 바뀔 때 조용히 어긋난다."*
+
+그리고 권한 승인은 여전히 터미널 안에서 답해야 한다 — 요구의 절반이 안 풀린다.
+
+### 8.3 웹뷰 챗
+
+챗 화면을 HTML 로 만들고 Compose 안에 웹뷰로 띄운다. 마크다운·코드 하이라이트·diff 를 성숙한 웹 라이브러리로 해결한다.
+
+**기각.** Compose Multiplatform Desktop 에 표준 웹뷰가 없다. JCEF 를 들이면 패키지 크기가 수백 MB 늘고, 그것이 앱 배포의 성격을 바꾼다. 그리고 3.15 가 Compose 쪽에도 스트리밍까지 다루는 렌더러가 있다는 것을 확인했다 — 웹뷰가 풀어줄 문제가 남아 있지 않다.
+
+### 8.4 `--output-format json` 으로 한 턴씩
+
+`-p` 로 한 턴 돌리고 JSON 하나를 받는 방식. orchestration 3.4 가 이미 쟀고 위임이 그것을 쓴다.
+
+**기각.** 턴마다 프로세스를 새로 띄우면 부팅 3 초(3.1)와 전체 컨텍스트 재전송이 매번 붙는다. 그리고 **스트리밍이 없다** — 사용자가 답을 다 쓸 때까지 빈 화면을 본다. 위임은 사람이 안 보고 있어서 그것이 괜찮았고, 챗은 사람이 보고 있다.
+
+### 8.5 앱이 API 를 직접 부른다
+
+`claude` 를 빼고 앱이 Anthropic API 를 직접 부른다.
+
+**기각.** 그러면 `CLAUDE.md`·`.mcp.json`·훅·커스텀 에이전트·슬래시 명령이 전부 사라진다. **이 도구의 존재 이유가 "레포의 설정을 전부 활용한 채로" 였다**(workdir 1.3). 그것을 버리는 길은 검토 대상이 아니다.
+
+---
+
+## 9. 구현 단계
+
+각 단계가 **PR 하나**이고, 각 단계 끝에 손으로 확인 가능한 상태가 된다.
+
+**1·2 단계는 서로를 기다리지 않는다.** 테마·셸은 지금 화면 위에서 먼저 설 수 있고, 어댑터는 화면 없이 시험할 수 있다. 병렬로 간다.
+
+| 단계 | 내용 | 완료 확인 |
+|---|---|---|
+| **1** (병렬 A) | **테마와 셸** — `KyuColorScheme`·`Typography`·`Shapes`, 다크 토글, 좌우 3 분할 셸. 대화 자리에는 지금의 터미널을 그대로 둔다 | 앱 전체가 새 색·타이포로 보이고 다크가 돈다. 레일에서 세션을 고르면 지금과 똑같이 터미널이 열린다. **화면 모델은 아직 안 바뀌었다** |
+| **2** (병렬 B) | **어댑터** — `kyu session-command --chat`(5.2), `ChatSessionOpener`·`ProcessChatSession`, 이벤트 모델(5.3.2). 화면 없이 테스트로만 | `kyu session-command --json --chat` 이 3.1 의 argv 를 답한다. 어댑터 테스트가 **녹화한 이벤트 줄**을 넣어 sealed 이벤트로 옮기는 것을 확인한다(부록 A 의 출력을 고정 자료로 쓴다). 실제 `claude` 를 한 번 띄워 두 턴이 도는 것을 확인한다 |
+| **3** | **말하고 듣는다** — `ChatSessionStateHolder`, 사용자 말풍선·모델 말풍선·마크다운(5.8)·스트리밍(6.6)·`TurnFooter`. 도구는 아직 일반 카드 | 레일에서 메인을 고르면 챗이 열리고, 치면 답이 글자 단위로 흐른다. 비용 배지가 뜬다. **도구를 쓰는 답도 오지만 카드는 밋밋하다** |
+| **4** | **중단과 도구 카드** — `control_request`(3.8), `ToolCallCard` 갈래(6.3), 상세 패널. 챗이 기본이 되고 터미널은 "원시 터미널로 보기" 로 내려간다(7 절) | 긴 답 도중 중단 버튼을 누르면 턴만 끊기고 **다음 말을 걸면 답한다**. Bash·Edit·Read 카드가 갈라 보인다. 터미널은 메뉴 안에 있다 |
+| **5** | **권한 브리지** — `kyu mcp ask`(5.2.2), 앱의 소켓 수신(5.4), `PermissionRequestCard`(6.4) | 승인이 필요한 일을 시키면 **앱 안에 카드가 뜬다**. 거절하면 파일이 안 생기고 모델이 이유를 안다. **인자를 고쳐 허용하면 고친 대로 돈다**. 소켓을 짧은 런타임 경로에 여는 것을 긴 워크디렉토리 이름으로 확인한다(3.7 의 107 바이트) |
+| **6** | **위임과 서브에이전트** — `DelegationCard`(5.7), `SubagentCard`, `parentToolUseId` 중첩, `permission_denials` 표시 | 메인에게 레포 작업을 시키면 위임 카드가 뜨고 경과 시간이 흐른다. 서브에이전트를 띄우면 안쪽 대화가 접힌 채로 보인다 |
+| **7** | **터미널 삭제** — 7 절의 ❓ 셋이 챗에서 되는 것을 확인한 뒤 | JediTerm·pty4j 의존과 `EmbeddedTerminalPane`·`HeldSessionTerminalWidgets`·`terminal/pty/` 가 사라진다. **패키지 크기가 준다** |
+
+**1·2 를 병렬로 두는 이유**: 둘이 겹치는 파일이 없다. 1 은 `KyuchestrationDesktopScreen.kt` 와 새 테마 파일을, 2 는 `internal/cli/` 와 새 `terminal/chat/` 을 만진다. 그리고 1 은 눈으로만 판정되고 2 는 테스트로만 판정된다 — 리뷰의 성격도 갈린다.
+
+**5 단계가 3·4 뒤인 이유**: 승인 카드를 그리려면 대화가 먼저 있어야 한다. 그리고 브리지는 이 설계에서 새로 만드는 것이 가장 많은 자리라(소켓·새 하위 명령·양쪽 직렬화), 앞의 것들이 서 있어야 실패가 어디서 났는지 갈린다.
+
+**7 단계에 조건이 붙어 있다.** 조건이 안 차면 그 PR 은 열리지 않는다 — 7 절이 그 조건이다.
+
+---
+
+## 10. 열린 질문
+
+구현을 막지는 않지만 해당 단계에서 정해야 하는 것들이다.
+
+1. **`/login`·`/mcp` 승인·플랜 모드가 챗에서 되는가** — 7 절의 ❓ 셋. **4 단계에서 잰다.** 이 답이 7 단계의 존재 여부를 정한다. 인증은 실제 계정이 걸려 있어 프로브로 재기 어렵고, 앱에서 직접 해보는 것이 유일한 길이다.
+
+2. **컨텍스트가 찰 때 무엇이 오는가** — 3.12 가 못 쟀다. 자동 압축이 이벤트로 오는지, 온다면 어느 `type` 인지. 안 오면 챗은 대화가 갑자기 짧아진 것을 설명하지 못한다. `/context` 를 주기적으로 부르는 길도 있지만 그것은 턴을 하나 쓴다. **3 단계에서 긴 대화를 실제로 만들어 본다.**
+
+3. **전사를 파일로 남길 것인가** — 5.5. 남기면 앱을 다시 열어도 화면이 이어지고, `claude` 의 전사와 우리 전사가 둘이 된다. 후보: (가) 남기지 않는다(v1) (나) `.coord/transcripts/<대화 ID>.jsonl` 에 받은 이벤트를 그대로 적는다 (다) `claude` 의 전사를 읽는다 — **(다)는 8.2 의 이유로 기각.** (나)를 언제 열지는 사용자가 "앱을 껐다 켜면 대화가 안 보인다" 를 실제로 불편해할 때 정한다.
+
+4. **"항상 허용" 을 어디에 적을 것인가** — 6.4. 앱이 사용자 `settings.json` 을 고치는 것은 큰 결정이다. 후보: (가) 두지 않는다(v1) (나) 워크디렉토리 `.coord/` 에 우리 규칙을 적고 브리지가 그것을 먼저 본다 (다) 사용자 설정을 고친다. **(나)가 유력하다** — 원칙 2("레포 안에는 아무것도 넣지 않는다")를 지키면서 우리 것을 우리 자리에 둔다. **5 단계에서 정한다.**
+
+5. **위임 안쪽의 승인을 사용자에게 올릴 것인가** — 5.4.2. 지금은 안 올린다. 올리면 사용자가 안 보는 레포의 물음에 답하게 되고, 안 올리면 위임은 계속 `auto` 로 돈다. **6 단계 이후.**
+
+6. **위임 진행을 앱 소켓으로 밀 것인가** — 5.7 의 두 번째 걸음. 채널이 이미 있으므로 비용이 작지만, 첫 사용처가 선 뒤에 정한다. **6 단계 이후.**
+
+7. **`kyu mcp ask` 라는 이름** — 5.2.2. `approve` 와 가깝다. 사용법 문구에만 나오는 이름이라 짧은 쪽을 먼저 쓰지만, 2 단계에서 문구를 써 보고 헷갈리면 그때 바꾼다.
+
+8. **큐 깊이를 정확히 그릴 것인가** — 3.11. `still_queued` 와 `queued_turn_count` 를 비어 있지 않은 상태로 재지 못했다. 앱이 자기가 보낸 수와 받은 `result` 수를 세는 것으로 v1 은 충분하다고 보지만, 그 셈이 어긋나는 경우가 있는지 **3 단계에서 본다.**
+
+9. **한글 폰트를 무엇으로 고정할 것인가** — 6.1. 지금은 시스템 기본이라 리눅스와 윈도우가 다르게 보인다. 폰트를 패키지에 담으면 크기가 늘고, 담지 않으면 화면이 머신마다 다르다. **목업 확정 시.**
+
+10. **`init.permissionMode` 를 화면에 보일 것인가** — 3.6 이 플래그 이름(`manual`)과 보고 이름(`default`)이 다른 것을 쟀다. 그대로 보이면 사용자가 준 적 없는 낱말이 뜬다. 우리 낱말로 옮겨 보이거나 아예 안 보이거나. **3 단계.**
+
+---
+
 ## 부록 A. 실측 원출력 요약
 
 **환경**: 2026-09-04, `claude` 2.1.259, Linux(WSL2). 모델은 세션 기본값(`claude-fable-5-1`, 일부 프로브는 `claude-opus-5[1m]`). 대부분 `--setting-sources ""` 로 사용자 설정을 걷어냈다.
@@ -718,3 +1300,61 @@ mcpServers: {"kyu-ask": {…}}
 
 **환경 격리**: 대부분의 프로브에 `--setting-sources ""` 를 주어 사용자·프로젝트·로컬 설정을 걷어냈다. 그러지 않으면 이 머신의 `defaultMode: auto` 때문에 권한 관문이 열리지 않고, 그것이 이 판의 성질인지 이 머신의 설정인지 갈리지 않는다.
 
+---
+
+## 부록 C. 확인된 사실
+
+3 절에서 **재서** 확정한 것만 적는다. 추정과 문서 조사는 따로 표시했다.
+
+1. `claude -p --input-format stream-json --output-format stream-json` 은 **한 프로세스가 여러 턴을 산다.** `session_id` 가 같고 대화가 이어진다.
+2. `system/init` 은 **턴마다 다시 온다.** 세션의 시작 신호가 아니다.
+3. `assistant` 이벤트는 **콘텐츠 블록 단위**다. 메시지 단위가 아니다.
+4. `--include-partial-messages` 의 `content_block_start` 는 **도구 이름을 인자보다 먼저** 준다.
+5. `user` 이벤트의 `tool_use_result` 곁가지는 **도구마다 다른 모양의 구조화된 결과**를 담는다.
+6. `--permission-prompt-tool` 의 요청 인자는 `{tool_name, input, tool_use_id}` 이고, 답은 `{"behavior":"allow","updatedInput":…}` 또는 `{"behavior":"deny","message":…}` 다.
+7. **`updatedInput` 으로 인자를 바꾸면 바꾼 대로 실행된다.**
+8. **`--permission-prompt-tool` 로 지정된 도구는 모델의 도구 목록에서 사라진다.**
+9. `--permission-mode manual` 은 `init` 에서 **`default`** 로 보고된다.
+10. `default` 에서도 **모든 도구 호출이 관문을 타지는 않는다** — `echo` 는 그냥 돈다.
+11. `dontAsk` 는 **묻지 않고 거절**하고 `result.permission_denials` 에 남긴다.
+12. `acceptEdits`·`auto`·`bypassPermissions` 에서는 승인 도구가 **한 번도 불리지 않는다.**
+13. MCP 서버가 부모에게 **유닉스 소켓으로 물어 150 초 뒤에 답해도** 승인이 통한다.
+14. `AF_UNIX` 경로는 **107 바이트가 한계**다. 긴 스크래치 경로에서는 소켓이 열리지 않았다.
+15. `control_request` 의 `{"subtype":"interrupt"}` 는 **턴만 끊고 프로세스와 대화를 살려둔다.** 중단 뒤 같은 프로세스가 앞 맥락을 기억한 채 답했다.
+16. `SIGINT` 은 **프로세스를 함께 끝낸다.**
+17. `--session-id` 와 `--resume` 이 이 모드에서 **그대로 돈다.** 없는 대화를 resume 하면 stderr 한 줄 + `result` 이벤트 + 종료 코드 1 이다.
+18. MCP 의 `notifications/progress` 는 **출력 스트림에 나타나지 않는다.**
+19. 서브에이전트는 `system/task_started`·`task_progress`·`task_updated`·`task_notification` 으로 **진행을 준다.** `--forward-subagent-text` 를 켜면 안쪽 대화가 `parent_tool_use_id` 가 채워진 채로 온다.
+20. 턴이 도는 중에 보낸 메시지들은 **큐에 쌓였다가 한 턴으로 합쳐진다.**
+21. 슬래시 명령이 **이 모드에서 돈다** — 레포의 커스텀 명령과 `/context` 같은 내장 로컬 명령 둘 다. `/context` 는 모델을 부르지 않고(`num_turns: 0`) 마크다운을 답한다.
+22. `--replay-user-messages` 는 앱이 보낸 사용자 메시지를 `user` 이벤트로 되돌려준다.
+23. `--mcp-config` 를 **두 번 줄 수 있고** 두 서버가 다 붙는다.
+24. MCP 서버 이름의 **하이픈은 도구 이름에 그대로 남는다** — `kyu-ask` → `mcp__kyu-ask__approve`. 콜론은 밑줄로 바뀐다(`plugin:context7:context7` → `plugin_context7_context7`).
+25. `result` 는 비용·토큰·컨텍스트 창 크기·소요 시간·중단 사유·권한 거절 목록·서브에이전트 통계를 담는다. `rate_limit_event` 는 5 시간·7 일 창의 사용률을 준다.
+
+**문서 조사로 확인한 것** (코드 실행 없음, 3.15)
+
+26. `com.mikepenz:multiplatform-markdown-renderer` 0.45.0 (2026-08-28)이 Compose Desktop JVM·Material 3 모듈·코드 하이라이트 모듈·스트리밍 전용 API 를 갖는다. Apache-2.0.
+27. 그 하이라이터 `dev.snipme:highlights:1.1.0` 은 언어 17 개를 enum 이름 완전일치로 매칭한다 — `json`·`yaml`·`sql`·`diff` 가 없고 `bash`·`js`·`py` 같은 별칭이 매칭되지 않는다.
+
+**아직 안 쟀거나 못 잰 것**
+
+28. `/login`·`/mcp` 승인·플랜 모드가 챗 모드에서 어떻게 되는지 (10 절 1 번).
+29. 컨텍스트가 찰 때 압축이 이벤트로 오는지 (10 절 2 번).
+30. `still_queued`·`queued_turn_count` 가 비어 있지 않은 경우 (10 절 8 번).
+31. `--mcp-config` 가 **대화형**에서도 승인 관문을 안 타는지 — orchestration 3.8 이 `-p` 로만 쟀고, 챗 모드도 `-p` 라 이 설계에서는 문제가 되지 않는다.
+
+---
+
+## 부록 D. 용어
+
+| 낱말 | 뜻 |
+|---|---|
+| **챗 모드** | 앱이 `claude` 를 `--input-format stream-json --output-format stream-json` 으로 띄우고 이벤트에서 화면을 직접 그리는 것 |
+| **터미널 모드** | 지금까지의 것 — PTY 를 열고 `claude` 가 그린 격자를 그대로 보이는 것 |
+| **전사** | 챗 화면에 쌓인 대화 전체. `claude` 가 자기 디렉토리에 남기는 전사와 다른 것이다 |
+| **턴** | 사용자 메시지 하나에서 `result` 하나까지 |
+| **블록** | 모델의 한 답 안의 조각 — 텍스트·사고·도구 호출 |
+| **승인 브리지** | `kyu mcp ask` ↔ 앱 소켓. 도구 호출 승인 물음을 앱까지 나르는 통로 |
+| **관문** | 승인이 필요한 자리. 이 문서에서는 도구 호출 승인을, orchestration 5.6 에서는 레포 설정 승인을 가리킨다 |
+| **셸** | 창 안의 골격 — 레일·대화·상세 세 자리 |
