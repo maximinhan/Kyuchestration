@@ -523,3 +523,131 @@ func TestSessionCommandResumesNothingWhenItWasToldToForgetTheRecord(t *testing.T
 		t.Errorf("resumedConversationId = %q, 새로 시작한 대화이므로 null 을 기대", *run.document.ResumedConversationID)
 	}
 }
+
+// chatModeStreamFlagsForTest 는 챗 모드가 claude 에게 주는 플래그를 순서 그대로 적어둔 것이다.
+//
+// 생산 코드의 값을 가져다 쓰지 않는다. 이 철자와 순서는 claude 와 맺는 계약이라(실측 3.1 · 3.3 ·
+// 3.14), 도구 안에서 상수가 바뀌는 것이 계약을 바꾸는 일이 되어서는 안 된다 — 문서 타입을
+// 테스트가 다시 적어두는 것과 같은 이유다.
+var chatModeStreamFlagsForTest = []string{
+	"-p",
+	"--input-format", "stream-json",
+	"--output-format", "stream-json",
+	"--verbose",
+	"--include-partial-messages",
+	"--replay-user-messages",
+}
+
+// splitChatModeFlagsForTest 는 claude 바로 뒤에 붙은 챗 모드 플래그를 떼어내고 나머지를 돌려준다.
+//
+// 첫 자리의 claude 는 남긴다 — 떼어낸 결과를 splitConversationFlagsForTest 에 그대로 이어
+// 넘기기 위해서다. 등록을 떼어내는 orchestrationServerRegistrationForTest 와 같은 모양이다.
+func splitChatModeFlagsForTest(t *testing.T, command []string) []string {
+	t.Helper()
+
+	if len(command) == 0 || command[0] != "claude" {
+		t.Fatalf("명령 = %q, 첫 자리에 claude 를 기대", command)
+	}
+
+	flagCount := len(chatModeStreamFlagsForTest)
+	if len(command) < 1+flagCount {
+		t.Fatalf("명령 = %q, claude 뒤에 챗 모드 플래그 %d 개를 기대", command, flagCount)
+	}
+	if !slices.Equal(command[1:1+flagCount], chatModeStreamFlagsForTest) {
+		t.Fatalf("claude 뒤의 플래그 = %q, want %q", command[1:1+flagCount], chatModeStreamFlagsForTest)
+	}
+	return slices.Concat([]string{"claude"}, command[1+flagCount:])
+}
+
+func TestChatModeGivesTheMainSessionTheStreamFlagsRightAfterClaude(t *testing.T) {
+	// 앱은 이 배열을 그대로 실행해 파이프 셋을 문다. 플래그 하나가 빠지면 파이프에서 오는 것이
+	// JSON 줄이 아니라 사람이 읽을 글이 되고, 어댑터는 그 사실을 첫 줄을 파싱하다 알게 된다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, chatModeOptionName)
+
+	_, commandWithoutRegistration := orchestrationServerRegistrationForTest(t, run.document.Command)
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, commandWithoutRegistration)
+
+	// 챗 모드가 바꾸는 것은 앞에 붙는 플래그뿐이다. 대화도 오케스트레이션 서버도 --add-dir 도
+	// 터미널 모드와 같아야 한다 — 챗은 화면 모델이지 세션의 성질이 아니다.
+	flagName, _, rest := splitConversationFlagsForTest(t, commandWithoutChatFlags)
+	if flagName != "--session-id" {
+		t.Errorf("대화 플래그 = %q, 첫 물음에는 --session-id 를 기대", flagName)
+	}
+	assertRestOfCommand(t, rest, []string{"--add-dir", filepath.Join(workDirPath, "alpha-commons")})
+}
+
+func TestChatModeGivesARepoSessionTheStreamFlagsWithoutTheOrchestrationServer(t *testing.T) {
+	// 위임의 시작점은 메인 하나다(설계 문서 5.2.1). 화면 모델이 바뀌었다고 그 경계가 움직이지 않는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName)
+
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, run.document.Command)
+	_, _, rest := splitConversationFlagsForTest(t, commandWithoutChatFlags)
+	assertRestOfCommand(t, rest, nil)
+
+	if slices.Contains(run.document.Command, "--mcp-config") {
+		t.Errorf("명령 = %q, 레포 세션에는 오케스트레이션 서버를 붙이지 않기를 기대", run.document.Command)
+	}
+}
+
+func TestChatModeAndBypassPermissionsBothLandInTheCommand(t *testing.T) {
+	// 두 옵션이 서로를 지우지 않는지 본다. bypass 는 대화 플래그 뒤에 붙고 챗 플래그는 앞에
+	// 붙으므로, 한쪽을 더하면서 다른 쪽의 자리를 밀어낼 자리가 실제로 있다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName, bypassPermissionsOptionName)
+
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, run.document.Command)
+	_, _, rest := splitConversationFlagsForTest(t, commandWithoutChatFlags)
+	assertRestOfCommand(t, rest, []string{"--dangerously-skip-permissions"})
+}
+
+func TestChatModeResumesTheRecordedConversationJustLikeTheTerminalDoes(t *testing.T) {
+	// 대화는 화면 모델과 무관하다. 터미널로 열어 둔 대화를 챗으로 이어갈 수 있어야 3 단계가
+	// 화면을 갈아 끼우는 날 사용자의 대화가 끊기지 않는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	terminalRun := runSessionCommandForTest(t, "alpha-commons")
+	_, conversationID, _ := splitConversationFlagsForTest(t, terminalRun.document.Command)
+
+	chatRun := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName)
+
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, chatRun.document.Command)
+	flagName, resumedID, _ := splitConversationFlagsForTest(t, commandWithoutChatFlags)
+	if flagName != "--resume" {
+		t.Errorf("대화 플래그 = %q, 적혀 있던 대화를 이어가기를 기대", flagName)
+	}
+	if resumedID != conversationID {
+		t.Errorf("이어간 대화 = %q, want %q", resumedID, conversationID)
+	}
+	if chatRun.document.ResumedConversationID == nil || *chatRun.document.ResumedConversationID != conversationID {
+		t.Errorf("resumedConversationId = %v, want %q", chatRun.document.ResumedConversationID, conversationID)
+	}
+}
+
+func TestWithoutChatModeTheCommandCarriesNoStreamFlags(t *testing.T) {
+	// 터미널 세션에 이 플래그가 하나라도 새어 들어가면 PTY 안에서 JSON 이 흐른다. 그 화면을
+	// 보는 사람은 claude 가 깨졌다고 읽는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons")
+
+	for _, flag := range chatModeStreamFlagsForTest {
+		if slices.Contains(run.document.Command, flag) {
+			t.Errorf("명령 = %q, --chat 없이는 %q 가 없기를 기대", run.document.Command, flag)
+		}
+	}
+}

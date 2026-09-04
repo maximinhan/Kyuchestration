@@ -38,6 +38,35 @@ const bypassPermissionsOptionName = "--bypass-permissions"
 // skipPermissionsFlagName 은 위 옵션이 claude 에게 전달되는 플래그다.
 const skipPermissionsFlagName = "--dangerously-skip-permissions"
 
+// chatModeOptionName 은 앱이 세션을 PTY 가 아니라 파이프로 부릴 때 붙이는 옵션이다.
+//
+// 답 문서의 모양은 이 옵션으로 바뀌지 않는다(chat-ui-design.md 5.2.1). 바뀌는 것은 조립이고,
+// 앱은 전과 똑같이 command 를 그대로 실행한다 — 파이프에 물릴지 PTY 에 물릴지는 물은 쪽이 이미 안다.
+const chatModeOptionName = "--chat"
+
+// chatModeFlags 는 claude 를 사람이 보는 화면이 아니라 프로그램으로 부리는 플래그다.
+//
+// 값이 아니라 함수인 이유는 이 목록이 아무 데서나 원소를 바꿀 수 있는 패키지 전역 슬라이스가
+// 되지 않게 하려는 것이다. 이 순서와 철자는 claude 와 맺는 계약이라 고쳐 쓸 자리를 두지 않는다.
+func chatModeFlags() []string {
+	return []string{
+		// 한 프로세스가 대화를 통째로 산다(chat-ui-design.md 3.1). 매번 새로 띄우는 것이 아니라
+		// stdin 에 사용자 메시지 한 줄을 쓸 때마다 한 턴이 돌고, result 한 줄로 끝난다.
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		// stream-json 출력은 --verbose 와 함께 쓴다 — 실측이 이 조합으로 쟀다(3.1).
+		"--verbose",
+		// 글자 단위 조각(stream_event)을 켠다(3.3). 완성본은 뒤이어 assistant 이벤트로 다시 오므로,
+		// 조각은 화면을 부드럽게 하는 데만 쓰이고 전사의 사실은 완성본이다.
+		"--include-partial-messages",
+		// 앱이 보낸 사용자 메시지를 user 이벤트로 되돌려받는다(3.14). 전사가 한 물줄기에서만
+		// 오게 하는 것이 원칙 14 다 — 앱이 자기가 아는 것을 스트림에 섞어 넣으면 큐잉(3.11)이나
+		// 중단이 끼는 순간 순서가 어긋나고, 그 어긋남은 사용자가 스크롤을 올릴 때 드러난다.
+		"--replay-user-messages",
+	}
+}
+
 // mcpConfigFlagName 은 claude 에게 MCP 서버 설정을 직접 넘기는 플래그다.
 //
 // 파일이 아니라 JSON 문자열을 준다. 워크디렉토리 .mcp.json 에 적는 길은 대화형 승인 관문을 타고
@@ -100,7 +129,7 @@ func mainSessionCommand(
 	conversationFlags []string,
 	orchestrationServerRegistration string,
 ) []string {
-	command := claudeCommand(request.bypassPermissions, conversationFlags)
+	command := claudeCommand(request, conversationFlags)
 	command = append(command, mcpConfigFlagName, orchestrationServerRegistration)
 
 	// 붙일 레포 수만큼 미리 늘린다. 아래 반복이 레포마다 두 자리씩 더하는데,
@@ -144,16 +173,30 @@ func orchestrationServerRegistration(workDirAbsolutePath string) (string, error)
 	return string(registration), nil
 }
 
-// claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 이 세션이 이어갈 대화를
-// 가리키는 플래그와, 켜져 있다면 권한 확인 생략 플래그.
+// claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 챗 모드라면 스트림 플래그와,
+// 이 세션이 이어갈 대화를 가리키는 플래그와, 켜져 있다면 권한 확인 생략 플래그.
 //
 // 메인 세션은 뒤에 --add-dir 을 잇고 레포 세션은 여기서 끝난다. 공통부를 한 곳에 두는 이유는
 // 두 세션이 같은 옵션에 다르게 반응하면 사용자가 그 차이를 세션 안에서야 발견하기 때문이다.
-func claudeCommand(bypassPermissions bool, conversationFlags []string) []string {
-	command := make([]string, 0, 2+len(conversationFlags))
+//
+// 요청을 통째로 받는다. 명령에 영향을 주는 옵션이 둘이 되면서, 필드를 하나씩 넘기면 옵션이
+// 하나 늘 때마다 두 호출자의 인자 목록이 함께 길어진다 — 그리고 그때 한쪽만 고치면 메인과
+// 레포 세션이 같은 옵션에 다르게 반응한다.
+func claudeCommand(request sessionCommandRequest, conversationFlags []string) []string {
+	chatFlags := []string(nil)
+	if request.chatMode {
+		chatFlags = chatModeFlags()
+	}
+
+	command := make([]string, 0, 2+len(chatFlags)+len(conversationFlags))
 	command = append(command, sessionCommandName)
+
+	// 스트림 플래그가 맨 앞이다. claude 는 순서를 가리지 않지만, 사람이 ps 에서 이 명령을 볼 때
+	// "무엇으로 부리는가" 가 먼저 오고 "무엇을 이어가는가" 가 뒤에 오는 편이 읽힌다.
+	command = append(command, chatFlags...)
+
 	command = append(command, conversationFlags...)
-	if bypassPermissions {
+	if request.bypassPermissions {
 		command = append(command, skipPermissionsFlagName)
 	}
 	return command
