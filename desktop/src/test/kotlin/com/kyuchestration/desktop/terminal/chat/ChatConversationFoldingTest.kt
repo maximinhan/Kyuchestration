@@ -69,6 +69,21 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `조각 블록이 새로 시작되면 그 번호가 오른다`() {
+        // 화면의 스트리밍 렌더러는 덧붙이기 전용이라(5.8) 블록이 바뀌는 순간을 알아야 상태를
+        // 새로 세운다. 버퍼 문자열만 보면 두 블록이 한 프레임에 겹쳐 올 때 가를 수 없다.
+        val firstBlock = conversationAfter(RecordedChatStreamLines.STREAM_TEXT_DELTA)
+        assertEquals(1, firstBlock.streamingBlockOrdinal)
+
+        val secondBlock = firstBlock
+            .after(RecordedChatStreamLines.STREAM_TEXT_DELTA)
+            .after(RecordedChatStreamLines.ASSISTANT_TEXT)
+            .after(RecordedChatStreamLines.STREAM_TEXT_DELTA)
+
+        assertEquals(2, secondBlock.streamingBlockOrdinal, "같은 블록의 조각마다 오르면 안 된다")
+    }
+
+    @Test
     fun `턴이 끝나면 완성본을 못 받은 조각도 버린다`() {
         // 중단된 턴이 이 모양이다 — 조각은 왔는데 완성본이 오지 않는다. 남겨 두면 다음 턴의
         // 답 위에 잘린 문장이 계속 떠 있는다.

@@ -41,7 +41,12 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         copy(entries = entries.withEntryAdded(ChatEntry.AssistantThought(event.text), event.parentToolUseId))
     }
 
-    is ChatSessionEvent.AssistantTextStreaming -> copy(streamingText = streamingText.orEmpty() + event.chunk)
+    is ChatSessionEvent.AssistantTextStreaming -> copy(
+        streamingText = streamingText.orEmpty() + event.chunk,
+        // 버퍼가 비어 있었다면 이 조각이 새 블록의 첫 글자다. 화면은 이 번호가 오를 때 스트리밍
+        // 렌더러의 상태를 새로 세운다 — 그 상태가 덧붙이기 전용이라 이어 쓸 수 없다.
+        streamingBlockOrdinal = if (streamingText == null) streamingBlockOrdinal + 1 else streamingBlockOrdinal,
+    )
 
     is ChatSessionEvent.ToolCallRequested -> copy(
         entries = entries.withEntryAdded(

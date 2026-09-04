@@ -178,22 +178,37 @@ private fun ChatTranscript(conversation: ChatConversation, modifier: Modifier = 
 
         items(conversation.entries) { entry -> ChatEntryView(entry) }
 
+        // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
+        conversation.streamingText?.let { streamingText ->
+            item { StreamingAssistantMarkdown(streamingText, conversation.streamingBlockOrdinal) }
+        }
+
         if (!conversation.alive) {
             item { SessionEndedNotice(conversation) }
         }
     }
 
     val itemCount = conversation.entries.size
-    LaunchedEffect(itemCount, conversation.alive) {
+    LaunchedEffect(itemCount, conversation.streamingText, conversation.alive) {
         val wasAtBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()
             ?.let { it.index >= lastKnownItemCount - 1 }
             ?: true
         lastKnownItemCount = itemCount
-        if (wasAtBottom && itemCount > 0) {
-            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        if (wasAtBottom && listState.layoutInfo.totalItemsCount > 0) {
+            // 항목의 시작이 아니라 끝으로 내린다. 글자가 흐르는 동안 마지막 항목이 계속 자라는데,
+            // 시작에 맞추면 새 글자가 화면 아래로 밀려 나간다. 목록은 내용 끝에서 멈춘다.
+            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1, SCROLL_PAST_LAST_ITEM)
         }
     }
 }
+
+/**
+ * 마지막 항목의 끝까지 내리기 위해 주는 값.
+ *
+ * 어떤 답도 이보다 길지 않다는 뜻이 아니라, 목록이 내용의 끝을 넘어 스크롤하지 않는다는 뜻이다 —
+ * 넘치게 주면 끝에서 멈춘다.
+ */
+private const val SCROLL_PAST_LAST_ITEM = 1_000_000
 
 /**
  * 이어가기로 연 대화의 맨 위에 서는 줄(5.5).

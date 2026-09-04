@@ -19,6 +19,12 @@ import com.kyuchestration.desktop.terminal.resumeFailureSuspected
  *   전사 맨 위의 "앞선 내용이 있습니다" 안내와, 세션이 실패한 코드로 끝났을 때의 판단이다(5.5.4).
  * @param streamingText 아직 완성본이 오지 않은 글자 조각들(3.3). **전사가 아니다** — 완성본이
  *   오면 버려진다. 조각만으로 전사를 만들면 중단된 턴의 잘린 문장이 영구히 남는다(5.3.2).
+ * @param streamingBlockOrdinal 지금까지 시작된 조각 블록이 몇 번째인가.
+ *
+ *   **화면이 이 번호를 필요로 한다.** 스트리밍 렌더러의 상태는 덧붙이기 전용이라(5.8의
+ *   `rememberStreamingMarkdownState`) 블록이 바뀌면 그 상태를 새로 세워야 하는데, 버퍼 문자열만
+ *   보면 "짧아졌다" 와 "새 블록이 시작됐다" 를 가를 수 없다. 두 사건이 한 프레임에 겹쳐 오면
+ *   앞 블록의 글자가 새 블록에 이어 붙는다.
  * @param endedExitCode 프로세스가 끝났으면 그 종료 코드. 살아 있으면 null.
  */
 data class ChatConversation(
@@ -28,6 +34,7 @@ data class ChatConversation(
     val resumedConversationId: String? = null,
     val entries: List<ChatEntry> = emptyList(),
     val streamingText: String? = null,
+    val streamingBlockOrdinal: Long = 0,
     val turnState: TurnState = TurnState.Idle,
     val totalCostUsd: Double = 0.0,
     val usageWindows: List<RateLimitWindow> = emptyList(),
