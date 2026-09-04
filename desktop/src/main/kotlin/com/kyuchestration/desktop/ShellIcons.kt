@@ -134,6 +134,21 @@ internal fun OrchestrationHubIcon(tint: Color, size: Dp = HUB_ICON_SIZE) {
     }
 }
 
+/**
+ * 여기서 더 할 수 있는 일들. 세로로 놓인 점 셋.
+ *
+ * 챗 머리말이 이 자리를 쓴다 — 세션을 끝내는 일과 원시 터미널로 여는 일은 자주 하는 일이
+ * 아니라, 늘 보이는 버튼으로 두면 대화의 머리말이 버튼 줄이 된다(설계 7 절).
+ */
+@Composable
+internal fun MoreActionsIcon(tint: Color, size: Dp = ICON_SIZE) {
+    Canvas(modifier = Modifier.size(size)) {
+        listOf(0.22f, 0.5f, 0.78f).forEach { row ->
+            drawCircle(tint, radius = this.size.minDimension * 0.09f, center = Offset(x(0.5f), y(row)))
+        }
+    }
+}
+
 /** 그림의 좌표는 0~1 의 비율로 적는다. 아이콘 크기를 바꿔도 같은 그림이 나온다. */
 private fun DrawScope.x(ratio: Float): Float = size.width * ratio
 

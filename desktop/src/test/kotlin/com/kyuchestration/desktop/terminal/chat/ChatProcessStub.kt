@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.terminal.chat
 
 import java.nio.file.Path
 import kotlin.io.path.exists
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /**
@@ -49,6 +50,18 @@ internal fun recordStandardInputCommand(receivedLinesFile: Path, ownProcessIdFil
 internal fun linesFile(path: Path, lines: List<String>): Path = path.apply {
     writeText(lines.joinToString(separator = "\n", postfix = "\n"))
 }
+
+/**
+ * 그 파일에 줄 하나가 **온전히** 적힐 때까지 기다린다. 끝내 안 되면 false.
+ *
+ * 파일이 생긴 것만으로는 모자라다. `cat` 은 빈 파일을 먼저 만들고 흘려보내므로, 생겼다는 것만
+ * 보고 읽으면 반쪽짜리 JSON 을 파싱하게 된다 — 실제로 그렇게 한 번 깨졌다. 줄바꿈이 그 줄이
+ * 끝났다는 표식이다.
+ */
+internal fun waitUntilFileHasWholeLine(path: Path): Boolean = waitUntil { path.readTextOrEmpty().endsWith("\n") }
+
+/** 아직 없는 파일은 빈 문자열이다. 기다리는 동안에는 없는 것이 정상이라 실패로 다루지 않는다. */
+internal fun Path.readTextOrEmpty(): String = runCatching { readText() }.getOrDefault("")
 
 /**
  * 그 파일이 생길 때까지 기다린다. 끝내 없으면 false.

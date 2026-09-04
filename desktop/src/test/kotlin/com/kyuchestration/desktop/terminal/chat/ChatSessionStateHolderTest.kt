@@ -9,6 +9,7 @@ import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import java.io.IOException
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -129,7 +130,7 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
-    fun `말을 보내면 세션에 실리고 입력이 잠긴다`() = runTest {
+    fun `말을 보내면 세션에 실리고 답을 기다린다`() = runTest {
         val opener = RecordingChatSessionOpener()
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
@@ -142,11 +143,31 @@ class ChatSessionStateHolderTest {
         // 보낸 말을 앱이 전사에 직접 넣지 않는다 — 되돌아온 것으로만 그린다(3.14).
         val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
         assertEquals(emptyList(), conversation.entries)
-        assertEquals(TurnState.Running, conversation.turnState)
+        assertEquals(listOf("README 를 읽어줘"), conversation.pendingUserMessages)
+        // 보낸 것은 아직 시작한 턴이 아니다. 시작은 이 말이 되돌아올 때다.
+        assertEquals(TurnState.Idle, conversation.turnState)
     }
 
     @Test
-    fun `턴이 끝나면 입력 잠금이 풀린다`() = runTest {
+    fun `보내지 못하면 대기 중에도 남지 않는다`() = runTest {
+        // stdin 이 닫혔다는 것은 이 세션이 끝났다는 뜻이라, 되돌아올 말도 없다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        opener.lastSession.failWrites()
+
+        holder.sendUserMessage("이미 끝난 세션에 거는 말")
+        runCurrent()
+
+        val conversation = onScreenConversation(holder)
+        assertEquals(emptyList(), conversation.pendingUserMessages)
+        assertEquals(TurnState.Idle, conversation.turnState)
+        assertIs<ChatEntry.EngineNotice>(conversation.entries.single())
+    }
+
+    @Test
+    fun `턴이 끝나면 기다림도 끝난다`() = runTest {
         val opener = RecordingChatSessionOpener()
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
@@ -154,12 +175,173 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("긴 답을 줘")
         runCurrent()
 
+        // 되돌아온 말이 result 보다 먼저 온다(실측: 2.4 초 · 80 초). 그 순서를 지키지 않으면
+        // 이 검증은 앱에 없는 상태를 만들어 놓고 그 결과를 본다.
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
         val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
         assertEquals(TurnState.Idle, conversation.turnState)
         assertEquals(0.25, conversation.totalCostUsd)
+    }
+
+    @Test
+    fun `턴이 도는 중에 보낸 말은 대기 중으로 선다`() = runTest {
+        // 되돌아온 말이 그 턴이 시작할 때에야 오므로(실측: 78 초 뒤), 앱이 보낸 것을 들고 있지
+        // 않으면 사용자가 친 말이 그동안 화면 어디에도 없다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        holder.sendUserMessage("긴 답을 줘")
+        holder.sendUserMessage("사과의 색은?")
+        runCurrent()
+
+        assertEquals(listOf("긴 답을 줘", "사과의 색은?"), opener.lastSession.sentMessages)
+        assertEquals(listOf("긴 답을 줘", "사과의 색은?"), onScreenConversation(holder).pendingUserMessages)
+        assertEquals(emptyList(), onScreenConversation(holder).entries)
+    }
+
+    @Test
+    fun `되돌아온 말은 대기 중에서 빠지고 말풍선이 된다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("긴 답을 줘")
+        holder.sendUserMessage("사과의 색은?")
+        runCurrent()
+
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        runCurrent()
+
+        val conversation = onScreenConversation(holder)
+        assertEquals(listOf("사과의 색은?"), conversation.pendingUserMessages)
+        assertEquals(listOf<ChatEntry>(ChatEntry.UserSaid("긴 답을 줘")), conversation.entries)
+    }
+
+    @Test
+    fun `되돌아온 말이 그 턴의 시작이다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("긴 답을 줘")
+        holder.sendUserMessage("사과의 색은?")
+        runCurrent()
+
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        runCurrent()
+        assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
+
+        // 첫 턴이 끝났다. 둘째 말은 아직 되돌아오지 않았으므로 그 턴은 시작하지 않았다 —
+        // 기다리는 중이라는 사실은 대기 목록이 말하고, 도는 턴은 없다.
+        opener.lastSession.emit(finishedTurn())
+        runCurrent()
+        val betweenTurns = onScreenConversation(holder)
+        assertEquals(TurnState.Idle, betweenTurns.turnState)
+        assertEquals(listOf("사과의 색은?"), betweenTurns.pendingUserMessages)
+
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("사과의 색은?"))
+        runCurrent()
+        assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `큐에 든 말만 있을 때는 끊을 턴이 없다`() = runTest {
+        // 시작하지 않은 턴에 대고 제어 요청을 보내면 그 말이 시작하자마자 첫 낱말에서 끊긴다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("긴 답을 줘")
+        holder.sendUserMessage("큐에 드는 말")
+        runCurrent()
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        opener.lastSession.emit(finishedTurn())
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(0, opener.lastSession.interruptCount)
+        assertEquals(TurnState.Idle, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `도는 턴을 끊으면 그 요청이 세션에 실린다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("아주 긴 답을 줘")
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(1, opener.lastSession.interruptCount)
+        // 아직 끊긴 것이 아니라 끊어 달라고 말한 것이다. 여기서 곧바로 Idle 로 두면 화면은 턴이
+        // 끝났다고 말하는데 글자는 계속 흐른다 — 끝났다는 사실은 result 가 말한다(3.8).
+        assertEquals(TurnState.Interrupting, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `끊긴 턴이 배지로 남고 입력이 다시 열린다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("아주 긴 답을 줘")
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
+        runCurrent()
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        opener.lastSession.emit(finishedTurn(outcome = TurnOutcome.Interrupted))
+        runCurrent()
+
+        val conversation = onScreenConversation(holder)
+        assertEquals(TurnState.Idle, conversation.turnState)
+        assertEquals(
+            TurnOutcome.Interrupted,
+            conversation.entries.filterIsInstance<ChatEntry.TurnEnded>().single().outcome,
+        )
+    }
+
+    @Test
+    fun `턴이 돌지 않을 때는 끊어 달라고 말하지 않는다`() = runTest {
+        // 도는 턴이 없는데 제어 요청을 보내면 claude 는 다음 턴의 첫 낱말을 끊는다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(0, opener.lastSession.interruptCount)
+        assertEquals(TurnState.Idle, onScreenConversation(holder).turnState)
+    }
+
+    @Test
+    fun `이미 끊어 달라고 말한 턴에 두 번 말하지 않는다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("아주 긴 답을 줘")
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
+        runCurrent()
+
+        holder.interruptOnScreenTurn()
+        holder.interruptOnScreenTurn()
+        runCurrent()
+
+        assertEquals(1, opener.lastSession.interruptCount)
     }
 
     @Test
@@ -293,10 +475,19 @@ class ChatSessionStateHolderTest {
         baseEnvironment = emptyMap(),
         // 앱에서는 엔진에게 묻고 프로세스를 띄우는 동안 화면이 멎지 않도록 IO 로 나간다.
         sessionEntryDispatcher = StandardTestDispatcher(testScheduler),
+        // stdin 쓰기도 시험의 시계 위에 올린다. 앱에서는 한 번에 하나씩 도는 자리이고, 여기서도
+        // 한 줄씩 차례로 도는 것은 같다 — 다른 것은 그 차례를 시험이 진행시킨다는 것뿐이다.
+        standardInputDispatcher = StandardTestDispatcher(testScheduler),
     )
 
-    private fun finishedTurn(costUsd: Double = 0.25) = ChatSessionEvent.TurnFinished(
-        outcome = TurnOutcome.Completed,
+    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
+        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+
+    private fun finishedTurn(
+        costUsd: Double = 0.25,
+        outcome: TurnOutcome = TurnOutcome.Completed,
+    ) = ChatSessionEvent.TurnFinished(
+        outcome = outcome,
         costUsd = costUsd,
         usage = TurnUsage(inputTokens = 3, outputTokens = 41, cacheReadInputTokens = 0, cacheCreationInputTokens = 0),
         permissionDenials = emptyList(),
@@ -357,7 +548,10 @@ class ChatSessionStateHolderTest {
         private val incoming = Channel<ChatSessionEvent>(Channel.UNLIMITED)
 
         val sentMessages = mutableListOf<String>()
+        private var writesFail = false
         var endSessionCount = 0
+            private set
+        var interruptCount = 0
             private set
 
         override val events: Flow<ChatSessionEvent> = incoming.receiveAsFlow()
@@ -366,11 +560,21 @@ class ChatSessionStateHolderTest {
             incoming.trySend(event)
         }
 
+        /** 프로세스가 이미 끝나 stdin 이 닫힌 자리를 만든다. */
+        fun failWrites() {
+            writesFail = true
+        }
+
         override suspend fun sendUserMessage(text: String) {
+            if (writesFail) {
+                throw IOException("Stream closed")
+            }
             sentMessages.add(text)
         }
 
-        override suspend fun interruptCurrentTurn() = Unit
+        override suspend fun interruptCurrentTurn() {
+            interruptCount++
+        }
 
         override suspend fun endSession() {
             endSessionCount++

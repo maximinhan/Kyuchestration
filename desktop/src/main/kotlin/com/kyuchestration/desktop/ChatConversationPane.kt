@@ -15,7 +15,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,6 +55,8 @@ internal fun ChatConversationPane(
     chatScreenState: ChatScreenState,
     diagnosticLogPathLabel: String,
     onSendUserMessageRequested: (String) -> Unit,
+    /** 도는 턴을 끊는 자리(설계 3.8 · 6.5). 세션을 끝내는 것과 다른 일이다 — 대화는 그대로 산다. */
+    onInterruptTurnRequested: () -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     /**
@@ -83,6 +88,7 @@ internal fun ChatConversationPane(
             OpenedChat(
                 conversation = chatScreenState.conversation,
                 onSendUserMessageRequested = onSendUserMessageRequested,
+                onInterruptTurnRequested = onInterruptTurnRequested,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
                 onOpenRawTerminalRequested = onOpenRawTerminalRequested,
@@ -95,6 +101,7 @@ internal fun ChatConversationPane(
 private fun OpenedChat(
     conversation: ChatConversation,
     onSendUserMessageRequested: (String) -> Unit,
+    onInterruptTurnRequested: () -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     onOpenRawTerminalRequested: (SessionTarget) -> Unit,
@@ -109,7 +116,7 @@ private fun OpenedChat(
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ChatTranscript(conversation, modifier = Modifier.weight(1f))
-        ChatComposer(conversation, onSendUserMessageRequested)
+        ChatComposer(conversation, onSendUserMessageRequested, onInterruptTurnRequested)
     }
 }
 
@@ -169,12 +176,63 @@ private fun ChatHeader(
         }
 
         if (conversation.alive) {
-            // 7 절이 정한 자리. 4 단계에 메뉴 안으로 내려가고, ❓ 셋(로그인 · MCP 승인 · 플랜 모드)이
-            // 챗에서 되는 것이 확인되면 7 단계에 사라진다.
-            TextButton(onClick = { onOpenRawTerminalRequested(conversation.target) }) {
-                Text("터미널로 보기")
-            }
-            TextButton(onClick = onEndSessionRequested) { Text("세션 끝내기") }
+            SessionActionsMenu(
+                conversation = conversation,
+                onEndSessionRequested = onEndSessionRequested,
+                onOpenRawTerminalRequested = onOpenRawTerminalRequested,
+            )
+        }
+    }
+}
+
+/**
+ * 이 세션에 대해 더 할 수 있는 일들(설계 7 절).
+ *
+ * **원시 터미널이 여기로 내려왔다.** 3 단계까지는 머리말에 늘 보이는 버튼이었다. 챗이 기본이
+ * 되는 이 단계에서 그것을 메뉴 안으로 넣는 것이 7 절이 정한 자리이고, ❓ 셋(로그인 · MCP 서버
+ * 인증 · 플랜 모드)이 챗에서 되는 것이 확인되면 7 단계에 통째로 사라진다.
+ *
+ * **누르기 전에 무슨 일이 일어나는지 적어 둔다**(원칙 12). 한 세션은 한 종류라(5.6) 이것은
+ * 화면을 바꾸는 일이 아니라 챗 세션을 끝내고 같은 대화를 터미널로 다시 여는 일이다.
+ */
+@Composable
+private fun SessionActionsMenu(
+    conversation: ChatConversation,
+    onEndSessionRequested: () -> Unit,
+    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
+) {
+    var showingActions by remember(conversation.target) { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { showingActions = true }) {
+            MoreActionsIcon(MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        DropdownMenu(expanded = showingActions, onDismissRequest = { showingActions = false }) {
+            DropdownMenuItem(
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("원시 터미널로 보기", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "이 챗을 끝내고 같은 대화를 터미널로 다시 엽니다",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                onClick = {
+                    showingActions = false
+                    onOpenRawTerminalRequested(conversation.target)
+                },
+            )
+
+            DropdownMenuItem(
+                text = { Text("세션 끝내기", style = MaterialTheme.typography.bodyMedium) },
+                onClick = {
+                    showingActions = false
+                    onEndSessionRequested()
+                },
+            )
         }
     }
 }

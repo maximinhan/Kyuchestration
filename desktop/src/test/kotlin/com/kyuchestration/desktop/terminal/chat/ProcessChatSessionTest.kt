@@ -103,7 +103,7 @@ class ProcessChatSessionTest {
 
         session.sendUserMessage("1 더하기 1은? 숫자만.")
 
-        assertTrue(waitUntilFileAppears(receivedLines), "보낸 줄이 자식에게 닿지 않았습니다")
+        assertTrue(waitUntilFileHasWholeLine(receivedLines), "보낸 줄이 자식에게 닿지 않았습니다")
         val sent = Json.parseToJsonElement(receivedLines.readText().trim()).jsonObject
         assertEquals("user", sent["type"]?.jsonPrimitive?.content)
         val onlyBlock = sent["message"]?.jsonObject?.get("content")?.jsonArray?.single()?.jsonObject
@@ -170,7 +170,7 @@ class ProcessChatSessionTest {
         val session = ProcessChatSessionOpener().openChatSession(
             planFor(recordStandardInputCommand(temporaryDirectory.resolve("받은-줄.jsonl"), ownProcessId)),
         )
-        assertTrue(waitUntilFileAppears(ownProcessId))
+        assertTrue(waitUntilFileHasWholeLine(ownProcessId))
         val sessionProcessId = ownProcessId.readText().trim().toLong()
 
         session.endSession()
@@ -200,8 +200,6 @@ class ProcessChatSessionTest {
      */
     private suspend fun OpenedChatSession.eventsUntilItEnds(): List<ChatSessionEvent> =
         withTimeout(COLLECT_TIMEOUT_MILLIS) { events.toList() }
-
-    private fun Path.readTextOrEmpty(): String = runCatching { readText() }.getOrDefault("")
 
     private companion object {
         const val COLLECT_TIMEOUT_MILLIS = 15_000L

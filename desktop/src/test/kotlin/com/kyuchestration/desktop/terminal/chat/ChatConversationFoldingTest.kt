@@ -45,6 +45,51 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `되돌아온 말은 기다리던 목록에서 빠진다`() {
+        // 앱이 보낸 것과 되돌아온 것을 잇는 근거는 텍스트 그대로다. 스트림이 주는 다른 열쇠가
+        // 없다 — 되돌아온 줄에는 앱이 붙일 수 있었던 식별자가 없다.
+        val waiting = ChatConversation(
+            target = SessionTarget.Main,
+            pendingUserMessages = listOf("README.txt 를 Read 도구로 읽고 첫 줄을 그대로 답해.", "그다음 것"),
+        )
+
+        val conversation = waiting.after(RecordedChatStreamLines.USER_MESSAGE_REPLAYED)
+
+        assertEquals(listOf("그다음 것"), conversation.pendingUserMessages)
+        assertIs<ChatEntry.UserSaid>(conversation.entries.single())
+    }
+
+    @Test
+    fun `되돌아온 말이 그 턴의 시작이다`() {
+        // 큐에 든 말은 그 턴이 시작할 때에야 되돌아온다(3.11). 그래서 되돌아옴이 "도는 턴이
+        // 생겼다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.
+        val conversation = conversationAfter(RecordedChatStreamLines.USER_MESSAGE_REPLAYED)
+
+        assertEquals(TurnState.Running, conversation.turnState)
+    }
+
+    @Test
+    fun `기다리는 말이 남아 있어도 턴이 끝나면 도는 턴은 없다`() {
+        // 그 말의 턴은 아직 시작하지 않았다. 도는 것으로 읽으면 그 사이에 누른 중단이 그 말의
+        // 첫 낱말을 끊는다.
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
+
+        val conversation = waiting.after(RecordedChatStreamLines.RESULT_SUCCESS)
+
+        assertEquals(TurnState.Idle, conversation.turnState)
+        assertEquals(listOf("큐에 든 말"), conversation.pendingUserMessages)
+    }
+
+    @Test
+    fun `세션이 끝나면 되돌아올 말도 없다`() {
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
+
+        val conversation = waiting.after(ChatSessionEvent.SessionEnded(exitCode = 0))
+
+        assertEquals(emptyList(), conversation.pendingUserMessages)
+    }
+
+    @Test
     fun `글자 조각은 전사가 아니라 버퍼에 쌓인다`() {
         val conversation = conversationAfter(
             RecordedChatStreamLines.STREAM_TEXT_DELTA,
@@ -89,7 +134,7 @@ class ChatConversationFoldingTest {
         // 답 위에 잘린 문장이 계속 떠 있는다.
         val conversation = conversationAfter(
             RecordedChatStreamLines.STREAM_TEXT_DELTA,
-            FromDesignAppendix.RESULT_ABORTED,
+            RecordedChatStreamLines.RESULT_ABORTED,
         )
 
         assertNull(conversation.streamingText)
@@ -114,16 +159,14 @@ class ChatConversationFoldingTest {
     fun `거절된 도구 호출은 실패로 표시된다`() {
         // 접힌 카드만 보고도 무엇이 잘못됐는지 알아야 실패가 대화에 묻히지 않는다(6.3).
         val conversation = conversationAfter(
-            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use",""" +
-                """"id":"toolu_01EK4pNYexJLbkuiiosevhXq","name":"Write","input":{"file_path":"/tmp/x"}}]},""" +
-                """"parent_tool_use_id":null}""",
-            FromDesignAppendix.TOOL_RESULT_DENIED,
+            RecordedChatStreamLines.BASH_TOOL_USE_REFUSED,
+            RecordedChatStreamLines.BASH_RESULT_REFUSED,
         )
 
         val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
         val answer = assertNotNull(card.answer)
         assertTrue(answer.failed)
-        assertEquals("사람이 거절했습니다 (프로브)", answer.modelVisibleText)
+        assertEquals("This command requires approval", answer.modelVisibleText)
     }
 
     @Test

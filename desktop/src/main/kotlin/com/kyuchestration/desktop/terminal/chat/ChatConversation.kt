@@ -19,6 +19,12 @@ import com.kyuchestration.desktop.terminal.resumeFailureSuspected
  *   전사 맨 위의 "앞선 내용이 있습니다" 안내와, 세션이 실패한 코드로 끝났을 때의 판단이다(5.5.4).
  * @param streamingText 아직 완성본이 오지 않은 글자 조각들(3.3). **전사가 아니다** — 완성본이
  *   오면 버려진다. 조각만으로 전사를 만들면 중단된 턴의 잘린 문장이 영구히 남는다(5.3.2).
+ * @param pendingUserMessages 앱이 보냈는데 아직 되돌아오지 않은 말들(3.11 · 3.14).
+ *
+ *   **전사가 아니다.** 말풍선은 되돌아온 것으로만 그리고([entries]), 이 목록은 그 사이의 공백을
+ *   메운다. 그 공백이 실제로 길다 — 턴이 도는 중에 보낸 말은 그 턴이 끝나고 **다음 턴이 시작할
+ *   때에야** 되돌아온다(2026-09-04 실측: 보낸 지 78 초 뒤). 이것을 들고 있지 않으면 사용자가
+ *   방금 친 말이 그동안 화면 어디에도 없다.
  * @param streamingBlockOrdinal 지금까지 시작된 조각 블록이 몇 번째인가.
  *
  *   **화면이 이 번호를 필요로 한다.** 스트리밍 렌더러의 상태는 덧붙이기 전용이라(5.8의
@@ -33,6 +39,7 @@ data class ChatConversation(
     val modelName: String? = null,
     val resumedConversationId: String? = null,
     val entries: List<ChatEntry> = emptyList(),
+    val pendingUserMessages: List<String> = emptyList(),
     val streamingText: String? = null,
     val streamingBlockOrdinal: Long = 0,
     val turnState: TurnState = TurnState.Idle,
@@ -57,9 +64,6 @@ data class ChatConversation(
 
 /**
  * 지금 이 대화가 답을 기다리고 있는가.
- *
- * 중단(`Interrupting`)은 아직 갈래에 없다. 중단 버튼이 4 단계에 서므로, 그 전에 갈래만 만들어
- * 두면 어느 화면도 그 상태를 만들지 못한 채 이름이 굳는다(원칙 4).
  */
 enum class TurnState {
 
@@ -67,11 +71,29 @@ enum class TurnState {
     Idle,
 
     /**
-     * 턴이 돌고 있다. 입력창이 잠긴다.
+     * **턴이 실제로 돌고 있다** — 되돌아온 말을 봤고 그 뒤로 `result` 가 오지 않았다.
      *
-     * **설계 6.5 와 다르게 정했다.** 그 절은 잠그지 않는 쪽이었다 — `claude` 가 큐를 갖고 있어
-     * (3.11) 도는 중에 보내도 받아 주기 때문이다. 다만 3 단계에는 중단 버튼이 없어서, 열어 두면
-     * 사용자가 쌓아 둔 말을 되돌릴 길이 없다. 중단이 서는 4 단계에 이 판단을 다시 본다.
+     * 이 갈래가 좁은 것이 요점이다. "무언가 기다린다" 는 이것보다 넓고
+     * ([ChatConversation.pendingUserMessages] 가 남은 자리가 그렇다), 그 둘을 한 갈래로 묶으면
+     * **끊을 수 있는가** 를 물을 자리가 사라진다 — 큐에 든 말만 있을 때 중단 요청을 보내면
+     * 그 말이 시작하자마자 첫 낱말에서 끊긴다.
+     *
+     * 보낸 즉시가 아니라 **되돌아온 뒤**에 이 갈래가 되는 근거도 같다. 보낸 말이 되돌아오는 것이
+     * 곧 그 턴의 시작이고(3.11 · 3.14), 그 전에는 끊을 턴이 아직 없다.
+     *
+     * **입력창을 잠그지 않는다**(설계 6.5 로 돌아왔다). 3 단계는 잠갔다 — 중단 버튼이 없어
+     * 쌓아 둔 말을 되돌릴 길이 없어서였다. 그 버튼이 선 지금은 잠글 이유가 없고, 잠그면
+     * `claude` 가 이미 가진 큐(3.11)를 앱이 막는 꼴이 된다.
      */
     Running,
+
+    /**
+     * 끊어 달라고 말했고 아직 그 턴의 끝을 받지 못했다(3.8).
+     *
+     * **[Idle] 로 곧바로 넘기지 않는 이유가 이 갈래의 존재 이유다.** 중단 요청은 stdin 에 한 줄을
+     * 쓰는 일이고, 그 뒤에도 이미 만들어진 글자들이 잠시 더 흐른다. 요청한 순간 이 갈래를 벗어나면
+     * 진행 줄이 사라지고 중단 버튼이 다시 눌리는데, 화면에는 답이 계속 자란다. 끝났다는 사실은
+     * `result` 하나가 말한다(TurnFinished).
+     */
+    Interrupting,
 }

@@ -24,7 +24,18 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         modelName = event.modelName,
     )
 
-    is ChatSessionEvent.UserMessageEchoed -> copy(entries = entries + ChatEntry.UserSaid(event.text))
+    // 되돌아왔으므로 기다리던 목록에서 뺀다. 같은 말을 두 번 보냈으면 앞의 하나만 빠진다 —
+    // minus 가 첫 항목만 지우는 것이 여기서는 바라는 동작이다(둘째는 아직 안 돌아왔다).
+    //
+    // **되돌아온 것이 그 턴의 시작이다**(3.11). 큐에 든 말은 그 턴이 시작할 때에야 돌아오므로,
+    // 이 자리가 "턴이 실제로 돌고 있다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.
+    is ChatSessionEvent.UserMessageEchoed -> copy(
+        entries = entries + ChatEntry.UserSaid(event.text),
+        pendingUserMessages = pendingUserMessages - event.text,
+        // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
+        // 읽으면 끊는 중이던 화면이 한순간 되살아난다.
+        turnState = if (turnState == TurnState.Interrupting) TurnState.Interrupting else TurnState.Running,
+    )
 
     // 완성본이 왔으므로 조각 버퍼를 버린다. 안쪽 대화(parentToolUseId 가 있는 것)의 완성본이어도
     // 버린다 — 조각에는 부모 정보가 실려 오지 않아(AssistantTextStreaming) 버퍼에 섞여 있다.
@@ -62,7 +73,11 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
     is ChatSessionEvent.ToolCallAnswered -> copy(
         entries = entries.withToolCallAnswered(
             toolUseId = event.toolUseId,
-            answer = ToolCallAnswer(failed = event.failed, modelVisibleText = event.modelVisibleText),
+            answer = ToolCallAnswer(
+                failed = event.failed,
+                modelVisibleText = event.modelVisibleText,
+                typedResult = event.typedResult,
+            ),
         ),
     )
 
@@ -81,6 +96,9 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         // 턴이 끝났는데 조각이 남아 있다면 완성본이 오지 않은 것이다(중단된 턴이 그렇다).
         // 그 잘린 문장을 화면에 남겨 두면 다음 턴의 답 위에 계속 떠 있는다.
         streamingText = null,
+        // 큐에 든 말이 남아 있어도 여기서는 Idle 이다. 그 말의 턴은 아직 시작하지 않았고(시작은
+        // 되돌아옴이다), 시작하지 않은 턴을 도는 것으로 읽으면 그 사이에 누른 중단이 그 말의 첫
+        // 낱말을 끊는다. 기다리는 중이라는 사실은 pendingUserMessages 가 말한다.
         turnState = TurnState.Idle,
         totalCostUsd = totalCostUsd + event.costUsd,
     )
@@ -93,6 +111,9 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         endedExitCode = event.exitCode,
         streamingText = null,
         turnState = TurnState.Idle,
+        // 되돌아올 말이 없다. 프로세스가 끝났으므로 큐에 남아 있던 것도 함께 사라졌다 —
+        // 남겨 두면 끝난 세션의 전사 아래에 영영 기다리는 줄이 붙는다.
+        pendingUserMessages = emptyList(),
     )
 
     // **원문을 기록에 남기지 않는다.** 모르는 줄을 들고 있는 것은 판이 바뀐 것을 알아채기
