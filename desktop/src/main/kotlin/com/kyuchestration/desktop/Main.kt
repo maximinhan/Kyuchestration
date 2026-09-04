@@ -2,8 +2,10 @@ package com.kyuchestration.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -31,6 +33,7 @@ import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.EmbeddedTerminalStateHolder
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.terminal.pty.PtySessionTerminalOpener
+import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
 
@@ -140,6 +143,11 @@ private fun runDesktopApplication(
     // 읽을 이유가 없다.
     val engineDirectoryLabel = remember { managedEngineDirectory().toString() }
 
+    // 테마만 상태 홀더 없이 여기 둔다. 다른 상태들은 포트를 부르고 그 결과를 갈래로 옮기는
+    // 일이 있어 홀더가 필요하지만, 이것은 사용자가 고른 값 하나이고 옮길 갈래가 없다 —
+    // 고른 것과 시스템이 답한 것을 합치는 판단만 순수 함수로 갈라 두었다(resolveDarkTheme).
+    var themePreference by remember { mutableStateOf(ThemePreference.AlwaysDark) }
+
     Window(
         onCloseRequest = {
             // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
@@ -171,6 +179,8 @@ private fun runDesktopApplication(
             terminalState = terminalState,
             heldSessions = heldSessions,
             repositoryCloneStateHolder = repositoryCloneStateHolder,
+            themePreference = themePreference,
+            onThemePreferenceChosen = { themePreference = it },
             onRetryEngineInstallationRequested = engineInstallationStateHolder::installEngine,
             onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
             onOpenWorkDirRequested = {

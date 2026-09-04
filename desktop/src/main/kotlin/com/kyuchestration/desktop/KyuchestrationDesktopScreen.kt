@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,8 @@ import com.kyuchestration.desktop.terminal.HeldSession
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.KyuTheme
+import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.theme.resolveDarkTheme
 import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 
@@ -71,6 +74,14 @@ fun KyuchestrationDesktopScreen(
      * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
      */
     repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    /**
+     * 사용자가 테마에 대해 고른 것. 앱을 띄우는 자리가 들고 있다.
+     *
+     * 화면이 스스로 들지 않는 이유는 이 값이 창 전체에 걸리기 때문이다 — 여기서 remember 로
+     * 두면 셸이 다시 세워질 때(워크디렉토리를 바꿀 때) 함께 되돌아간다.
+     */
+    themePreference: ThemePreference,
+    onThemePreferenceChosen: (ThemePreference) -> Unit,
     onRetryEngineInstallationRequested: () -> Unit,
     onLookForEngineAgainRequested: () -> Unit,
     onOpenWorkDirRequested: () -> Unit,
@@ -90,9 +101,7 @@ fun KyuchestrationDesktopScreen(
     val liveConnectors = heldSessions.map { it.ttyConnector } + listOfNotNull(onScreenConnector(terminalState))
     SideEffect { heldSessionTerminalWidgets.dropWidgetsOtherThan(liveConnectors.toSet()) }
 
-    // 앱은 다크로 뜬다. 라이트 스킴도 서 있지만 목업이 확정한 것은 다크 쪽이고, 고르는 자리는
-    // 다음 걸음에서 붙는다.
-    KyuTheme(darkTheme = true) {
+    KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
             // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
@@ -131,6 +140,8 @@ fun KyuchestrationDesktopScreen(
                             onCloseWorkDirRequested = onCloseWorkDirRequested,
                             onEnterSessionRequested = onEnterSessionRequested,
                             onEndSessionRequested = onEndSessionRequested,
+                            themePreference = themePreference,
+                            onThemePreferenceChosen = onThemePreferenceChosen,
                         )
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
@@ -180,10 +191,14 @@ private fun OrchestrationShell(
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
+    themePreference: ThemePreference,
+    onThemePreferenceChosen: (ThemePreference) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
         SessionNavigationRail(
             diagnosticLogPathLabel = diagnosticLogPathLabel,
+            themePreference = themePreference,
+            onThemePreferenceChosen = onThemePreferenceChosen,
             onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
             onCloneRepositoriesRequested = onCloneRepositoriesRequested,
             onRefreshRequested = onRefreshRequested,
