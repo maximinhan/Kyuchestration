@@ -80,9 +80,23 @@ class HeldSessionProcessLifecycleTest {
         assertTrue(waitUntilProcessIsGone(secondProcessId), "pid $secondProcessId 가 남아 있으면 안 된다")
     }
 
+    /**
+     * 그 세션에 들어가고, 앱이 **그것을 보유할 때까지** 기다린 뒤 pid 를 돌려준다.
+     *
+     * 프로세스가 떴다는 것과 앱이 그것을 보유한다는 것은 다른 사건이고, 이 시험이 다음 걸음에서
+     * 기대는 것은 뒤쪽이다. 기록 파일만 보고 다음 세션에 들어가면 앞 세션은 아직 "화면이
+     * 기다리는 진입" 인 채로 번호가 밀려, 그 자리에서 끝난다(EmbeddedTerminalStateHolder 의
+     * 진입 번호). 그러면 이 시험은 앱의 결함이 아니라 자기 성급함 때문에 깨진다 —
+     * 실제로 부하가 있을 때 그렇게 깨졌다.
+     */
     private fun enterSessionAndWaitForItsProcess(target: SessionTarget): Long {
         holder.enterSession(temporaryDirectory, target, SessionConversationChoice.ContinueRecordedConversation)
-        return waitForSessionReport(reportPathFor(target)).processId
+        val processId = waitForSessionReport(reportPathFor(target)).processId
+        assertTrue(
+            waitUntil { holder.heldSessions.value.any { it.target == target } },
+            "앱이 ${target.label} 세션을 보유하기 시작하지 않았습니다",
+        )
+        return processId
     }
 
     /**

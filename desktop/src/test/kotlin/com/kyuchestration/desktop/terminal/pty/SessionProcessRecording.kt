@@ -61,9 +61,12 @@ internal fun processIsAlive(processId: Long): Boolean =
     ProcessHandle.of(processId).map { it.isAlive }.orElse(false)
 
 /** 그 프로세스가 사라질 때까지 기다린다. 끝내 남아 있으면 false. */
-internal fun waitUntilProcessIsGone(processId: Long): Boolean {
+internal fun waitUntilProcessIsGone(processId: Long): Boolean = waitUntil { !processIsAlive(processId) }
+
+/** 그 조건이 될 때까지 기다린다. 끝내 안 되면 false. 기다리는 자리마다 같은 촘촘함을 쓴다. */
+internal fun waitUntil(condition: () -> Boolean): Boolean {
     repeat(POLL_ATTEMPTS) {
-        if (!processIsAlive(processId)) {
+        if (condition()) {
             return true
         }
         Thread.sleep(POLL_INTERVAL_MILLIS)
