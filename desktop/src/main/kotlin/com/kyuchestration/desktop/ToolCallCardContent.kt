@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -132,12 +133,12 @@ internal fun toolCallCardContentOf(
  */
 private fun fileChangedIn(typedResult: JsonObject): ToolCallCardContent.FileChanged? {
     val filePath = typedResult.stringOrNull("filePath") ?: return null
-    val patchHunks = typedResult["structuredPatch"] as? kotlinx.serialization.json.JsonArray
+    val patchHunks = typedResult["structuredPatch"] as? JsonArray
 
     val hunks = patchHunks
         ?.filterIsInstance<JsonObject>()
         ?.mapNotNull { hunk ->
-            (hunk["lines"] as? kotlinx.serialization.json.JsonArray)
+            (hunk["lines"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
                 ?.map(::diffLineOf)
                 ?.let(::DiffHunk)
