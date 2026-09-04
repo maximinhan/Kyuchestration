@@ -110,12 +110,19 @@ sealed interface ChatSessionEvent {
      * 턴 하나가 끝났다(`result`). 턴마다 정확히 하나 온다(3.1).
      *
      * 입력창의 잠금을 풀고 비용 배지를 그리는 자리다.
+     *
+     * @param durationMillis 그 턴이 걸린 시간(`duration_ms` — 3.12). 없는 줄에서는 0 이다.
+     *
+     *   **앱이 직접 재지 않는다.** 보낸 순간부터 재는 길도 있지만, 큐에 들어간 둘 이상이 한 턴으로
+     *   합쳐지면(3.11) 앱이 잡은 시작점은 그 턴의 시작이 아니다. 잰 값이 스트림에 있는데 앱이 다시
+     *   재면 두 숫자가 갈리고, 갈린 것을 발견하는 자리는 사용자의 화면이다.
      */
     data class TurnFinished(
         val outcome: TurnOutcome,
         val costUsd: Double,
         val usage: TurnUsage,
         val permissionDenials: List<PermissionDenial>,
+        val durationMillis: Long,
     ) : ChatSessionEvent
 
     /** `rate_limit_event` — 한도 사용률을 창 두 개로 준다(3.12). 턴마다 온다. */

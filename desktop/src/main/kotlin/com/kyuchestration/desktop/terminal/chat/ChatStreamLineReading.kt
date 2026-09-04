@@ -214,6 +214,7 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
             ?.filterIsInstance<JsonObject>()
             ?.map(::PermissionDenial)
             .orEmpty(),
+        durationMillis = line.longOrNull("duration_ms") ?: 0,
     )
 }
 
