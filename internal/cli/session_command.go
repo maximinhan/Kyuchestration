@@ -53,6 +53,7 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
+  --chat                 파이프로 부릴 스트림 모드로 답한다 — 앱의 챗 화면이 쓴다
 
 이 명령은 --json 으로만 답한다 — 답이 사람이 읽고 무엇을 할 것이 아니라 앱이 실행할 것이다.
 세션을 실제로 여는 것은 이 답을 받은 데스크톱 앱이다.`
@@ -101,6 +102,12 @@ type sessionCommandRequest struct {
 
 	// forgetRecordedConversation 은 적혀 있는 대화를 버리고 새 대화로 답할지다.
 	forgetRecordedConversation bool
+
+	// chatMode 는 앱이 이 세션을 PTY 가 아니라 파이프로 부릴지다.
+	//
+	// 답 문서의 모양은 이 값으로 바뀌지 않는다(chat-ui-design.md 5.2.1). 바뀌는 것은 command 에
+	// 실리는 플래그뿐이고, 앱은 자기가 --chat 을 붙여 물었다는 것을 이미 안다.
+	chatMode bool
 }
 
 // parseSessionCommandArgs 는 인자를 세션 요청으로 옮긴다.
@@ -121,6 +128,9 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 
 		case arg == forgetConversationOptionName:
 			request.forgetRecordedConversation = true
+
+		case arg == chatModeOptionName:
+			request.chatMode = true
 
 		// 모르는 옵션을 레포 이름으로 흘려보내면 "없는 레포입니다: --typo" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
@@ -187,7 +197,7 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 	}
 
 	return writeSessionCommandAsJSON(out,
-		claudeCommand(request.bypassPermissions, conversation.flags),
+		claudeCommand(request, conversation.flags),
 		repo.AbsolutePath,
 		sessionEnvironment(request),
 		conversation)
