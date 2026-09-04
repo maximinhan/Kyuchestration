@@ -69,6 +69,14 @@ dependencies {
     // 직접 적는다. 끌려온 것에 기대면 Compose 의존이 바뀔 때 이유도 모르고 깨진다.
     implementation(libs.kotlinxCoroutinesCore)
 
+    // 모델의 답을 그리는 마크다운 렌더러(설계 5.8). 셋을 함께 넣는다 — core 는 Material 을 모르고,
+    // -m3 가 테마를 붙이고, -code 가 코드 펜스에 색을 넣는다. 하이라이터는 -code 가 끌고 오지만
+    // 우리가 다크 여부를 직접 넘기므로 쓰는 것을 그대로 적는다.
+    implementation(libs.markdownRenderer)
+    implementation(libs.markdownRendererM3)
+    implementation(libs.markdownRendererCode)
+    implementation(libs.highlights)
+
     // 앱 안의 터미널. JediTerm 이 화면과 터미널 에뮬레이션을, pty4j 가 그 아래의 진짜 PTY 를 맡는다.
     // 이 둘이 있어야 claude 가 요구하는 TTY 가 앱 안에 생긴다 — 앱이 세션을 직접 보유하는 근거다.
     implementation(libs.jeditermUi)
