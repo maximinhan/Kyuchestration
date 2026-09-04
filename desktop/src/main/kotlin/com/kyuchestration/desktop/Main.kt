@@ -11,8 +11,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
@@ -42,6 +40,8 @@ import com.kyuchestration.desktop.terminal.pty.PtySessionTerminalOpener
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * 조립이 일어나는 유일한 자리.
