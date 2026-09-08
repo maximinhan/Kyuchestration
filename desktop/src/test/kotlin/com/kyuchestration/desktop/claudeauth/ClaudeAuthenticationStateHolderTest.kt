@@ -9,6 +9,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 
@@ -241,6 +242,9 @@ class ClaudeAuthenticationStateHolderTest {
         claudeTokenStore = claudeTokenStore,
         coroutineScope = testScope,
         diagnosticLog = diagnosticLog,
+        // 앱에서는 창이 멎지 않도록 IO 로 나가는 자리다. 여기서도 나가는 것은 같고,
+        // 다른 것은 그 차례를 시험의 시계가 진행시킨다는 것뿐이다.
+        tokenStoreDispatcher = StandardTestDispatcher(testScope.testScheduler),
     )
 }
 

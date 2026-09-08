@@ -2,11 +2,14 @@ package com.kyuchestration.desktop.claudeauth
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 이 머신의 claude 가 로그인돼 있는지 보고, 아니면 로그인시키는 걸음을 쥔 자리. Compose 를 모른다.
@@ -23,6 +26,14 @@ class ClaudeAuthenticationStateHolder(
     private val claudeTokenStore: ClaudeTokenStore,
     private val coroutineScope: CoroutineScope,
     private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
+    /**
+     * 저장소에 묻고 맡기는 일이 나가는 자리.
+     *
+     * 이 홀더가 받는 범위는 화면을 그리는 스레드다. 저장소 포트는 멈춰 서서 답하는 자리라
+     * ([ClaudeTokenStore] 뒤에 kyu 프로세스가 있다) 그대로 부르면 그 몇 백 밀리초 동안 창이 멎는다.
+     * claude 에게 묻는 쪽은 자기 어댑터 안에서 이미 나가므로 여기서 감싸지 않는다.
+     */
+    private val tokenStoreDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     private val mutableState = MutableStateFlow<ClaudeAuthenticationState>(
@@ -64,7 +75,7 @@ class ClaudeAuthenticationStateHolder(
 
         coroutineScope.launch {
             val storedCredential = try {
-                claudeTokenStore.storedCredential()
+                withContext(tokenStoreDispatcher) { claudeTokenStore.storedCredential() }
             } catch (failure: ClaudeTokenStoreFailure) {
                 // 저장소가 답하지 않아도 로그인은 할 수 있다. 맡아 둔 것이 없는 것으로 보고 나아가되,
                 // 왜 그런지는 기록에 남긴다 — 이 실패는 화면에 뜨지 않으면 어디에도 남지 않는다.
@@ -171,7 +182,7 @@ class ClaudeAuthenticationStateHolder(
             }
 
             try {
-                claudeTokenStore.storeToken(token)
+                withContext(tokenStoreDispatcher) { claudeTokenStore.storeToken(token) }
             } catch (failure: ClaudeTokenStoreFailure) {
                 diagnosticLog.record(DiagnosticLogEntry.ClaudeTokenStoreUnavailable(failure.message.orEmpty()))
                 mutableState.value = credentialsMissing(
