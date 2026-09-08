@@ -30,8 +30,9 @@ class KyuCliSessionCommandSource(
         workDirPath: Path,
         target: SessionTarget,
         conversationChoice: SessionConversationChoice,
+        approvalSocketPath: Path?,
     ): SessionCommandAnswer {
-        val arguments = sessionCommandArguments(target, conversationChoice, sessionMode)
+        val arguments = sessionCommandArguments(target, conversationChoice, sessionMode, approvalSocketPath)
 
         val result = try {
             // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
@@ -71,6 +72,7 @@ private fun sessionCommandArguments(
     target: SessionTarget,
     conversationChoice: SessionConversationChoice,
     sessionMode: SessionMode,
+    approvalSocketPath: Path?,
 ): List<String> {
     val repoArgument = when (target) {
         is SessionTarget.Main -> emptyList()
@@ -92,8 +94,18 @@ private fun sessionCommandArguments(
         SessionMode.Chat -> listOf(CHAT_MODE_OPTION)
     }
 
-    return listOf("session-command") + repoArgument + conversationOption + modeOption + "--json"
+    // 승인 소켓은 앱이 정하고 엔진이 옮긴다(설계 5.2). 엔진은 이 경로를 --mcp-config 의 ask 서버
+    // 인자와 --permission-prompt-tool 로 옮기는데, 그 조립을 앱이 알기 시작하면 지식이 두 곳에
+    // 놓인다 — 앱이 아는 것은 "우리가 이 자리에서 듣고 있다" 하나다(원칙 11).
+    val approvalSocketOption = approvalSocketPath
+        ?.let { listOf(APPROVAL_SOCKET_OPTION, it.toString()) }
+        .orEmpty()
+
+    return listOf("session-command") + repoArgument + conversationOption + modeOption + approvalSocketOption + "--json"
 }
+
+/** 앱이 연 승인 소켓의 자리를 넘기는 옵션(session_command.go 의 approvalSocketOptionName). */
+private const val APPROVAL_SOCKET_OPTION = "--approval-socket"
 
 /** 파이프로 부릴 스트림 모드로 답하라는 옵션(session_command.go 의 chatModeOptionName). */
 private const val CHAT_MODE_OPTION = "--chat"

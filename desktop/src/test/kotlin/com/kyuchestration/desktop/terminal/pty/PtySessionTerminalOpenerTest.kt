@@ -89,7 +89,7 @@ class PtySessionTerminalOpenerTest {
     fun `엔진이 답한 이어간 대화를 앱이 그대로 들고 간다`() {
         val reportPath = temporaryDirectory.resolve("세션이-받은-것.txt")
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = SessionCommandSource { _, _, _ ->
+            sessionCommandSource = SessionCommandSource { _, _, _, _ ->
                 SessionCommandAnswer(
                     command = recordAndStayAliveCommand(reportPath),
                     workingDirectory = temporaryDirectory,
@@ -114,7 +114,7 @@ class PtySessionTerminalOpenerTest {
     @Test
     fun `무엇을 띄울지 묻는 데 실패하면 PTY 를 열지 않는다`() {
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = { _, _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
+            sessionCommandSource = { _, _, _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
             baseEnvironment = emptyMap(),
         )
 
@@ -133,7 +133,7 @@ class PtySessionTerminalOpenerTest {
         target: SessionTarget = SessionTarget.Repo("proj-a"),
     ): TtyConnector {
         val opener = PtySessionTerminalOpener(
-            sessionCommandSource = SessionCommandSource { _, _, _ -> answer },
+            sessionCommandSource = SessionCommandSource { _, _, _, _ -> answer },
             baseEnvironment = baseEnvironment,
         )
         return opener

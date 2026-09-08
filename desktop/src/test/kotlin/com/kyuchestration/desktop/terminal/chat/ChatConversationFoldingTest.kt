@@ -8,6 +8,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 이벤트가 대화로 쌓이는 규칙(chat-ui-design.md 5.5).
@@ -295,6 +297,82 @@ class ChatConversationFoldingTest {
         assertNull(conversation.streamingText)
         assertEquals(TurnState.Idle, conversation.turnState)
     }
+
+
+    @Test
+    fun `승인 물음이 대화의 맨 아래에 카드로 선다`() {
+        // 물음의 맥락이 바로 위에 있어야 사용자가 판단할 수 있다(6.4) — 방금 지나간 도구 호출과
+        // 모델의 말이 그 맥락이다.
+        val conversation = conversationAfter(RecordedChatStreamLines.ASSISTANT_TEXT)
+            .after(permissionRequested("Write", "toolu_01"))
+
+        val card = assertIs<ChatEntry.PermissionAsked>(conversation.entries.last())
+        assertEquals("Write", card.toolName)
+        assertEquals("toolu_01", card.toolUseId)
+        assertNull(card.answer, "물음이 답부터 달고 섰다")
+    }
+
+    @Test
+    fun `답한 카드는 그 결정을 달고 전사에 남는다`() {
+        // 결정 뒤에 카드가 사라지면, 스크롤을 올린 사용자는 "이 파일은 왜 안 만들어졌지" 를 읽을
+        // 자리가 없다.
+        val conversation = ChatConversation(target = SessionTarget.Main)
+            .after(permissionRequested("Write", "toolu_01"))
+            .withPermissionAnswered("toolu_01", PermissionAnswer.Denied("이 파일은 손대지 마세요"))
+
+        val card = assertIs<ChatEntry.PermissionAsked>(conversation.entries.single())
+        assertEquals(PermissionAnswer.Denied("이 파일은 손대지 마세요"), card.answer)
+    }
+
+    @Test
+    fun `이미 답한 카드는 다시 답해도 그대로다`() {
+        // 버튼을 두 번 누르거나, 세션이 끝나 닫힌 카드를 누른 자리다. 첫 답이 실제로 소켓을 타고
+        // 간 것이라, 나중 것으로 덮으면 화면이 실제와 다른 말을 한다.
+        val conversation = ChatConversation(target = SessionTarget.Main)
+            .after(permissionRequested("Write", "toolu_01"))
+            .withPermissionAnswered("toolu_01", PermissionAnswer.Allowed())
+            .withPermissionAnswered("toolu_01", PermissionAnswer.Denied("늦게 누른 거부"))
+
+        val card = assertIs<ChatEntry.PermissionAsked>(conversation.entries.single())
+        assertEquals(PermissionAnswer.Allowed(), card.answer)
+    }
+
+    @Test
+    fun `세션이 끝나면 답하지 못한 카드가 거절로 닫힌다`() {
+        // 실제로 일어난 일이 그것이다 — 소켓이 닫히면 kyu mcp ask 가 EOF 를 거절로 읽는다.
+        val conversation = ChatConversation(target = SessionTarget.Main)
+            .after(permissionRequested("Write", "toolu_01"))
+            .after(ChatSessionEvent.SessionEnded(exitCode = 0))
+
+        val card = assertIs<ChatEntry.PermissionAsked>(conversation.entries.single())
+        assertIs<PermissionAnswer.Denied>(card.answer)
+    }
+
+    @Test
+    fun `세션이 끝나도 이미 답한 카드의 결정은 바뀌지 않는다`() {
+        val conversation = ChatConversation(target = SessionTarget.Main)
+            .after(permissionRequested("Write", "toolu_01"))
+            .withPermissionAnswered("toolu_01", PermissionAnswer.AllowedForThisSession)
+            .after(ChatSessionEvent.SessionEnded(exitCode = 0))
+
+        val card = assertIs<ChatEntry.PermissionAsked>(conversation.entries.single())
+        assertEquals(PermissionAnswer.AllowedForThisSession, card.answer)
+    }
+
+    /**
+     * 관문이 연 물음 하나.
+     *
+     * 이 이벤트만 손으로 짓는다 — 스트림에서 오지 않고 앱의 소켓으로 오는 유일한 갈래라
+     * 녹화해 둘 줄이 없다. 그 줄의 진짜 모양은 진짜 소켓으로 따로 잰다(PermissionRequestSocketTest).
+     */
+    private fun permissionRequested(toolName: String, toolUseId: String) =
+        ChatSessionEvent.PermissionRequested(
+            PermissionRequest(
+                toolName = toolName,
+                input = buildJsonObject { put("file_path", "/tmp/probe.txt") },
+                toolUseId = toolUseId,
+            ),
+        )
 
     /** 줄들을 어댑터에 통과시켜 나온 이벤트를 순서대로 접는다. */
     private fun conversationAfter(vararg streamLines: String): ChatConversation =

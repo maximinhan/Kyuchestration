@@ -37,6 +37,7 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChatScreenState
+import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
 
 /**
@@ -57,6 +58,13 @@ internal fun ChatConversationPane(
     onSendUserMessageRequested: (String) -> Unit,
     /** 도는 턴을 끊는 자리(설계 3.8 · 6.5). 세션을 끝내는 것과 다른 일이다 — 대화는 그대로 산다. */
     onInterruptTurnRequested: () -> Unit,
+    /**
+     * 승인 카드에서 사용자가 고른 것(6.4).
+     *
+     * 화면은 무엇이 허용되는지 정하지 않는다 — 누른 것을 그대로 올리고, 그것을 소켓 너머의
+     * 자식에게 옮기는 일과 전사에 남기는 일은 상태 홀더가 한 자리에서 한다.
+     */
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     /**
@@ -89,6 +97,7 @@ internal fun ChatConversationPane(
                 conversation = chatScreenState.conversation,
                 onSendUserMessageRequested = onSendUserMessageRequested,
                 onInterruptTurnRequested = onInterruptTurnRequested,
+                onPermissionChoiceMade = onPermissionChoiceMade,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
                 onOpenRawTerminalRequested = onOpenRawTerminalRequested,
@@ -102,6 +111,7 @@ private fun OpenedChat(
     conversation: ChatConversation,
     onSendUserMessageRequested: (String) -> Unit,
     onInterruptTurnRequested: () -> Unit,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
     onOpenRawTerminalRequested: (SessionTarget) -> Unit,
@@ -115,7 +125,7 @@ private fun OpenedChat(
             onOpenRawTerminalRequested = onOpenRawTerminalRequested,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ChatTranscript(conversation, modifier = Modifier.weight(1f))
+        ChatTranscript(conversation, onPermissionChoiceMade, modifier = Modifier.weight(1f))
         ChatComposer(conversation, onSendUserMessageRequested, onInterruptTurnRequested)
     }
 }
@@ -241,7 +251,11 @@ private fun SessionActionsMenu(
  * 전사. 위에서 아래로 쌓이고, 새 것이 오면 따라 내려간다.
  */
 @Composable
-private fun ChatTranscript(conversation: ChatConversation, modifier: Modifier = Modifier) {
+private fun ChatTranscript(
+    conversation: ChatConversation,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val listState = rememberLazyListState()
 
     // 사용자가 위로 올려 읽는 중이면 끌어내리지 않는다. 판단은 한 프레임 늦은 배치 정보로 하므로
@@ -258,7 +272,9 @@ private fun ChatTranscript(conversation: ChatConversation, modifier: Modifier = 
             item { ResumedConversationNotice() }
         }
 
-        items(conversation.entries) { entry -> ChatEntryView(entry) }
+        items(conversation.entries) { entry ->
+            ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade)
+        }
 
         // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
         conversation.streamingText?.let { streamingText ->
