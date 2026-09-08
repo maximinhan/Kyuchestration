@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.terminal
 
+import java.nio.file.Path
+
 /**
  * 세션에 들어가지 못한 이유.
  *
@@ -91,6 +93,36 @@ sealed class TerminalSessionFailure(
         guidance = "claude 가 PATH 에 있는지, 엔진이 답한 디렉토리가 그대로 있는지 확인하세요. " +
             "원인: ${cause.message}",
         cause = cause,
+    )
+
+    /**
+     * 승인 물음을 받을 소켓을 열지 못했다(chat-ui-design.md 5.4).
+     *
+     * **세션을 열지 않고 여기서 멈춘다.** 소켓 없이 챗을 열 수도 있지만, 그러면 승인이 필요한 일이
+     * 나올 때까지는 멀쩡해 보이다가 그 순간부터 아무것도 못 하는 세션이 된다 — 화면이 먼저
+     * 말하는 자리다(설계 원칙 12).
+     */
+    class ApprovalSocketFailedToOpen(socketPath: Path, cause: Throwable) : TerminalSessionFailure(
+        message = "승인 물음을 받을 소켓을 열지 못했습니다 ($socketPath).",
+        guidance = "이 소켓이 사람에게 물어볼 유일한 통로라, 없으면 승인이 필요한 일을 하나도 하지 못합니다. " +
+            "런타임 디렉토리(XDG_RUNTIME_DIR · TMPDIR · /tmp)가 쓸 수 있는 자리인지 확인하세요. 원인: ${cause.message}",
+        cause = cause,
+    )
+
+    /**
+     * 승인 소켓의 경로가 유닉스 소켓의 한계를 넘는다.
+     *
+     * 실측이 실제로 만난 실패다(3.7 의 `AF_UNIX path too long`). 앱이 고르는 자리는 런타임
+     * 디렉토리라 이 선을 넘는 일이 흔치 않지만, 넘었을 때 "왜 승인이 안 되지" 로 남지 않도록
+     * 이유를 따로 든다.
+     */
+    class ApprovalSocketPathTooLong(
+        socketPath: Path,
+        limitBytes: Int,
+    ) : TerminalSessionFailure(
+        message = "승인 소켓의 경로가 유닉스 소켓의 한계($limitBytes 바이트)를 넘습니다: $socketPath",
+        guidance = "런타임 디렉토리(XDG_RUNTIME_DIR · TMPDIR)를 더 짧은 자리로 두면 열립니다. " +
+            "워크디렉토리 경로는 이 자리에 섞이지 않으므로 그쪽을 줄일 일은 아닙니다.",
     )
 
     /**
