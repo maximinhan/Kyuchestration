@@ -297,6 +297,76 @@ func TestAuthAnswersWithoutNeedingTmux(t *testing.T) {
 	}
 }
 
+func TestClaudeAuthStoresAndGivesBackTheTokenOnAMachineWithoutAKeychain(t *testing.T) {
+	// 앱이 실제로 지나는 길이다 — 사용자가 붙여넣은 토큰을 set 으로 넣고, 세션을 띄우기 직전에
+	// token 으로 꺼내 자식 환경에 싣는다. 그 왕복이 진짜 바이너리에서 도는지는 여기서만 갈린다:
+	// 저장소를 조립하는 자리(NewClaudeTokenStore)도, 라우팅도 이 시험 밖에서는 실행되지 않는다.
+	//
+	// PATH 를 비워 키체인도 secret-service 도 없는 머신을 만든다. WSL 이 그 자리이고,
+	// 이 도구의 주 사용처다.
+	const fakeToken = "sk-ant-oat01-왕복-시험-가짜-값"
+
+	configDirectoryPath := t.TempDir()
+	binaryPath := buildKyuBinary(t)
+
+	runClaudeAuth := func(standardInput string, args ...string) (string, string, error) {
+		command := exec.Command(binaryPath, append([]string{"claude-auth"}, args...)...)
+		command.Dir = t.TempDir()
+		command.Env = append(os.Environ(), "PATH=", "HOME="+configDirectoryPath, "XDG_CONFIG_HOME="+configDirectoryPath)
+		command.Stdin = strings.NewReader(standardInput)
+
+		var stdout, stderr bytes.Buffer
+		command.Stdout = &stdout
+		command.Stderr = &stderr
+
+		err := command.Run()
+		return stdout.String(), stderr.String(), err
+	}
+
+	if _, stderr, err := runClaudeAuth(fakeToken, "set"); err != nil {
+		t.Fatalf("claude-auth set 실행 실패: %v (%s)", err, stderr)
+	}
+
+	stdout, stderr, err := runClaudeAuth("", "token")
+	if err != nil {
+		t.Fatalf("claude-auth token 실행 실패: %v (%s)", err, stderr)
+	}
+	// 나온 바이트가 곧 저장한 값이어야 한다. 개행 한 글자가 붙으면 앱이 싣는 환경변수가 달라진다.
+	if stdout != fakeToken {
+		t.Errorf("claude-auth token = %q, 저장한 %q 를 그대로 기대", stdout, fakeToken)
+	}
+
+	statusOutput, stderr, err := runClaudeAuth("", "status")
+	if err != nil {
+		t.Fatalf("claude-auth status 실행 실패: %v (%s)", err, stderr)
+	}
+	if strings.Contains(statusOutput, fakeToken) {
+		t.Errorf("status 출력에 토큰이 있습니다:\n%s", statusOutput)
+	}
+
+	if _, stderr, err := runClaudeAuth("", "clear"); err != nil {
+		t.Fatalf("claude-auth clear 실행 실패: %v (%s)", err, stderr)
+	}
+	if _, _, err := runClaudeAuth("", "token"); err == nil {
+		t.Error("지운 뒤에도 claude-auth token 이 성공했습니다")
+	}
+
+	// GitHub 프로필 목록에 이 토큰이 섞여 보이지 않아야 한다 — 이름 공간이 갈라져 있다는 사실을
+	// 사용자가 실제로 보는 자리에서 확인한다.
+	authList := exec.Command(binaryPath, "auth", "list")
+	authList.Dir = t.TempDir()
+	authList.Env = append(os.Environ(), "PATH=", "HOME="+configDirectoryPath, "XDG_CONFIG_HOME="+configDirectoryPath)
+
+	var authListOutput bytes.Buffer
+	authList.Stdout = &authListOutput
+	if err := authList.Run(); err != nil {
+		t.Fatalf("kyu auth list 실행 실패: %v", err)
+	}
+	if !strings.Contains(authListOutput.String(), "kyu auth add") {
+		t.Errorf("kyu auth list = %q, claude 토큰과 무관하게 빈 목록이기를 기대", authListOutput.String())
+	}
+}
+
 func TestSessionCommandAnswersOnAMachineWithoutTmux(t *testing.T) {
 	// 앱은 claude 를 자기 PTY 에서 직접 띄운다. 이 명령은 그 앞에서 "무엇을 띄울까" 에만 답하므로
 	// 바깥 명령을 하나도 부르지 않아야 하고, 그 사실을 라우팅 자리에서 고정한다(설계 문서 5.2).

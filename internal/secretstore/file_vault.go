@@ -17,8 +17,8 @@ type fileVault struct {
 
 var _ secretVault = fileVault{}
 
-func newFileVault(configDirectory string) fileVault {
-	return fileVault{credentialsPath: filepath.Join(configDirectory, credentialsFileName)}
+func newFileVault(configDirectory string, namespace secretNamespace) fileVault {
+	return fileVault{credentialsPath: filepath.Join(configDirectory, namespace.credentialsFileName)}
 }
 
 func (vault fileVault) kind() StorageKind {

@@ -1,12 +1,16 @@
-// Package secretstore 는 GitHub 토큰을 프로필 이름으로 저장하고 꺼내는 계층이다.
+// Package secretstore 는 이 도구가 맡아 두는 비밀을 저장하고 꺼내는 계층이다.
+//
+// 맡는 것이 둘이다. GitHub 토큰은 사용자가 이름 붙인 프로필로 여러 개를 두고([ProfileStore]),
+// claude 자격 증명은 이름 없이 하나만 둔다([ClaudeTokenStore]). 둘은 이름 공간부터 갈라져 있어
+// 서로를 덮지 않는다(secretNamespace).
 //
 // 이 도구는 머신에 굴러다니는 인증을 읽지 않는다 — GITHUB_TOKEN 환경변수도, gh 의 로그인도
 // 쓰지 않는다. 그런 것을 집어 쓰면 회사 토큰이 깔린 머신에서 개인 레포를 클론하려던 사용자가
 // 엉뚱한 계정의 목록을 보게 되고, 무엇으로 인증했는지 화면에서 확인할 방법도 없다.
-// 그래서 사용자가 직접 등록한 토큰만 쓰고, 그 토큰을 여기에 이름 붙여 보관한다.
+// 그래서 사용자가 직접 등록한 토큰만 쓰고, 그 토큰을 여기에 보관한다.
 //
 // 저장 자리는 플랫폼마다 다르다(키체인 · secret-service · 설정 파일). 그 차이는 secretVault 뒤에
-// 숨기고, 부르는 쪽은 "어느 프로필의 토큰" 으로만 말한다.
+// 숨기고, 부르는 쪽은 "어느 비밀" 로만 말한다.
 package secretstore
 
 import (
@@ -99,9 +103,6 @@ const (
 	// 목록을 따로 두는 이유: 키체인은 "이 서비스의 항목을 전부 나열" 을 사용자 확인 없이 해주지 않는다.
 	// 이름은 비밀이 아니므로, 나열할 수 있는 것만 우리가 들고 값은 저장소에 맡긴다.
 	profileIndexFileName = "profiles.json"
-
-	// credentialsFileName 은 폴백 저장소가 토큰을 적는 파일이다.
-	credentialsFileName = "credentials.json"
 )
 
 const (
@@ -121,15 +122,28 @@ type ProfileStore struct {
 
 var _ TokenStore = (*ProfileStore)(nil)
 
-// NewTokenStore 는 이 머신에 맞는 토큰 저장소를 만든다.
-func NewTokenStore() (*ProfileStore, error) {
+// NewGitHubTokenStore 는 이 머신에 맞는 GitHub 토큰 저장소를 만든다.
+//
+// 이름에 GitHub 이 들어간 이유는 이 패키지가 맡는 비밀이 둘이 되어서다. 그냥 "토큰 저장소" 는
+// 이제 어느 비밀을 가리키는지 말하지 않는다.
+func NewGitHubTokenStore() (*ProfileStore, error) {
+	configDirectory, err := toolConfigDirectory()
+	if err != nil {
+		return nil, err
+	}
+	return newProfileStore(configDirectory, detectSecretVault(configDirectory, gitHubTokenNamespace)), nil
+}
+
+// toolConfigDirectory 는 이 도구가 사용자 설정 디렉토리 아래에 쓰는 자리다.
+//
+// 두 저장소가 같은 자리를 쓴다 — 파일 이름만 이름 공간이 가른다. 자리까지 갈라 두면 사용자가
+// 이 도구의 흔적을 찾을 때 볼 곳이 둘이 된다.
+func toolConfigDirectory() (string, error) {
 	userConfigDirectory, err := os.UserConfigDir()
 	if err != nil {
-		return nil, fmt.Errorf("설정 디렉토리를 찾지 못했습니다: %w", err)
+		return "", fmt.Errorf("설정 디렉토리를 찾지 못했습니다: %w", err)
 	}
-
-	configDirectory := filepath.Join(userConfigDirectory, configDirectoryName)
-	return newProfileStore(configDirectory, detectSecretVault(configDirectory)), nil
+	return filepath.Join(userConfigDirectory, configDirectoryName), nil
 }
 
 // newProfileStore 는 저장 자리를 직접 지정해 저장소를 만든다. 테스트가 이 문으로 들어온다.
@@ -184,7 +198,7 @@ func (store *ProfileStore) LoadToken(profileName string) (string, error) {
 		return "", err
 	}
 
-	vault, err := vaultForKind(profile.Storage, store.configDirectory)
+	vault, err := vaultForKind(profile.Storage, store.configDirectory, gitHubTokenNamespace)
 	if err != nil {
 		return "", err
 	}
@@ -198,7 +212,7 @@ func (store *ProfileStore) RemoveToken(profileName string) error {
 		return err
 	}
 
-	vault, err := vaultForKind(profile.Storage, store.configDirectory)
+	vault, err := vaultForKind(profile.Storage, store.configDirectory, gitHubTokenNamespace)
 	if err != nil {
 		return err
 	}

@@ -36,6 +36,8 @@ const usageText = `사용법: kyu <명령> [인자]
                          approve 는 레포의 실행 유발 설정을 눈으로 확인하고 승인한다)
   kyu auth <add|list|remove>
                          저장한 GitHub 토큰 프로필 관리 (add 는 토큰을 stdin 으로 받는다)
+  kyu claude-auth <set|token|status|clear>
+                         앱이 세션에 실어 보낼 claude 자격 증명 토큰 (set 은 stdin 으로 받는다)
   kyu version            이 바이너리의 버전
 
 옵션 (kyu session-command):
@@ -47,7 +49,8 @@ const usageText = `사용법: kyu <명령> [인자]
   --profile <이름>       어느 토큰으로 붙을지 (필수)
   --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
-옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list):
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list,
+      kyu claude-auth set, kyu claude-auth status):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
 kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크톱 앱의 몫이다.
@@ -93,14 +96,14 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// clone 은 무엇을 클론할지 묻지 않는다. 고르는 화면은 앱으로 옮겨갔고, 이 명령은 이미
 	// 고른 것을 받아 클론한다(app-owned-sessions-design.md 6절).
 	case "clone":
-		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+		return withGitHubTokenStore(func(tokenStore secretstore.TokenStore) error {
 			return cli.CloneRepos(out, commandArgs, newGitHubAccess, tokenStore)
 		})
 
 	// repos 도 GitHub 에 무엇이 있는지 묻기만 하는 명령이라 워크디렉토리를 보지 않는다 —
 	// 앱이 아직 워크디렉토리를 만들기 전에 부르는 자리다.
 	case "repos":
-		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+		return withGitHubTokenStore(func(tokenStore secretstore.TokenStore) error {
 			return cli.BrowseGitHubRepositories(out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
 
@@ -116,9 +119,18 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	// auth 는 토큰을 등록하고 보고 지우는 일이다.
 	case "auth":
-		return withTokenStore(func(tokenStore secretstore.TokenStore) error {
+		return withGitHubTokenStore(func(tokenStore secretstore.TokenStore) error {
 			return cli.ManageTokenProfiles(in, out, errOut, commandArgs, newGitHubAccess, tokenStore)
 		})
+
+	// claude-auth 는 auth 와 다른 비밀을 다룬다 — GitHub 이 아니라 claude 자격 증명이고,
+	// 이름 붙인 프로필이 아니라 값 하나다. 저장 자리도 갈라져 있어 서로를 덮지 않는다.
+	case "claude-auth":
+		claudeTokenStore, err := secretstore.NewClaudeTokenStore()
+		if err != nil {
+			return err
+		}
+		return cli.ManageClaudeCredentials(in, out, errOut, commandArgs, claudeTokenStore)
 
 	case "init":
 		return cli.InitWorkDir(out, commandArgs)
@@ -131,12 +143,12 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	}
 }
 
-// withTokenStore 는 명령에 토큰 저장소를 조립해 넘긴다.
+// withGitHubTokenStore 는 명령에 GitHub 토큰 저장소를 조립해 넘긴다.
 //
 // 세션 백엔드와 같은 이유로 여기서 만든다 — 키체인을 쓸지 파일에 쓸지는 이 머신을 보고 정하는
 // 진입점의 결정이고, 표시 계층이 그것을 알면 저장 방식이 늘어날 때마다 함께 바뀐다.
-func withTokenStore(command func(secretstore.TokenStore) error) error {
-	tokenStore, err := secretstore.NewTokenStore()
+func withGitHubTokenStore(command func(secretstore.TokenStore) error) error {
+	tokenStore, err := secretstore.NewGitHubTokenStore()
 	if err != nil {
 		return err
 	}
