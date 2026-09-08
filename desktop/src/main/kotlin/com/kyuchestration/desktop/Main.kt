@@ -151,7 +151,12 @@ private fun runDesktopApplication(
         EmbeddedTerminalStateHolder(
             // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11). 그 답을 실행하는 것이
             // PTY 어댑터의 일이라, 두 어댑터가 여기서 만난다.
-            sessionTerminalOpener = PtySessionTerminalOpener(KyuCliSessionCommandSource(kyuCommandRunner)),
+            sessionTerminalOpener = PtySessionTerminalOpener(
+                sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
+                // 세션을 띄우는 순간의 값을 묻는다. 조립 시점에는 아직 인증 화면을 지나기 전이라
+                // 값이 없고, 지나고 나면 이 자리가 그것을 답한다.
+                claudeAuthToken = { claudeAuthenticationStateHolder.tokenForSessions.value },
+            ),
             coroutineScope = applicationCoroutineScope,
             diagnosticLog = diagnosticLog,
         )
@@ -162,6 +167,7 @@ private fun runDesktopApplication(
             // 어느 쪽을 묻는지는 이 자리가 정한다 — 화면이 정할 일이 아니다.
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner, SessionMode.Chat),
             chatSessionOpener = ProcessChatSessionOpener(),
+            claudeAuthToken = { claudeAuthenticationStateHolder.tokenForSessions.value },
             coroutineScope = applicationCoroutineScope,
             diagnosticLog = diagnosticLog,
         )

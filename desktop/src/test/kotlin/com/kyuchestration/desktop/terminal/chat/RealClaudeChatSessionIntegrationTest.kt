@@ -113,6 +113,9 @@ class RealClaudeChatSessionIntegrationTest {
             baseEnvironment = childProcessEnvironment(),
             workDirPath = temporaryDirectory,
             target = SessionTarget.Main,
+            // 이 시험을 돌리는 사람의 claude 는 이미 로그인돼 있다. 앱이 맡아 둔 토큰을 실어
+            // 보내는 자리는 여기가 아니라 SessionEntryPlanTest 가 본다.
+            claudeAuthToken = null,
         )
     }
 
