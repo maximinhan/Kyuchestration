@@ -44,6 +44,14 @@ const resumeFlagName = "--resume"
 // 없는 쪽이 그것이어서다. 앱에서 이 옵션이 붙는 순간 앞 대화를 가리키던 기록은 사라진다.
 const forgetConversationOptionName = "--forget-conversation"
 
+// approvalSocketOptionName 은 앱이 연 승인 소켓의 경로를 넘기는 옵션이다(chat-ui-design.md 5.2).
+//
+// **경로를 앱이 정한다.** 소켓을 여는 것은 앱이고 — 결정을 내리는 쪽이므로 — 엔진은 그 경로를
+// argv 의 어느 자리에 넣을지만 안다. 엔진이 경로를 스스로 정하면 앱이 그것을 되읽어야 하고,
+// 그러면 답 문서에 필드가 하나 늘면서 "엔진이 정하고 앱이 따른다" 와 "앱이 정하고 엔진이 옮긴다"
+// 가 한 표면에 섞인다.
+const approvalSocketOptionName = "--approval-socket"
+
 const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] --json
 
   kyu session-command --json            메인 세션이 실행할 것 (명령·cwd·더할 환경)
@@ -54,6 +62,7 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
   --chat                 파이프로 부릴 스트림 모드로 답한다 — 앱의 챗 화면이 쓴다
+  --approval-socket <경로>  승인 물음을 나를 앱 소켓의 자리 — --chat 과 함께만 쓴다
 
 이 명령은 --json 으로만 답한다 — 답이 사람이 읽고 무엇을 할 것이 아니라 앱이 실행할 것이다.
 세션을 실제로 여는 것은 이 답을 받은 데스크톱 앱이다.`
@@ -108,6 +117,19 @@ type sessionCommandRequest struct {
 	// 답 문서의 모양은 이 값으로 바뀌지 않는다(chat-ui-design.md 5.2.1). 바뀌는 것은 command 에
 	// 실리는 플래그뿐이고, 앱은 자기가 --chat 을 붙여 물었다는 것을 이미 안다.
 	chatMode bool
+
+	// approvalSocketPath 는 앱이 승인 물음을 받으려고 열어 둔 소켓의 자리다. 비어 있으면
+	// 이 세션에는 승인 브리지가 없다.
+	approvalSocketPath string
+}
+
+// wantsPermissionBridge 는 이 세션에 승인 브리지를 붙일지다.
+//
+// bypass 로 연 세션에는 붙이지 않는다. 실측 3.6 이 bypassPermissions 에서 승인 도구가 한 번도
+// 불리지 않는 것을 보였다 — 등록해봐야 아무도 부르지 않는 프로세스가 하나 뜰 뿐이고, 붙이지
+// 않는 편이 "bypass 로 열었는데 승인 카드가 뜰지도 모른다" 는 물음 자체를 없앤다(설계 5.2).
+func (request sessionCommandRequest) wantsPermissionBridge() bool {
+	return request.approvalSocketPath != "" && !request.bypassPermissions
 }
 
 // parseSessionCommandArgs 는 인자를 세션 요청으로 옮긴다.
@@ -115,10 +137,24 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 	var request sessionCommandRequest
 	asJSON := false
 
-	for _, arg := range args {
+	// 자리로 도는 반복이다. 값을 받는 옵션이 하나 생기면서 "다음 인자" 를 집을 자리가 필요해졌고,
+	// 그것을 상태 변수로 흉내 내면 옵션 뒤에 아무것도 없는 실행이 조용히 지나간다.
+	for argIndex := 0; argIndex < len(args); argIndex++ {
+		arg := args[argIndex]
+
 		switch {
 		case arg == machineJSONOptionName:
 			asJSON = true
+
+		case arg == approvalSocketOptionName:
+			argIndex++
+			// 뒤에 아무것도 없거나 다음 옵션이 온 것을 경로로 읽지 않는다. 읽어버리면 그 세션은
+			// "--json" 이라는 소켓에 묻는 세션이 되고, 그 실패는 관문이 처음 열릴 때까지 숨는다.
+			if argIndex >= len(args) || strings.HasPrefix(args[argIndex], "-") {
+				return sessionCommandRequest{}, fmt.Errorf("%s 뒤에는 앱이 연 소켓의 경로가 와야 합니다\n\n%s",
+					approvalSocketOptionName, sessionCommandUsageText)
+			}
+			request.approvalSocketPath = args[argIndex]
 
 		case arg == repoClaudeMdOptionName:
 			request.loadRepoClaudeMd = true
@@ -152,6 +188,13 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 			repoClaudeMdOptionName)
 	}
 
+	// PTY 세션에는 브리지를 물릴 자리가 없다 — 그 화면의 승인은 claude 가 직접 그린다(설계 7.1).
+	// 조용히 무시하면 앱은 승인 카드가 뜰 것이라 믿고, 그 믿음은 관문이 열릴 때까지 드러나지 않는다.
+	if request.approvalSocketPath != "" && !request.chatMode {
+		return sessionCommandRequest{}, fmt.Errorf("%s 는 %s 와 함께만 쓸 수 있습니다 — PTY 세션의 승인은 claude 가 그 화면에 직접 그립니다",
+			approvalSocketOptionName, chatModeOptionName)
+	}
+
 	if !asJSON {
 		return sessionCommandRequest{}, fmt.Errorf("session-command 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 이 답을 실행하는 것은 데스크톱 앱입니다\n\n%s",
 			machineJSONOptionName, sessionCommandUsageText)
@@ -164,7 +207,7 @@ func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos
 	// 등록을 대화보다 먼저 조립한다. 등록에 실패하면 이 답 자체가 성립하지 않는데, 대화를 먼저
 	// 배정하면 그 실패가 쓰이지 않을 기록을 하나 남긴다 — 없는 레포를 대화 배정 전에 거절하는
 	// answerForRepoSession 과 같은 자세다.
-	registration, err := orchestrationServerRegistration(location.absolutePath)
+	mcpSetup, err := mainSessionMcpSetup(location.absolutePath, request)
 	if err != nil {
 		return err
 	}
@@ -175,7 +218,7 @@ func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos
 	}
 
 	return writeSessionCommandAsJSON(out,
-		mainSessionCommand(repos, request, conversation.flags, registration),
+		mainSessionCommand(repos, request, conversation.flags, mcpSetup),
 		location.absolutePath,
 		sessionEnvironment(request),
 		conversation)
@@ -191,13 +234,18 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 		return err
 	}
 
+	mcpSetup, err := repoSessionMcpSetup(request)
+	if err != nil {
+		return err
+	}
+
 	conversation, err := conversationForLabel(errOut, location.absolutePath, repo.Name, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
-		claudeCommand(request, conversation.flags),
+		claudeCommand(request, conversation.flags, mcpSetup),
 		repo.AbsolutePath,
 		sessionEnvironment(request),
 		conversation)

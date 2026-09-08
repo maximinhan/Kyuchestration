@@ -35,6 +35,7 @@ import com.kyuchestration.desktop.terminal.HeldSession
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatScreenState
+import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.theme.resolveDarkTheme
@@ -105,6 +106,7 @@ fun KyuchestrationDesktopScreen(
     onSendUserMessageRequested: (String) -> Unit,
     /** 도는 턴을 끊는 자리(3.8). 대화도 프로세스도 죽지 않는다 — 이번 턴만 끊긴다. */
     onInterruptTurnRequested: () -> Unit,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndChatSessionRequested: () -> Unit,
     /** 이 세션을 챗 대신 원시 터미널로 여는 자리(7 절). 4 단계에 메뉴 안으로 내려간다. */
     onOpenRawTerminalRequested: (SessionTarget) -> Unit,
@@ -162,6 +164,7 @@ fun KyuchestrationDesktopScreen(
                             onEnterSessionRequested = onEnterSessionRequested,
                             onSendUserMessageRequested = onSendUserMessageRequested,
                             onInterruptTurnRequested = onInterruptTurnRequested,
+                            onPermissionChoiceMade = onPermissionChoiceMade,
                             onEndChatSessionRequested = onEndChatSessionRequested,
                             onOpenRawTerminalRequested = onOpenRawTerminalRequested,
                             onEndTerminalSessionRequested = onEndTerminalSessionRequested,
@@ -221,6 +224,7 @@ private fun OrchestrationShell(
     onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
     onSendUserMessageRequested: (String) -> Unit,
     onInterruptTurnRequested: () -> Unit,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndChatSessionRequested: () -> Unit,
     onOpenRawTerminalRequested: (SessionTarget) -> Unit,
     onEndTerminalSessionRequested: () -> Unit,
@@ -260,6 +264,7 @@ private fun OrchestrationShell(
             diagnosticLogPathLabel = diagnosticLogPathLabel,
             onSendUserMessageRequested = onSendUserMessageRequested,
             onInterruptTurnRequested = onInterruptTurnRequested,
+            onPermissionChoiceMade = onPermissionChoiceMade,
             onEndChatSessionRequested = onEndChatSessionRequested,
             onOpenRawTerminalRequested = onOpenRawTerminalRequested,
             onEndTerminalSessionRequested = onEndTerminalSessionRequested,
@@ -285,6 +290,7 @@ private fun ConversationPane(
     diagnosticLogPathLabel: String,
     onSendUserMessageRequested: (String) -> Unit,
     onInterruptTurnRequested: () -> Unit,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndChatSessionRequested: () -> Unit,
     onOpenRawTerminalRequested: (SessionTarget) -> Unit,
     onEndTerminalSessionRequested: () -> Unit,
@@ -304,6 +310,7 @@ private fun ConversationPane(
                 diagnosticLogPathLabel = diagnosticLogPathLabel,
                 onSendUserMessageRequested = onSendUserMessageRequested,
                 onInterruptTurnRequested = onInterruptTurnRequested,
+                onPermissionChoiceMade = onPermissionChoiceMade,
                 onEndSessionRequested = onEndChatSessionRequested,
                 onStartNewConversationRequested = startNewConversation,
                 onOpenRawTerminalRequested = onOpenRawTerminalRequested,

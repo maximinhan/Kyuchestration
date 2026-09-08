@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.resumeFailureSuspected
+import java.nio.file.Path
 
 /**
  * 세션 하나의 대화 전부 — 화면이 그릴 것과, 그리는 데 필요한 사실들(chat-ui-design.md 5.5).
@@ -14,6 +15,8 @@ import com.kyuchestration.desktop.terminal.resumeFailureSuspected
  * 전사는 비어 있다. 그 어긋남을 화면이 먼저 말한다([resumedConversationId] 가 그 근거다).
  * 파일로 남기는 것은 v1 밖이다(10 절 열린 질문 3).
  *
+ * @param workingDirectory 이 세션의 `claude` 가 도는 자리 — 엔진이 답한 cwd 그대로다. 승인 카드가
+ *   "어느 레포의 물음인가" 를 말하는 근거이고(6.4), 챗이 여럿 열려 있으면 그것이 판단의 절반이다.
  * @param conversationId `system/init` 이 알려준 이 대화의 ID. 턴마다 다시 오지만 값은 같다(3.1).
  * @param resumedConversationId 이 세션이 이어가려던 대화. 새 대화면 null. 두 자리에서 쓰인다 —
  *   전사 맨 위의 "앞선 내용이 있습니다" 안내와, 세션이 실패한 코드로 끝났을 때의 판단이다(5.5.4).
@@ -35,6 +38,7 @@ import com.kyuchestration.desktop.terminal.resumeFailureSuspected
  */
 data class ChatConversation(
     val target: SessionTarget,
+    val workingDirectory: Path? = null,
     val conversationId: String? = null,
     val modelName: String? = null,
     val resumedConversationId: String? = null,

@@ -81,6 +81,16 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         ),
     )
 
+    // 관문이 열렸다(3.5). 카드는 대화의 맨 아래에 선다 — 물음의 맥락이 바로 위에 있어야
+    // 사용자가 판단할 수 있고(6.4), 그 맥락은 방금 지나간 도구 호출과 모델의 말이다.
+    is ChatSessionEvent.PermissionRequested -> copy(
+        entries = entries + ChatEntry.PermissionAsked(
+            toolUseId = event.request.toolUseId,
+            toolName = event.request.toolName,
+            input = event.request.input,
+        ),
+    )
+
     // 서브에이전트의 진행은 6 단계가 그린다. 지금 이것을 어딘가에 얹어 두면 그 값을 보여줄 화면이
     // 없는 채로 자리만 생긴다 — 도구 카드는 이미 "도는 중" 을 말하고 있다(5.7).
     is ChatSessionEvent.DelegationProgressed -> this
@@ -114,6 +124,10 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         // 되돌아올 말이 없다. 프로세스가 끝났으므로 큐에 남아 있던 것도 함께 사라졌다 —
         // 남겨 두면 끝난 세션의 전사 아래에 영영 기다리는 줄이 붙는다.
         pendingUserMessages = emptyList(),
+        // 답을 기다리던 승인도 함께 끝났다. 세션이 끝나면 소켓이 닫히고, 그 순간 kyu mcp ask 는
+        // EOF 를 거절로 읽는다(mcp_ask.go) — 화면에만 버튼이 살아 있으면 사용자는 누를 수 있는
+        // 척하는 카드를 보게 되고, 실제로 일어난 일(거절)은 어디에도 없다.
+        entries = entries.withUnansweredPermissionsClosed(),
     )
 
     // **원문을 기록에 남기지 않는다.** 모르는 줄을 들고 있는 것은 판이 바뀐 것을 알아채기
@@ -172,4 +186,38 @@ private fun List<ChatEntry>.withToolCallChanged(
     }
 
     return changedEntries.takeIf { changed }
+}
+
+/**
+ * 그 승인 카드에 답을 채운다. 없는 카드에는 아무 일도 하지 않는다.
+ *
+ * 이벤트가 아니라 함수인 이유는 답이 `claude` 에게서 오지 않아서다 — 사용자가 화면에서 누른 것을
+ * 상태 홀더가 여기로 옮긴다. 그래도 순수 함수로 두는 것은 [after] 와 같은 이유다: 전사가 어떻게
+ * 바뀌는지를 프로세스도 소켓도 없이 시험할 수 있어야 한다.
+ */
+internal fun ChatConversation.withPermissionAnswered(
+    toolUseId: String,
+    answer: PermissionAnswer,
+): ChatConversation = copy(
+    entries = entries.map { entry ->
+        if (entry is ChatEntry.PermissionAsked && entry.toolUseId == toolUseId && entry.answer == null) {
+            entry.copy(answer = answer)
+        } else {
+            entry
+        }
+    },
+)
+
+/**
+ * 아직 답하지 않은 승인 카드를 "세션이 끝나 거절됨" 으로 닫는다.
+ *
+ * 이유를 지어내지 않는다. 실제로 일어난 일이 그것이다 — 소켓이 닫히면 엔진은 그 물음을 거절로
+ * 끝낸다(mcp_ask.go 의 EOF 갈래).
+ */
+private fun List<ChatEntry>.withUnansweredPermissionsClosed(): List<ChatEntry> = map { entry ->
+    if (entry is ChatEntry.PermissionAsked && entry.answer == null) {
+        entry.copy(answer = PermissionAnswer.Denied(reason = "세션이 끝나 이 물음은 거절되었습니다"))
+    } else {
+        entry
+    }
 }

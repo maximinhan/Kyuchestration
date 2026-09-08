@@ -106,7 +106,14 @@ class RealClaudeChatSessionIntegrationTest {
         requireClaudeIsInstalled()
 
         val answer = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip(), SessionMode.Chat)
-            .sessionCommandFor(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+            .sessionCommandFor(
+                workDirPath = temporaryDirectory,
+                target = SessionTarget.Main,
+                conversationChoice = SessionConversationChoice.ContinueRecordedConversation,
+                // 이 검증은 승인 브리지를 재지 않는다 — 그것은 5 단계의 검증이
+                // (RealClaudePermissionBridgeIntegrationTest) 자기 소켓을 열고 잰다.
+                approvalSocketPath = null,
+            )
 
         return planSessionEntry(
             sessionCommandAnswer = answer,

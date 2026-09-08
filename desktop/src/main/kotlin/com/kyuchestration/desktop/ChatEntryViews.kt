@@ -16,7 +16,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,9 +34,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
+import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
+import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.ToolCallAnswer
 import com.kyuchestration.desktop.terminal.chat.TurnOutcome
 import com.kyuchestration.desktop.theme.KyuTheme
+import java.nio.file.Path
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
@@ -45,7 +51,16 @@ import kotlinx.serialization.json.JsonObject
  * 항목이 하나 늘면 이 파일이 컴파일되지 않는다 — 그릴 자리 없는 항목이 조용히 사라지지 않는다.
  */
 @Composable
-internal fun ChatEntryView(entry: ChatEntry) {
+internal fun ChatEntryView(
+    entry: ChatEntry,
+    /**
+     * 이 세션이 도는 자리. 승인 카드가 "어느 레포의 물음인가" 를 말하는 근거다(6.4) — 챗이
+     * 여럿 열려 있으면 그것이 판단의 절반이다.
+     */
+    sessionWorkingDirectory: Path?,
+    /** 승인 카드의 버튼이 눌린 자리. 도구 호출 하나와 사용자가 고른 것을 함께 올린다. */
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+) {
     when (entry) {
         // 중단 안내가 사용자 메시지와 같은 모양으로 온다(3.8). 가르는 자리가 여기다 —
         // 왜 어댑터가 아닌지는 isTurnInterruptionEcho 에 적혀 있다.
@@ -53,7 +68,10 @@ internal fun ChatEntryView(entry: ChatEntry) {
             if (isTurnInterruptionEcho(entry.text)) TurnInterruptedNotice() else UserMessageBubble(entry.text)
         is ChatEntry.AssistantSaid -> AssistantMessageBlock(entry.text)
         is ChatEntry.AssistantThought -> ThinkingBlock(entry.text)
-        is ChatEntry.ToolCall -> ToolCallCard(entry)
+        is ChatEntry.ToolCall -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+
+        is ChatEntry.PermissionAsked ->
+            PermissionRequestCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
         is ChatEntry.TurnEnded -> TurnFooter(entry)
         is ChatEntry.EngineNotice -> EngineNoticeRow(entry.line)
     }
@@ -139,7 +157,11 @@ private fun ThinkingBlock(text: String) {
  * 카드를 하나씩 펴 봐야 하고, 그러면 실패가 대화에 묻힌다.
  */
 @Composable
-private fun ToolCallCard(entry: ChatEntry.ToolCall) {
+private fun ToolCallCard(
+    entry: ChatEntry.ToolCall,
+    sessionWorkingDirectory: Path?,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+) {
     // 글자가 흐르는 동안 대화가 프레임마다 새로 나므로, 곁가지를 그때마다 다시 파면 보이는 카드
     // 전부가 패치를 새로 만든다. 이 값을 정하는 것은 셋뿐이라 그 셋을 열쇠로 든다.
     val cardContent = remember(entry.toolName, entry.input, entry.answer) {
@@ -167,7 +189,9 @@ private fun ToolCallCard(entry: ChatEntry.ToolCall) {
                     modifier = Modifier.padding(start = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    entry.nestedEntries.forEach { ChatEntryView(it) }
+                    entry.nestedEntries.forEach {
+                        ChatEntryView(it, sessionWorkingDirectory, onPermissionChoiceMade)
+                    }
                 }
             }
         }
@@ -577,6 +601,179 @@ private fun FullTextPanel(title: String, text: String, onDismissRequested: () ->
         confirmButton = { TextButton(onClick = onDismissRequested) { Text("닫기") } },
     )
 }
+
+/**
+ * 관문이 열려 사람에게 묻는 카드(6.4).
+ *
+ * **다이얼로그가 아니라 전사 안이다.** 물음의 맥락 — 직전에 모델이 무엇을 하겠다고 했는지 — 이
+ * 바로 위에 있어야 사용자가 판단할 수 있고, 다이얼로그는 그것을 가린다.
+ *
+ * **인자를 고쳐서 허용할 수 있다.** 고친 대로 실제로 실행되는 것을 실측이 쟀다(3.5): 모델이
+ * `echo ORIGINAL` 을 요청했는데 결과가 `MODIFIED-BY-APP` 이었고 원래 파일은 만들어지지 않았다.
+ * 그래서 이 자리의 편집은 시늉이 아니라 실행될 것을 바꾸는 일이다.
+ *
+ * **읽을 수 없는 JSON 으로는 보내지 않는다.** 보내면 엔진이 그것을 인자로 넘기지 못하고, 그
+ * 실패는 사용자가 고친 글자와 한참 떨어진 자리에서 드러난다.
+ */
+@Composable
+private fun PermissionRequestCard(
+    entry: ChatEntry.PermissionAsked,
+    sessionWorkingDirectory: Path?,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+) {
+    val requestedInputText = remember(entry.input) { prettyPrintedToolInput(entry.input) }
+    var inputText by remember(entry.toolUseId) { mutableStateOf(requestedInputText) }
+    var denyReason by remember(entry.toolUseId) { mutableStateOf("") }
+    var inputUnreadable by remember(entry.toolUseId) { mutableStateOf(false) }
+    val toolLabel = remember(entry.toolName) { toolLabel(entry.toolName) }
+
+    fun chooseWithEditedInput(choice: (JsonObject) -> PermissionCardChoice) {
+        val input = parsedToolInputOrNull(inputText)
+        if (input == null) {
+            inputUnreadable = true
+            return
+        }
+        onPermissionChoiceMade(entry.toolUseId, choice(input))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.shapes.medium)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = if (entry.answer == null) "승인이 필요합니다" else "승인 물음",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = toolLabel,
+                style = MaterialTheme.typography.labelLarge,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+
+        // 어느 자리에서 도는 세션의 물음인가. 챗이 여럿 열려 있으면 이것이 판단의 절반이다(6.4).
+        sessionWorkingDirectory?.let {
+            Text(
+                text = it.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (entry.answer == null) {
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = {
+                    inputText = it
+                    inputUnreadable = false
+                },
+                label = { Text("인자 — 고쳐서 허용할 수 있습니다") },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.fillMaxWidth().heightIn(max = PERMISSION_INPUT_MAX_HEIGHT),
+            )
+
+            if (inputUnreadable) {
+                Text(
+                    text = "이 인자를 JSON 으로 읽지 못했습니다 — 고친 글자를 확인하세요.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = KyuTheme.statusColors.failure,
+                )
+            }
+
+            OutlinedTextField(
+                value = denyReason,
+                onValueChange = { denyReason = it },
+                label = { Text("거부 이유 (선택) — 모델이 그대로 읽습니다") },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = { chooseWithEditedInput(PermissionCardChoice::AllowOnce) }) {
+                    Text("허용")
+                }
+                TextButton(onClick = { chooseWithEditedInput(PermissionCardChoice::AllowForThisSession) }) {
+                    // 무엇을 계속 허용하는지 버튼이 직접 말한다. "계속 허용" 만 적으면 사용자는
+                    // 그것이 이 호출인지 이 도구인지 이 세션인지 알 수 없다.
+                    Text("이 세션에서 $toolLabel 계속 허용")
+                }
+                TextButton(
+                    onClick = {
+                        onPermissionChoiceMade(
+                            entry.toolUseId,
+                            PermissionCardChoice.Deny(denyReason.ifBlank { DEFAULT_DENY_REASON }),
+                        )
+                    },
+                ) {
+                    Text("거부", color = KyuTheme.statusColors.failure)
+                }
+            }
+        } else {
+            MonospaceBlock(requestedInputText, detailTitle = "$toolLabel 인자")
+            PermissionAnswerLine(entry.answer, toolLabel)
+        }
+    }
+}
+
+/**
+ * 답한 뒤에 카드가 남기는 한 줄.
+ *
+ * **규칙이 자동으로 허용한 것을 사람이 허용한 것과 같은 모양으로 그리지 않는다.** 그러면 사용자는
+ * 자기가 보지 않은 승인을 자기가 한 것으로 읽는다.
+ */
+@Composable
+private fun PermissionAnswerLine(answer: PermissionAnswer, toolLabel: String) {
+    val (text, color) = when (answer) {
+        is PermissionAnswer.Allowed -> if (answer.editedInput == null) {
+            "허용했습니다" to KyuTheme.statusColors.success
+        } else {
+            "인자를 고쳐서 허용했습니다" to KyuTheme.statusColors.success
+        }
+
+        is PermissionAnswer.AllowedForThisSession ->
+            "허용했습니다 — 이 세션에서 $toolLabel 은 다시 묻지 않습니다" to KyuTheme.statusColors.success
+
+        is PermissionAnswer.AllowedByThisSessionRule ->
+            "이 세션의 규칙이 허용했습니다 — 묻지 않았습니다" to KyuTheme.statusColors.caution
+
+        is PermissionAnswer.Denied -> "거부했습니다 — ${answer.reason}" to KyuTheme.statusColors.failure
+    }
+
+    Text(text = text, style = MaterialTheme.typography.labelMedium, color = color)
+
+    // 고친 인자는 원본과 나란히 둔다. 무엇이 실제로 돌았는지가 카드에 없으면, 나중에 전사를 읽는
+    // 사람은 모델이 요청한 것이 그대로 돈 줄 안다.
+    if (answer is PermissionAnswer.Allowed && answer.editedInput != null) {
+        MonospaceBlock(prettyPrintedToolInput(answer.editedInput), detailTitle = "고쳐서 실행한 인자")
+    }
+}
+
+/** 카드에서 고친 인자를 다시 JSON 으로 읽는다. 객체가 아니면 null 이다 — 도구 인자는 늘 객체다. */
+private fun parsedToolInputOrNull(inputText: String): JsonObject? = try {
+    toolInputJson.parseToJsonElement(inputText) as? JsonObject
+} catch (failure: SerializationException) {
+    null
+} catch (failure: IllegalArgumentException) {
+    null
+}
+
+/** 사용자가 이유를 적지 않았을 때 모델이 읽을 문구. 빈 문구를 보내면 모델은 말할 것이 없다. */
+private const val DEFAULT_DENY_REASON = "사용자가 이 도구 호출을 거절했습니다"
+
+/** 승인 카드의 인자 편집칸 높이. 넘치면 그 안에서 스크롤된다. */
+private val PERMISSION_INPUT_MAX_HEIGHT = 260.dp
 
 private fun prettyPrintedToolInput(input: JsonObject): String = toolInputJson.encodeToString(JsonObject.serializer(), input)
 
