@@ -17,20 +17,26 @@ import (
 // 그 수명은 자기를 띄운 메인 세션의 수명이다 — claude 가 세션을 접으면 stdin 이 닫히고 이 서버도
 // 함께 끝난다. 엔진이 프로세스를 관리하지 않는다는 자세(설계 문서 5.1)가 여기서도 성립한다.
 
-const mcpUsageText = `사용법: kyu mcp <serve|approve> [인자]
+const mcpUsageText = `사용법: kyu mcp <serve|approve|ask> [인자]
 
   kyu mcp serve <워크디렉토리>   메인 세션에 붙는 오케스트레이션 MCP 서버를 stdio 로 연다 — 기계용
   kyu mcp approve <repo>        그 레포의 실행 유발 설정을 눈으로 확인하고 위임을 승인한다
+  kyu mcp ask <소켓 경로>        승인 물음을 그 소켓 너머의 앱에게 중계한다 — 기계용
 
-serve 는 사람이 직접 부르는 명령이 아니다. kyu session-command --json 이 답하는 메인 세션 명령의
---mcp-config 에 이 명령이 실려 있고, claude 가 그것을 자식 프로세스로 띄운다.
+serve 와 ask 는 사람이 직접 부르는 명령이 아니다. kyu session-command --json 이 답하는 세션 명령의
+--mcp-config 에 두 명령이 실려 있고, claude 가 그것을 자식 프로세스로 띄운다.
 
-approve 는 반대로 사람만 부를 수 있다 — 터미널에서만 답을 받는다.`
+approve 는 반대로 사람만 부를 수 있다 — 터미널에서만 답을 받는다.
 
-// ManageOrchestrationTools 는 kyu mcp 를 실행한다 — 도구를 여는 serve 와 레포를 승인하는 approve.
+approve 와 ask 는 승인의 대상이 다르다. approve 는 레포 하나를 한 번 승인하는 것이고(설계 5.6),
+ask 는 도구 호출 하나를 그때그때 사람에게 묻는 것이다(chat-ui-design.md 5.2.2).`
+
+// ManageOrchestrationTools 는 kyu mcp 를 실행한다 — 도구를 여는 serve, 레포를 승인하는 approve,
+// 승인 물음을 앱에게 중계하는 ask.
 //
-// 두 하위 명령이 한 낱말 아래 있는 이유는 둘이 같은 것을 다뤄서다. serve 가 여는 위임 통로에
+// 셋이 한 낱말 아래 있는 이유는 셋 다 claude 의 MCP 표면을 다뤄서다. serve 가 여는 위임 통로에
 // 관문을 세우는 것이 approve 이고(설계 문서 5.6), 그 관문의 기록도 같은 .coord 에 남는다.
+// ask 는 같은 --mcp-config 에 실려 뜨는 두 번째 서버다(chat-ui-design.md 5.2).
 func ManageOrchestrationTools(in io.Reader, out, errOut io.Writer, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("mcp 는 하위 명령이 필요합니다\n\n%s", mcpUsageText)
@@ -44,6 +50,9 @@ func ManageOrchestrationTools(in io.Reader, out, errOut io.Writer, args []string
 
 	case mcpApproveSubcommandName:
 		return approveRepoDelegation(in, out, subcommandArgs)
+
+	case mcpAskSubcommandName:
+		return relayPermissionQuestions(in, out, subcommandArgs)
 
 	default:
 		return fmt.Errorf("mcp 가 모르는 하위 명령입니다: %s\n\n%s", subcommandName, mcpUsageText)

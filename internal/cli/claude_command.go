@@ -78,6 +78,18 @@ const mcpConfigFlagName = "--mcp-config"
 // 모델이 보는 도구 이름이 mcp__kyu__run_in_repo 가 된다. 짧게 두는 이유가 그것이다.
 const orchestrationServerName = "kyu"
 
+// permissionAskServerName 은 승인 물음을 앱에게 중계하는 서버의 이름이다(chat-ui-design.md 5.2.2).
+//
+// **하이픈이 도구 이름에 그대로 남는다.** kyu-ask 로 붙인 서버의 도구가 mcp__kyu-ask__… 으로
+// 보였다(실측 A.15) — 콜론이 밑줄로 바뀌는 것(plugin:context7:context7)과 다르다. 이것을 재보지
+// 않고 밑줄로 적었으면 승인 도구가 한 번도 안 불렸을 자리다.
+//
+// 오케스트레이션 서버(kyu)와 이름이 갈려 있어야 하는 이유는 claude 가 서버 이름으로 도구를
+// 가리키기 때문이다. 한 서버에 합치면 --permission-prompt-tool 이 그 서버의 도구 하나만 가리는
+// 사이 run_in_repo 는 그대로 모델에게 보이는데, 그 둘의 수명과 등록 대상 세션이 서로 다르다
+// (오케스트레이션은 메인 세션에만 · 승인은 둘 다).
+const permissionAskServerName = "kyu-ask"
+
 // mcpCommandName 과 mcpServeSubcommandName 은 등록된 서버가 실행할 이 바이너리의 명령이다.
 //
 // 설계 문서 9 절 8 번이 "mcp 라는 낱말 아래 있을 것이 서버 하나뿐이라 지금은 kyu mcp 로 둔다.
