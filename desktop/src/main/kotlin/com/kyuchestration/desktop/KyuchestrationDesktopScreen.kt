@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
@@ -59,6 +60,13 @@ fun KyuchestrationDesktopScreen(
     diagnosticLogPathLabel: String,
     engineInstallationState: EngineInstallationState,
     engineDirectoryLabel: String,
+    /**
+     * 이 머신의 claude 가 로그인돼 있는가. 엔진 다음 갈림길이다.
+     *
+     * 워크디렉토리보다 앞에 둔다. 세션을 여는 걸음이 전부 claude 를 띄우는 일이라, 로그인되지
+     * 않은 채로 대시보드를 보여주면 사용자는 카드를 누를 때마다 같은 실패를 만난다.
+     */
+    claudeAuthenticationState: ClaudeAuthenticationState,
     dashboardState: WorkDirDashboardState,
     initializationState: WorkDirInitializationState,
     /** 대화 자리가 지금 보여줄 것. 이 앱의 기본 화면이다. */
@@ -96,6 +104,11 @@ fun KyuchestrationDesktopScreen(
     onThemePreferenceChosen: (ThemePreference) -> Unit,
     onRetryEngineInstallationRequested: () -> Unit,
     onLookForEngineAgainRequested: () -> Unit,
+    onCheckClaudeCredentialsRequested: () -> Unit,
+    onClaudeBrowserLoginRequested: () -> Unit,
+    onClaudeBrowserLoginCodeSubmitted: (String) -> Unit,
+    onClaudeBrowserLoginCancelled: () -> Unit,
+    onClaudeTokenSubmitted: (String) -> Unit,
     onOpenWorkDirRequested: () -> Unit,
     onInitializeOpenedWorkDirRequested: () -> Unit,
     onCloneRepositoriesRequested: () -> Unit,
@@ -131,6 +144,20 @@ fun KyuchestrationDesktopScreen(
                     engineInstallationState = engineInstallationState,
                     onRetryEngineInstallationRequested = onRetryEngineInstallationRequested,
                     onLookForEngineAgainRequested = onLookForEngineAgainRequested,
+                )
+            } else if (claudeAuthenticationState != ClaudeAuthenticationState.CredentialsReady) {
+                // 엔진과 같은 이유로 여기서 막는다. 워크디렉토리를 고르고 레포를 받아 온 뒤에
+                // 첫 대화에서야 "Not logged in" 을 만나면, 사용자는 그때까지 한 일이 헛일이었는지
+                // 부터 의심하게 된다(chat-ui-design.md 7.2).
+                ClaudeAuthenticationScreen(
+                    versionLabel = versionLabel,
+                    diagnosticLogPathLabel = diagnosticLogPathLabel,
+                    claudeAuthenticationState = claudeAuthenticationState,
+                    onCheckCredentialsRequested = onCheckClaudeCredentialsRequested,
+                    onBrowserLoginRequested = onClaudeBrowserLoginRequested,
+                    onBrowserLoginCodeSubmitted = onClaudeBrowserLoginCodeSubmitted,
+                    onBrowserLoginCancelled = onClaudeBrowserLoginCancelled,
+                    onTokenSubmitted = onClaudeTokenSubmitted,
                 )
             } else {
                 when (dashboardState) {
