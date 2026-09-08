@@ -85,17 +85,17 @@ func assertRestOfCommand(t *testing.T, rest, want []string) {
 	}
 }
 
-// orchestrationServerRegistrationForTest 는 답한 명령에서 --mcp-config 한 쌍을 떼어내 되읽고,
+// mcpServerRegistrationForTest 는 답한 명령에서 --mcp-config 한 쌍을 떼어내 되읽고,
 // 나머지를 돌려준다.
 //
 // 등록에 실리는 kyu 절대경로는 실행마다 다르므로(테스트에서는 테스트 바이너리다) 값을 미리
 // 적어둘 수 없다. 자리와 모양을 확인하고 나머지 조립은 그대로 비교한다.
-func orchestrationServerRegistrationForTest(t *testing.T, command []string) (registration mcpConfigForTest, rest []string) {
+func mcpServerRegistrationForTest(t *testing.T, command []string) (registration mcpConfigForTest, rest []string) {
 	t.Helper()
 
 	flagIndex := slices.Index(command, "--mcp-config")
 	if flagIndex < 0 {
-		t.Fatalf("명령 = %q, 오케스트레이션 서버를 등록하는 --mcp-config 를 기대", command)
+		t.Fatalf("명령 = %q, MCP 서버를 등록하는 --mcp-config 를 기대", command)
 	}
 	if flagIndex+1 >= len(command) {
 		t.Fatalf("명령 = %q, --mcp-config 뒤에 설정 문자열을 기대", command)
@@ -128,7 +128,7 @@ func TestTheMainSessionCommandRegistersTheOrchestrationServerAsAConfigString(t *
 
 	run := runSessionCommandForTest(t)
 
-	registration, rest := orchestrationServerRegistrationForTest(t, run.document.Command)
+	registration, rest := mcpServerRegistrationForTest(t, run.document.Command)
 	server, registered := registration.McpServers["kyu"]
 	if !registered {
 		t.Fatalf("등록한 서버 = %v, kyu 하나를 기대", registration.McpServers)
@@ -217,7 +217,7 @@ func TestSessionCommandForTheMainSessionAnswersAddDirForEveryRepo(t *testing.T) 
 
 	run := runSessionCommandForTest(t)
 
-	_, commandWithoutRegistration := orchestrationServerRegistrationForTest(t, run.document.Command)
+	_, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
 	flagName, _, rest := splitConversationFlagsForTest(t, commandWithoutRegistration)
 	if flagName != "--session-id" {
 		t.Errorf("대화 플래그 = %q, 첫 물음에는 --session-id 를 기대", flagName)
@@ -541,7 +541,7 @@ var chatModeStreamFlagsForTest = []string{
 // splitChatModeFlagsForTest 는 claude 바로 뒤에 붙은 챗 모드 플래그를 떼어내고 나머지를 돌려준다.
 //
 // 첫 자리의 claude 는 남긴다 — 떼어낸 결과를 splitConversationFlagsForTest 에 그대로 이어
-// 넘기기 위해서다. 등록을 떼어내는 orchestrationServerRegistrationForTest 와 같은 모양이다.
+// 넘기기 위해서다. 등록을 떼어내는 mcpServerRegistrationForTest 와 같은 모양이다.
 func splitChatModeFlagsForTest(t *testing.T, command []string) []string {
 	t.Helper()
 
@@ -568,7 +568,7 @@ func TestChatModeGivesTheMainSessionTheStreamFlagsRightAfterClaude(t *testing.T)
 
 	run := runSessionCommandForTest(t, chatModeOptionName)
 
-	_, commandWithoutRegistration := orchestrationServerRegistrationForTest(t, run.document.Command)
+	_, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
 	commandWithoutChatFlags := splitChatModeFlagsForTest(t, commandWithoutRegistration)
 
 	// 챗 모드가 바꾸는 것은 앞에 붙는 플래그뿐이다. 대화도 오케스트레이션 서버도 --add-dir 도
@@ -649,5 +649,153 @@ func TestWithoutChatModeTheCommandCarriesNoStreamFlags(t *testing.T) {
 		if slices.Contains(run.document.Command, flag) {
 			t.Errorf("명령 = %q, --chat 없이는 %q 가 없기를 기대", run.document.Command, flag)
 		}
+	}
+}
+
+// permissionPromptToolForTest 는 claude 가 승인 도구를 가리키는 문자열을 테스트가 다시 적어둔 것이다.
+//
+// **하이픈이 그대로 남는다는 것이 이 문자열의 전부다**(실측 A.15). 생산 코드의 조립을 가져다
+// 쓰면 그 조립이 밑줄로 바뀌는 날 테스트도 함께 밑줄이 되고, claude 는 없는 도구를 가리킨 채
+// 승인 도구를 한 번도 부르지 않는다 — 그 실패는 "관문이 원래 잘 안 열리나 보다" 로 숨는다.
+const permissionPromptToolForTest = "mcp__kyu-ask__request_permission"
+
+// splitPermissionPromptToolForTest 는 승인 도구를 가리키는 한 쌍을 떼어내고 나머지를 돌려준다.
+func splitPermissionPromptToolForTest(t *testing.T, command []string) []string {
+	t.Helper()
+
+	flagIndex := slices.Index(command, "--permission-prompt-tool")
+	if flagIndex < 0 {
+		t.Fatalf("명령 = %q, 승인 도구를 가리키는 --permission-prompt-tool 을 기대", command)
+	}
+	if flagIndex+1 >= len(command) {
+		t.Fatalf("명령 = %q, --permission-prompt-tool 뒤에 도구 이름을 기대", command)
+	}
+	if command[flagIndex+1] != permissionPromptToolForTest {
+		t.Errorf("승인 도구 = %q, want %q", command[flagIndex+1], permissionPromptToolForTest)
+	}
+	return slices.Concat(command[:flagIndex], command[flagIndex+2:])
+}
+
+// assertAskServerRegistration 은 등록된 kyu-ask 서버가 그 소켓에 묻는 서버인지 본다.
+func assertAskServerRegistration(t *testing.T, registration mcpConfigForTest, socketPath string) {
+	t.Helper()
+
+	server, registered := registration.McpServers["kyu-ask"]
+	if !registered {
+		t.Fatalf("등록한 서버 = %v, 승인 서버(kyu-ask)를 기대", registration.McpServers)
+	}
+	if server.Type != "stdio" {
+		t.Errorf("kyu-ask type = %q, want stdio", server.Type)
+	}
+	// 앱이 정한 경로가 그대로 실려야 한다. 엔진이 경로를 스스로 정하면 앱이 그것을 되읽어야
+	// 하고, 소켓을 여는 쪽과 정하는 쪽이 갈린다(설계 5.2).
+	if !slices.Equal(server.Args, []string{"mcp", "ask", socketPath}) {
+		t.Errorf("kyu-ask args = %q, want %q", server.Args, []string{"mcp", "ask", socketPath})
+	}
+}
+
+func TestTheMainChatRegistersTheAskServerBesideTheOrchestrationServer(t *testing.T) {
+	// 두 서버가 한 --mcp-config 에 함께 실린다(설계 5.2). 승인 서버가 오케스트레이션 서버를
+	// 밀어내면 메인 세션이 위임 도구를 잃고, 그 반대면 승인 카드가 영영 뜨지 않는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, chatModeOptionName, approvalSocketOptionName, "/run/user/1000/kyu/a1.sock")
+
+	registration, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
+	if _, registered := registration.McpServers["kyu"]; !registered {
+		t.Errorf("등록한 서버 = %v, 오케스트레이션 서버(kyu)도 함께이기를 기대", registration.McpServers)
+	}
+	assertAskServerRegistration(t, registration, "/run/user/1000/kyu/a1.sock")
+
+	commandWithoutPermissionFlag := splitPermissionPromptToolForTest(t, commandWithoutRegistration)
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, commandWithoutPermissionFlag)
+	_, _, rest := splitConversationFlagsForTest(t, commandWithoutChatFlags)
+	assertRestOfCommand(t, rest, []string{"--add-dir", filepath.Join(workDirPath, "alpha-commons")})
+}
+
+func TestARepoChatGetsTheAskServerWithoutTheOrchestrationServer(t *testing.T) {
+	// 승인은 위임의 문제가 아니라 화면의 문제다(설계 5.2). 레포 챗에서도 사람이 앞에 있으므로
+	// 승인 서버는 받고, 위임의 시작점은 메인 하나라는 경계는 그대로다(5.2.1).
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName, approvalSocketOptionName, "/tmp/kyu/r1.sock")
+
+	registration, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
+	if _, registered := registration.McpServers["kyu"]; registered {
+		t.Errorf("등록한 서버 = %v, 레포 세션에는 오케스트레이션 서버가 없기를 기대", registration.McpServers)
+	}
+	assertAskServerRegistration(t, registration, "/tmp/kyu/r1.sock")
+
+	commandWithoutPermissionFlag := splitPermissionPromptToolForTest(t, commandWithoutRegistration)
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, commandWithoutPermissionFlag)
+	_, _, rest := splitConversationFlagsForTest(t, commandWithoutChatFlags)
+	assertRestOfCommand(t, rest, nil)
+}
+
+func TestBypassPermissionsLeavesTheApprovalBridgeOutOfTheCommand(t *testing.T) {
+	// 실측 3.6: bypassPermissions 에서는 승인 도구가 한 번도 불리지 않는다. 등록해봐야 프로세스
+	// 하나가 놀 뿐이고, 붙이지 않는 편이 "bypass 로 열었는데 카드가 뜰지도 모른다" 를 없앤다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons",
+		chatModeOptionName, bypassPermissionsOptionName, approvalSocketOptionName, "/tmp/kyu/r2.sock")
+
+	if slices.Contains(run.document.Command, "--permission-prompt-tool") {
+		t.Errorf("명령 = %q, bypass 세션에는 승인 플래그가 없기를 기대", run.document.Command)
+	}
+	if slices.Contains(run.document.Command, "--mcp-config") {
+		t.Errorf("명령 = %q, bypass 로 연 레포 세션에는 붙일 서버가 없기를 기대", run.document.Command)
+	}
+}
+
+func TestAChatWithoutAnApprovalSocketCarriesNoPermissionFlag(t *testing.T) {
+	// 소켓을 열지 않은 앱(뒤처진 판)이 그대로 챗을 연다. 그 세션에 승인 플래그만 붙이면 관문이
+	// 열릴 때마다 물어볼 상대가 없어 모든 호출이 거절된다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName)
+
+	if slices.Contains(run.document.Command, "--permission-prompt-tool") {
+		t.Errorf("명령 = %q, 소켓 없이는 승인 플래그가 없기를 기대", run.document.Command)
+	}
+}
+
+func TestTheApprovalSocketIsOnlyForChatSessions(t *testing.T) {
+	// PTY 세션에는 브리지를 물릴 자리가 없다 — 그 화면의 승인은 claude 가 직접 그린다.
+	// 조용히 무시하면 앱은 카드가 뜰 것이라 믿고, 그 믿음은 관문이 열릴 때까지 드러나지 않는다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	var out, errOut bytes.Buffer
+	err := AnswerSessionCommand(&out, &errOut,
+		[]string{"alpha-commons", approvalSocketOptionName, "/tmp/kyu/r3.sock", machineJSONOptionName})
+
+	if err == nil {
+		t.Fatalf("--chat 없이 소켓을 준 요청이 성공했습니다: %s", out.String())
+	}
+	if !strings.Contains(err.Error(), chatModeOptionName) {
+		t.Errorf("오류 = %q, --chat 과 함께 써야 한다는 사실을 알리기를 기대", err)
+	}
+}
+
+func TestTheApprovalSocketOptionNeedsAPath(t *testing.T) {
+	// 값 없이 온 옵션을 조용히 넘기면 그다음 인자가 소켓 경로로 읽힌다 — 레포 이름이 소켓이 된다.
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	var out, errOut bytes.Buffer
+	err := AnswerSessionCommand(&out, &errOut, []string{chatModeOptionName, approvalSocketOptionName, machineJSONOptionName})
+
+	if err == nil {
+		t.Fatalf("경로 없이 준 소켓 옵션이 성공했습니다: %s", out.String())
 	}
 }

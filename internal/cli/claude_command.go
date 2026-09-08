@@ -73,6 +73,12 @@ func chatModeFlags() []string {
 // (설계 문서 3.2), 미리 허용하는 설정은 듣지 않았다(3.8). 문자열은 그 관문을 타지 않는다.
 const mcpConfigFlagName = "--mcp-config"
 
+// permissionPromptToolFlagName 은 승인이 필요한 호출마다 부를 MCP 도구를 가리키는 플래그다.
+//
+// 이 플래그가 붙는 순간 그 도구는 모델의 도구 목록에서 사라진다(실측 3.5 · A.7) — 모델이 자기
+// 승인 도구를 스스로 불러 통과하는 길이 애초에 없다.
+const permissionPromptToolFlagName = "--permission-prompt-tool"
+
 // orchestrationServerName 은 메인 세션이 이 엔진의 도구를 부를 때 쓰는 서버 이름이다.
 //
 // 모델이 보는 도구 이름이 mcp__kyu__run_in_repo 가 된다. 짧게 두는 이유가 그것이다.
@@ -139,10 +145,9 @@ func mainSessionCommand(
 	repos []workdir.Repo,
 	request sessionCommandRequest,
 	conversationFlags []string,
-	orchestrationServerRegistration string,
+	mcpSetup sessionMcpSetup,
 ) []string {
-	command := claudeCommand(request, conversationFlags)
-	command = append(command, mcpConfigFlagName, orchestrationServerRegistration)
+	command := claudeCommand(request, conversationFlags, mcpSetup)
 
 	// 붙일 레포 수만큼 미리 늘린다. 아래 반복이 레포마다 두 자리씩 더하는데,
 	// 그때마다 슬라이스가 자라면 레포가 많은 워크디렉토리에서 같은 목록을 여러 번 복사하게 된다.
@@ -154,35 +159,100 @@ func mainSessionCommand(
 	return command
 }
 
-// orchestrationServerRegistration 은 메인 세션이 --mcp-config 로 받을 설정 문자열을 만든다.
+// sessionMcpSetup 은 이 세션의 명령에 붙는 MCP 관련 자리 둘이다 — 서버 등록 문자열과,
+// 그중 승인 물음을 받을 도구를 가리키는 이름.
 //
-// 이 엔진이 자기 경로를 적는다(설계 문서 5.2). 설정 파일에 적어두는 길이었다면 바이너리를 옮기거나
-// 올리는 순간 그 파일이 조용히 낡는데, 답하는 쪽이 os.Executable() 로 자기를 적으면 앱이
-// KYU_BINARY_PATH 로 어느 엔진을 겨누든 그 엔진이 등록된다.
-//
-// 담기는 것은 kyu 절대경로와 워크디렉토리 절대경로뿐이다. 이 문자열은 프로세스 인자로 들어가
-// ps 에 보이므로(설계 문서 5.2 의 대가), 비밀이 생기면 이 자리를 다시 정해야 한다.
-func orchestrationServerRegistration(workDirAbsolutePath string) (string, error) {
+// 둘을 함께 든다. 승인 플래그는 그 도구를 여는 서버가 등록되어 있을 때만 뜻이 있고, 등록 없이
+// 플래그만 붙으면 claude 는 없는 도구를 가리킨 채 관문마다 실패한다 — 두 값을 따로 나르면
+// 한쪽만 붙는 조립이 언제든 가능해진다.
+type sessionMcpSetup struct {
+	// mcpConfig 는 --mcp-config 에 실릴 문자열이다. 붙일 서버가 없으면 비어 있다.
+	mcpConfig string
+
+	// permissionPromptTool 은 --permission-prompt-tool 에 실릴 도구 이름이다.
+	// 승인 브리지가 없으면 비어 있다.
+	permissionPromptTool string
+}
+
+// mainSessionMcpSetup 은 메인 세션에 붙일 서버들을 등록으로 옮긴다 — 오케스트레이션과, 있다면 승인.
+func mainSessionMcpSetup(workDirAbsolutePath string, request sessionCommandRequest) (sessionMcpSetup, error) {
 	engineExecutablePath, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("이 엔진의 실행 경로를 알아내지 못해 오케스트레이션 서버를 등록할 수 없습니다: %w", err)
+		return sessionMcpSetup{}, fmt.Errorf("이 엔진의 실행 경로를 알아내지 못해 MCP 서버를 등록할 수 없습니다: %w", err)
+	}
+
+	servers := map[string]any{
+		orchestrationServerName: engineMcpServer(engineExecutablePath, mcpServeSubcommandName, workDirAbsolutePath),
+	}
+	return mcpSetupFor(servers, engineExecutablePath, request)
+}
+
+// repoSessionMcpSetup 은 레포 세션에 붙일 서버를 등록으로 옮긴다 — 있다면 승인 서버 하나뿐이다.
+//
+// 오케스트레이션 서버는 여기 없다. 레포 세션이 run_in_repo 를 가지면 레포 세션이 다른 레포에
+// 위임하게 되고, 위임의 시작점은 메인 하나다(orchestration-tools-design.md 5.2.1). 승인은 그
+// 경계와 무관하다 — 위임의 문제가 아니라 화면의 문제라, 사람이 앞에 있는 세션은 둘 다 받는다.
+func repoSessionMcpSetup(request sessionCommandRequest) (sessionMcpSetup, error) {
+	if !request.wantsPermissionBridge() {
+		return sessionMcpSetup{}, nil
+	}
+
+	engineExecutablePath, err := os.Executable()
+	if err != nil {
+		return sessionMcpSetup{}, fmt.Errorf("이 엔진의 실행 경로를 알아내지 못해 승인 서버를 등록할 수 없습니다: %w", err)
+	}
+	return mcpSetupFor(map[string]any{}, engineExecutablePath, request)
+}
+
+// mcpSetupFor 는 받은 서버들에 승인 서버를 더해 --mcp-config 문자열 하나로 만든다.
+//
+// 담기는 것은 kyu 절대경로와 워크디렉토리·소켓 절대경로뿐이다. 이 문자열은 프로세스 인자로
+// 들어가 ps 에 보이므로(orchestration-tools-design.md 5.2 의 대가), 비밀이 생기면 이 자리를
+// 다시 정해야 한다 — 소켓 경로가 비밀이 아닌 것은 그 소켓의 권한이 0600 이기 때문이다(5.4).
+func mcpSetupFor(servers map[string]any, engineExecutablePath string, request sessionCommandRequest) (sessionMcpSetup, error) {
+	var setup sessionMcpSetup
+
+	if request.wantsPermissionBridge() {
+		servers[permissionAskServerName] = engineMcpServer(engineExecutablePath, mcpAskSubcommandName, request.approvalSocketPath)
+		setup.permissionPromptTool = permissionPromptToolName()
+	}
+
+	if len(servers) == 0 {
+		return setup, nil
 	}
 
 	// 손으로 문자열을 잇지 않는다. 경로에 따옴표나 역슬래시가 들어가는 날 — 윈도우 경로가
 	// 그렇다 — 이어붙인 문자열은 claude 가 읽지 못하는 JSON 이 된다.
-	registration, err := json.Marshal(map[string]any{
-		"mcpServers": map[string]any{
-			orchestrationServerName: map[string]any{
-				"type":    "stdio",
-				"command": engineExecutablePath,
-				"args":    []string{mcpCommandName, mcpServeSubcommandName, workDirAbsolutePath},
-			},
-		},
-	})
+	registration, err := json.Marshal(map[string]any{"mcpServers": servers})
 	if err != nil {
-		return "", fmt.Errorf("오케스트레이션 서버 등록 조립 실패: %w", err)
+		return sessionMcpSetup{}, fmt.Errorf("MCP 서버 등록 조립 실패: %w", err)
 	}
-	return string(registration), nil
+
+	setup.mcpConfig = string(registration)
+	return setup, nil
+}
+
+// engineMcpServer 는 이 엔진의 하위 명령 하나를 stdio 서버로 등록하는 항목이다.
+//
+// 이 엔진이 자기 경로를 적는다(설계 문서 5.2). 설정 파일에 적어두는 길이었다면 바이너리를 옮기거나
+// 올리는 순간 그 파일이 조용히 낡는데, 답하는 쪽이 os.Executable() 로 자기를 적으면 앱이
+// KYU_BINARY_PATH 로 어느 엔진을 겨누든 그 엔진이 등록된다.
+func engineMcpServer(engineExecutablePath, subcommandName, subcommandArgument string) map[string]any {
+	return map[string]any{
+		"type":    "stdio",
+		"command": engineExecutablePath,
+		"args":    []string{mcpCommandName, subcommandName, subcommandArgument},
+	}
+}
+
+// permissionPromptToolName 은 claude 에게 넘길 승인 도구의 이름이다.
+//
+// **하이픈이 그대로 남는다**(실측 A.15). kyu-ask 로 붙인 서버의 도구는 mcp__kyu-ask__… 으로
+// 보였다 — 콜론이 밑줄로 바뀌는 것(plugin:context7:context7)과 다르다. 조립으로 두는 이유는
+// 서버 이름과 도구 이름이 각자 자기 자리에 있고, 이 문자열이 그 둘에서 자동으로 따라오게 하려는
+// 것이다 — 손으로 적어 두면 한쪽을 고친 날 조용히 어긋난다.
+func permissionPromptToolName() string {
+	return "mcp__" + permissionAskServerName + "__" + requestPermissionToolName
 }
 
 // claudeCommand 는 두 세션이 공통으로 실행하는 부분이다: claude 와, 챗 모드라면 스트림 플래그와,
@@ -194,7 +264,7 @@ func orchestrationServerRegistration(workDirAbsolutePath string) (string, error)
 // 요청을 통째로 받는다. 명령에 영향을 주는 옵션이 둘이 되면서, 필드를 하나씩 넘기면 옵션이
 // 하나 늘 때마다 두 호출자의 인자 목록이 함께 길어진다 — 그리고 그때 한쪽만 고치면 메인과
 // 레포 세션이 같은 옵션에 다르게 반응한다.
-func claudeCommand(request sessionCommandRequest, conversationFlags []string) []string {
+func claudeCommand(request sessionCommandRequest, conversationFlags []string, mcpSetup sessionMcpSetup) []string {
 	chatFlags := []string(nil)
 	if request.chatMode {
 		chatFlags = chatModeFlags()
@@ -210,6 +280,15 @@ func claudeCommand(request sessionCommandRequest, conversationFlags []string) []
 	command = append(command, conversationFlags...)
 	if request.bypassPermissions {
 		command = append(command, skipPermissionsFlagName)
+	}
+
+	// 승인 플래그가 등록보다 앞이다. 설계 5.2 가 적어둔 순서 그대로이고, ps 에서 이 명령을 보는
+	// 사람에게 "무엇이 관문을 지는가" 가 "무엇이 붙어 있는가" 보다 먼저 읽힌다.
+	if mcpSetup.permissionPromptTool != "" {
+		command = append(command, permissionPromptToolFlagName, mcpSetup.permissionPromptTool)
+	}
+	if mcpSetup.mcpConfig != "" {
+		command = append(command, mcpConfigFlagName, mcpSetup.mcpConfig)
 	}
 	return command
 }
