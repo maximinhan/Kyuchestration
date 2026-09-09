@@ -302,6 +302,7 @@ private fun runDesktopApplication(
             },
             onSendUserMessageRequested = chatSessionStateHolder::sendUserMessage,
             onInterruptTurnRequested = chatSessionStateHolder::interruptOnScreenTurn,
+            onPermissionChoiceMade = chatSessionStateHolder::answerOnScreenPermission,
             onEndChatSessionRequested = {
                 applicationCoroutineScope.launch { chatSessionStateHolder.endOnScreenSession() }
             },

@@ -44,7 +44,14 @@ class PtySessionTerminalOpener(
         target: SessionTarget,
         conversationChoice: SessionConversationChoice,
     ): OpenedSessionTerminal {
-        val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(workDirPath, target, conversationChoice)
+        // 승인 소켓을 주지 않는다. 이 화면의 승인은 `claude` 가 PTY 안에 직접 그리므로 나를
+        // 물음이 없고, 그래도 주면 아무도 붙지 않는 소켓이 세션마다 하나씩 열린다.
+        val sessionCommandAnswer = sessionCommandSource.sessionCommandFor(
+            workDirPath = workDirPath,
+            target = target,
+            conversationChoice = conversationChoice,
+            approvalSocketPath = null,
+        )
 
         val plan = planSessionEntry(
             sessionCommandAnswer = sessionCommandAnswer,

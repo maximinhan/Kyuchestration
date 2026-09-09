@@ -94,6 +94,23 @@ sealed interface ChatSessionEvent {
     ) : ChatSessionEvent
 
     /**
+     * 관문이 열렸다 — 이 도구 호출을 해도 되는지 사람에게 묻는다(3.5 · 5.4).
+     *
+     * **이 갈래만 스트림에서 오지 않는다.** `claude` 는 승인이 필요한 호출마다 MCP 도구를 부르고,
+     * 그 도구를 여는 `kyu mcp ask` 가 앱이 열어 둔 소켓으로 물어 온다([PermissionRequestSocket]).
+     * 갈래를 여기에 두는 이유는 전사에 무엇이 쌓이는지를 아는 자리가 하나여야 해서다 — 화면에
+     * 이르는 길을 따로 내면 승인 카드만 다른 규칙으로 그려진다.
+     *
+     * **모든 도구 호출이 이 이벤트를 내지 않는다.** `claude` 가 자체 분류로 무해한 것을 먼저
+     * 거르므로(3.6: `default` 에서도 `echo` 는 그냥 돈다), 이 카드는 "도구를 부를 때마다" 가
+     * 아니라 "관문이 열릴 때만" 뜬다.
+     *
+     * 답을 되돌릴 자리는 이 이벤트에 없다. 그것은 값이 아니라 기다리고 있는 연결이라
+     * ([AskedPermission]), 전사를 접는 순수 함수가 들고 있을 것이 아니다 — 상태 홀더가 따로 쥔다.
+     */
+    data class PermissionRequested(val request: PermissionRequest) : ChatSessionEvent
+
+    /**
      * 서브에이전트 하나의 진행(`system/task_progress` — 3.10).
      *
      * **MCP 도구의 진행은 오지 않는다.** 프로브 서버가 `notifications/progress` 를 세 번 보냈는데

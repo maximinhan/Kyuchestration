@@ -53,6 +53,16 @@ class ChatSessionStateHolder(
     private val coroutineScope: CoroutineScope,
     private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
+    /**
+     * 세션마다의 승인 통로를 여는 자리(5.4).
+     *
+     * 기본값이 실제로 도는 것이다 — 런타임 디렉토리에 세션마다 유닉스 소켓 하나. **그 자리에
+     * 워크디렉토리가 섞이지 않는 것이 요점이다**: 사용자가 지은 긴 이름 하나가 107 바이트 한계를
+     * 넘겨 승인 기능 전체를 조용히 죽이는 것이 실측이 만난 실패다(3.7).
+     */
+    private val permissionRequestChannelOpener: PermissionRequestChannelOpener = PermissionRequestChannelOpener {
+        PermissionRequestSocket.openAt(permissionSocketDirectory().resolve(newPermissionSocketFileName()))
+    },
     /** 엔진에게 묻고 프로세스를 띄우고 끝내는 동안 화면이 멎지 않도록 나가는 자리. */
     private val sessionEntryDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /**
@@ -98,6 +108,27 @@ class ChatSessionStateHolder(
      * 조용히 샌다 — 터미널 홀더가 보유 목록에 대해 두는 전제와 같다.
      */
     private val conversations = mutableMapOf<SessionTarget, ChatConversation>()
+
+    /**
+     * 아직 답하지 않은 승인 물음들 — 화면의 버튼과 소켓 너머의 자식을 잇는 자리.
+     *
+     * 전사에 넣지 않는다. 전사는 화면에 그릴 값이고 이것은 기다리고 있는 연결이라, 한 자리에
+     * 담으면 대화를 복사할 때마다 그 연결이 함께 복사된다.
+     *
+     * 세션과 도구 호출을 함께 열쇠로 쓴다. `toolUseId` 만으로도 지금은 갈리지만, 그 값이 비어
+     * 오는 물음이 있으면(엔진이 채우지 못한 경우) 두 세션의 물음이 한 자리를 두고 겹친다.
+     */
+    private val askedPermissions = mutableMapOf<AskedPermissionKey, AskedPermission>()
+
+    /**
+     * 세션마다 "이 세션에서 계속 허용" 을 받은 도구 이름들(설계 10 절 열린 질문 4 의 v1 결정).
+     *
+     * **메모리에만 산다.** 워크디렉토리의 `.coord/` 에 규칙을 적는 길이 유력했지만(설계 10 절 4 의
+     * (나)), 그것을 열려면 규칙의 모양 — 도구 이름까지인가, 인자의 무늬까지인가, 누가 그것을
+     * 검증하는가 — 을 먼저 정해야 한다. 세션 범위는 그 물음 없이도 성립하고, 사용자가 앱을 끄면
+     * 함께 사라져 잊힌 규칙이 남지 않는다. 적어 두는 자리는 사용자가 그것을 실제로 아쉬워할 때 연다.
+     */
+    private val toolsAllowedForSession = mutableMapOf<SessionTarget, MutableSet<String>>()
 
     /**
      * 지금 화면이 기다리고 있는 진입이 몇 번째인가.
@@ -275,26 +306,47 @@ class ChatSessionStateHolder(
         target: SessionTarget,
         conversationChoice: SessionConversationChoice,
     ): HeldChatSession {
-        val answer = sessionCommandSource.sessionCommandFor(workDirPath, target, conversationChoice)
+        // 소켓이 먼저다. 엔진에게 물을 때 그 자리를 함께 줘야 하고(조립은 엔진이 한다 — 원칙 11),
+        // 그러려면 앱이 이미 듣고 있어야 한다. 열지 못하면 세션도 열지 않는다 — 승인이 필요한
+        // 일이 나올 때까지 멀쩡해 보이다가 그때부터 아무것도 못 하는 세션이 되는 것보다,
+        // 화면이 먼저 말하는 편이 낫다(원칙 12 · TerminalSessionFailure.ApprovalSocketFailedToOpen).
+        val permissionChannel = permissionRequestChannelOpener.openPermissionRequestChannel()
 
-        val plan = planSessionEntry(
-            sessionCommandAnswer = answer,
-            baseEnvironment = baseEnvironment,
-            workDirPath = workDirPath,
-            target = target,
-            claudeAuthToken = claudeAuthToken(),
-        )
+        try {
+            val answer = sessionCommandSource.sessionCommandFor(
+                workDirPath = workDirPath,
+                target = target,
+                conversationChoice = conversationChoice,
+                approvalSocketPath = permissionChannel.socketPath,
+            )
 
-        return HeldChatSession(
-            target = target,
-            session = chatSessionOpener.openChatSession(plan),
-            resumedConversationId = answer.resumedConversationId,
-        )
+            val plan = planSessionEntry(
+                sessionCommandAnswer = answer,
+                baseEnvironment = baseEnvironment,
+                workDirPath = workDirPath,
+                target = target,
+                claudeAuthToken = claudeAuthToken(),
+            )
+
+            return HeldChatSession(
+                target = target,
+                session = chatSessionOpener.openChatSession(plan),
+                resumedConversationId = answer.resumedConversationId,
+                workingDirectory = plan.workingDirectory,
+                permissionChannel = permissionChannel,
+            )
+        } catch (failure: Throwable) {
+            // 세션이 서지 못했으면 그 소켓에 물어올 자식도 없다. 닫지 않으면 아무도 붙지 않는
+            // 소켓이 런타임 디렉토리에 하나씩 쌓인다.
+            permissionChannel.close()
+            throw failure
+        }
     }
 
     private fun holdAndShow(held: HeldChatSession) {
         val conversation = ChatConversation(
             target = held.target,
+            workingDirectory = held.workingDirectory,
             resumedConversationId = held.resumedConversationId,
         )
         conversations[held.target] = conversation
@@ -315,6 +367,78 @@ class ChatSessionStateHolder(
         coroutineScope.launch {
             held.session.events.collect { event -> receive(held.target, event) }
         }
+
+        // 승인 물음은 다른 통로로 온다(소켓). 같은 이유로 화면과 무관하게 받는다 — 보고 있지 않은
+        // 세션의 물음에 아무도 답하지 않으면 그 세션의 claude 는 관문 앞에서 멈춘 채 산다.
+        coroutineScope.launch {
+            held.permissionChannel.requests.collect { asked -> receivePermissionRequest(held.target, asked) }
+        }
+    }
+
+    /**
+     * 승인 물음 하나가 올라왔다.
+     *
+     * **세션 규칙이 먼저다.** "이 세션에서 계속 허용" 을 받은 도구면 사람에게 다시 묻지 않고 그대로
+     * 답하되, 카드는 그래도 세운다 — 규칙이 무엇을 통과시켰는지가 전사에 없으면 사용자는 자기가
+     * 세운 규칙이 실제로 무엇을 허용했는지 볼 길이 없다.
+     */
+    private fun receivePermissionRequest(target: SessionTarget, asked: AskedPermission) {
+        val request = asked.request
+
+        if (request.toolName in toolsAllowedForSession[target].orEmpty()) {
+            asked.answerWith(PermissionDecision.Allow(updatedInput = request.input))
+            updateConversation(target) {
+                it.after(ChatSessionEvent.PermissionRequested(request))
+                    .withPermissionAnswered(request.toolUseId, PermissionAnswer.AllowedByThisSessionRule)
+            }
+            return
+        }
+
+        askedPermissions[AskedPermissionKey(target, request.toolUseId)] = asked
+        receive(target, ChatSessionEvent.PermissionRequested(request))
+    }
+
+    /**
+     * 화면에 떠 있는 대화의 승인 카드에 답한다(6.4).
+     *
+     * 답을 두 곳으로 보낸다 — 소켓 너머의 자식에게는 결정을, 전사에는 그 결정이 무엇이었는지를.
+     * 둘을 한 함수에서만 하는 것이 규율이다. 나눠 두면 소켓에는 갔는데 화면에는 남지 않은 승인이
+     * 생기고, 그것은 사용자가 무엇을 허용했는지 확인할 수 없다는 뜻이다.
+     *
+     * **이미 답한 물음에는 아무 일도 하지 않는다.** 버튼을 두 번 누르거나, 세션이 끝나 물음이
+     * 닫힌 뒤에 누른 자리가 그렇다.
+     */
+    fun answerOnScreenPermission(toolUseId: String, choice: PermissionCardChoice) {
+        val target = mutableState.value.target ?: return
+        val asked = askedPermissions.remove(AskedPermissionKey(target, toolUseId)) ?: return
+
+        val decision = when (choice) {
+            is PermissionCardChoice.AllowOnce -> PermissionDecision.Allow(choice.input)
+            is PermissionCardChoice.AllowForThisSession -> PermissionDecision.Allow(choice.input)
+            is PermissionCardChoice.Deny -> PermissionDecision.Deny(choice.reason)
+        }
+        asked.answerWith(decision)
+
+        if (choice is PermissionCardChoice.AllowForThisSession) {
+            toolsAllowedForSession.getOrPut(target) { mutableSetOf() }.add(asked.request.toolName)
+        }
+
+        updateConversation(target) { it.withPermissionAnswered(toolUseId, answerFor(choice, asked.request)) }
+    }
+
+    /**
+     * 카드가 결정 뒤에 남을 모습을 정한다.
+     *
+     * 고친 인자는 원본과 다를 때만 싣는다. 같은 값을 담아 두면 화면이 "고쳐서 허용" 과 "그대로
+     * 허용" 을 가르지 못하고, 그 둘은 사용자가 나중에 전사를 읽을 때 가장 먼저 묻는 것이다.
+     */
+    private fun answerFor(choice: PermissionCardChoice, request: PermissionRequest): PermissionAnswer = when (choice) {
+        is PermissionCardChoice.AllowOnce ->
+            PermissionAnswer.Allowed(editedInput = choice.input.takeIf { it != request.input })
+
+        is PermissionCardChoice.AllowForThisSession -> PermissionAnswer.AllowedForThisSession
+
+        is PermissionCardChoice.Deny -> PermissionAnswer.Denied(choice.reason)
     }
 
     private fun receive(target: SessionTarget, event: ChatSessionEvent) {
@@ -337,6 +461,11 @@ class ChatSessionStateHolder(
             // 우리가 끝낸 세션이다. 끝내는 자리에서 이미 목록에서 뺐다.
             ?: return
         mutableHeldSessions.value = mutableHeldSessions.value - held
+
+        // 스스로 끝난 세션의 소켓도 닫는다. 프로세스가 죽으면 그 자식(kyu mcp ask)도 함께 죽으므로
+        // 물어올 상대는 이미 없고, 남은 것은 런타임 디렉토리의 파일 하나뿐이다.
+        coroutineScope.launch { held.permissionChannel.close() }
+        forgetPermissionsOf(target)
 
         // 잘 끝난 세션은 남기지 않는다 — 사용자가 시킨 일이라 진단할 것이 없다. 화면과 달리 이
         // 자리는 보고 있지 않은 세션의 죽음도 남긴다.
@@ -379,10 +508,32 @@ class ChatSessionStateHolder(
         }
     }
 
-    /** 끝내기는 프로세스를 기다리는 일이라 화면을 그리는 스레드에서 하지 않는다. */
-    private suspend fun endSessionProcess(held: HeldChatSession) =
-        withContext(sessionEntryDispatcher) { held.session.endSession() }
+    /**
+     * 끝내기는 프로세스를 기다리는 일이라 화면을 그리는 스레드에서 하지 않는다.
+     *
+     * 소켓을 프로세스보다 **나중에** 닫는다. 먼저 닫으면 마지막 순간에 관문을 연 도구가 물어볼
+     * 자리를 잃고, 그 자식은 이유 없이 거절당한 채 끝난다 — 프로세스가 먼저 끝나면 그 물음도
+     * 함께 사라진다.
+     */
+    private suspend fun endSessionProcess(held: HeldChatSession) = withContext(sessionEntryDispatcher) {
+        held.session.endSession()
+        held.permissionChannel.close()
+        forgetPermissionsOf(held.target)
+    }
+
+    /**
+     * 그 세션이 들고 있던 승인 관련 상태를 놓는다 — 답하지 못한 물음과 세션 규칙.
+     *
+     * 규칙이 여기서 사라지는 것이 "이 세션에서 계속 허용" 의 수명 그 자체다(열린 질문 4 의 v1 결정).
+     */
+    private fun forgetPermissionsOf(target: SessionTarget) {
+        askedPermissions.keys.removeAll { it.target == target }
+        toolsAllowedForSession.remove(target)
+    }
 }
+
+/** 어느 세션의 어느 도구 호출에 대한 물음인가. */
+private data class AskedPermissionKey(val target: SessionTarget, val toolUseId: String)
 
 /**
  * 진입 실패는 전부 TerminalSessionFailure 로 온다 — 어댑터가 프로세스 경계의 예외를 거기서
