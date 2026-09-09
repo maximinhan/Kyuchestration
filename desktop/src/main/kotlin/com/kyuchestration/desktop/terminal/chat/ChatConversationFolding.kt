@@ -91,9 +91,11 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         ),
     )
 
-    // 서브에이전트의 진행은 6 단계가 그린다. 지금 이것을 어딘가에 얹어 두면 그 값을 보여줄 화면이
-    // 없는 채로 자리만 생긴다 — 도구 카드는 이미 "도는 중" 을 말하고 있다(5.7).
-    is ChatSessionEvent.DelegationProgressed -> this
+    // 서브에이전트의 시작·진행·끝은 다음 걸음이 그린다. 이벤트가 먼저 서 있어야 그 걸음이
+    // 무엇을 접을지 정할 수 있고, 지금 얹어 두면 보여줄 화면이 없는 채로 자리만 생긴다.
+    is ChatSessionEvent.SubagentStarted -> this
+    is ChatSessionEvent.SubagentProgressed -> this
+    is ChatSessionEvent.SubagentFinished -> this
 
     is ChatSessionEvent.TurnFinished -> copy(
         entries = entries + ChatEntry.TurnEnded(

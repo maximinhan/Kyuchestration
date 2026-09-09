@@ -111,16 +111,43 @@ sealed interface ChatSessionEvent {
     data class PermissionRequested(val request: PermissionRequest) : ChatSessionEvent
 
     /**
+     * 서브에이전트 하나가 떴다(`system/task_started` — 3.10).
+     *
+     * **이 갈래가 있는 이유는 "이 도구 호출이 서브에이전트다" 를 도구 이름 없이 아는 것이다.**
+     * 그 이름은 판마다 달라진다 — 설계 문서가 `Task` 라고 적어둔 자리를 이 판은 `Agent` 로
+     * 부른다(2026-09-08 실측). 이름으로만 갈래를 정하면 다음 판에서 서브에이전트 카드가 조용히
+     * 사라지고, 안쪽 대화가 접히지 않은 채로 메인 전사에 쏟아진다.
+     *
+     * @param subagentType 어떤 에이전트인가 — `general-purpose` 같은 것. 카드의 머리말이다.
+     */
+    data class SubagentStarted(val toolUseId: String, val subagentType: String) : ChatSessionEvent
+
+    /**
      * 서브에이전트 하나의 진행(`system/task_progress` — 3.10).
      *
      * **MCP 도구의 진행은 오지 않는다.** 프로브 서버가 `notifications/progress` 를 세 번 보냈는데
      * 스트림에는 0 개였다(3.10 가). 그래서 오케스트레이션 위임 카드는 "도는 중" 까지만 그린다.
+     *
+     * `task_id` 를 싣지 않는다. 화면이 이 진행을 붙일 자리는 바깥 도구 카드이고 그 열쇠는
+     * [toolUseId] 다 — 두 값을 다 들고 있으면 쓰지 않는 쪽이 무슨 뜻인지 모르는 채 굳는다.
      */
-    data class DelegationProgressed(
-        val taskId: String,
+    data class SubagentProgressed(
         val toolUseId: String,
         val description: String,
         val lastToolName: String?,
+    ) : ChatSessionEvent
+
+    /**
+     * 서브에이전트 하나가 끝났다(`system/task_notification` — 3.10).
+     *
+     * @param status 끝난 모양. 실측으로 본 것은 `completed` 하나다 — 열거형으로 굳히지 않는다.
+     * @param outputFilePath 그 실행의 원출력이 남은 자리. 카드가 이 경로를 그대로 보인다 —
+     *   위임 기록 자리를 화면에 안내하는 자세와 같다(orchestration 6.3 · DiagnosticLogPathNotice).
+     */
+    data class SubagentFinished(
+        val toolUseId: String,
+        val status: String,
+        val outputFilePath: String?,
     ) : ChatSessionEvent
 
     /**

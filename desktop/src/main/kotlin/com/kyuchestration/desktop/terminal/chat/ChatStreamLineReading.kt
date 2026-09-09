@@ -79,17 +79,35 @@ private fun systemEventsIn(line: JsonObject, streamLine: String): List<ChatSessi
             ),
         )
 
+        "task_started" -> listOf(
+            ChatSessionEvent.SubagentStarted(
+                toolUseId = line.stringOrNull("tool_use_id").orEmpty(),
+                subagentType = line.stringOrNull("subagent_type").orEmpty(),
+            ),
+        )
+
         "task_progress" -> listOf(
-            ChatSessionEvent.DelegationProgressed(
-                taskId = line.stringOrNull("task_id").orEmpty(),
+            ChatSessionEvent.SubagentProgressed(
                 toolUseId = line.stringOrNull("tool_use_id").orEmpty(),
                 description = line.stringOrNull("description").orEmpty(),
                 lastToolName = line.stringOrNull("last_tool_name"),
             ),
         )
 
+        "task_notification" -> listOf(
+            ChatSessionEvent.SubagentFinished(
+                toolUseId = line.stringOrNull("tool_use_id").orEmpty(),
+                status = line.stringOrNull("status").orEmpty(),
+                outputFilePath = line.stringOrNull("output_file"),
+            ),
+        )
+
+        // task_updated 가 여기 있는 이유를 적어 둔다. 실측한 모양이 `patch: {status, end_time}` 이고
+        // **tool_use_id 가 없다**(2026-09-08) — 카드에 이어 붙일 열쇠가 그 줄에 없다. 그리고 그 줄이
+        // 말하는 "끝났다" 는 바깥 도구 결과와 task_notification 이 이미 말한다. 이을 수도 없고 더할
+        // 것도 없는 줄이라 갈래를 만들지 않는다.
         "status", "thinking_tokens", "hook_started", "hook_response",
-        "task_started", "task_updated", "task_notification", "background_tasks_changed",
+        "task_updated", "background_tasks_changed",
         -> emptyList()
 
         else -> listOf(ChatSessionEvent.Unrecognized(streamLine))

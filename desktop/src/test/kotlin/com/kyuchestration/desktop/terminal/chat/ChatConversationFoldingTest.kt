@@ -176,7 +176,7 @@ class ChatConversationFoldingTest {
         // parent_tool_use_id 가 챗 UI 의 중첩 열쇠다(3.10). 본문에 풀어 놓으면 메인 대화와
         // 안쪽 대화가 한 줄기로 섞여 누가 한 말인지 알 수 없게 된다.
         val conversation = conversationAfter(
-            TASK_TOOL_USE,
+            RecordedChatStreamLines.AGENT_TOOL_USE,
             RecordedChatStreamLines.SUBAGENT_TOOL_USE,
         )
 
@@ -188,14 +188,14 @@ class ChatConversationFoldingTest {
     @Test
     fun `안쪽 도구 호출의 결과도 그 안쪽 카드가 받는다`() {
         val conversation = conversationAfter(
-            TASK_TOOL_USE,
+            RecordedChatStreamLines.AGENT_TOOL_USE,
             RecordedChatStreamLines.SUBAGENT_TOOL_USE,
-            SUBAGENT_TOOL_RESULT,
+            RecordedChatStreamLines.SUBAGENT_TOOL_RESULT,
         )
 
         val outerCard = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
         val nested = assertIs<ChatEntry.ToolCall>(outerCard.nestedEntries.single())
-        assertEquals("hello from fake repo", nested.answer?.modelVisibleText)
+        assertEquals("1\thello from fake repo\n2\t", nested.answer?.modelVisibleText)
     }
 
     @Test
@@ -384,18 +384,6 @@ class ChatConversationFoldingTest {
         chatSessionEventsFrom(streamLine).fold(this) { conversation, event -> conversation.after(event) }
 
     private companion object {
-
-        /** 메인이 서브에이전트를 띄우는 도구 호출. 녹화된 안쪽 이벤트의 `parent_tool_use_id` 와 짝이다. */
-        const val TASK_TOOL_USE: String =
-            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use",""" +
-                """"id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M","name":"Task","input":{"description":"Read README.txt first line"}}]},""" +
-                """"parent_tool_use_id":null}"""
-
-        /** 그 서브에이전트 안쪽 Read 의 결과. 녹화된 SUBAGENT_TOOL_USE 의 `id` 와 짝이다. */
-        const val SUBAGENT_TOOL_RESULT: String =
-            """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_015cgoqteHactDNH8Er6kf4J",""" +
-                """"type":"tool_result","content":"hello from fake repo"}]},""" +
-                """"parent_tool_use_id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M"}"""
 
         const val RESUMED_ID = "211f6974-88a8-4453-9248-a02b0d6febae"
     }

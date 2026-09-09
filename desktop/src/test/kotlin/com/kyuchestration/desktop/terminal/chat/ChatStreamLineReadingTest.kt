@@ -126,7 +126,17 @@ class ChatStreamLineReadingTest {
             onlyEventIn(RecordedChatStreamLines.SUBAGENT_TOOL_USE),
         )
 
-        assertEquals("toolu_01QUbBJ2Rh6wpXTtCkjoC95M", requested.parentToolUseId)
+        assertEquals("toolu_0144EDWk6by45Zj2YrwXLNBX", requested.parentToolUseId)
+    }
+
+    @Test
+    fun `서브에이전트가 낸 결과는 텍스트 블록 둘을 한 줄기로 잇는다`() {
+        // 바깥 Agent 호출의 결과는 블록 하나가 아니다(실측) — 에이전트의 답과 그 실행의 통계가
+        // 각각 텍스트 블록으로 온다. 하나만 읽으면 카드가 보이는 결과가 반쪽이 된다.
+        val answered = assertIs<ChatSessionEvent.ToolCallAnswered>(onlyEventIn(RecordedChatStreamLines.AGENT_RESULT))
+
+        assertTrue(answered.modelVisibleText.startsWith("파일: /tmp/fakerepo/README.txt"))
+        assertTrue("subagent_tokens: 10852" in answered.modelVisibleText)
     }
 
     @Test
@@ -151,20 +161,43 @@ class ChatStreamLineReadingTest {
         // 정작 판이 바뀐 줄이 묻힌다.
         assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.STREAM_TOOL_BLOCK_STARTED))
         assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.SYSTEM_STATUS))
-        assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.TASK_STARTED))
         assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.CONTROL_RESPONSE))
+        // task_updated 는 이을 열쇠(tool_use_id)가 줄에 없고, 말하는 것을 다른 줄이 이미 말한다.
+        assertEquals(emptyList(), chatSessionEventsFrom(RecordedChatStreamLines.TASK_UPDATED))
+    }
+
+    @Test
+    fun `서브에이전트가 떴다는 것은 도구 이름 없이도 온다`() {
+        // 이 갈래가 있어야 카드가 "Agent" 라는 이름에 매이지 않는다 — 그 이름은 판마다 달라진다.
+        val started = assertIs<ChatSessionEvent.SubagentStarted>(onlyEventIn(RecordedChatStreamLines.TASK_STARTED))
+
+        assertEquals("toolu_0144EDWk6by45Zj2YrwXLNBX", started.toolUseId, "이 값이 바깥 도구 카드를 가리킨다")
+        assertEquals("general-purpose", started.subagentType)
     }
 
     @Test
     fun `서브에이전트의 진행은 바깥 도구 호출에 이어 붙을 수 있게 온다`() {
-        val progressed = assertIs<ChatSessionEvent.DelegationProgressed>(
+        val progressed = assertIs<ChatSessionEvent.SubagentProgressed>(
             onlyEventIn(RecordedChatStreamLines.TASK_PROGRESS),
         )
 
-        assertEquals("af9ca720398708b1c", progressed.taskId)
-        assertEquals("toolu_01QUbBJ2Rh6wpXTtCkjoC95M", progressed.toolUseId, "이 값이 진행을 도구 카드에 잇는다")
+        assertEquals("toolu_0144EDWk6by45Zj2YrwXLNBX", progressed.toolUseId, "이 값이 진행을 도구 카드에 잇는다")
         assertEquals("Reading README.txt", progressed.description)
         assertEquals("Read", progressed.lastToolName)
+    }
+
+    @Test
+    fun `서브에이전트가 끝나면 원출력 자리가 함께 온다`() {
+        val finished = assertIs<ChatSessionEvent.SubagentFinished>(
+            onlyEventIn(RecordedChatStreamLines.TASK_NOTIFICATION),
+        )
+
+        assertEquals("toolu_0144EDWk6by45Zj2YrwXLNBX", finished.toolUseId)
+        assertEquals("completed", finished.status)
+        assertEquals(
+            "/tmp/claude-1000/-tmp-fakerepo/e4dba7e4-2718-4a07-a524-907722eff1a8/tasks/aadb20bff6e5d47e9.output",
+            finished.outputFilePath,
+        )
     }
 
     @Test
