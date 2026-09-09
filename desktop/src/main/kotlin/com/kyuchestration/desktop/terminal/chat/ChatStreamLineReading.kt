@@ -157,12 +157,16 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
  */
 private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
     val typedResult = line["tool_use_result"]
+    val parentToolUseId = line.stringOrNull("parent_tool_use_id")
     val contentBlocks = line.objectOrNull("message")?.arrayOrNull("content")
         ?: return listOf(ChatSessionEvent.Unrecognized(streamLine))
 
     return contentBlocks.filterIsInstance<JsonObject>().map { block ->
         when (block.stringOrNull("type")) {
-            "text" -> ChatSessionEvent.UserMessageEchoed(block.stringOrNull("text").orEmpty())
+            "text" -> ChatSessionEvent.UserMessageEchoed(
+                text = block.stringOrNull("text").orEmpty(),
+                parentToolUseId = parentToolUseId,
+            )
 
             "tool_result" -> ChatSessionEvent.ToolCallAnswered(
                 toolUseId = block.stringOrNull("tool_use_id").orEmpty(),

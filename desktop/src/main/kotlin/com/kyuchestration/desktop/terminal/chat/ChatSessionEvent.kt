@@ -35,11 +35,15 @@ sealed interface ChatSessionEvent {
      * 앱이 방금 보낸 말이 스트림을 한 바퀴 돌아 여기로 온다. 화면의 말풍선은 이것으로 그린다 —
      * 앱이 자기가 보낸 것을 직접 넣으면 큐잉(3.11)이나 중단이 끼는 순간 순서가 어긋난다.
      *
+     * **서브에이전트가 받은 프롬프트도 이 모양으로 온다.** 그때는 [parentToolUseId] 가 채워져
+     * 있고(2026-09-08 실측), 그것은 사용자가 한 말이 아니라 안쪽 대화의 첫 줄이다 — 이 값을
+     * 보지 않으면 메인 전사에 사용자가 쓴 적 없는 말풍선이 선다.
+     *
      * **중단 표시도 이 모양으로 온다.** 턴을 끊으면 `[Request interrupted by user]` 가 `user`
      * 이벤트의 텍스트로 온다(A.9). 그것을 사용자의 말과 가르는 것은 화면의 몫이다 — 어댑터가
      * 문구를 알아보고 다른 갈래로 옮기면, 그 문구가 바뀌는 날 조용히 사용자 말풍선이 된다.
      */
-    data class UserMessageEchoed(val text: String) : ChatSessionEvent
+    data class UserMessageEchoed(val text: String, val parentToolUseId: String?) : ChatSessionEvent
 
     /**
      * 모델이 텍스트 블록 하나를 **완성**했다.

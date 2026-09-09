@@ -29,13 +29,19 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
     //
     // **되돌아온 것이 그 턴의 시작이다**(3.11). 큐에 든 말은 그 턴이 시작할 때에야 돌아오므로,
     // 이 자리가 "턴이 실제로 돌고 있다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.
-    is ChatSessionEvent.UserMessageEchoed -> copy(
-        entries = entries + ChatEntry.UserSaid(event.text),
-        pendingUserMessages = pendingUserMessages - event.text,
-        // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
-        // 읽으면 끊는 중이던 화면이 한순간 되살아난다.
-        turnState = if (turnState == TurnState.Interrupting) TurnState.Interrupting else TurnState.Running,
-    )
+    // 안쪽 대화의 첫 줄이면 그 카드 안으로 접고 여기서 끝낸다. 서브에이전트가 받은 프롬프트가
+    // 이 모양으로 오는데(3.10 실측), 그것은 사용자가 한 말도 이 턴의 시작도 아니다.
+    is ChatSessionEvent.UserMessageEchoed -> if (event.parentToolUseId != null) {
+        copy(entries = entries.withEntryAdded(ChatEntry.UserSaid(event.text), event.parentToolUseId))
+    } else {
+        copy(
+            entries = entries + ChatEntry.UserSaid(event.text),
+            pendingUserMessages = pendingUserMessages - event.text,
+            // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
+            // 읽으면 끊는 중이던 화면이 한순간 되살아난다.
+            turnState = if (turnState == TurnState.Interrupting) TurnState.Interrupting else TurnState.Running,
+        )
+    }
 
     // 완성본이 왔으므로 조각 버퍼를 버린다. 안쪽 대화(parentToolUseId 가 있는 것)의 완성본이어도
     // 버린다 — 조각에는 부모 정보가 실려 오지 않아(AssistantTextStreaming) 버퍼에 섞여 있다.
@@ -91,11 +97,25 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         ),
     )
 
-    // 서브에이전트의 시작·진행·끝은 다음 걸음이 그린다. 이벤트가 먼저 서 있어야 그 걸음이
-    // 무엇을 접을지 정할 수 있고, 지금 얹어 두면 보여줄 화면이 없는 채로 자리만 생긴다.
-    is ChatSessionEvent.SubagentStarted -> this
-    is ChatSessionEvent.SubagentProgressed -> this
-    is ChatSessionEvent.SubagentFinished -> this
+    // 서브에이전트의 셋은 모두 바깥 도구 카드 하나에 얹힌다. 그 카드를 못 찾으면 아무 일도
+    // 하지 않는다 — 안쪽만 아는 카드를 지어내면 그 카드에는 접어 넣을 대화가 영영 없다.
+    is ChatSessionEvent.SubagentStarted -> copy(
+        entries = entries.withSubagentRunChanged(event.toolUseId) {
+            it.copy(subagentType = event.subagentType)
+        },
+    )
+
+    is ChatSessionEvent.SubagentProgressed -> copy(
+        entries = entries.withSubagentRunChanged(event.toolUseId) {
+            it.copy(lastDescription = event.description, lastToolName = event.lastToolName)
+        },
+    )
+
+    is ChatSessionEvent.SubagentFinished -> copy(
+        entries = entries.withSubagentRunChanged(event.toolUseId) {
+            it.copy(finishedStatus = event.status, outputFilePath = event.outputFilePath)
+        },
+    )
 
     is ChatSessionEvent.TurnFinished -> copy(
         entries = entries + ChatEntry.TurnEnded(
@@ -154,6 +174,19 @@ private fun List<ChatEntry>.withEntryAdded(entry: ChatEntry, parentToolUseId: St
     return withToolCallChanged(parentToolUseId) { it.copy(nestedEntries = it.nestedEntries + entry) }
         ?: (this + entry)
 }
+
+/**
+ * 그 도구 카드에 붙은 서브에이전트의 모습을 고친다. 카드가 없으면 그대로 둔다.
+ *
+ * 아직 없으면 만든다. 진행이나 끝만 받고 시작을 놓친 경우가 그것인데, 그때도 그 카드가
+ * 서브에이전트라는 것과 지금 무엇을 하는지는 사실이다 — 종류만 비어 있다.
+ */
+private fun List<ChatEntry>.withSubagentRunChanged(
+    toolUseId: String,
+    change: (SubagentRun) -> SubagentRun,
+): List<ChatEntry> =
+    withToolCallChanged(toolUseId) { it.copy(subagentRun = change(it.subagentRun ?: SubagentRun(subagentType = ""))) }
+        ?: this
 
 /** 그 도구 호출의 결과를 채운다. 카드가 없으면 그대로 둔다 — 결과만 있는 카드를 지어내지 않는다. */
 private fun List<ChatEntry>.withToolCallAnswered(toolUseId: String, answer: ToolCallAnswer): List<ChatEntry> =

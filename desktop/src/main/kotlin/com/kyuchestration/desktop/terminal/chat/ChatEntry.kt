@@ -39,6 +39,7 @@ sealed interface ChatEntry {
         val input: JsonObject,
         val answer: ToolCallAnswer? = null,
         val nestedEntries: List<ChatEntry> = emptyList(),
+        val subagentRun: SubagentRun? = null,
     ) : ChatEntry
 
     /**
@@ -105,6 +106,30 @@ data class ToolCallAnswer(
     val failed: Boolean,
     val modelVisibleText: String,
     val typedResult: JsonElement? = null,
+)
+
+/**
+ * 이 도구 호출이 띄운 서브에이전트가 지금 어디까지 왔는가(3.10 · 6.3 의 SubagentCard).
+ *
+ * **도구 호출의 인자·결과가 아니라 `system/task_*` 에서 온다.** 그래서 [ToolCallAnswer] 옆이
+ * 아니라 카드 자체에 붙는다 — 결과가 오기 전에도 채워지는 값이고, 결과가 온 뒤에도 남는다.
+ *
+ * 이 값이 있다는 것이 곧 "이 카드는 서브에이전트다" 다. **도구 이름으로 가르지 않는다** — 그
+ * 이름은 판마다 달라진다(설계 문서의 `Task` 가 이 판에서는 `Agent` 였다).
+ *
+ * @param subagentType `general-purpose` 같은 것. 진행·끝만 받고 시작을 놓친 카드에서는 비어 있다 —
+ *   그때도 진행은 사실이므로 카드를 세운다.
+ * @param lastDescription 그 에이전트가 지금 무엇을 하는 중인가(`task_progress.description`).
+ * @param lastToolName 마지막으로 부른 도구 이름.
+ * @param finishedStatus 끝났으면 그 모양(`task_notification.status`). 아직이면 null.
+ * @param outputFilePath 그 실행의 원출력이 남은 자리. 카드가 경로를 그대로 보인다.
+ */
+data class SubagentRun(
+    val subagentType: String,
+    val lastDescription: String? = null,
+    val lastToolName: String? = null,
+    val finishedStatus: String? = null,
+    val outputFilePath: String? = null,
 )
 
 /**

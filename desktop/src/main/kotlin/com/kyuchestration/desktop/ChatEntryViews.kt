@@ -68,7 +68,13 @@ internal fun ChatEntryView(
             if (isTurnInterruptionEcho(entry.text)) TurnInterruptedNotice() else UserMessageBubble(entry.text)
         is ChatEntry.AssistantSaid -> AssistantMessageBlock(entry.text)
         is ChatEntry.AssistantThought -> ThinkingBlock(entry.text)
-        is ChatEntry.ToolCall -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+        // 서브에이전트 카드로 갈리는 근거는 도구 이름이 아니라 스트림이 말해 준 사실이다
+        // (ChatEntry.SubagentRun) — 그 이름은 판마다 달라진다.
+        is ChatEntry.ToolCall -> if (entry.subagentRun != null) {
+            SubagentCard(entry, entry.subagentRun, sessionWorkingDirectory, onPermissionChoiceMade)
+        } else {
+            ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+        }
 
         is ChatEntry.PermissionAsked ->
             PermissionRequestCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
@@ -487,7 +493,7 @@ private fun EngineNoticeRow(line: String) {
  * 두 사용처가 실제로 있어서 함수로 뽑았다(원칙 4). 하나였으면 그 자리에 그대로 두었다.
  */
 @Composable
-private fun CollapsibleBlock(
+internal fun CollapsibleBlock(
     header: @Composable () -> Unit,
     containerColor: Color = Color.Transparent,
     content: @Composable () -> Unit,
@@ -531,7 +537,7 @@ private fun CollapsibleBlock(
  *   사용자가 어느 것을 열었는지 안다.
  */
 @Composable
-private fun MonospaceBlock(
+internal fun MonospaceBlock(
     text: String,
     detailTitle: String,
     textColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,

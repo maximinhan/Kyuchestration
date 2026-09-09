@@ -199,6 +199,85 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `서브에이전트 카드는 종류와 진행과 원출력 자리를 차례로 받는다`() {
+        // 셋이 다른 줄로 오고 셋 다 같은 카드에 얹힌다(3.10). 이어 붙이는 열쇠는 tool_use_id 다.
+        val started = conversationAfter(
+            RecordedChatStreamLines.AGENT_TOOL_USE,
+            RecordedChatStreamLines.TASK_STARTED,
+        )
+        val startedRun = assertNotNull(assertIs<ChatEntry.ToolCall>(started.entries.single()).subagentRun)
+        assertEquals("general-purpose", startedRun.subagentType)
+        assertNull(startedRun.lastDescription, "아직 진행이 오지 않았다")
+
+        val progressed = started.after(RecordedChatStreamLines.TASK_PROGRESS)
+        val progressedRun = assertNotNull(assertIs<ChatEntry.ToolCall>(progressed.entries.single()).subagentRun)
+        assertEquals("Reading README.txt", progressedRun.lastDescription)
+        assertEquals("Read", progressedRun.lastToolName)
+        assertNull(progressedRun.finishedStatus, "아직 끝나지 않았다")
+
+        val finished = progressed.after(RecordedChatStreamLines.TASK_NOTIFICATION)
+        val finishedRun = assertNotNull(assertIs<ChatEntry.ToolCall>(finished.entries.single()).subagentRun)
+        assertEquals("completed", finishedRun.finishedStatus)
+        assertTrue(finishedRun.outputFilePath.orEmpty().endsWith("/tasks/aadb20bff6e5d47e9.output"))
+        // 진행은 지워지지 않는다 — 끝난 카드도 그 에이전트가 마지막에 무엇을 했는지 말한다.
+        assertEquals("Read", finishedRun.lastToolName)
+    }
+
+    @Test
+    fun `서브에이전트가 받은 프롬프트는 사용자 말풍선이 되지 않는다`() {
+        // 안쪽 프롬프트가 사용자 메시지와 같은 모양으로 온다(3.10 실측) — 가르는 것은
+        // parent_tool_use_id 하나다. 이것을 보지 않으면 사용자가 쓴 적 없는 말풍선이 전사에 서고,
+        // 그 줄이 턴의 시작으로 읽혀 도는 턴 판단까지 어긋난다.
+        val conversation = conversationAfter(
+            RecordedChatStreamLines.AGENT_TOOL_USE,
+            RecordedChatStreamLines.SUBAGENT_PROMPT_ECHOED,
+        )
+
+        val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
+        assertIs<ChatEntry.UserSaid>(card.nestedEntries.single())
+        assertEquals(TurnState.Idle, conversation.turnState, "안쪽 프롬프트를 이 턴의 시작으로 읽었다")
+    }
+
+    @Test
+    fun `서브에이전트 줄이 가리키는 카드가 없으면 아무 일도 하지 않는다`() {
+        // 안쪽만 아는 카드를 지어내면 그 카드에는 접어 넣을 대화가 영영 없다.
+        val conversation = conversationAfter(RecordedChatStreamLines.TASK_STARTED)
+
+        assertEquals(emptyList(), conversation.entries)
+    }
+
+    @Test
+    fun `서브에이전트 한 벌이 통째로 오면 안쪽 대화가 그 카드 안에 접힌다`() {
+        // 실제 한 실행의 줄들을 온 순서 그대로 흘린다 — 이것이 6 단계의 완료 확인이다
+        // ("서브에이전트를 띄우면 안쪽 대화가 접힌 채로 보인다").
+        val conversation = conversationAfter(
+            RecordedChatStreamLines.AGENT_TOOL_USE,
+            RecordedChatStreamLines.TASK_STARTED,
+            RecordedChatStreamLines.SUBAGENT_PROMPT_ECHOED,
+            RecordedChatStreamLines.SUBAGENT_TEXT,
+            RecordedChatStreamLines.TASK_PROGRESS,
+            RecordedChatStreamLines.SUBAGENT_TOOL_USE,
+            RecordedChatStreamLines.SUBAGENT_TOOL_RESULT,
+            RecordedChatStreamLines.TASK_UPDATED,
+            RecordedChatStreamLines.TASK_NOTIFICATION,
+            RecordedChatStreamLines.AGENT_RESULT,
+        )
+
+        // 메인 전사에 선 것은 카드 하나뿐이다. 안쪽 대화가 본문으로 새어 나오면 여기서 갈린다.
+        val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
+        assertEquals(
+            listOf(
+                ChatEntry.UserSaid::class,
+                ChatEntry.AssistantSaid::class,
+                ChatEntry.ToolCall::class,
+            ),
+            card.nestedEntries.map { it::class },
+        )
+        assertNotNull(card.answer, "바깥 호출의 결과가 카드를 채우지 못했다")
+        assertNotNull(card.subagentRun)
+    }
+
+    @Test
     fun `턴이 끝나면 배지가 붙고 비용이 쌓인다`() {
         val conversation = conversationAfter(
             RecordedChatStreamLines.RESULT_SUCCESS,
