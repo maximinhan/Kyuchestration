@@ -1100,7 +1100,7 @@ stdin 을 파이프로 물려 띄우면 stdout·stderr 에 한 글자도 내지 
 | 앱 이미지 | 164 356 180 B | 157 671 123 B | **-6.4 MiB** (-4.1 %) |
 | `lib/app` 의 jar | 63 개 | 56 개 | jediterm-core · jediterm-ui · pty4j · jna · jna-platform · slf4j-api · slf4j-simple |
 
-**pty4j 하나가 JNA 둘을 데리고 있었다.** 직접 적은 의존 셋을 지웠는데 사라진 jar 은 일곱이다 — 줄어든 5 MB 의 절반이 아무도 이름을 적지 않은 자리에서 나왔다.
+**pty4j 하나가 JNA 둘을 데리고 있었다.** 직접 적은 의존 넷(jediterm-ui · jediterm-core · pty4j · slf4j-simple)을 지웠는데 사라진 jar 은 일곱이다 — 줄어든 6.4 MiB 의 절반(JNA 둘이 3.1 MiB)이 아무도 이름을 적지 않은 자리에서 나왔다.
 
 **남겨 둔 자리 셋을 적어둔다.**
 
