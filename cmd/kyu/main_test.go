@@ -368,8 +368,8 @@ func TestClaudeAuthStoresAndGivesBackTheTokenOnAMachineWithoutAKeychain(t *testi
 }
 
 func TestSessionCommandAnswersOnAMachineWithoutTmux(t *testing.T) {
-	// 앱은 claude 를 자기 PTY 에서 직접 띄운다. 이 명령은 그 앞에서 "무엇을 띄울까" 에만 답하므로
-	// 바깥 명령을 하나도 부르지 않아야 하고, 그 사실을 라우팅 자리에서 고정한다(설계 문서 5.2).
+	// 앱은 claude 를 자기 자식 프로세스로 직접 띄운다. 이 명령은 그 앞에서 "무엇을 띄울까" 에만
+	// 답하므로 바깥 명령을 하나도 부르지 않아야 하고, 그 사실을 라우팅 자리에서 고정한다(설계 문서 5.2).
 	//
 	// PATH 를 비워 실행한다. git 도 없는 상태이고, 그래도 답이 나와야 한다.
 	workDirPath := t.TempDir()

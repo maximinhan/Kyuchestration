@@ -96,7 +96,7 @@ sealed interface DiagnosticLogEntry {
      *
      * @param exitCode 세션이 남긴 종료 코드. 예외로 끝나 알 수 없으면 null.
      * @param resumeFailureSuspected 이어가려던 대화를 열지 못한 것으로 보이는가
-     *   (EmbeddedTerminalState.SessionEndedOnScreen 이 화면에서 쓰는 것과 같은 판단이다).
+     *   (화면이 쓰는 것과 같은 판단이다 — terminal/ResumeFailureSuspicion.kt).
      */
     data class SessionEndedUnexpectedly(
         val targetLabel: String,

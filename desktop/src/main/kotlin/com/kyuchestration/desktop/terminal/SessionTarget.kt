@@ -1,7 +1,7 @@
 package com.kyuchestration.desktop.terminal
 
 /**
- * 앱 안의 터미널이 들어갈 세션 하나.
+ * 앱이 열 세션 하나.
  *
  * 문자열 하나로 두지 않는다. 메인 세션은 이름이 아니라 **인자가 없는 것**으로 가리킨다
  * (`kyu session-command` 는 인자 없는 실행을 메인 세션으로 읽는다). 그 차이를 문자열 비교로

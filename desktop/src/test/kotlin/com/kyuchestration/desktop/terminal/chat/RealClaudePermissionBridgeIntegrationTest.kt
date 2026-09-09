@@ -4,7 +4,6 @@ import com.kyuchestration.desktop.kyu.realKyuCommandRunnerOrSkip
 import com.kyuchestration.desktop.platform.childProcessEnvironment
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
-import com.kyuchestration.desktop.terminal.SessionMode
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.terminal.planSessionEntry
@@ -192,7 +191,7 @@ class RealClaudePermissionBridgeIntegrationTest {
     }
 
     private fun sessionPlanAskingThrough(approvalSocketPath: Path): SessionEntryPlan {
-        val answer = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip(), SessionMode.Chat)
+        val answer = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
             .sessionCommandFor(
                 workDirPath = temporaryDirectory,
                 target = SessionTarget.Main,
