@@ -72,15 +72,16 @@ sealed interface ChatEntry {
      * 전사 안에 두는 것이 뜻이다. 화면 아래 한 자리에 마지막 턴의 것만 두면 스크롤을 올렸을 때
      * 어느 답이 얼마였는지 알 수 없다 — 비용은 그 턴에 붙는 사실이다.
      *
-     * @param permissionDenialCount 권한이 없어 못 한 도구 호출의 수(3.6 의 `dontAsk`). 항목의
-     *   안쪽 모양은 아직 재지 못했으므로 세기만 한다 — 없는 필드 이름을 지어내지 않는다(원칙 15).
+     * @param permissionDenials 권한이 없어 못 한 도구 호출들(3.6). **사용자가 승인 카드에서 직접
+     *   거부한 것은 여기 없다** — 그것은 그 카드가 이미 말하고 있고, 같은 사실을 턴 끝에서 다시
+     *   말하면 사용자는 자기가 거부한 것 말고 무언가가 더 막혔다고 읽는다.
      */
     data class TurnEnded(
         val outcome: TurnOutcome,
         val costUsd: Double,
         val usage: TurnUsage,
         val durationMillis: Long,
-        val permissionDenialCount: Int,
+        val permissionDenials: List<PermissionDenial>,
     ) : ChatEntry
 
     /**

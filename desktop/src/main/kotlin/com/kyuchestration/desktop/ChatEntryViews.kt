@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
+import com.kyuchestration.desktop.terminal.chat.PermissionDenial
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.ToolCallAnswer
 import com.kyuchestration.desktop.terminal.chat.TurnOutcome
@@ -492,22 +493,67 @@ private fun TurnFooter(entry: ChatEntry.TurnEnded) {
         turnCostLabel(entry.costUsd),
         turnTokenLabel(entry.usage),
         turnElapsedLabel(entry.durationMillis),
-        // 권한이 없어 못 한 일이 있으면 그 사실이 화면에 있어야 한다(3.6). 없으면 모델이 "권한이
-        // 없어서 못 했습니다" 라고 말하는 것이 유일한 통로가 된다.
-        entry.permissionDenialCount.takeIf { it > 0 }?.let { "권한 거절 ${it}건" },
     )
 
-    Text(
-        text = badges.joinToString(" · "),
-        style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
-        color = if (entry.outcome == TurnOutcome.Completed) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            KyuTheme.statusColors.caution
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = badges.joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = if (entry.outcome == TurnOutcome.Completed) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                KyuTheme.statusColors.caution
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (entry.permissionDenials.isNotEmpty()) {
+            PermissionDenialNotice(entry.permissionDenials)
+        }
+    }
+}
+
+/**
+ * 권한에 막혀 아예 일어나지 못한 호출들(6.3 의 `PermissionDenialNotice` · 3.6).
+ *
+ * **이 줄이 없으면 그 사실이 화면 어디에도 없다.** 묻지 않고 거절하는 모드에서는 승인 카드가
+ * 뜨지 않으므로(3.6 의 `dontAsk`), 사용자가 "왜 그 파일이 안 만들어졌지" 를 알 통로는 모델이
+ * 그것을 말해 주기를 바라는 것뿐이다.
+ *
+ * **묻고 거부한 것은 여기 없다.** 그것은 그 승인 카드가 이미 말한다(ChatEntry.TurnEnded).
+ *
+ * 인자를 접어 둔다. 무엇이 막혔는지는 이름으로 충분하고, 그 인자에는 쓰려던 파일 내용이
+ * 통째로 들어 있을 수 있다 — 대화 흐름 안에 그것을 펴 두면 그 위아래가 화면 밖으로 밀린다.
+ */
+@Composable
+private fun PermissionDenialNotice(denials: List<PermissionDenial>) {
+    CollapsibleBlock(
+        header = {
+            Text(
+                text = "권한에 막혀 못 한 호출 ${denials.size}건 — " +
+                    denials.joinToString(", ") { toolLabel(it.toolName) },
+                style = MaterialTheme.typography.labelSmall,
+                color = KyuTheme.statusColors.caution,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
-        modifier = Modifier.fillMaxWidth(),
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "묻지 않고 거절되었습니다 — 이 세션의 권한 모드가 그렇게 정해져 있습니다.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            denials.forEach {
+                MonospaceBlock(
+                    text = prettyPrintedToolInput(it.input),
+                    detailTitle = "${toolLabel(it.toolName)} 인자",
+                )
+            }
+        }
+    }
 }
 
 /** 잘 끝난 턴은 굳이 말하지 않는다 — 배지에 비용이 있는 것이 이미 끝났다는 뜻이다. */

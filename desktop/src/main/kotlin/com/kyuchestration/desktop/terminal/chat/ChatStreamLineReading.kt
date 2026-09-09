@@ -240,7 +240,13 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
         ),
         permissionDenials = line.arrayOrNull("permission_denials")
             ?.filterIsInstance<JsonObject>()
-            ?.map(::PermissionDenial)
+            ?.map {
+                PermissionDenial(
+                    toolName = it.stringOrNull("tool_name").orEmpty(),
+                    toolUseId = it.stringOrNull("tool_use_id").orEmpty(),
+                    input = it.objectOrNull("tool_input") ?: JsonObject(emptyMap()),
+                )
+            }
             .orEmpty(),
         durationMillis = line.longOrNull("duration_ms") ?: 0,
     )

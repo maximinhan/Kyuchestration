@@ -252,12 +252,14 @@ data class TurnUsage(
 /**
  * 권한이 없어 못 한 도구 호출 하나(`result.permission_denials` — 3.6).
  *
- * **안쪽 모양을 재지 못했다.** 이 배열이 비어 있지 않았던 실측은 `dontAsk` 하나였고(A.6), 그때도
- * 건수만 셌지 항목의 키를 적어두지 않았다. 그래서 온 것을 그대로 들고 있는다 — 지금 필드 이름을
- * 지어내면 그 이름이 맞는지 아무도 모르는 채로 굳는다(원칙 15). 화면이 이것을 그리는 6 단계에서
- * 실제 값을 보고 가른다.
+ * **6 단계가 안쪽 모양을 쟀다**(2026-09-08, `--permission-mode dontAsk` 로 Write 를 시켜 받았다).
+ * 항목은 셋이다 — `tool_name` · `tool_use_id` · `tool_input`. 3 단계는 이 모양을 몰라 온 것을
+ * 통째로 들고 있었는데, 화면이 "무엇이 막혔는가" 를 말하려면 이름과 인자가 갈려 있어야 한다.
+ *
+ * @param toolUseId 이 값이 전사의 카드와 이 항목을 잇는다. 사용자가 승인 카드에서 직접 거부한
+ *   호출은 그 카드가 이미 말하고 있으므로, 화면은 이 값으로 그것을 가려낸다.
  */
-data class PermissionDenial(val fields: JsonObject)
+data class PermissionDenial(val toolName: String, val toolUseId: String, val input: JsonObject)
 
 /**
  * 한도 창 하나(`rate_limit_event.rate_limit_info.unifiedWindows` — 3.12).

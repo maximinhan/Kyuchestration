@@ -125,7 +125,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
             costUsd = event.costUsd,
             usage = event.usage,
             durationMillis = event.durationMillis,
-            permissionDenialCount = event.permissionDenials.size,
+            permissionDenials = event.permissionDenials.filterNot { entries.answeredPermissionCardFor(it) },
         ),
         // 턴이 끝났는데 조각이 남아 있다면 완성본이 오지 않은 것이다(중단된 턴이 그렇다).
         // 그 잘린 문장을 화면에 남겨 두면 다음 턴의 답 위에 계속 떠 있는다.
@@ -223,6 +223,21 @@ private fun List<ChatEntry>.withToolCallChanged(
     }
 
     return changedEntries.takeIf { changed }
+}
+
+/**
+ * 이 거절을 사용자가 카드에서 직접 답한 적이 있는가.
+ *
+ * **이 갈래를 가르는 이유는 같은 사실을 두 번 말하지 않기 위해서다.** 화면에 뜬 승인 카드에서
+ * 거부를 누른 호출이 턴 끝의 목록에도 실려 오면, 사용자는 자기가 거부한 것 말고 무언가가 더
+ * 막혔다고 읽는다. 카드가 없는 거절 — 관문이 아예 열리지 않고 막힌 것(3.6 의 `dontAsk`) — 만
+ * 턴 끝이 말한다.
+ *
+ * 브리지로 답한 거절이 그 목록에 실려 오는지는 아직 재지 못했다. 실려 오든 아니든 이 규칙의
+ * 답은 같다 — 실려 오면 걸러지고, 안 오면 걸러낼 것이 없다.
+ */
+private fun List<ChatEntry>.answeredPermissionCardFor(denial: PermissionDenial): Boolean = any {
+    it is ChatEntry.PermissionAsked && it.toolUseId == denial.toolUseId && it.answer != null
 }
 
 /**

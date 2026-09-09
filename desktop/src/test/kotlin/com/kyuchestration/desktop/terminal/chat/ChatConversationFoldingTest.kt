@@ -10,6 +10,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -304,6 +305,31 @@ class ChatConversationFoldingTest {
         assertEquals(263, ended.usage.outputTokens)
         // 배지는 그 턴의 것이고 머리말은 이 대화가 쓴 것 전부를 말한다.
         assertEquals(0.0888635 * 2, conversation.totalCostUsd)
+    }
+
+    @Test
+    fun `묻지 않고 거절된 호출은 턴 끝에 이름과 인자로 남는다`() {
+        // 묻지 않는 모드에서는 승인 카드가 뜨지 않는다(3.6). 이 목록이 없으면 사용자가
+        // "왜 그 파일이 안 만들어졌지" 를 알 통로는 모델의 말 하나뿐이다.
+        val conversation = conversationAfter(RecordedChatStreamLines.RESULT_WITH_PERMISSION_DENIALS)
+
+        val ended = assertIs<ChatEntry.TurnEnded>(conversation.entries.single())
+        val denial = ended.permissionDenials.single()
+        assertEquals("Write", denial.toolName)
+        assertEquals("toolu_01J3E2oezHZVWiyWBHWPGdxZ", denial.toolUseId)
+        assertEquals("/tmp/fakerepo/denied.txt", denial.input["file_path"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `카드에서 사용자가 거부한 것은 턴 끝이 다시 말하지 않는다`() {
+        // 같은 사실을 두 번 말하면 사용자는 자기가 거부한 것 말고 무언가가 더 막혔다고 읽는다.
+        val conversation = ChatConversation(target = SessionTarget.Main)
+            .after(permissionRequested("Write", "toolu_01J3E2oezHZVWiyWBHWPGdxZ"))
+            .withPermissionAnswered("toolu_01J3E2oezHZVWiyWBHWPGdxZ", PermissionAnswer.Denied("이 파일은 손대지 마세요"))
+            .after(RecordedChatStreamLines.RESULT_WITH_PERMISSION_DENIALS)
+
+        val ended = assertIs<ChatEntry.TurnEnded>(conversation.entries.last())
+        assertEquals(emptyList(), ended.permissionDenials)
     }
 
     @Test
