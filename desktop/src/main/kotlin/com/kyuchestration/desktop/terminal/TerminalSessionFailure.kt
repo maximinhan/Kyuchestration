@@ -10,9 +10,9 @@ import java.nio.file.Path
  * "그 세션에 왜 못 들어갔는가" 다.
  *
  * **이름에 아직 터미널이 남아 있다.** 터미널 화면이 사라진 지금 이 타입이 담는 것은 챗 세션의
- * 진입 실패뿐이고, 이름은 `SessionEntryFailure` 가 맞다. 이 PR 에서 바꾸지 않는 이유는 그
- * 개명이 `terminal/chat/` 의 파일 열 개를 건드리는데 그 자리를 지금 다른 작업(6 단계)이 쥐고
- * 있어서다 — 삭제와 개명을 한 PR 에 섞으면 리뷰가 둘로 갈린다. 개명은 그 뒤의 PR 한 줄기다.
+ * 진입 실패뿐이고, 이름은 `SessionEntryFailure` 가 맞다. 터미널을 지우는 PR 에서 함께 바꾸지
+ * 않은 이유는 그 개명이 `terminal/chat/` 의 파일 열 개를 건드리기 때문이다 — 삭제와 개명을 한
+ * PR 에 섞으면 리뷰가 둘로 갈린다. 개명은 그 자체로 한 줄기다(chat-ui-design.md 7.4).
  */
 sealed class TerminalSessionFailure(
     message: String,
