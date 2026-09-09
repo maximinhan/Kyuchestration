@@ -1096,7 +1096,7 @@ stdin 을 파이프로 물려 띄우면 stdout·stderr 에 한 글자도 내지 
 
 | 잰 것 | 전 | 후 | 차이 |
 |---|---|---|---|
-| deb | 70 491 640 B | 64 278 746 B | **-5.9 MiB** (-8.8 %) |
+| deb | 70 491 752 B | 64 277 950 B | **-5.9 MiB** (-8.8 %) |
 | 앱 이미지 | 164 356 180 B | 157 671 123 B | **-6.4 MiB** (-4.1 %) |
 | `lib/app` 의 jar | 63 개 | 56 개 | jediterm-core · jediterm-ui · pty4j · jna · jna-platform · slf4j-api · slf4j-simple |
 
