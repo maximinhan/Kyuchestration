@@ -29,13 +29,19 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
     //
     // **되돌아온 것이 그 턴의 시작이다**(3.11). 큐에 든 말은 그 턴이 시작할 때에야 돌아오므로,
     // 이 자리가 "턴이 실제로 돌고 있다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.
-    is ChatSessionEvent.UserMessageEchoed -> copy(
-        entries = entries + ChatEntry.UserSaid(event.text),
-        pendingUserMessages = pendingUserMessages - event.text,
-        // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
-        // 읽으면 끊는 중이던 화면이 한순간 되살아난다.
-        turnState = if (turnState == TurnState.Interrupting) TurnState.Interrupting else TurnState.Running,
-    )
+    // 안쪽 대화의 첫 줄이면 그 카드 안으로 접고 여기서 끝낸다. 서브에이전트가 받은 프롬프트가
+    // 이 모양으로 오는데(3.10 실측), 그것은 사용자가 한 말도 이 턴의 시작도 아니다.
+    is ChatSessionEvent.UserMessageEchoed -> if (event.parentToolUseId != null) {
+        copy(entries = entries.withEntryAdded(ChatEntry.UserSaid(event.text), event.parentToolUseId))
+    } else {
+        copy(
+            entries = entries + ChatEntry.UserSaid(event.text),
+            pendingUserMessages = pendingUserMessages - event.text,
+            // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
+            // 읽으면 끊는 중이던 화면이 한순간 되살아난다.
+            turnState = if (turnState == TurnState.Interrupting) TurnState.Interrupting else TurnState.Running,
+        )
+    }
 
     // 완성본이 왔으므로 조각 버퍼를 버린다. 안쪽 대화(parentToolUseId 가 있는 것)의 완성본이어도
     // 버린다 — 조각에는 부모 정보가 실려 오지 않아(AssistantTextStreaming) 버퍼에 섞여 있다.
@@ -65,6 +71,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
                 toolUseId = event.toolUseId,
                 toolName = event.toolName,
                 input = event.input,
+                requestedAt = event.requestedAt,
             ),
             event.parentToolUseId,
         ),
@@ -77,6 +84,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
                 failed = event.failed,
                 modelVisibleText = event.modelVisibleText,
                 typedResult = event.typedResult,
+                answeredAt = event.answeredAt,
             ),
         ),
     )
@@ -91,9 +99,25 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         ),
     )
 
-    // 서브에이전트의 진행은 6 단계가 그린다. 지금 이것을 어딘가에 얹어 두면 그 값을 보여줄 화면이
-    // 없는 채로 자리만 생긴다 — 도구 카드는 이미 "도는 중" 을 말하고 있다(5.7).
-    is ChatSessionEvent.DelegationProgressed -> this
+    // 서브에이전트의 셋은 모두 바깥 도구 카드 하나에 얹힌다. 그 카드를 못 찾으면 아무 일도
+    // 하지 않는다 — 안쪽만 아는 카드를 지어내면 그 카드에는 접어 넣을 대화가 영영 없다.
+    is ChatSessionEvent.SubagentStarted -> copy(
+        entries = entries.withSubagentRunChanged(event.toolUseId) {
+            it.copy(subagentType = event.subagentType)
+        },
+    )
+
+    is ChatSessionEvent.SubagentProgressed -> copy(
+        entries = entries.withSubagentRunChanged(event.toolUseId) {
+            it.copy(lastDescription = event.description, lastToolName = event.lastToolName)
+        },
+    )
+
+    is ChatSessionEvent.SubagentFinished -> copy(
+        entries = entries.withSubagentRunChanged(event.toolUseId) {
+            it.copy(finishedStatus = event.status, outputFilePath = event.outputFilePath)
+        },
+    )
 
     is ChatSessionEvent.TurnFinished -> copy(
         entries = entries + ChatEntry.TurnEnded(
@@ -101,7 +125,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
             costUsd = event.costUsd,
             usage = event.usage,
             durationMillis = event.durationMillis,
-            permissionDenialCount = event.permissionDenials.size,
+            permissionDenials = event.permissionDenials.filterNot { entries.answeredPermissionCardFor(it) },
         ),
         // 턴이 끝났는데 조각이 남아 있다면 완성본이 오지 않은 것이다(중단된 턴이 그렇다).
         // 그 잘린 문장을 화면에 남겨 두면 다음 턴의 답 위에 계속 떠 있는다.
@@ -153,6 +177,19 @@ private fun List<ChatEntry>.withEntryAdded(entry: ChatEntry, parentToolUseId: St
         ?: (this + entry)
 }
 
+/**
+ * 그 도구 카드에 붙은 서브에이전트의 모습을 고친다. 카드가 없으면 그대로 둔다.
+ *
+ * 아직 없으면 만든다. 진행이나 끝만 받고 시작을 놓친 경우가 그것인데, 그때도 그 카드가
+ * 서브에이전트라는 것과 지금 무엇을 하는지는 사실이다 — 종류만 비어 있다.
+ */
+private fun List<ChatEntry>.withSubagentRunChanged(
+    toolUseId: String,
+    change: (SubagentRun) -> SubagentRun,
+): List<ChatEntry> =
+    withToolCallChanged(toolUseId) { it.copy(subagentRun = change(it.subagentRun ?: SubagentRun(subagentType = ""))) }
+        ?: this
+
 /** 그 도구 호출의 결과를 채운다. 카드가 없으면 그대로 둔다 — 결과만 있는 카드를 지어내지 않는다. */
 private fun List<ChatEntry>.withToolCallAnswered(toolUseId: String, answer: ToolCallAnswer): List<ChatEntry> =
     withToolCallChanged(toolUseId) { it.copy(answer = answer) } ?: this
@@ -186,6 +223,21 @@ private fun List<ChatEntry>.withToolCallChanged(
     }
 
     return changedEntries.takeIf { changed }
+}
+
+/**
+ * 이 거절을 사용자가 카드에서 직접 답한 적이 있는가.
+ *
+ * **이 갈래를 가르는 이유는 같은 사실을 두 번 말하지 않기 위해서다.** 화면에 뜬 승인 카드에서
+ * 거부를 누른 호출이 턴 끝의 목록에도 실려 오면, 사용자는 자기가 거부한 것 말고 무언가가 더
+ * 막혔다고 읽는다. 카드가 없는 거절 — 관문이 아예 열리지 않고 막힌 것(3.6 의 `dontAsk`) — 만
+ * 턴 끝이 말한다.
+ *
+ * 브리지로 답한 거절이 그 목록에 실려 오는지는 아직 재지 못했다. 실려 오든 아니든 이 규칙의
+ * 답은 같다 — 실려 오면 걸러지고, 안 오면 걸러낼 것이 없다.
+ */
+private fun List<ChatEntry>.answeredPermissionCardFor(denial: PermissionDenial): Boolean = any {
+    it is ChatEntry.PermissionAsked && it.toolUseId == denial.toolUseId && it.answer != null
 }
 
 /**

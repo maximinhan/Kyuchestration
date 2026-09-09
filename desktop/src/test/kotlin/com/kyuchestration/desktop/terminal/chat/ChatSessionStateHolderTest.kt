@@ -81,7 +81,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("1 더하기 1은?"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("1 더하기 1은?", parentToolUseId = null))
         opener.lastSession.emit(ChatSessionEvent.AssistantTextArrived("2", parentToolUseId = null))
         runCurrent()
 
@@ -99,7 +99,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         val mainSession = opener.lastSession
-        mainSession.emit(ChatSessionEvent.UserMessageEchoed("메인에게 한 말"))
+        mainSession.emit(ChatSessionEvent.UserMessageEchoed("메인에게 한 말", parentToolUseId = null))
         runCurrent()
 
         holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
@@ -183,7 +183,7 @@ class ChatSessionStateHolderTest {
 
         // 되돌아온 말이 result 보다 먼저 온다(실측: 2.4 초 · 80 초). 그 순서를 지키지 않으면
         // 이 검증은 앱에 없는 상태를 만들어 놓고 그 결과를 본다.
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
@@ -220,7 +220,7 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("사과의 색은?")
         runCurrent()
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null))
         runCurrent()
 
         val conversation = onScreenConversation(holder)
@@ -238,7 +238,7 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("사과의 색은?")
         runCurrent()
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null))
         runCurrent()
         assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
 
@@ -250,7 +250,7 @@ class ChatSessionStateHolderTest {
         assertEquals(TurnState.Idle, betweenTurns.turnState)
         assertEquals(listOf("사과의 색은?"), betweenTurns.pendingUserMessages)
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("사과의 색은?"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("사과의 색은?", parentToolUseId = null))
         runCurrent()
         assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
     }
@@ -265,7 +265,7 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("긴 답을 줘")
         holder.sendUserMessage("큐에 드는 말")
         runCurrent()
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
@@ -283,7 +283,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘", parentToolUseId = null))
         runCurrent()
 
         holder.interruptOnScreenTurn()
@@ -302,7 +302,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘", parentToolUseId = null))
         runCurrent()
         holder.interruptOnScreenTurn()
         runCurrent()
@@ -340,7 +340,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘"))
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘", parentToolUseId = null))
         runCurrent()
 
         holder.interruptOnScreenTurn()

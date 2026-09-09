@@ -189,10 +189,10 @@ app-owned 3.4 가 이 안을 통째로 기각했다. 그 문서의 제목이 이
 | `status` | `{"status":"requesting"}` — API 요청을 보내는 중 |
 | `thinking_tokens` | `estimated_tokens` · `estimated_tokens_delta` |
 | `hook_started` · `hook_response` | 훅 이름·이벤트·종료 코드·출력 |
-| `task_started` | 서브에이전트 시작 — `task_id` · `tool_use_id` · `subagent_type` · `spawn_depth` · `prompt` |
-| `task_progress` | 서브에이전트 진행 — `usage.total_tokens` · `tool_uses` · `duration_ms` · `last_tool_name` |
-| `task_updated` | 상태 변화 — `completed` · `killed` |
-| `task_notification` | 끝났음과 `output_file` 경로 |
+| `task_started` | 서브에이전트 시작 — `task_id` · `tool_use_id` · `subagent_type` · `spawn_depth` · `task_type` · `is_backgrounded` · `prompt` |
+| `task_progress` | 서브에이전트 진행 — `task_id` · `tool_use_id` · `description` · `usage.total_tokens` · `tool_uses` · `duration_ms` · `last_tool_name` |
+| `task_updated` | 상태 변화 — `task_id` · **`patch`**`.status` · `patch.end_time`. **`tool_use_id` 가 없다**(6 단계 실측) |
+| `task_notification` | 끝났음 — `task_id` · `tool_use_id` · `status` · `output_file` · `summary` · `usage` |
 | `background_tasks_changed` | 백그라운드 작업 목록 전체 |
 
 **`assistant` 는 메시지 단위가 아니라 블록 단위로 온다.** 한 턴에서 텍스트 블록 하나와 도구 호출 블록 하나가 나오면 `assistant` 이벤트가 둘이다. 어댑터가 "assistant 이벤트 하나 = 말풍선 하나" 로 두면 도구 호출이 빈 말풍선이 된다.
@@ -347,18 +347,32 @@ app-owned 3.4 가 이 안을 통째로 기각했다. 그 문서의 제목이 이
 
 **(가) MCP 진행 알림 — 오지 않는다.** 프로브 서버가 `_meta.progressToken` 을 받아 `notifications/progress` 를 3 회 보냈다. 서버 로그에 보낸 기록이 남아 있다. 그런데 `claude` 의 출력 스트림에서 `progress` 라는 낱말이 들어간 이벤트는 **0 개**였다. `tool_use` 와 `tool_result` 사이 6 초 동안 아무것도 오지 않았다.
 
-**(나) 서브에이전트(`Task`) — 온다.** 그것도 풍부하게.
+**(나) 서브에이전트 — 온다.** 그것도 풍부하게.
 
 | 이벤트 | 담는 것 |
 |---|---|
-| `system/task_started` | `task_id` · `tool_use_id` · `subagent_type` · `spawn_depth` · 프롬프트 전문 |
-| `system/task_progress` | `description`("Reading README.txt") · `usage.total_tokens` · `tool_uses` · `duration_ms` · `last_tool_name` |
-| `system/task_updated` | `{"status":"completed"}` |
-| `system/task_notification` | `output_file` 경로 |
-| 안쪽 대화 | `--forward-subagent-text` 를 켜면 서브에이전트의 `assistant`·`user`·도구 호출이 **`parent_tool_use_id` 가 채워진 채로** 인라인으로 온다 (프로브에서 5 개) |
+| `system/task_started` | `task_id` · `tool_use_id` · `subagent_type` · `spawn_depth` · `task_type` · 프롬프트 전문 |
+| `system/task_progress` | `description`("Reading README.txt") · `tool_use_id` · `usage.total_tokens` · `tool_uses` · `duration_ms` · `last_tool_name` |
+| `system/task_updated` | `patch: {status: "completed", end_time: …}` — **`tool_use_id` 가 없다** |
+| `system/task_notification` | `tool_use_id` · `status` · `output_file` · `summary` · `usage` |
+| 안쪽 대화 | 서브에이전트의 `user`·도구 호출·도구 결과가 **`parent_tool_use_id` 가 채워진 채로** 인라인으로 온다. **그 에이전트가 한 말과 사고 블록은 `--forward-subagent-text` 를 켜야 온다** |
+| 바깥 도구 결과 | `content` 가 텍스트 블록 **둘**(에이전트의 답 · `agentId` 와 사용량). 곁가지에 `status`·`agentType`·`prompt` |
 | `result.subagent_stats` | `spawned` · `completed` · `failed` · `max_depth` · `by_type` |
 
 **`parent_tool_use_id` 가 챗 UI 의 중첩 열쇠다.** 그 값이 있는 이벤트는 바깥 도구 카드 안으로 접어 넣고, `null` 인 것만 대화 본문에 둔다.
+
+#### 3.10.1 6 단계가 다시 잰 것 (2026-09-08 · `claude` 2.1.259)
+
+카드를 그리려면 필드 이름과 이어 붙일 열쇠가 맞아야 해서, 같은 프롬프트를 **엔진이 조립하는 챗 모드 플래그 그대로** 두 번 돌려 갈랐다. 넷이 위 표를 고쳤다.
+
+| 잰 것 | 결과 | 화면에 미친 영향 |
+|---|---|---|
+| 서브에이전트를 띄우는 도구 이름 | **`Task` 가 아니라 `Agent`** | 카드의 갈래를 이름으로 정하지 않는다 — `task_started` 가 "이것이 서브에이전트다" 를 말한다 |
+| `--forward-subagent-text` 가 더하는 것 | 그것 없이도 안쪽 **도구 호출과 프롬프트**는 온다. **말과 사고 블록만** 이 플래그에 달렸다 | 엔진의 챗 모드 플래그에 이것을 더했다(`claude_command.go`) |
+| `task_updated` 의 모양 | `patch.status` 이고 **`tool_use_id` 가 없다** | 카드에 이어 붙일 열쇠가 없고, 말하는 것("끝났다")은 `task_notification` 과 바깥 도구 결과가 이미 말한다 — 어댑터가 이 줄에 갈래를 두지 않는다 |
+| 안쪽 도구 결과의 곁가지 | **`tool_use_result` 가 없다** | 안쪽 카드는 모델이 읽은 텍스트로만 그린다(바깥 카드와 다른 점) |
+
+**되돌아온 사용자 메시지에도 `parent_tool_use_id` 가 실린다.** 서브에이전트가 받은 프롬프트가 그 모양으로 오는데, 그것을 보지 않으면 사용자가 쓴 적 없는 말풍선이 메인 전사에 서고 그 줄이 턴의 시작으로 읽힌다(3.14 의 규칙이 여기서 한 겹 더 필요하다).
 
 **설계에 미치는 영향**: 오케스트레이션 위임은 MCP 도구라서 (가) 쪽이다 — v1 의 위임 카드는 "도는 중" 과 경과 시간까지만 보인다. 그 이상을 원하면 진행을 **승인 브리지가 이미 쓰는 앱 소켓으로** 밀어야 한다. 5.7 이 그 판단이다.
 
@@ -608,8 +622,11 @@ sealed interface ChatSessionEvent {
         val connectedMcpServers: List<McpServerStatus>,
     ) : ChatSessionEvent
 
-    /** --replay-user-messages 가 되돌려준 사용자 메시지(3.14 · 원칙 14). */
-    data class UserMessageEchoed(val text: String) : ChatSessionEvent
+    /**
+     * --replay-user-messages 가 되돌려준 사용자 메시지(3.14 · 원칙 14).
+     * parentToolUseId 가 채워지면 서브에이전트가 받은 프롬프트다 — 사용자의 말이 아니다(3.10.1).
+     */
+    data class UserMessageEchoed(val text: String, val parentToolUseId: String?) : ChatSessionEvent
 
     data class AssistantTextArrived(val text: String, val parentToolUseId: String?) : ChatSessionEvent
     data class AssistantThinkingArrived(val text: String, val parentToolUseId: String?) : ChatSessionEvent
@@ -617,20 +634,24 @@ sealed interface ChatSessionEvent {
     /** stream_event 의 글자 조각. 완성본은 AssistantTextArrived 로 다시 온다(3.3). */
     data class AssistantTextStreaming(val chunk: String) : ChatSessionEvent
 
+    /** requestedAt·answeredAt 은 그 줄의 timestamp 다 — 도는 도구의 경과 시간을 앱이 다시 재지 않는다(6 단계). */
     data class ToolCallRequested(
         val toolUseId: String, val toolName: String,
-        val input: JsonObject, val parentToolUseId: String?,
+        val input: JsonObject, val parentToolUseId: String?, val requestedAt: Instant?,
     ) : ChatSessionEvent
 
     data class ToolCallAnswered(
         val toolUseId: String, val failed: Boolean,
-        val modelVisibleText: String, val typedResult: JsonElement?,
+        val modelVisibleText: String, val typedResult: JsonElement?, val answeredAt: Instant?,
     ) : ChatSessionEvent
 
     /** system/task_* — 서브에이전트만 온다. MCP 도구는 오지 않는다(3.10). */
-    data class DelegationProgressed(
-        val taskId: String, val toolUseId: String,
-        val description: String, val lastToolName: String?,
+    data class SubagentStarted(val toolUseId: String, val subagentType: String) : ChatSessionEvent
+    data class SubagentProgressed(
+        val toolUseId: String, val description: String, val lastToolName: String?,
+    ) : ChatSessionEvent
+    data class SubagentFinished(
+        val toolUseId: String, val status: String, val outputFilePath: String?,
     ) : ChatSessionEvent
 
     data class TurnFinished(
@@ -646,6 +667,10 @@ sealed interface ChatSessionEvent {
     data class SessionEnded(val exitCode: Int) : ChatSessionEvent
 }
 ```
+
+**6 단계에서 이름 하나를 바꿨다.** 위 셋의 이름이 `DelegationProgressed` 였는데, 같은 단계에서
+`run_in_repo` 위임 카드가 서면서 "위임" 이라는 낱말이 두 가지를 가리키게 됐다 — 이 이벤트가
+말하는 것은 서브에이전트뿐이고(3.10), 오케스트레이션 위임은 이 줄을 아예 내지 않는다.
 
 **`AssistantTextStreaming` 과 `AssistantTextArrived` 를 가르는 이유**: 조각은 화면을 부드럽게 하려고 있는 것이고 전사의 사실은 완성본이다. 상태 홀더는 조각을 임시 버퍼에 쌓다가 완성본이 오면 버퍼를 버리고 완성본으로 바꾼다. **조각만으로 전사를 만들면 중단된 턴의 잘린 문장이 영구히 전사에 남는다.**
 
@@ -754,15 +779,19 @@ data class ChatConversation(
 
 | 보이는 것 | 출처 |
 |---|---|
-| 어느 레포에 무엇을 시켰나 | `input.repo` · `input.task` |
-| 경과 시간 | 앱이 잰다 — 두 이벤트 사이 |
+| 어느 레포에 무엇을 시켰나 | `input.repo` · `input.prompt` |
+| 경과 시간 | 시작한 때는 **그 줄의 `timestamp`**, 지금은 이 기계의 시계 |
 | 끝난 뒤의 결과와 원출력 파일 | `ToolCallAnswered` · orchestration 5.4.3 의 `.coord/runs/` |
 
 **진행 막대는 없다.** 원칙 15 다. MCP 진행 알림이 오지 않는 것을 쟀고, 오지 않는 것을 그린 척하지 않는다.
 
+**경과 시간의 시작점을 앱이 재지 않는다 — 6 단계에서 이렇게 정했다.** 이 표의 두 번째 줄은 원래 "앱이 잰다 — 두 이벤트 사이" 였는데, 도구 호출과 도구 결과 줄에 `timestamp` 가 실려 온다(3.4 의 원출력에 있다). 잰 값이 스트림에 있는데 앱이 다시 재면 두 숫자가 갈리고, 갈린 것을 발견하는 자리는 사용자의 화면이다 — `result.duration_ms` 에 대해 이미 같은 판단을 했다(5.3.2). **"지금" 만 이 기계의 시계에서 온다**: 도는 동안에는 아무 줄도 오지 않으므로 그 값을 줄 수 있는 것이 스트림에 없다. 끝난 뒤에는 엔진이 잰 `durationMs` 를 그대로 적는다.
+
+**끝난 카드가 보이는 것은 엔진의 답 문서에 있는 것뿐이다**(orchestration 5.4.2 의 `runInRepoAnswer`) — 완결되지 않은 이유·권한에 막힌 도구 이름·비용·소요 시간·턴 수·대화를 이어갔는지·원출력 자리. **바뀐 파일 목록은 그 문서에 없고, 위임의 답 본문에서 뽑아내지 않는다**(원칙 15). **`incomplete` 문장이 이 카드의 핵심이다** — 권한에 막힌 위임도 종료 코드 0 으로 끝나므로(orchestration 3.3), 그 문장이 없으면 아무것도 하지 못한 위임이 "완료" 로 그려진다.
+
 **두 번째 걸음의 후보를 적어둔다 — 지금 만들지 않는다.** `kyu mcp serve` 가 위임 진행을 **승인 브리지가 이미 쓰는 앱 소켓으로** 밀어 넣는 길이 있다. 채널이 이미 있으므로 새로 만들 것은 메시지 종류 하나뿐이고, 그것이 원칙 4 가 말하는 "두 번째 사용처" 다. 다만 **첫 번째 사용처(승인)가 실제로 서기 전에는 만들지 않는다.** 승인 브리지를 쓰면서 채널의 모양이 바뀔 수 있고, 그때 사용처가 둘이면 둘 다 고쳐야 한다.
 
-**서브에이전트는 다르다.** 메인 세션이 `Task` 를 띄우면 `system/task_*` 가 오고 `--forward-subagent-text` 로 안쪽 대화까지 온다. **그것은 v1 부터 그린다** — 이벤트가 오는 것을 그리는 데는 아무 결정도 필요 없다.
+**서브에이전트는 다르다.** 메인 세션이 서브에이전트를 띄우면 `system/task_*` 가 오고, 안쪽 대화가 `parent_tool_use_id` 와 함께 온다(그 에이전트가 한 **말**은 `--forward-subagent-text` 를 켜야 온다 — 3.10.1). **그것은 v1 부터 그린다** — 이벤트가 오는 것을 그리는 데는 아무 결정도 필요 없다.
 
 ### 5.8 마크다운을 어디서 그리는가
 
@@ -850,10 +879,10 @@ MaterialTheme(
 | `ThinkingBlock` | `AssistantThinkingArrived` | 기본 접힘. 헤더에 `system/thinking_tokens` 의 추정 토큰 |
 | `ToolCallCard` | `ToolCallRequested` + `ToolCallAnswered` | 아래 표 |
 | `PermissionRequestCard` | 브리지가 올린 물음(5.4) | 6.4 |
-| `DelegationCard` | `run_in_repo` 호출 | 레포 이름·작업·경과 시간. 진행 막대 없음(5.7) |
-| `SubagentCard` | `DelegationProgressed` + `parentToolUseId` 자식들 | 안쪽 대화를 접어 담는다 |
+| `DelegationCard` | `run_in_repo` 호출 | 레포 이름·시킨 일·경과 시간 → 결말과 원출력 자리. 진행 막대 없음(5.7) |
+| `SubagentCard` | `SubagentStarted`·`SubagentProgressed`·`SubagentFinished` + `parentToolUseId` 자식들 | 안쪽 대화를 접어 담고, 접힌 줄이 "지금 무엇을 하는 중" 을 말한다 |
 | `TurnFooter` | `TurnFinished` | 비용·토큰·소요 시간 배지. 중단·실패면 그 사유 |
-| `PermissionDenialNotice` | `TurnFinished.permissionDenials` | 3.6 의 `dontAsk` 가 여기로 온다 |
+| `PermissionDenialNotice` | `TurnFinished.permissionDenials` | 3.6 의 `dontAsk` 가 여기로 온다. 항목은 `tool_name`·`tool_use_id`·`tool_input` 이고(6 단계 실측), **사용자가 승인 카드에서 거부한 것은 여기 없다** — 그것은 그 카드가 이미 말한다 |
 | `EngineNotice` | `EngineSpoke` · `SessionEnded` | resume 실패가 여기로 온다(3.9) |
 
 `ToolCallCard` 의 갈래는 도구 이름으로 정한다. **모르는 도구는 일반 카드로 떨어진다** — MCP 도구가 얼마든지 새로 붙을 수 있으므로 이것이 기본값이어야 한다.
@@ -1113,6 +1142,10 @@ stdin 을 파이프로 물려 띄우면 stdout·stderr 에 한 글자도 내지 
 
 **5 단계가 3·4 뒤인 이유**: 승인 카드를 그리려면 대화가 먼저 있어야 한다. 그리고 브리지는 이 설계에서 새로 만드는 것이 가장 많은 자리라(소켓·새 하위 명령·양쪽 직렬화), 앞의 것들이 서 있어야 실패가 어디서 났는지 갈린다.
 
+**6 단계의 완료 확인은 검증으로 남겼다.** 위 두 문장을 진짜 `claude` 로 그대로 해 보는 검증이 있다
+(`RealClaudeDelegationIntegrationTest` — 켜는 법은 그 파일의 머리말). 손으로 한 번 보고 마는 것과 달리,
+`claude` 의 판이 올라 안쪽 대화가 안 오게 되는 날 그 검증이 먼저 말한다.
+
 **7 단계에 조건이 붙어 있었다.** 그 조건이 6.5 단계에서 채워졌다 — 로그인이 필요한 상태를 앱이
 다루는 자리가 터미널 밖에 섰다(7.2). 6.5 라는 번호를 쓰는 이유는 이것이 처음부터 계획에 있던
 단계가 아니라 7 단계의 조건에서 자란 것이기 때문이다. 번호를 밀어 6 을 7 로 만들면 이미 머지된
@@ -1158,13 +1191,51 @@ PR 들이 가리키는 번호가 어긋난다.
 
 3. **전사를 파일로 남길 것인가** — 5.5. 남기면 앱을 다시 열어도 화면이 이어지고, `claude` 의 전사와 우리 전사가 둘이 된다. 후보: (가) 남기지 않는다(v1) (나) `.coord/transcripts/<대화 ID>.jsonl` 에 받은 이벤트를 그대로 적는다 (다) `claude` 의 전사를 읽는다 — **(다)는 8.2 의 이유로 기각.** (나)를 언제 열지는 사용자가 "앱을 껐다 켜면 대화가 안 보인다" 를 실제로 불편해할 때 정한다.
 
-4. **"항상 허용" 을 어디에 적을 것인가** — 6.4. 앱이 사용자 `settings.json` 을 고치는 것은 큰 결정이다. 후보: (가) 두지 않는다(v1) (나) 워크디렉토리 `.coord/` 에 우리 규칙을 적고 브리지가 그것을 먼저 본다 (다) 사용자 설정을 고친다. **(나)가 유력하다** — 원칙 2("레포 안에는 아무것도 넣지 않는다")를 지키면서 우리 것을 우리 자리에 둔다. **5 단계에서 정한다.**
+4. **"항상 허용" 을 어디에 적을 것인가** — **5 단계에서 정했다. v1 은 세션 범위로만 두고 아무 데도 적지 않는다.**
 
-5. **위임 안쪽의 승인을 사용자에게 올릴 것인가** — 5.4.2. 지금은 안 올린다. 올리면 사용자가 안 보는 레포의 물음에 답하게 되고, 안 올리면 위임은 계속 `auto` 로 돈다. **6 단계 이후.**
+   화면의 버튼은 "이 세션에서 <도구> 계속 허용" 이고, 그 규칙은 앱의 메모리에만 산다 — 세션이
+   끝나면 함께 사라진다(`ChatSessionStateHolder.toolsAllowedForSession`).
 
-6. **위임 진행을 앱 소켓으로 밀 것인가** — 5.7 의 두 번째 걸음. 채널이 이미 있으므로 비용이 작지만, 첫 사용처가 선 뒤에 정한다. **6 단계 이후.**
+   **(나)를 지금 열지 않은 근거**: `.coord/` 에 규칙을 적으려면 규칙의 모양을 먼저 정해야 한다 —
+   도구 이름까지인가, 인자의 무늬까지인가, 그 규칙을 누가 검증하는가. 세션 범위는 그 물음 없이도
+   성립하고, 잊힌 규칙이 남지 않는다. **적어 두는 자리는 사용자가 "앱을 다시 열 때마다 같은 것을
+   또 허용한다" 를 실제로 아쉬워할 때 연다** — 그때는 어떤 규칙을 몇 번 세웠는지가 관찰된 사실로
+   있고, 그 위에서 모양을 정할 수 있다.
 
-7. **`kyu mcp ask` 라는 이름** — 5.2.2. `approve` 와 가깝다. 사용법 문구에만 나오는 이름이라 짧은 쪽을 먼저 쓰지만, 2 단계에서 문구를 써 보고 헷갈리면 그때 바꾼다.
+   **규칙이 통과시킨 호출도 카드로 선다**(`AllowedByThisSessionRule`). 사람이 누르지 않은 승인을
+   사람이 누른 것과 같은 모양으로 그리면, 사용자는 자기가 보지 않은 승인을 자기가 한 것으로 읽는다.
+
+5. **위임 안쪽의 승인을 사용자에게 올릴 것인가** — **6 단계에서 다시 보고, 올리지 않기로 남긴다.**
+
+   근거가 셋이다.
+
+   - **올리려면 위임의 권한 모드가 바뀐다.** 지금 위임은 `--permission-mode auto` 로 돌고 승인 도구를
+     붙이지 않는다(orchestration 5.4.1). 물음을 올리려면 `--permission-prompt-tool` 을 위임에도 붙여야
+     하고, 그 순간 위임이 관문을 타는 호출의 수가 달라진다(3.6) — 15~60 초짜리 위임이 사람을 기다리는
+     세션이 된다. **한 위임이 관문을 몇 번 열게 되는지는 재지 않았다.**
+   - **원칙 13 은 지금도 지켜진다.** 위임은 메인보다 넓은 권한을 갖지 않는다 — bypass 만 메인에서
+     전파되고, 위임이 스스로 켜는 길은 없다.
+   - **이 PR 이 그 물음을 관찰할 통로를 만들었다.** 권한에 막힌 위임은 이제 카드가 "권한에 막혀 부르지
+     못한 도구" 로 말한다(5.7). **그 줄이 실제로 자주 뜨는 것이 이 질문을 다시 여는 조건이다** — 그 전에
+     여는 것은 일어나지 않은 불편을 위해 위임의 성질을 바꾸는 일이다.
+
+6. **위임 진행을 앱 소켓으로 밀 것인가** — **6 단계에서 다시 보고, 미룬다. 값이 이 문서가 적어둔 것보다 크다.**
+
+   *"채널이 이미 있으므로 새로 만들 것은 메시지 종류 하나뿐"* 이라고 적었는데, 6 단계에서 보니 그렇지
+   않다. **위임은 `--output-format json` 으로 돌아서 끝에 문서 하나만 낸다**(`internal/workdir/delegation.go`).
+   밀어 넣을 진행 자체가 엔진에 없다 — 그것을 만들려면 위임 실행을 `stream-json` 으로 바꾸고 엔진이
+   그 이벤트를 읽어야 하고, 그러면 위임의 결과 읽기(5.4.2 의 계약)까지 함께 바뀐다.
+
+   **첫 사용처(승인)는 이제 서 있다**(5 단계). 그래서 원칙 4 가 막는 자리는 지나갔고, 지금 막는 것은
+   값이다. **여는 조건**: 사용자가 도는 위임 앞에서 "이게 살아 있긴 한가" 를 실제로 묻게 될 때. 지금
+   카드는 경과 시간이 흐르는 것으로 그 물음의 절반을 답한다(5.7).
+
+7. **`kyu mcp ask` 라는 이름** — **5 단계에서 정했다. 그대로 둔다.**
+
+   사용법 문구를 실제로 써 보고(`kyu mcp <serve|approve|ask>`) 헷갈리지 않았다. `approve` 는 사람이
+   레포 하나를 승인하는 명령이고 `ask` 는 도구 호출 하나를 앱에게 묻는 통로라, 두 낱말이 각각
+   **누가 하는 일인지**를 말한다. 이름을 바꾸면 그 문구와 `mcp__kyu-ask__request_permission` 이라는
+   도구 이름이 함께 바뀌고, 얻는 것이 없다.
 
 8. **큐 깊이를 정확히 그릴 것인가** — **3 단계에서 쟀고, 셀 필요가 없어졌다.**
 
@@ -1349,24 +1420,41 @@ system/task_updated             {"status":"killed"}          ← 백그라운드
                             stderr: No conversation found with session ID: 00000000-…
 ```
 
-### A.11 서브에이전트 (3.10)
+### A.11 서브에이전트 (3.10 · 3.10.1)
+
+6 단계가 **엔진의 챗 모드 플래그 그대로** 다시 받은 한 벌이다(2026-09-08). 이 줄들이 그대로 앱의 녹화 자료가 되었다(`RecordedChatStreamLines`).
 
 ```
-assistant                  tool_use: Agent{subagent_type:"general-purpose", …}
-system/task_started        task_id=a0130b1ed866786d2  spawn_depth=1  task_type=local_agent
-user       (parent=toolu_015ezC9Koz…)   프롬프트
-assistant  (parent=toolu_015ezC9Koz…)   "I'll read the file."
+assistant                  tool_use: Agent{subagent_type:"general-purpose", description, prompt}
+system/task_started        task_id=aadb20bff6e5d47e9  tool_use_id=toolu_0144EDWk…  spawn_depth=1
+                           task_type=local_agent  is_backgrounded=false  prompt=전문
+user       (parent=toolu_0144EDWk…)   프롬프트 (되돌아온 사용자 메시지 모양이다)
+assistant  (parent=toolu_0144EDWk…)   "I'll read the file."        ← --forward-subagent-text 가 있어야 온다
 system/task_progress       description="Reading README.txt"  last_tool_name="Read"
-                           usage={total_tokens:9942, tool_uses:1, duration_ms:4398}
-assistant  (parent=toolu_015ezC9Koz…)   tool_use: Read
-user       (parent=toolu_015ezC9Koz…)   tool_result
-system/task_updated        {"status":"completed"}
-system/task_notification   output_file=…/tasks/a0130b1ed866786d2
-user                       tool_result   (바깥 Agent 호출의 답)
+                           tool_use_id=toolu_0144EDWk…  usage={total_tokens:9700, tool_uses:1, duration_ms:1728}
+assistant  (parent=toolu_0144EDWk…)   tool_use: Read
+user       (parent=toolu_0144EDWk…)   tool_result   ← tool_use_result 곁가지가 없다
+assistant  (parent=toolu_0144EDWk…)   thinking / text              ← 같은 플래그에 달려 있다
+system/task_updated        {"patch":{"status":"completed","end_time":…}}   ← tool_use_id 가 없다
+system/task_notification   tool_use_id=…  status=completed  output_file=…/tasks/aadb20bff6e5d47e9.output
+                           summary=…  usage={total_tokens:10849, tool_uses:1, duration_ms:5008}
+user                       tool_result   (바깥 Agent 호출의 답 — 텍스트 블록 둘)
+                           tool_use_result={status, prompt, agentId, agentType, content:[…]}
 result/success             subagent_stats={spawned:1, completed:1, max_depth:1, by_type:{"general-purpose":1}}
 ```
 
 MCP 도구 쪽에서는 `notifications/progress` 를 3 회 보냈는데 스트림의 `progress` 관련 이벤트는 **0 개**였다.
+
+### A.11.1 권한 거절 항목의 모양 (3.6 · 6 단계)
+
+`--permission-mode dontAsk` 로 Write 를 시켜 받은 `result` 의 한 조각이다. A.6 은 건수만 셌고, 항목의 키는 이때 처음 확정됐다.
+
+```json
+"permission_denials":[{"tool_name":"Write","tool_use_id":"toolu_01J3E2oe…",
+                       "tool_input":{"file_path":"/tmp/fakerepo/denied.txt","content":"DENIED-PROBE\n"}}]
+```
+
+같은 실행의 도구 결과는 `is_error: true` 에 *"Permission to use Write has been denied because Claude Code is running in don't ask mode…"* 였다.
 
 ### A.12 비용과 한도 (3.12)
 
@@ -1447,6 +1535,8 @@ mcpServers: {"kyu-ask": {…}}
 | 슬래시 명령 | 레포에만 있는 지문을 답했는가 |
 | 모델의 도구 목록 | `system/init` 의 `tools` 배열 |
 
+**6 단계의 프로브는 재료가 더 적다**(2026-09-08 · 2026-09-09). 가짜 레포 하나와 구동기(`drive.py`)면 되고, 판정은 셋으로 갈랐다 — 서브에이전트는 **같은 프롬프트를 플래그만 바꿔 두 번** 돌려 무엇이 그 플래그에 달렸는지 갈랐고, 권한 거절은 `--permission-mode dontAsk` 로 실제로 막고 그 `result` 를 봤고, 위임은 **이 브랜치에서 빌드한 `kyu mcp serve` 에게 `run_in_repo` 를 직접 불러** 답 문서를 받았다. 마지막 것은 `claude` 를 통과하지 않으므로 앱의 카드가 읽을 계약만 정확히 잰다 — 메인 세션까지 지나는 확인은 앱의 통합 검증이 한다(`RealClaudeDelegationIntegrationTest`).
+
 **환경 격리**: 대부분의 프로브에 `--setting-sources ""` 를 주어 사용자·프로젝트·로컬 설정을 걷어냈다. 그러지 않으면 이 머신의 `defaultMode: auto` 때문에 권한 관문이 열리지 않고, 그것이 이 판의 성질인지 이 머신의 설정인지 갈리지 않는다.
 
 **자격 증명 격리** (7.1 · 7.3): `CLAUDE_CONFIG_DIR` 을 빈 임시 디렉토리로 돌려 "로그인한 적 없는 설치" 를 재현했다. 실제 자격 증명은 읽지도 고치지도 않았고, `claude auth logout` 은 한 번도 부르지 않았다 — 그것을 부르면 재는 사람의 계정이 실제로 끊긴다. 브라우저가 열리지 않게 `BROWSER=/bin/true` 를 함께 주었다(리눅스 관례라 맥·윈도우에서는 다르게 막아야 한다). 7.3 의 프로브가 넣은 코드와 토큰은 전부 가짜이고, 실계정으로 로그인을 끝내는 걸음은 재지 않았다.
@@ -1501,6 +1591,17 @@ mcpServers: {"kyu-ask": {…}}
 35. 컨텍스트가 찰 때 압축이 이벤트로 오는지 (10 절 2 번).
 36. `still_queued`·`queued_turn_count` 가 비어 있지 않은 경우 (10 절 8 번).
 37. `--mcp-config` 가 **대화형**에서도 승인 관문을 안 타는지 — orchestration 3.8 이 `-p` 로만 쟀고, 챗 모드도 `-p` 라 이 설계에서는 문제가 되지 않는다.
+
+**6 단계가 잰 것** (2026-09-08 · 2026-09-09, `claude` 2.1.259, 엔진의 챗 모드 플래그 그대로)
+
+32. 서브에이전트를 띄우는 도구 이름은 이 판에서 **`Agent`** 다(설계가 `Task` 로 적어둔 자리).
+33. `--forward-subagent-text` 없이도 안쪽 **도구 호출과 프롬프트**는 `parent_tool_use_id` 와 함께 온다. **그 에이전트의 말과 사고 블록만** 이 플래그에 달려 있다.
+34. `system/task_updated` 는 `patch.status` 모양이고 **`tool_use_id` 가 없다.** `task_started`·`task_progress`·`task_notification` 셋은 그 값을 싣는다.
+35. 서브에이전트가 받은 프롬프트는 **되돌아온 사용자 메시지와 같은 모양**으로 오고 `parent_tool_use_id` 가 채워져 있다.
+36. 안쪽 도구 결과에는 **`tool_use_result` 곁가지가 없다.** 바깥 `Agent` 결과에는 있고(`status`·`agentType`·`prompt`·`content`), 그 `content` 는 텍스트 블록 둘이다.
+37. `result.permission_denials` 의 항목은 **`tool_name`·`tool_use_id`·`tool_input`** 셋이다.
+38. `assistant` 와 `user` 줄에는 **`timestamp`** 가 실려 온다 — 도는 도구의 경과 시간을 앱이 따로 재지 않아도 되는 근거다.
+39. `run_in_repo` 의 답은 **모델이 읽는 텍스트 자리에 JSON 문서**로 온다(`tool_use_result` 곁가지가 아니다). 위임이 걸리기도 전에 거절되면 그 자리에 사람이 읽을 문장 하나가 온다.
 
 ---
 

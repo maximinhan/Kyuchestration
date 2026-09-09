@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -9,6 +10,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -158,6 +160,19 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `도구 카드는 그 호출이 오간 시각을 스트림에서 받는다`() {
+        // 도는 도구의 경과 시간을 그리려면 시작한 때가 필요한데, 그 값이 스트림에 이미 있다.
+        // 앱이 자기 시계로 다시 재면 두 숫자가 갈리고, 갈린 것을 발견하는 자리는 사용자의 화면이다.
+        val requested = conversationAfter(RecordedChatStreamLines.ASSISTANT_TOOL_USE)
+        val pending = assertIs<ChatEntry.ToolCall>(requested.entries.single())
+        assertEquals(Instant.parse("2026-09-04T06:45:47.437Z"), pending.requestedAt)
+
+        val answered = requested.after(RecordedChatStreamLines.TOOL_RESULT)
+        val card = assertIs<ChatEntry.ToolCall>(answered.entries.single())
+        assertEquals(Instant.parse("2026-09-04T06:45:47.489Z"), card.answer?.answeredAt)
+    }
+
+    @Test
     fun `거절된 도구 호출은 실패로 표시된다`() {
         // 접힌 카드만 보고도 무엇이 잘못됐는지 알아야 실패가 대화에 묻히지 않는다(6.3).
         val conversation = conversationAfter(
@@ -176,7 +191,7 @@ class ChatConversationFoldingTest {
         // parent_tool_use_id 가 챗 UI 의 중첩 열쇠다(3.10). 본문에 풀어 놓으면 메인 대화와
         // 안쪽 대화가 한 줄기로 섞여 누가 한 말인지 알 수 없게 된다.
         val conversation = conversationAfter(
-            TASK_TOOL_USE,
+            RecordedChatStreamLines.AGENT_TOOL_USE,
             RecordedChatStreamLines.SUBAGENT_TOOL_USE,
         )
 
@@ -188,14 +203,93 @@ class ChatConversationFoldingTest {
     @Test
     fun `안쪽 도구 호출의 결과도 그 안쪽 카드가 받는다`() {
         val conversation = conversationAfter(
-            TASK_TOOL_USE,
+            RecordedChatStreamLines.AGENT_TOOL_USE,
             RecordedChatStreamLines.SUBAGENT_TOOL_USE,
-            SUBAGENT_TOOL_RESULT,
+            RecordedChatStreamLines.SUBAGENT_TOOL_RESULT,
         )
 
         val outerCard = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
         val nested = assertIs<ChatEntry.ToolCall>(outerCard.nestedEntries.single())
-        assertEquals("hello from fake repo", nested.answer?.modelVisibleText)
+        assertEquals("1\thello from fake repo\n2\t", nested.answer?.modelVisibleText)
+    }
+
+    @Test
+    fun `서브에이전트 카드는 종류와 진행과 원출력 자리를 차례로 받는다`() {
+        // 셋이 다른 줄로 오고 셋 다 같은 카드에 얹힌다(3.10). 이어 붙이는 열쇠는 tool_use_id 다.
+        val started = conversationAfter(
+            RecordedChatStreamLines.AGENT_TOOL_USE,
+            RecordedChatStreamLines.TASK_STARTED,
+        )
+        val startedRun = assertNotNull(assertIs<ChatEntry.ToolCall>(started.entries.single()).subagentRun)
+        assertEquals("general-purpose", startedRun.subagentType)
+        assertNull(startedRun.lastDescription, "아직 진행이 오지 않았다")
+
+        val progressed = started.after(RecordedChatStreamLines.TASK_PROGRESS)
+        val progressedRun = assertNotNull(assertIs<ChatEntry.ToolCall>(progressed.entries.single()).subagentRun)
+        assertEquals("Reading README.txt", progressedRun.lastDescription)
+        assertEquals("Read", progressedRun.lastToolName)
+        assertNull(progressedRun.finishedStatus, "아직 끝나지 않았다")
+
+        val finished = progressed.after(RecordedChatStreamLines.TASK_NOTIFICATION)
+        val finishedRun = assertNotNull(assertIs<ChatEntry.ToolCall>(finished.entries.single()).subagentRun)
+        assertEquals("completed", finishedRun.finishedStatus)
+        assertTrue(finishedRun.outputFilePath.orEmpty().endsWith("/tasks/aadb20bff6e5d47e9.output"))
+        // 진행은 지워지지 않는다 — 끝난 카드도 그 에이전트가 마지막에 무엇을 했는지 말한다.
+        assertEquals("Read", finishedRun.lastToolName)
+    }
+
+    @Test
+    fun `서브에이전트가 받은 프롬프트는 사용자 말풍선이 되지 않는다`() {
+        // 안쪽 프롬프트가 사용자 메시지와 같은 모양으로 온다(3.10 실측) — 가르는 것은
+        // parent_tool_use_id 하나다. 이것을 보지 않으면 사용자가 쓴 적 없는 말풍선이 전사에 서고,
+        // 그 줄이 턴의 시작으로 읽혀 도는 턴 판단까지 어긋난다.
+        val conversation = conversationAfter(
+            RecordedChatStreamLines.AGENT_TOOL_USE,
+            RecordedChatStreamLines.SUBAGENT_PROMPT_ECHOED,
+        )
+
+        val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
+        assertIs<ChatEntry.UserSaid>(card.nestedEntries.single())
+        assertEquals(TurnState.Idle, conversation.turnState, "안쪽 프롬프트를 이 턴의 시작으로 읽었다")
+    }
+
+    @Test
+    fun `서브에이전트 줄이 가리키는 카드가 없으면 아무 일도 하지 않는다`() {
+        // 안쪽만 아는 카드를 지어내면 그 카드에는 접어 넣을 대화가 영영 없다.
+        val conversation = conversationAfter(RecordedChatStreamLines.TASK_STARTED)
+
+        assertEquals(emptyList(), conversation.entries)
+    }
+
+    @Test
+    fun `서브에이전트 한 벌이 통째로 오면 안쪽 대화가 그 카드 안에 접힌다`() {
+        // 실제 한 실행의 줄들을 온 순서 그대로 흘린다 — 이것이 6 단계의 완료 확인이다
+        // ("서브에이전트를 띄우면 안쪽 대화가 접힌 채로 보인다").
+        val conversation = conversationAfter(
+            RecordedChatStreamLines.AGENT_TOOL_USE,
+            RecordedChatStreamLines.TASK_STARTED,
+            RecordedChatStreamLines.SUBAGENT_PROMPT_ECHOED,
+            RecordedChatStreamLines.SUBAGENT_TEXT,
+            RecordedChatStreamLines.TASK_PROGRESS,
+            RecordedChatStreamLines.SUBAGENT_TOOL_USE,
+            RecordedChatStreamLines.SUBAGENT_TOOL_RESULT,
+            RecordedChatStreamLines.TASK_UPDATED,
+            RecordedChatStreamLines.TASK_NOTIFICATION,
+            RecordedChatStreamLines.AGENT_RESULT,
+        )
+
+        // 메인 전사에 선 것은 카드 하나뿐이다. 안쪽 대화가 본문으로 새어 나오면 여기서 갈린다.
+        val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
+        assertEquals(
+            listOf(
+                ChatEntry.UserSaid::class,
+                ChatEntry.AssistantSaid::class,
+                ChatEntry.ToolCall::class,
+            ),
+            card.nestedEntries.map { it::class },
+        )
+        assertNotNull(card.answer, "바깥 호출의 결과가 카드를 채우지 못했다")
+        assertNotNull(card.subagentRun)
     }
 
     @Test
@@ -211,6 +305,31 @@ class ChatConversationFoldingTest {
         assertEquals(263, ended.usage.outputTokens)
         // 배지는 그 턴의 것이고 머리말은 이 대화가 쓴 것 전부를 말한다.
         assertEquals(0.0888635 * 2, conversation.totalCostUsd)
+    }
+
+    @Test
+    fun `묻지 않고 거절된 호출은 턴 끝에 이름과 인자로 남는다`() {
+        // 묻지 않는 모드에서는 승인 카드가 뜨지 않는다(3.6). 이 목록이 없으면 사용자가
+        // "왜 그 파일이 안 만들어졌지" 를 알 통로는 모델의 말 하나뿐이다.
+        val conversation = conversationAfter(RecordedChatStreamLines.RESULT_WITH_PERMISSION_DENIALS)
+
+        val ended = assertIs<ChatEntry.TurnEnded>(conversation.entries.single())
+        val denial = ended.permissionDenials.single()
+        assertEquals("Write", denial.toolName)
+        assertEquals("toolu_01J3E2oezHZVWiyWBHWPGdxZ", denial.toolUseId)
+        assertEquals("/tmp/fakerepo/denied.txt", denial.input["file_path"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `카드에서 사용자가 거부한 것은 턴 끝이 다시 말하지 않는다`() {
+        // 같은 사실을 두 번 말하면 사용자는 자기가 거부한 것 말고 무언가가 더 막혔다고 읽는다.
+        val conversation = ChatConversation(target = SessionTarget.Main)
+            .after(permissionRequested("Write", "toolu_01J3E2oezHZVWiyWBHWPGdxZ"))
+            .withPermissionAnswered("toolu_01J3E2oezHZVWiyWBHWPGdxZ", PermissionAnswer.Denied("이 파일은 손대지 마세요"))
+            .after(RecordedChatStreamLines.RESULT_WITH_PERMISSION_DENIALS)
+
+        val ended = assertIs<ChatEntry.TurnEnded>(conversation.entries.last())
+        assertEquals(emptyList(), ended.permissionDenials)
     }
 
     @Test
@@ -384,18 +503,6 @@ class ChatConversationFoldingTest {
         chatSessionEventsFrom(streamLine).fold(this) { conversation, event -> conversation.after(event) }
 
     private companion object {
-
-        /** 메인이 서브에이전트를 띄우는 도구 호출. 녹화된 안쪽 이벤트의 `parent_tool_use_id` 와 짝이다. */
-        const val TASK_TOOL_USE: String =
-            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use",""" +
-                """"id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M","name":"Task","input":{"description":"Read README.txt first line"}}]},""" +
-                """"parent_tool_use_id":null}"""
-
-        /** 그 서브에이전트 안쪽 Read 의 결과. 녹화된 SUBAGENT_TOOL_USE 의 `id` 와 짝이다. */
-        const val SUBAGENT_TOOL_RESULT: String =
-            """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_015cgoqteHactDNH8Er6kf4J",""" +
-                """"type":"tool_result","content":"hello from fake repo"}]},""" +
-                """"parent_tool_use_id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M"}"""
 
         const val RESUMED_ID = "211f6974-88a8-4453-9248-a02b0d6febae"
     }

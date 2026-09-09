@@ -536,6 +536,7 @@ var chatModeStreamFlagsForTest = []string{
 	"--verbose",
 	"--include-partial-messages",
 	"--replay-user-messages",
+	"--forward-subagent-text",
 }
 
 // splitChatModeFlagsForTest 는 claude 바로 뒤에 붙은 챗 모드 플래그를 떼어내고 나머지를 돌려준다.

@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,11 +36,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
+import com.kyuchestration.desktop.terminal.chat.PermissionDenial
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.ToolCallAnswer
 import com.kyuchestration.desktop.terminal.chat.TurnOutcome
 import com.kyuchestration.desktop.theme.KyuTheme
 import java.nio.file.Path
+import java.time.Duration
+import java.time.Instant
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -68,7 +73,18 @@ internal fun ChatEntryView(
             if (isTurnInterruptionEcho(entry.text)) TurnInterruptedNotice() else UserMessageBubble(entry.text)
         is ChatEntry.AssistantSaid -> AssistantMessageBlock(entry.text)
         is ChatEntry.AssistantThought -> ThinkingBlock(entry.text)
-        is ChatEntry.ToolCall -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+        // 서브에이전트 카드로 갈리는 근거는 도구 이름이 아니라 스트림이 말해 준 사실이다
+        // (ChatEntry.SubagentRun) — 그 이름은 판마다 달라진다.
+        is ChatEntry.ToolCall -> when {
+            entry.subagentRun != null ->
+                SubagentCard(entry, entry.subagentRun, sessionWorkingDirectory, onPermissionChoiceMade)
+
+            // 위임은 도구 이름으로 갈린다. 서브에이전트와 달리 이 이름은 우리 엔진이 정하는
+            // 것이라(claude_command.go), 판이 바뀌어도 우리가 바꾸지 않는 한 그대로다.
+            entry.toolName == RUN_IN_REPO_TOOL_NAME -> DelegationCard(entry)
+
+            else -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+        }
 
         is ChatEntry.PermissionAsked ->
             PermissionRequestCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
@@ -175,7 +191,7 @@ private fun ToolCallCard(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 ToolCallSummary(toolLabel, cardContent)
                 Spacer(Modifier.width(10.dp))
-                ToolCallStatus(entry.answer)
+                ToolCallStatus(entry.answer, entry.requestedAt)
             }
         },
     ) {
@@ -401,7 +417,7 @@ private fun fileName(filePath: String): String =
  * 규율이다(WorkDirSessionPanel 의 SessionChip).
  */
 @Composable
-private fun ToolCallStatus(answer: ToolCallAnswer?) {
+private fun ToolCallStatus(answer: ToolCallAnswer?, requestedAt: Instant?) {
     val (label, color) = when {
         answer == null -> "도는 중" to MaterialTheme.colorScheme.onSurfaceVariant
         answer.failed -> "실패" to KyuTheme.statusColors.failure
@@ -411,6 +427,10 @@ private fun ToolCallStatus(answer: ToolCallAnswer?) {
     Text("●", color = color, style = MaterialTheme.typography.labelSmall)
     Spacer(Modifier.width(5.dp))
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
+
+    if (answer == null) {
+        RunningElapsedText(requestedAt)
+    }
 
     // 실패한 까닭을 머리말에 그대로 붙인다. 카드를 펴지 않아도 무엇이 잘못됐는지 보여야 한다.
     if (answer?.failed == true) {
@@ -427,6 +447,40 @@ private fun ToolCallStatus(answer: ToolCallAnswer?) {
 }
 
 /**
+ * 도는 중인 것 옆에 흐르는 경과 시간(6.6 — "도구가 도는 중 · 카드에 경과 시간").
+ *
+ * **시작한 때는 스트림이 주고, 지금은 이 기계의 시계가 준다.** 앞의 것을 앱이 재지 않는 이유는
+ * 두 숫자가 갈리지 않게 하려는 것이고(ChatSessionEvent.ToolCallRequested), 뒤의 것을 스트림이
+ * 줄 수 없는 이유는 도는 동안 아무 줄도 오지 않기 때문이다 — 위임이 그 예다(3.10 가).
+ *
+ * **진행 막대가 아니다.** 몇 걸음 중 몇 번째인지는 아무도 말해 주지 않는다(원칙 15). 이 줄이
+ * 말하는 것은 "아직 돌고 있고, 이만큼 됐다" 하나다.
+ */
+@Composable
+internal fun RunningElapsedText(since: Instant?) {
+    if (since == null) {
+        return
+    }
+
+    var now by remember(since) { mutableStateOf(Instant.now()) }
+    LaunchedEffect(since) {
+        while (true) {
+            delay(ELAPSED_TICK_MILLIS)
+            now = Instant.now()
+        }
+    }
+
+    val label = runningElapsedLabel(Duration.between(since, now).toMillis()) ?: return
+    Spacer(Modifier.width(8.dp))
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
  * 턴 하나가 끝났다는 배지 — 비용 · 토큰 · 소요 시간(6.3).
  *
  * 전사 안에 놓인다. 화면 아래 한 자리에 마지막 턴의 것만 두면 스크롤을 올렸을 때 어느 답이
@@ -439,22 +493,67 @@ private fun TurnFooter(entry: ChatEntry.TurnEnded) {
         turnCostLabel(entry.costUsd),
         turnTokenLabel(entry.usage),
         turnElapsedLabel(entry.durationMillis),
-        // 권한이 없어 못 한 일이 있으면 그 사실이 화면에 있어야 한다(3.6). 없으면 모델이 "권한이
-        // 없어서 못 했습니다" 라고 말하는 것이 유일한 통로가 된다.
-        entry.permissionDenialCount.takeIf { it > 0 }?.let { "권한 거절 ${it}건" },
     )
 
-    Text(
-        text = badges.joinToString(" · "),
-        style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
-        color = if (entry.outcome == TurnOutcome.Completed) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            KyuTheme.statusColors.caution
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = badges.joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = if (entry.outcome == TurnOutcome.Completed) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                KyuTheme.statusColors.caution
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (entry.permissionDenials.isNotEmpty()) {
+            PermissionDenialNotice(entry.permissionDenials)
+        }
+    }
+}
+
+/**
+ * 권한에 막혀 아예 일어나지 못한 호출들(6.3 의 `PermissionDenialNotice` · 3.6).
+ *
+ * **이 줄이 없으면 그 사실이 화면 어디에도 없다.** 묻지 않고 거절하는 모드에서는 승인 카드가
+ * 뜨지 않으므로(3.6 의 `dontAsk`), 사용자가 "왜 그 파일이 안 만들어졌지" 를 알 통로는 모델이
+ * 그것을 말해 주기를 바라는 것뿐이다.
+ *
+ * **묻고 거부한 것은 여기 없다.** 그것은 그 승인 카드가 이미 말한다(ChatEntry.TurnEnded).
+ *
+ * 인자를 접어 둔다. 무엇이 막혔는지는 이름으로 충분하고, 그 인자에는 쓰려던 파일 내용이
+ * 통째로 들어 있을 수 있다 — 대화 흐름 안에 그것을 펴 두면 그 위아래가 화면 밖으로 밀린다.
+ */
+@Composable
+private fun PermissionDenialNotice(denials: List<PermissionDenial>) {
+    CollapsibleBlock(
+        header = {
+            Text(
+                text = "권한에 막혀 못 한 호출 ${denials.size}건 — " +
+                    denials.joinToString(", ") { toolLabel(it.toolName) },
+                style = MaterialTheme.typography.labelSmall,
+                color = KyuTheme.statusColors.caution,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
-        modifier = Modifier.fillMaxWidth(),
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "묻지 않고 거절되었습니다 — 이 세션의 권한 모드가 그렇게 정해져 있습니다.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            denials.forEach {
+                MonospaceBlock(
+                    text = prettyPrintedToolInput(it.input),
+                    detailTitle = "${toolLabel(it.toolName)} 인자",
+                )
+            }
+        }
+    }
 }
 
 /** 잘 끝난 턴은 굳이 말하지 않는다 — 배지에 비용이 있는 것이 이미 끝났다는 뜻이다. */
@@ -487,7 +586,7 @@ private fun EngineNoticeRow(line: String) {
  * 두 사용처가 실제로 있어서 함수로 뽑았다(원칙 4). 하나였으면 그 자리에 그대로 두었다.
  */
 @Composable
-private fun CollapsibleBlock(
+internal fun CollapsibleBlock(
     header: @Composable () -> Unit,
     containerColor: Color = Color.Transparent,
     content: @Composable () -> Unit,
@@ -531,7 +630,7 @@ private fun CollapsibleBlock(
  *   사용자가 어느 것을 열었는지 안다.
  */
 @Composable
-private fun MonospaceBlock(
+internal fun MonospaceBlock(
     text: String,
     detailTitle: String,
     textColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -793,6 +892,9 @@ private const val MONOSPACE_BLOCK_MAX_LINES = 40
  * 적어 두어, 사용자가 "다 본 것" 과 "일부만 본 것" 을 가를 수 있게 한다.
  */
 private const val DIFF_LINES_SHOWN_IN_CARD = 30
+
+/** 경과 시간이 다시 그려지는 주기. 1 초보다 잦게 그릴 이유가 없다 — 화면이 적는 단위가 초다. */
+private const val ELAPSED_TICK_MILLIS = 1_000L
 
 /** 상세 패널의 폭과 높이. 창(1360dp)보다 좁게 두어 뒤의 대화가 가장자리에 남아 있게 한다. */
 private val FULL_TEXT_PANEL_WIDTH = 900.dp

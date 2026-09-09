@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import java.time.Instant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -29,6 +30,8 @@ sealed interface ChatEntry {
     /**
      * 도구 호출 하나. 부른 순간 [answer] 없이 서고, 결과가 오면 그 자리에서 채워진다.
      *
+     * @param requestedAt 이 호출이 스트림에 실려 온 시각. 도는 동안 카드가 보이는 경과 시간이
+     *   여기서 나온다 — 앱의 시계가 아니라 스트림이 준 값이다(ChatSessionEvent.ToolCallRequested).
      * @param nestedEntries 이 호출 **안쪽**에서 일어난 것들. 서브에이전트가 자기 대화를
      *   `parent_tool_use_id` 를 달고 보내면(3.10) 그것이 여기로 접힌다 — 대화 본문에 풀어 놓으면
      *   메인 대화와 안쪽 대화가 한 줄기로 섞인다.
@@ -37,8 +40,10 @@ sealed interface ChatEntry {
         val toolUseId: String,
         val toolName: String,
         val input: JsonObject,
+        val requestedAt: Instant? = null,
         val answer: ToolCallAnswer? = null,
         val nestedEntries: List<ChatEntry> = emptyList(),
+        val subagentRun: SubagentRun? = null,
     ) : ChatEntry
 
     /**
@@ -67,15 +72,16 @@ sealed interface ChatEntry {
      * 전사 안에 두는 것이 뜻이다. 화면 아래 한 자리에 마지막 턴의 것만 두면 스크롤을 올렸을 때
      * 어느 답이 얼마였는지 알 수 없다 — 비용은 그 턴에 붙는 사실이다.
      *
-     * @param permissionDenialCount 권한이 없어 못 한 도구 호출의 수(3.6 의 `dontAsk`). 항목의
-     *   안쪽 모양은 아직 재지 못했으므로 세기만 한다 — 없는 필드 이름을 지어내지 않는다(원칙 15).
+     * @param permissionDenials 권한이 없어 못 한 도구 호출들(3.6). **사용자가 승인 카드에서 직접
+     *   거부한 것은 여기 없다** — 그것은 그 카드가 이미 말하고 있고, 같은 사실을 턴 끝에서 다시
+     *   말하면 사용자는 자기가 거부한 것 말고 무언가가 더 막혔다고 읽는다.
      */
     data class TurnEnded(
         val outcome: TurnOutcome,
         val costUsd: Double,
         val usage: TurnUsage,
         val durationMillis: Long,
-        val permissionDenialCount: Int,
+        val permissionDenials: List<PermissionDenial>,
     ) : ChatEntry
 
     /**
@@ -105,6 +111,31 @@ data class ToolCallAnswer(
     val failed: Boolean,
     val modelVisibleText: String,
     val typedResult: JsonElement? = null,
+    val answeredAt: Instant? = null,
+)
+
+/**
+ * 이 도구 호출이 띄운 서브에이전트가 지금 어디까지 왔는가(3.10 · 6.3 의 SubagentCard).
+ *
+ * **도구 호출의 인자·결과가 아니라 `system/task_*` 에서 온다.** 그래서 [ToolCallAnswer] 옆이
+ * 아니라 카드 자체에 붙는다 — 결과가 오기 전에도 채워지는 값이고, 결과가 온 뒤에도 남는다.
+ *
+ * 이 값이 있다는 것이 곧 "이 카드는 서브에이전트다" 다. **도구 이름으로 가르지 않는다** — 그
+ * 이름은 판마다 달라진다(설계 문서의 `Task` 가 이 판에서는 `Agent` 였다).
+ *
+ * @param subagentType `general-purpose` 같은 것. 진행·끝만 받고 시작을 놓친 카드에서는 비어 있다 —
+ *   그때도 진행은 사실이므로 카드를 세운다.
+ * @param lastDescription 그 에이전트가 지금 무엇을 하는 중인가(`task_progress.description`).
+ * @param lastToolName 마지막으로 부른 도구 이름.
+ * @param finishedStatus 끝났으면 그 모양(`task_notification.status`). 아직이면 null.
+ * @param outputFilePath 그 실행의 원출력이 남은 자리. 카드가 경로를 그대로 보인다.
+ */
+data class SubagentRun(
+    val subagentType: String,
+    val lastDescription: String? = null,
+    val lastToolName: String? = null,
+    val finishedStatus: String? = null,
+    val outputFilePath: String? = null,
 )
 
 /**

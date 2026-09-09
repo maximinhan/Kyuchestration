@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import java.time.Instant
+import java.time.format.DateTimeParseException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -79,17 +81,35 @@ private fun systemEventsIn(line: JsonObject, streamLine: String): List<ChatSessi
             ),
         )
 
+        "task_started" -> listOf(
+            ChatSessionEvent.SubagentStarted(
+                toolUseId = line.stringOrNull("tool_use_id").orEmpty(),
+                subagentType = line.stringOrNull("subagent_type").orEmpty(),
+            ),
+        )
+
         "task_progress" -> listOf(
-            ChatSessionEvent.DelegationProgressed(
-                taskId = line.stringOrNull("task_id").orEmpty(),
+            ChatSessionEvent.SubagentProgressed(
                 toolUseId = line.stringOrNull("tool_use_id").orEmpty(),
                 description = line.stringOrNull("description").orEmpty(),
                 lastToolName = line.stringOrNull("last_tool_name"),
             ),
         )
 
+        "task_notification" -> listOf(
+            ChatSessionEvent.SubagentFinished(
+                toolUseId = line.stringOrNull("tool_use_id").orEmpty(),
+                status = line.stringOrNull("status").orEmpty(),
+                outputFilePath = line.stringOrNull("output_file"),
+            ),
+        )
+
+        // task_updated 가 여기 있는 이유를 적어 둔다. 실측한 모양이 `patch: {status, end_time}` 이고
+        // **tool_use_id 가 없다**(2026-09-08) — 카드에 이어 붙일 열쇠가 그 줄에 없다. 그리고 그 줄이
+        // 말하는 "끝났다" 는 바깥 도구 결과와 task_notification 이 이미 말한다. 이을 수도 없고 더할
+        // 것도 없는 줄이라 갈래를 만들지 않는다.
         "status", "thinking_tokens", "hook_started", "hook_response",
-        "task_started", "task_updated", "task_notification", "background_tasks_changed",
+        "task_updated", "background_tasks_changed",
         -> emptyList()
 
         else -> listOf(ChatSessionEvent.Unrecognized(streamLine))
@@ -103,6 +123,7 @@ private fun systemEventsIn(line: JsonObject, streamLine: String): List<ChatSessi
  */
 private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
     val parentToolUseId = line.stringOrNull("parent_tool_use_id")
+    val arrivedAt = line.instantOrNull("timestamp")
     val contentBlocks = line.objectOrNull("message")?.arrayOrNull("content")
         ?: return listOf(ChatSessionEvent.Unrecognized(streamLine))
 
@@ -123,6 +144,7 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
                 toolName = block.stringOrNull("name").orEmpty(),
                 input = block.objectOrNull("input") ?: JsonObject(emptyMap()),
                 parentToolUseId = parentToolUseId,
+                requestedAt = arrivedAt,
             )
 
             else -> ChatSessionEvent.Unrecognized(streamLine)
@@ -139,18 +161,24 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
  */
 private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
     val typedResult = line["tool_use_result"]
+    val parentToolUseId = line.stringOrNull("parent_tool_use_id")
+    val arrivedAt = line.instantOrNull("timestamp")
     val contentBlocks = line.objectOrNull("message")?.arrayOrNull("content")
         ?: return listOf(ChatSessionEvent.Unrecognized(streamLine))
 
     return contentBlocks.filterIsInstance<JsonObject>().map { block ->
         when (block.stringOrNull("type")) {
-            "text" -> ChatSessionEvent.UserMessageEchoed(block.stringOrNull("text").orEmpty())
+            "text" -> ChatSessionEvent.UserMessageEchoed(
+                text = block.stringOrNull("text").orEmpty(),
+                parentToolUseId = parentToolUseId,
+            )
 
             "tool_result" -> ChatSessionEvent.ToolCallAnswered(
                 toolUseId = block.stringOrNull("tool_use_id").orEmpty(),
                 failed = block.booleanOrNull("is_error") ?: false,
                 modelVisibleText = modelVisibleTextOf(block["content"]),
                 typedResult = typedResult,
+                answeredAt = arrivedAt,
             )
 
             else -> ChatSessionEvent.Unrecognized(streamLine)
@@ -212,7 +240,13 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
         ),
         permissionDenials = line.arrayOrNull("permission_denials")
             ?.filterIsInstance<JsonObject>()
-            ?.map(::PermissionDenial)
+            ?.map {
+                PermissionDenial(
+                    toolName = it.stringOrNull("tool_name").orEmpty(),
+                    toolUseId = it.stringOrNull("tool_use_id").orEmpty(),
+                    input = it.objectOrNull("tool_input") ?: JsonObject(emptyMap()),
+                )
+            }
             .orEmpty(),
         durationMillis = line.longOrNull("duration_ms") ?: 0,
     )
@@ -283,6 +317,20 @@ private fun JsonObject.booleanOrNull(key: String): Boolean? =
 private fun JsonObject.doubleOrNull(key: String): Double? = (this[key] as? JsonPrimitive)?.doubleOrNull
 
 private fun JsonObject.longOrNull(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
+
+/**
+ * 그 줄에 실려 온 시각. 없거나 우리가 읽지 못하는 모양이면 null 이다.
+ *
+ * 읽지 못한 것을 "지금" 으로 대신하지 않는다. 그러면 아주 오래전에 시작한 도구가 방금 시작한
+ * 것으로 그려지고, 그 화면은 틀렸다는 사실조차 말하지 않는다 — 없으면 경과 시간을 안 그린다.
+ */
+private fun JsonObject.instantOrNull(key: String): Instant? = stringOrNull(key)?.let {
+    try {
+        Instant.parse(it)
+    } catch (failure: DateTimeParseException) {
+        null
+    }
+}
 
 private fun JsonObject.objectOrNull(key: String): JsonObject? = this[key] as? JsonObject
 

@@ -19,6 +19,13 @@ package com.kyuchestration.desktop.terminal.chat
  * **4 단계가 여기에 더한 것**(2026-09-04, 같은 판): 도구별 결과의 실제 모양(Bash·Edit·Write·거절)과
  * 중단 왕복이다. 3 단계까지는 중단과 거절을 설계 문서 부록 A 에서 옮겨 왔는데, 카드를 그리려면
  * 곁가지의 키 이름이 맞아야 해서 직접 받았다. **옮겨 온 줄은 이제 하나도 없다.**
+ *
+ * **6 단계가 여기에 더한 것**(2026-09-08, `claude` 2.1.259, 같은 방법): 서브에이전트 한 벌
+ * (`Agent` 호출 → `task_started` → 안쪽 대화 → `task_progress` → `task_updated` →
+ * `task_notification` → 바깥 결과)과 권한에 막힌 턴의 `result` 다. 이 줄들은 **엔진이 실제로
+ * 조립하는 챗 모드 플래그 그대로**(`--forward-subagent-text` 포함) 돌려 받은 것이라, 앱이 받을
+ * 것과 같다. 서브에이전트 줄들은 한 실행에서 통째로 온 것이라 `tool_use_id` 가 서로 맞는다 —
+ * 손으로 짝을 지어 준 줄이 하나도 없다.
  */
 internal object RecordedChatStreamLines {
 
@@ -62,17 +69,68 @@ internal object RecordedChatStreamLines {
     const val SYSTEM_STATUS: String =
         """{"type":"system","subtype":"status","status":"requesting","session_id":"8129eebb-0f2f-4067-af9c-d189154b6617","uuid":"679b60cb-acf9-4543-9f92-e893a9323c6a"}"""
 
-    /** 서브에이전트가 떴다(3.10). 프롬프트 전문이 실려 오는데 여기서는 첫 줄만 남겼다. */
-    const val TASK_STARTED: String =
-        """{"type":"system","subtype":"task_started","task_id":"af9ca720398708b1c","tool_use_id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M","description":"Read README.txt first line","subagent_type":"general-purpose","is_backgrounded":false,"spawn_depth":1,"task_type":"local_agent","prompt":"작업 디렉터리(/tmp/fakerepo)의 README.txt 파일을 읽고, 그 파일의 첫 번째 줄 내용을 그대로 보고해줘.","uuid":"90c370d8-cafa-4641-ba2e-9b9fa969f970","session_id":"bdda591c-d334-4a29-9791-43506315ae17"}"""
+    /**
+     * 메인이 서브에이전트를 띄우는 도구 호출.
+     *
+     * **도구 이름이 `Agent` 다.** 설계 문서가 `Task` 라고 적어둔 자리인데, 이 판이 실제로 부른
+     * 이름은 이것이다(2026-09-08). 카드가 이름으로 갈래를 정하는 자리라 지어낸 이름을 쓰면
+     * 서브에이전트 카드가 한 번도 서지 않는다.
+     */
+    const val AGENT_TOOL_USE: String =
+        """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011Ceq7fHrMdcTdaiP6Vi9SQ","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_0144EDWk6by45Zj2YrwXLNBX","name":"Agent","input":{"description":"Read README.txt first line","subagent_type":"general-purpose","run_in_background":false,"prompt":"/tmp/fakerepo/README.txt 파일을 읽고, 그 파일의 첫 번째 줄을 그대로(수정 없이) 보고해라. 다른 작업은 하지 말고, 첫 줄 내용만 반환해라. 파일이 없으면 없다고 보고해라."},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":16723,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":null,"session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8","uuid":"acf3c087-d815-4ae5-8c4b-7317455ab169","timestamp":"2026-09-08T01:36:54.793Z","request_id":"req_011Ceq7fH2zqYuBQyvar1oBZ"}"""
 
-    /** 서브에이전트의 진행(3.10). `task_id` 와 `tool_use_id` 가 함께 온다 — 이 두 값이 진행을 바깥 도구 카드에 잇는다. */
+    /** 서브에이전트가 떴다(3.10). `tool_use_id` 가 바깥 도구 카드를 가리킨다. 프롬프트 전문이 실려 온다. */
+    const val TASK_STARTED: String =
+        """{"type":"system","subtype":"task_started","task_id":"aadb20bff6e5d47e9","tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","description":"Read README.txt first line","subagent_type":"general-purpose","is_backgrounded":false,"spawn_depth":1,"task_type":"local_agent","prompt":"/tmp/fakerepo/README.txt 파일을 읽고, 그 파일의 첫 번째 줄을 그대로(수정 없이) 보고해라. 다른 작업은 하지 말고, 첫 줄 내용만 반환해라. 파일이 없으면 없다고 보고해라.","uuid":"0abd9b37-9150-47cf-abbb-7aa535a30664","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8"}"""
+
+    /** 서브에이전트가 받은 프롬프트가 안쪽 사용자 메시지로 되돌아온다. `parent_tool_use_id` 가 채워져 있다. */
+    const val SUBAGENT_PROMPT_ECHOED: String =
+        """{"type":"user","message":{"role":"user","content":[{"type":"text","text":"/tmp/fakerepo/README.txt 파일을 읽고, 그 파일의 첫 번째 줄을 그대로(수정 없이) 보고해라. 다른 작업은 하지 말고, 첫 줄 내용만 반환해라. 파일이 없으면 없다고 보고해라."}]},"parent_tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8","uuid":"21df9aad-7357-4cc6-9154-06ddc2f18f9e","timestamp":"2026-09-08T01:36:57.583Z","subagent_type":"general-purpose","task_description":"Read README.txt first line"}"""
+
+    /** 서브에이전트가 한 말. **`--forward-subagent-text` 를 켜야 온다**(6 단계 실측). */
+    const val SUBAGENT_TEXT: String =
+        """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011Ceq7fw2FinLuofpYdJve1","type":"message","role":"assistant","content":[{"type":"text","text":"I'll read the file."}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":2767,"cache_read_input_tokens":6925,"cache_creation":{"ephemeral_5m_input_tokens":2767,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8","uuid":"5c91b28e-da6a-4990-bdcb-40efcab7003a","timestamp":"2026-09-08T01:36:59.305Z","request_id":"req_011Ceq7fvM5AHrgXXWt552C2","subagent_type":"general-purpose","task_description":"Read README.txt first line"}"""
+
+    /** 서브에이전트의 진행(3.10). `description` 과 `last_tool_name` 이 "지금 무엇을 하는 중인가" 를 준다. */
     const val TASK_PROGRESS: String =
-        """{"type":"system","subtype":"task_progress","task_id":"af9ca720398708b1c","tool_use_id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M","description":"Reading README.txt","subagent_type":"general-purpose","usage":{"total_tokens":10027,"tool_uses":1,"duration_ms":3173},"last_tool_name":"Read","uuid":"3237dd79-6b17-4adb-9d00-bf26433c40d9","session_id":"bdda591c-d334-4a29-9791-43506315ae17"}"""
+        """{"type":"system","subtype":"task_progress","task_id":"aadb20bff6e5d47e9","tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","description":"Reading README.txt","subagent_type":"general-purpose","usage":{"total_tokens":9700,"tool_uses":1,"duration_ms":1728},"last_tool_name":"Read","uuid":"0b163015-bcff-450d-a51d-c4fc7a0208cb","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8"}"""
 
     /** 서브에이전트 안쪽의 도구 호출. `parent_tool_use_id` 가 채워져 있다(3.10) — 중첩의 열쇠다. */
     const val SUBAGENT_TOOL_USE: String =
-        """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011Cehx1GVs8feLs2y3hQZbW","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_015cgoqteHactDNH8Er6kf4J","name":"Read","input":{"file_path":"/tmp/fakerepo/README.txt"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":9988,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":9988,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":"toolu_01QUbBJ2Rh6wpXTtCkjoC95M","session_id":"bdda591c-d334-4a29-9791-43506315ae17","uuid":"e4ef25da-290d-4bbf-85a5-a9aa7121022d","timestamp":"2026-09-04T06:46:05.324Z","request_id":"req_011Cehx1Fnx5PfEdU1WpqeSw","subagent_type":"general-purpose","task_description":"Read README.txt first line"}"""
+        """{"type":"assistant","message":{"model":"claude-opus-5","id":"msg_011Ceq7fw2FinLuofpYdJve1","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01Qu3cuw7ubHfTYKdCU4a2hs","name":"Read","input":{"file_path":"/tmp/fakerepo/README.txt"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":2767,"cache_read_input_tokens":6925,"cache_creation":{"ephemeral_5m_input_tokens":2767,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null,"context_management":null},"parent_tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8","uuid":"e97ef80d-1c69-417a-a341-b68d61aae0da","timestamp":"2026-09-08T01:36:59.309Z","request_id":"req_011Ceq7fvM5AHrgXXWt552C2","subagent_type":"general-purpose","task_description":"Read README.txt first line"}"""
+
+    /** 그 안쪽 도구의 결과. **`tool_use_result` 곁가지가 없다** — 안쪽 카드는 모델이 읽은 텍스트로만 그린다. */
+    const val SUBAGENT_TOOL_RESULT: String =
+        """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01Qu3cuw7ubHfTYKdCU4a2hs","type":"tool_result","content":"1\thello from fake repo\n2\t"}]},"parent_tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8","uuid":"a1506ea1-8cca-4e9e-ae13-ba358d4fa370","timestamp":"2026-09-08T01:36:59.332Z","subagent_type":"general-purpose","task_description":"Read README.txt first line"}"""
+
+    /**
+     * 서브에이전트의 상태가 바뀌었다.
+     *
+     * **`tool_use_id` 가 없고 상태가 `patch` 안에 있다** — 설계 문서가 `{"status":"completed"}` 로
+     * 적어둔 것과 다른 모양이다(2026-09-08). 이 줄이 말하는 것을 카드는 바깥 도구 결과와
+     * `task_notification` 에서 이미 받으므로, 어댑터는 이 줄을 조용히 지나보낸다.
+     */
+    const val TASK_UPDATED: String =
+        """{"type":"system","subtype":"task_updated","task_id":"aadb20bff6e5d47e9","patch":{"status":"completed","end_time":1788831422590},"uuid":"65770718-4fb6-4233-9084-1e91f26c48fd","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8"}"""
+
+    /** 서브에이전트가 끝났다. `output_file` 이 그 실행의 원출력 자리다. */
+    const val TASK_NOTIFICATION: String =
+        """{"type":"system","subtype":"task_notification","task_id":"aadb20bff6e5d47e9","tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","status":"completed","output_file":"/tmp/claude-1000/-tmp-fakerepo/e4dba7e4-2718-4a07-a524-907722eff1a8/tasks/aadb20bff6e5d47e9.output","summary":"파일: /tmp/fakerepo/README.txt\n\n첫 번째 줄:\n\n```\nhello from fake repo\n```\n\n(파일은 존재하며, 총 1줄 + 끝 개행으로 구성되어 있습니다.)","usage":{"total_tokens":10849,"tool_uses":1,"duration_ms":5008},"uuid":"b6cd7ded-47ea-46cf-9208-9711769047d5","session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8"}"""
+
+    /**
+     * 바깥 `Agent` 호출의 결과. `content` 가 **텍스트 블록 둘**이고, 곁가지에 `status`·`agentType` 이 있다.
+     */
+    const val AGENT_RESULT: String =
+        """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_0144EDWk6by45Zj2YrwXLNBX","type":"tool_result","content":[{"type":"text","text":"파일: /tmp/fakerepo/README.txt\n\n첫 번째 줄:\n\n```\nhello from fake repo\n```\n\n(파일은 존재하며, 총 1줄 + 끝 개행으로 구성되어 있습니다.)"},{"type":"text","text":"agentId: aadb20bff6e5d47e9 (use SendMessage with to: 'aadb20bff6e5d47e9', summary: '<5-10 word recap>' to continue this agent)\n<usage>subagent_tokens: 10852\ntool_uses: 1\nduration_ms: 5010</usage>"}]}]},"parent_tool_use_id":null,"session_id":"e4dba7e4-2718-4a07-a524-907722eff1a8","uuid":"417d7433-29cd-4592-91e9-866266b09d72","timestamp":"2026-09-08T01:37:05.597Z","tool_use_result":{"status":"completed","prompt":"/tmp/fakerepo/README.txt 파일을 읽고, 그 파일의 첫 번째 줄을 그대로(수정 없이) 보고해라. 다른 작업은 하지 말고, 첫 줄 내용만 반환해라. 파일이 없으면 없다고 보고해라.","agentId":"aadb20bff6e5d47e9","agentType":"general-purpose","harnessNoteCount":0,"harnessTailCount":0,"harnessSectionHash":"491e67377b018209","content":[{"type":"text","text":"파일: /tmp/fakerepo/README.txt\n\n첫 번째 줄:\n\n```\nhello from fake repo\n```\n\n(파일은 존재하며, 총 1줄 + 끝 개행으로 구성되어 있습니다.)"}],"resolvedModel":"claude-opus-5[1m]","totalDurationMs":5010,"totalTokens":10852,"totalToolUseCount":1,"usage":{"input_tokens":2,"cache_creation_input_tokens":988,"cache_read_input_tokens":9692,"output_tokens":170,"output_tokens_details":{"thinking_tokens":81},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":988},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":170,"cache_read_input_tokens":9692,"cache_creation_input_tokens":988,"cache_creation":{"ephemeral_5m_input_tokens":988,"ephemeral_1h_input_tokens":0},"type":"message"}],"speed":"standard"},"toolStats":{"readCount":1,"searchCount":0,"bashCount":0,"editFileCount":0,"linesAdded":0,"linesRemoved":0,"otherToolCount":0}}}"""
+
+    /**
+     * 권한에 막힌 호출이 실린 턴의 끝(3.6).
+     *
+     * `--permission-mode dontAsk` 로 Write 를 시켜 받았다(2026-09-08). **항목의 모양이 이 줄로
+     * 처음 확정됐다** — `tool_name`·`tool_use_id`·`tool_input` 셋이다.
+     */
+    const val RESULT_WITH_PERMISSION_DENIALS: String =
+        """{"duration_api_ms":12073,"stop_reason":"end_turn","session_id":"999d5dd5-324b-4414-b5ab-56a27f779deb","total_cost_usd":0.10143950000000002,"usage":{"input_tokens":4,"cache_creation_input_tokens":7078,"cache_read_input_tokens":26829,"output_tokens":646,"output_tokens_details":{"thinking_tokens":231},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":7078,"ephemeral_5m_input_tokens":0},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":462,"cache_read_input_tokens":16703,"cache_creation_input_tokens":501,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":501},"type":"message"}],"speed":"standard"},"modelUsage":{"claude-haiku-4-5-20251001":{"inputTokens":955,"outputTokens":24,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"webSearchRequests":0,"costUSD":0.001075,"contextWindow":200000,"maxOutputTokens":32000,"thinkingTokens":0,"canonicalModel":"claude-haiku-4-5","provider":"firstParty","costBasis":"list"},"claude-opus-5[1m]":{"inputTokens":4,"outputTokens":646,"cacheReadInputTokens":26829,"cacheCreationInputTokens":7078,"webSearchRequests":0,"costUSD":0.10036450000000001,"contextWindow":1000000,"maxOutputTokens":64000,"thinkingTokens":231,"canonicalModel":"claude-opus-5","provider":"firstParty","costBasis":"list"}},"permission_denials":[{"tool_name":"Write","tool_use_id":"toolu_01J3E2oezHZVWiyWBHWPGdxZ","tool_input":{"file_path":"/tmp/fakerepo/denied.txt","content":"DENIED-PROBE\n"}}],"terminal_reason":"completed","fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required","subagent_stats":{"spawned":0,"requested":{"background":0,"foreground":0,"unset":0},"started_in_background":0,"max_depth":0,"spawned_by_subagents":0,"completed":0,"failed":0,"killed":{"parent":0,"user":0,"system":0},"refused":{"depth_limit":0,"concurrency_limit":0,"budget":0},"by_type":{}},"is_error":false,"num_turns":3,"subtype":"success","api_error_status":null,"result":"`date` ran fine:\n\n```\n2026. 09. 08. (화) 10:37:30 KST\n```\n\nBut the file was **not** created. The `Write` tool call was denied — the session is in \"don't ask\" mode, so write permission is blocked and can't be prompted for here.\n\nI'm not going to route around it with a shell redirect (`echo ... > denied.txt`), since the denial is on file-writing itself, not on that particular tool's syntax.\n\nTo get `denied.txt` created, you'd need to either allow `Write` (e.g. via `/permissions` in an interactive session, or a permission entry in `.claude/settings.json`), or tell me explicitly that using Bash to write the file is acceptable to you.","ttft_ms":2997,"type":"result","duration_ms":12102,"uuid":"595bf1b2-fd6c-405a-8e86-de26a87c789a","ttft_stream_ms":1910,"time_to_request_ms":85,"queued_turn_count":0}"""
 
     /** 한도 사용률을 창 두 개로 준다(3.12). 턴마다 온다. */
     const val RATE_LIMIT: String =

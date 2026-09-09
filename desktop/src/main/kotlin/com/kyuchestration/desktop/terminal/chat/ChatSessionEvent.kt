@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import java.time.Instant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -35,11 +36,15 @@ sealed interface ChatSessionEvent {
      * 앱이 방금 보낸 말이 스트림을 한 바퀴 돌아 여기로 온다. 화면의 말풍선은 이것으로 그린다 —
      * 앱이 자기가 보낸 것을 직접 넣으면 큐잉(3.11)이나 중단이 끼는 순간 순서가 어긋난다.
      *
+     * **서브에이전트가 받은 프롬프트도 이 모양으로 온다.** 그때는 [parentToolUseId] 가 채워져
+     * 있고(2026-09-08 실측), 그것은 사용자가 한 말이 아니라 안쪽 대화의 첫 줄이다 — 이 값을
+     * 보지 않으면 메인 전사에 사용자가 쓴 적 없는 말풍선이 선다.
+     *
      * **중단 표시도 이 모양으로 온다.** 턴을 끊으면 `[Request interrupted by user]` 가 `user`
      * 이벤트의 텍스트로 온다(A.9). 그것을 사용자의 말과 가르는 것은 화면의 몫이다 — 어댑터가
      * 문구를 알아보고 다른 갈래로 옮기면, 그 문구가 바뀌는 날 조용히 사용자 말풍선이 된다.
      */
-    data class UserMessageEchoed(val text: String) : ChatSessionEvent
+    data class UserMessageEchoed(val text: String, val parentToolUseId: String?) : ChatSessionEvent
 
     /**
      * 모델이 텍스트 블록 하나를 **완성**했다.
@@ -69,12 +74,19 @@ sealed interface ChatSessionEvent {
      *
      * 조각(`input_json_delta`)은 이 이벤트로 오지 않는다. 잘린 JSON 이라 그 자체로 파싱되지 않고,
      * 완성본이 곧 오기 때문이다(3.3).
+     *
+     * @param requestedAt 이 줄에 실려 온 시각(`timestamp`). 없는 줄에서는 null 이다.
+     *
+     *   **앱이 시계를 보지 않는다.** 도는 도구의 경과 시간을 그리려면 시작한 때가 필요한데, 그
+     *   값이 스트림에 이미 있다 — 앱이 자기 시계로 다시 재면 두 숫자가 갈리고, 갈린 것을 발견하는
+     *   자리는 사용자의 화면이다(TurnFinished 의 `duration_ms` 에 대해 정한 것과 같다).
      */
     data class ToolCallRequested(
         val toolUseId: String,
         val toolName: String,
         val input: JsonObject,
         val parentToolUseId: String?,
+        val requestedAt: Instant?,
     ) : ChatSessionEvent
 
     /**
@@ -91,6 +103,7 @@ sealed interface ChatSessionEvent {
         val failed: Boolean,
         val modelVisibleText: String,
         val typedResult: JsonElement?,
+        val answeredAt: Instant?,
     ) : ChatSessionEvent
 
     /**
@@ -111,16 +124,43 @@ sealed interface ChatSessionEvent {
     data class PermissionRequested(val request: PermissionRequest) : ChatSessionEvent
 
     /**
+     * 서브에이전트 하나가 떴다(`system/task_started` — 3.10).
+     *
+     * **이 갈래가 있는 이유는 "이 도구 호출이 서브에이전트다" 를 도구 이름 없이 아는 것이다.**
+     * 그 이름은 판마다 달라진다 — 설계 문서가 `Task` 라고 적어둔 자리를 이 판은 `Agent` 로
+     * 부른다(2026-09-08 실측). 이름으로만 갈래를 정하면 다음 판에서 서브에이전트 카드가 조용히
+     * 사라지고, 안쪽 대화가 접히지 않은 채로 메인 전사에 쏟아진다.
+     *
+     * @param subagentType 어떤 에이전트인가 — `general-purpose` 같은 것. 카드의 머리말이다.
+     */
+    data class SubagentStarted(val toolUseId: String, val subagentType: String) : ChatSessionEvent
+
+    /**
      * 서브에이전트 하나의 진행(`system/task_progress` — 3.10).
      *
      * **MCP 도구의 진행은 오지 않는다.** 프로브 서버가 `notifications/progress` 를 세 번 보냈는데
      * 스트림에는 0 개였다(3.10 가). 그래서 오케스트레이션 위임 카드는 "도는 중" 까지만 그린다.
+     *
+     * `task_id` 를 싣지 않는다. 화면이 이 진행을 붙일 자리는 바깥 도구 카드이고 그 열쇠는
+     * [toolUseId] 다 — 두 값을 다 들고 있으면 쓰지 않는 쪽이 무슨 뜻인지 모르는 채 굳는다.
      */
-    data class DelegationProgressed(
-        val taskId: String,
+    data class SubagentProgressed(
         val toolUseId: String,
         val description: String,
         val lastToolName: String?,
+    ) : ChatSessionEvent
+
+    /**
+     * 서브에이전트 하나가 끝났다(`system/task_notification` — 3.10).
+     *
+     * @param status 끝난 모양. 실측으로 본 것은 `completed` 하나다 — 열거형으로 굳히지 않는다.
+     * @param outputFilePath 그 실행의 원출력이 남은 자리. 카드가 이 경로를 그대로 보인다 —
+     *   위임 기록 자리를 화면에 안내하는 자세와 같다(orchestration 6.3 · DiagnosticLogPathNotice).
+     */
+    data class SubagentFinished(
+        val toolUseId: String,
+        val status: String,
+        val outputFilePath: String?,
     ) : ChatSessionEvent
 
     /**
@@ -212,12 +252,14 @@ data class TurnUsage(
 /**
  * 권한이 없어 못 한 도구 호출 하나(`result.permission_denials` — 3.6).
  *
- * **안쪽 모양을 재지 못했다.** 이 배열이 비어 있지 않았던 실측은 `dontAsk` 하나였고(A.6), 그때도
- * 건수만 셌지 항목의 키를 적어두지 않았다. 그래서 온 것을 그대로 들고 있는다 — 지금 필드 이름을
- * 지어내면 그 이름이 맞는지 아무도 모르는 채로 굳는다(원칙 15). 화면이 이것을 그리는 6 단계에서
- * 실제 값을 보고 가른다.
+ * **6 단계가 안쪽 모양을 쟀다**(2026-09-08, `--permission-mode dontAsk` 로 Write 를 시켜 받았다).
+ * 항목은 셋이다 — `tool_name` · `tool_use_id` · `tool_input`. 3 단계는 이 모양을 몰라 온 것을
+ * 통째로 들고 있었는데, 화면이 "무엇이 막혔는가" 를 말하려면 이름과 인자가 갈려 있어야 한다.
+ *
+ * @param toolUseId 이 값이 전사의 카드와 이 항목을 잇는다. 사용자가 승인 카드에서 직접 거부한
+ *   호출은 그 카드가 이미 말하고 있으므로, 화면은 이 값으로 그것을 가려낸다.
  */
-data class PermissionDenial(val fields: JsonObject)
+data class PermissionDenial(val toolName: String, val toolUseId: String, val input: JsonObject)
 
 /**
  * 한도 창 하나(`rate_limit_event.rate_limit_info.unifiedWindows` — 3.12).
