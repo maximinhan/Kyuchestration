@@ -19,8 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -31,8 +29,6 @@ import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
-import com.kyuchestration.desktop.terminal.EmbeddedTerminalState
-import com.kyuchestration.desktop.terminal.HeldSession
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatScreenState
@@ -73,26 +69,19 @@ fun KyuchestrationDesktopScreen(
     /** 대화 자리가 지금 보여줄 것. 이 앱의 기본 화면이다. */
     chatScreenState: ChatScreenState,
     /**
-     * 앱이 지금 챗으로 보유 중인 세션의 대상.
-     *
-     * 통로가 아니라 대상만 받는다 — 목록이 세션에 말을 걸 일은 없고, 통로를 넘기면 줄을 그리는
-     * 자리가 세션을 끝낼 수도 있는 자리가 된다(터미널 쪽과 같은 규율이다).
-     */
-    heldChatSessionTargets: Set<SessionTarget>,
-    /** 대화 자리에 챗을 둘 것인가 원시 터미널을 둘 것인가(7 절). */
-    conversationPaneContent: ConversationPaneContent,
-    terminalState: EmbeddedTerminalState,
-    /**
-     * 앱이 지금 보유 중인 세션 전부. 화면에 보이지 않는 것도 들어 있다.
+     * 앱이 지금 보유 중인 세션의 대상 전부. 화면에 보이지 않는 것도 들어 있다.
      *
      * 엔진이 답한 목록에 얹을 앱 자신의 사실이다 — 세션을 띄우는 것이 앱뿐이라 엔진은 이것을
      * 알지 못하고, 앱이 자기 것을 스스로 아는 것 말고는 알 길이 없다(설계 문서 5.4).
+     *
+     * 통로가 아니라 대상만 받는다 — 목록이 세션에 말을 걸 일은 없고, 통로를 넘기면 줄을 그리는
+     * 자리가 세션을 끝낼 수도 있는 자리가 된다.
      */
-    heldSessions: List<HeldSession>,
+    heldChatSessionTargets: Set<SessionTarget>,
     /**
      * 레포를 골라 받아 오는 대화상자가 자기 상태를 직접 구독한다. 다른 상태들처럼 위에서 받아
      * 내려보내지 않는 이유는, 그 상태를 보는 곳이 대화상자 하나뿐이기 때문이다 — 여기서
-     * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 터미널까지 다시 그려진다.
+     * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 대화 자리까지 다시 그려진다.
      */
     repositoryCloneStateHolder: RepositoryCloneStateHolder,
     /**
@@ -121,19 +110,7 @@ fun KyuchestrationDesktopScreen(
     onInterruptTurnRequested: () -> Unit,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndChatSessionRequested: () -> Unit,
-    /** 이 세션을 챗 대신 원시 터미널로 여는 자리(7 절). 4 단계에 메뉴 안으로 내려간다. */
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
-    onEndTerminalSessionRequested: () -> Unit,
 ) {
-    // 세션마다 살려 두는 터미널 위젯. 창이 사는 동안 같은 것 하나다 — 터미널 자리 안에 두면
-    // 터미널을 접을 때 함께 사라지고, 그러면 그때까지 보유하던 세션들의 화면을 통째로 잃는다.
-    val heldSessionTerminalWidgets = remember { HeldSessionTerminalWidgets() }
-
-    // 보유가 끝났고 화면에도 없는 세션의 위젯은 죽은 격자다. 합성이 끝날 때마다 정리한다 —
-    // 터미널을 접은 뒤에도 여기가 돌아야 마지막 위젯이 치워진다.
-    val liveConnectors = heldSessions.map { it.ttyConnector } + listOfNotNull(onScreenConnector(terminalState))
-    SideEffect { heldSessionTerminalWidgets.dropWidgetsOtherThan(liveConnectors.toSet()) }
-
     KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
@@ -176,14 +153,10 @@ fun KyuchestrationDesktopScreen(
                     is WorkDirDashboardState.WorkDirObserved -> {
                         OrchestrationShell(
                             observed = dashboardState,
-                            // 두 화면 모델이 함께 있는 동안 세션 표시는 둘을 합친 것이다.
-                            heldSessionTargets = heldChatSessionTargets + heldSessions.map { it.target },
+                            heldSessionTargets = heldChatSessionTargets,
                             initializationState = initializationState,
                             chatScreenState = chatScreenState,
-                            conversationPaneContent = conversationPaneContent,
-                            terminalState = terminalState,
                             diagnosticLogPathLabel = diagnosticLogPathLabel,
-                            heldSessionTerminalWidgets = heldSessionTerminalWidgets,
                             onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
                             onCloneRepositoriesRequested = onCloneRepositoriesRequested,
                             onRefreshRequested = onRefreshRequested,
@@ -193,8 +166,6 @@ fun KyuchestrationDesktopScreen(
                             onInterruptTurnRequested = onInterruptTurnRequested,
                             onPermissionChoiceMade = onPermissionChoiceMade,
                             onEndChatSessionRequested = onEndChatSessionRequested,
-                            onOpenRawTerminalRequested = onOpenRawTerminalRequested,
-                            onEndTerminalSessionRequested = onEndTerminalSessionRequested,
                             themePreference = themePreference,
                             onThemePreferenceChosen = onThemePreferenceChosen,
                         )
@@ -203,10 +174,7 @@ fun KyuchestrationDesktopScreen(
                         RepositoryCloneDialog(
                             repositoryCloneStateHolder = repositoryCloneStateHolder,
                             diagnosticLogPathLabel = diagnosticLogPathLabel,
-                            // 화면 모델이 둘인 동안에는 둘 다 세어야 한다. 한쪽만 보면 챗으로 연
-                            // 메인 세션이 없는 것처럼 보인다.
-                            mainSessionHeld = SessionTarget.Main in heldChatSessionTargets ||
-                                heldSessions.any { it.target == SessionTarget.Main },
+                            mainSessionHeld = SessionTarget.Main in heldChatSessionTargets,
                         )
                     }
 
@@ -230,9 +198,6 @@ fun KyuchestrationDesktopScreen(
  * **위아래였던 이유가 이제 사라졌다.** 예전 주석은 "터미널이 폭을 먹기 때문" 이라고 적었다:
  * 세션 안의 화면은 80 칸을 기준으로 그려지는데 창을 반으로 갈라 오른쪽에 두면 그 폭이 나오지
  * 않았다. 오른쪽에 서는 것이 챗이 되면서 그 제약이 없어졌다 — 챗은 폭에 맞춰 흐른다(설계 6.2).
- *
- * 원시 터미널을 고른 동안에는 그 자리에 터미널이 그대로 들어온다. 창 기본 폭이 그때도 80 칸을
- * 내주도록 잡혀 있다(Main.kt 의 창 크기).
  */
 @Composable
 private fun OrchestrationShell(
@@ -240,10 +205,7 @@ private fun OrchestrationShell(
     heldSessionTargets: Set<SessionTarget>,
     initializationState: WorkDirInitializationState,
     chatScreenState: ChatScreenState,
-    conversationPaneContent: ConversationPaneContent,
-    terminalState: EmbeddedTerminalState,
     diagnosticLogPathLabel: String,
-    heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
     onInitializeOpenedWorkDirRequested: () -> Unit,
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
@@ -253,8 +215,6 @@ private fun OrchestrationShell(
     onInterruptTurnRequested: () -> Unit,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndChatSessionRequested: () -> Unit,
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
-    onEndTerminalSessionRequested: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceChosen: (ThemePreference) -> Unit,
 ) {
@@ -272,10 +232,7 @@ private fun OrchestrationShell(
         WorkDirSessionPanel(
             observed = observed,
             heldSessionTargets = heldSessionTargets,
-            onScreenTarget = when (conversationPaneContent) {
-                ConversationPaneContent.Chat -> chatScreenState.target
-                ConversationPaneContent.RawTerminal -> terminalState.target
-            },
+            onScreenTarget = chatScreenState.target,
             initializationState = initializationState,
             onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
             onEnterSessionRequested = onEnterSessionRequested,
@@ -283,110 +240,21 @@ private fun OrchestrationShell(
         )
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        ConversationPane(
+        ChatConversationPane(
             chatScreenState = chatScreenState,
-            conversationPaneContent = conversationPaneContent,
-            terminalState = terminalState,
-            heldSessionTerminalWidgets = heldSessionTerminalWidgets,
             diagnosticLogPathLabel = diagnosticLogPathLabel,
             onSendUserMessageRequested = onSendUserMessageRequested,
             onInterruptTurnRequested = onInterruptTurnRequested,
             onPermissionChoiceMade = onPermissionChoiceMade,
-            onEndChatSessionRequested = onEndChatSessionRequested,
-            onOpenRawTerminalRequested = onOpenRawTerminalRequested,
-            onEndTerminalSessionRequested = onEndTerminalSessionRequested,
-            onEnterSessionRequested = onEnterSessionRequested,
+            onEndSessionRequested = onEndChatSessionRequested,
+            // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 왼쪽 줄을 누르는
+            // 것과 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
+            onStartNewConversationRequested = { target ->
+                onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
+            },
             modifier = Modifier.weight(1f),
         )
     }
-}
-
-/**
- * 셸의 오른쪽 자리 — 여기에 대화가 산다.
- *
- * **챗이 기본이다.** 왼쪽에서 세션을 고르면 이 자리에 챗이 열리고, 원시 터미널은 챗 머리말의
- * "터미널로 보기" 로만 온다(설계 7 절). 두 화면을 나란히 두지 않고 갈래로 가르는 것은 **한
- * 세션이 한 종류**이기 때문이다 — 같은 대화를 두 화면이 동시에 열지 못한다(5.6).
- */
-@Composable
-private fun ConversationPane(
-    chatScreenState: ChatScreenState,
-    conversationPaneContent: ConversationPaneContent,
-    terminalState: EmbeddedTerminalState,
-    heldSessionTerminalWidgets: HeldSessionTerminalWidgets,
-    diagnosticLogPathLabel: String,
-    onSendUserMessageRequested: (String) -> Unit,
-    onInterruptTurnRequested: () -> Unit,
-    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
-    onEndChatSessionRequested: () -> Unit,
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
-    onEndTerminalSessionRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 왼쪽 줄을 누르는 것과
-    // 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
-    val startNewConversation = { target: SessionTarget ->
-        onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
-    }
-
-    when (conversationPaneContent) {
-        ConversationPaneContent.Chat ->
-            ChatConversationPane(
-                chatScreenState = chatScreenState,
-                diagnosticLogPathLabel = diagnosticLogPathLabel,
-                onSendUserMessageRequested = onSendUserMessageRequested,
-                onInterruptTurnRequested = onInterruptTurnRequested,
-                onPermissionChoiceMade = onPermissionChoiceMade,
-                onEndSessionRequested = onEndChatSessionRequested,
-                onStartNewConversationRequested = startNewConversation,
-                onOpenRawTerminalRequested = onOpenRawTerminalRequested,
-                modifier = modifier,
-            )
-
-        ConversationPaneContent.RawTerminal ->
-            EmbeddedTerminalPane(
-                terminalState = terminalState,
-                heldSessionTerminalWidgets = heldSessionTerminalWidgets,
-                diagnosticLogPathLabel = diagnosticLogPathLabel,
-                onEndSessionRequested = onEndTerminalSessionRequested,
-                onStartNewConversationRequested = startNewConversation,
-                modifier = modifier,
-            )
-    }
-}
-
-/**
- * 대화 자리에 지금 무엇이 있는가.
- *
- * **화면 모델이 둘인 동안만 있는 타입이다.** 챗이 기본이 되고 터미널이 보조로 남는 것이 지금의
- * 처지이고(설계 7 절), 터미널을 지우는 7 단계에 이 갈래도 함께 사라진다.
- *
- * 상태 홀더가 아니라 창이 들고 있다. 어느 화면 모델을 볼지는 사용자가 방금 무엇을 눌렀는가의
- * 문제이지 어느 세션이 도는가의 문제가 아니라, 두 홀더 중 어느 쪽의 사실도 아니다.
- */
-enum class ConversationPaneContent {
-
-    /** 이 앱의 기본. 왼쪽에서 세션을 고르면 여기로 온다. */
-    Chat,
-
-    /** 챗 머리말에서 일부러 고른 자리. 그 세션의 챗은 끝나고 같은 대화가 터미널로 다시 열린다. */
-    RawTerminal,
-}
-
-/**
- * 지금 화면에 떠 있는 세션의 통로. 터미널 자리가 비어 있으면 null.
- *
- * 끝난 세션도 여기 실린다 — 보유는 끝났지만 마지막 화면을 아직 보여주고 있어서, 그 위젯까지
- * 치우면 사용자가 왜 끝났는지 읽을 자리가 사라진다.
- */
-private fun onScreenConnector(terminalState: EmbeddedTerminalState) = when (terminalState) {
-    is EmbeddedTerminalState.SessionOnScreen -> terminalState.ttyConnector
-    is EmbeddedTerminalState.SessionEndedOnScreen -> terminalState.ttyConnector
-    is EmbeddedTerminalState.NoTerminalOpen,
-    is EmbeddedTerminalState.SessionEntryRunning,
-    is EmbeddedTerminalState.SessionEntryFailed,
-    -> null
 }
 
 /**

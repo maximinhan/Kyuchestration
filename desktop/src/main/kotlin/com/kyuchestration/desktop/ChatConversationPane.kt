@@ -15,10 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,13 +64,6 @@ internal fun ChatConversationPane(
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
-    /**
-     * 이 대화를 원시 터미널로 다시 여는 자리(설계 7 절).
-     *
-     * **챗 세션을 끝내고 같은 대화를 터미널로 여는 일이다.** 한 세션은 한 종류라 두 화면이 같은
-     * 대화를 동시에 열지 못한다(5.6) — 누르기 전에 그 사실을 알 수 있게 버튼 옆에 적어 둔다.
-     */
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (chatScreenState) {
@@ -100,7 +90,6 @@ internal fun ChatConversationPane(
                 onPermissionChoiceMade = onPermissionChoiceMade,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
-                onOpenRawTerminalRequested = onOpenRawTerminalRequested,
                 modifier = modifier,
             )
     }
@@ -114,7 +103,6 @@ private fun OpenedChat(
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -122,7 +110,6 @@ private fun OpenedChat(
             conversation = conversation,
             onEndSessionRequested = onEndSessionRequested,
             onStartNewConversationRequested = onStartNewConversationRequested,
-            onOpenRawTerminalRequested = onOpenRawTerminalRequested,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ChatTranscript(conversation, onPermissionChoiceMade, modifier = Modifier.weight(1f))
@@ -143,7 +130,6 @@ private fun ChatHeader(
     conversation: ChatConversation,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (SessionTarget) -> Unit,
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
@@ -185,64 +171,10 @@ private fun ChatHeader(
             }
         }
 
+        // 점 셋 메뉴 안에 있던 자리다. 원시 터미널이 사라지면서(7 단계) 그 메뉴에 남을 항목이
+        // 하나뿐이 되었고, 하나를 고르려고 메뉴를 여는 자리는 누르는 횟수만 늘린다.
         if (conversation.alive) {
-            SessionActionsMenu(
-                conversation = conversation,
-                onEndSessionRequested = onEndSessionRequested,
-                onOpenRawTerminalRequested = onOpenRawTerminalRequested,
-            )
-        }
-    }
-}
-
-/**
- * 이 세션에 대해 더 할 수 있는 일들(설계 7 절).
- *
- * **원시 터미널이 여기로 내려왔다.** 3 단계까지는 머리말에 늘 보이는 버튼이었다. 챗이 기본이
- * 되는 이 단계에서 그것을 메뉴 안으로 넣는 것이 7 절이 정한 자리이고, ❓ 셋(로그인 · MCP 서버
- * 인증 · 플랜 모드)이 챗에서 되는 것이 확인되면 7 단계에 통째로 사라진다.
- *
- * **누르기 전에 무슨 일이 일어나는지 적어 둔다**(원칙 12). 한 세션은 한 종류라(5.6) 이것은
- * 화면을 바꾸는 일이 아니라 챗 세션을 끝내고 같은 대화를 터미널로 다시 여는 일이다.
- */
-@Composable
-private fun SessionActionsMenu(
-    conversation: ChatConversation,
-    onEndSessionRequested: () -> Unit,
-    onOpenRawTerminalRequested: (SessionTarget) -> Unit,
-) {
-    var showingActions by remember(conversation.target) { mutableStateOf(false) }
-
-    Box {
-        IconButton(onClick = { showingActions = true }) {
-            MoreActionsIcon(MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        DropdownMenu(expanded = showingActions, onDismissRequest = { showingActions = false }) {
-            DropdownMenuItem(
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("원시 터미널로 보기", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = "이 챗을 끝내고 같은 대화를 터미널로 다시 엽니다",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                onClick = {
-                    showingActions = false
-                    onOpenRawTerminalRequested(conversation.target)
-                },
-            )
-
-            DropdownMenuItem(
-                text = { Text("세션 끝내기", style = MaterialTheme.typography.bodyMedium) },
-                onClick = {
-                    showingActions = false
-                    onEndSessionRequested()
-                },
-            )
+            TextButton(onClick = onEndSessionRequested) { Text("세션 끝내기") }
         }
     }
 }
