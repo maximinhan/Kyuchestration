@@ -77,13 +77,6 @@ dependencies {
     implementation(libs.markdownRendererCode)
     implementation(libs.highlights)
 
-    // 앱 안의 터미널. JediTerm 이 화면과 터미널 에뮬레이션을, pty4j 가 그 아래의 진짜 PTY 를 맡는다.
-    // 이 둘이 있어야 claude 가 요구하는 TTY 가 앱 안에 생긴다 — 앱이 세션을 직접 보유하는 근거다.
-    implementation(libs.jeditermUi)
-    implementation(libs.jeditermCore)
-    implementation(libs.pty4j)
-    runtimeOnly(libs.slf4jSimple)
-
     // kotlin("test") 는 적용된 Kotlin 플러그인의 버전을 그대로 따라간다. 버전 카탈로그에 한 줄 더
     // 적으면 Kotlin 을 올릴 때 두 곳을 맞춰야 하므로 여기서는 일부러 버전을 적지 않는다.
     testImplementation(kotlin("test"))
@@ -330,8 +323,7 @@ val checkBundledEngine = tasks.register("checkBundledEngine") {
 // run 은 걸지 않는다. 소스에서 띄우는 흐름은 엔진을 PATH 에 두거나 첫 화면에서 받는 예전
 // 길이 그대로 열려 있어야 한다.
 //
-// packageRelease* 갈래는 걸지 않는다. 프로가드가 pty4j 를 깨서 이 저장소가 쓰지 않는
-// 태스크들이다(위 application 블록의 주석).
+// packageRelease* 갈래는 걸지 않는다. 이 저장소가 쓰지 않는 태스크들이다(위 application 블록의 주석).
 //
 // named 가 아니라 matching 으로 잡는다 — 이 태스크들은 Compose 플러그인이 프로젝트 평가가
 // 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
@@ -403,13 +395,14 @@ compose.desktop {
         mainClass = "com.kyuchestration.desktop.MainKt"
 
         // 배포 패키지는 packageDeb·packageDmg 로 만든다 — packageRelease* 가 아니다.
-        // release 변형은 프로가드로 코드를 줄이는데, JNA 가 네이티브 쪽에서 이름으로 찾아 쓰는
-        // com.sun.jna.Native.dispose 까지 "아무도 부르지 않는다" 며 지운다. 그러면 pty4j 가
-        // PTY 를 여는 첫 순간 UnsatisfiedLinkError 로 죽는다 — 앱의 핵심인 임베디드 터미널이
-        // 통째로 못 쓰게 되는데, 빌드는 끝까지 성공하므로 받아서 눌러 보기 전에는 알 수 없다.
-        // (같은 클래스패스로 PTY 를 여는 시험: 최소화본은 위 오류, 최소화 없는 쪽은 정상 — PR 26)
-        // 줄여서 얻는 것은 46MB 대 62MB 뿐이라, 검증할 수 없는 keep 규칙을 손으로 떠안느니
-        // CI 가 실제로 시험한 바이트코드를 그대로 배포한다.
+        //
+        // 처음의 이유는 pty4j 였다. release 변형이 프로가드로 코드를 줄이면서 JNA 가 네이티브
+        // 쪽에서 이름으로 찾아 쓰는 com.sun.jna.Native.dispose 까지 지웠고, 그러면 PTY 를 여는
+        // 첫 순간 UnsatisfiedLinkError 로 죽었다(PR 26). **그 이유는 pty4j 와 함께 사라졌다.**
+        //
+        // 그래도 옮기지 않는다. 최소화가 지금의 클래스패스에서 무엇을 깨는지 아무도 재지 않았고,
+        // 그 확인은 이 자리에서 짐작으로 대신할 것이 아니다 — 빌드는 끝까지 성공하고 받아서
+        // 띄워 봐야 드러나는 종류의 실패다. 재 보는 것은 별도 작업이다.
 
         nativeDistributions {
             // 두 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
