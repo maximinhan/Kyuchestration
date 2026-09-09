@@ -97,6 +97,7 @@ class PtySessionTerminalOpenerTest {
                     resumedConversationId = "211f6974-88a8-4453-9248-a02b0d6febae",
                 )
             },
+            claudeAuthToken = { null },
             baseEnvironment = mapOf("PATH" to System.getenv("PATH")),
         )
 
@@ -115,6 +116,7 @@ class PtySessionTerminalOpenerTest {
     fun `무엇을 띄울지 묻는 데 실패하면 PTY 를 열지 않는다`() {
         val opener = PtySessionTerminalOpener(
             sessionCommandSource = { _, _, _, _ -> throw TerminalSessionFailure.KyuExecutableNotFound() },
+            claudeAuthToken = { null },
             baseEnvironment = emptyMap(),
         )
 
@@ -134,6 +136,7 @@ class PtySessionTerminalOpenerTest {
     ): TtyConnector {
         val opener = PtySessionTerminalOpener(
             sessionCommandSource = SessionCommandSource { _, _, _, _ -> answer },
+            claudeAuthToken = { null },
             baseEnvironment = baseEnvironment,
         )
         return opener

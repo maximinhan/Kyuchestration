@@ -20,6 +20,7 @@ const keychainItemNotFoundExitCode = 44
 // 두고, 이 파일의 전제는 전부 거기서 확인한다(keychain_roundtrip_test.go).
 type keychainVault struct {
 	securityPath string
+	namespace    secretNamespace
 }
 
 var _ secretVault = keychainVault{}
@@ -46,7 +47,7 @@ func (vault keychainVault) kind() StorageKind {
 // 문자열로 읽어 그 둘이 같다고 판정한다 — 빈 토큰을 저장하고 종료 코드 0 으로 끝난다. 제어 터미널을
 // 떼지 않으면 터미널에서 부른 kyu 가 사용자 화면에 프롬프트를 띄운 채로 멎는다.
 func (vault keychainVault) store(profileName, token string) error {
-	command := exec.Command(vault.securityPath, keychainStoreArguments(profileName)...)
+	command := exec.Command(vault.securityPath, keychainStoreArguments(vault.namespace, profileName)...)
 	command.Stdin = strings.NewReader(token + "\n" + token + "\n")
 	detachFromControllingTerminal(command)
 
@@ -79,7 +80,7 @@ func (vault keychainVault) confirmStoredToken(profileName, token string) error {
 }
 
 func (vault keychainVault) lookup(profileName string) (string, error) {
-	command := exec.Command(vault.securityPath, keychainLookupArguments(profileName)...)
+	command := exec.Command(vault.securityPath, keychainLookupArguments(vault.namespace, profileName)...)
 
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -101,7 +102,7 @@ func (vault keychainVault) lookup(profileName string) (string, error) {
 }
 
 func (vault keychainVault) clear(profileName string) error {
-	command := exec.Command(vault.securityPath, keychainDeleteArguments(profileName)...)
+	command := exec.Command(vault.securityPath, keychainDeleteArguments(vault.namespace, profileName)...)
 
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
@@ -117,14 +118,14 @@ func (vault keychainVault) clear(profileName string) error {
 }
 
 // keychainStoreArguments 는 저장 명령의 인자다. -U 는 같은 항목이 있으면 덮어쓴다는 뜻이다.
-func keychainStoreArguments(profileName string) []string {
-	return []string{"add-generic-password", "-U", "-s", secretServiceName, "-a", profileName, "-w"}
+func keychainStoreArguments(namespace secretNamespace, profileName string) []string {
+	return []string{"add-generic-password", "-U", "-s", namespace.keychainServiceName, "-a", profileName, "-w"}
 }
 
-func keychainLookupArguments(profileName string) []string {
-	return []string{"find-generic-password", "-s", secretServiceName, "-a", profileName, "-w"}
+func keychainLookupArguments(namespace secretNamespace, profileName string) []string {
+	return []string{"find-generic-password", "-s", namespace.keychainServiceName, "-a", profileName, "-w"}
 }
 
-func keychainDeleteArguments(profileName string) []string {
-	return []string{"delete-generic-password", "-s", secretServiceName, "-a", profileName}
+func keychainDeleteArguments(namespace secretNamespace, profileName string) []string {
+	return []string{"delete-generic-password", "-s", namespace.keychainServiceName, "-a", profileName}
 }

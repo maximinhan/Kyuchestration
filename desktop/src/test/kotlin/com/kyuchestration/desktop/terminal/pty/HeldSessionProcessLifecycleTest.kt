@@ -32,6 +32,7 @@ class HeldSessionProcessLifecycleTest {
     private val holder = EmbeddedTerminalStateHolder(
         sessionTerminalOpener = PtySessionTerminalOpener(
             sessionCommandSource = SessionCommandSource { _, target, _, _ -> answerFor(target) },
+            claudeAuthToken = { null },
             baseEnvironment = mapOf("PATH" to System.getenv("PATH")),
         ),
         coroutineScope = holderScope,

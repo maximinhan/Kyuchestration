@@ -8,13 +8,18 @@ import java.io.StringWriter
  *
  * **갈래를 닫아 두는 것이 이 타입의 요점이다.** 자유로운 문자열 한 줄을 받는 `log(String)` 이
  * 있었다면 이 앱의 어느 자리에서든 무엇이든 적을 수 있고, 그러면 "기록에 비밀이 들어가지 않는가"
- * 는 그 부르는 자리를 전부 읽어야만 답할 수 있는 물음이 된다. 남길 수 있는 것을 여기 여섯 가지로
+ * 는 그 부르는 자리를 전부 읽어야만 답할 수 있는 물음이 된다. 남길 수 있는 것을 여기 열 가지로
  * 못 하나씩 정해 두면, 그 물음의 답은 이 파일 하나를 읽으면 끝난다.
  *
- * 그래서 이 타입들 어디에도 토큰이 실릴 자리가 없다. 토큰이 앱을 지나는 통로는 stdin 하나이고
- * (KyuCommandRunner.standardInput), 여기에는 stdin 을 받는 필드가 없다 — 엔진 호출을 기록하는
- * [EngineCallFailed] 조차 인자와 stderr 만 받는다. 뒷날 누가 실패를 더 자세히 남기려고 stdin 을
- * 얹으려 하면, 그 결정은 이 파일을 고치는 일이 되어 눈에 띈다.
+ * 그래서 이 타입들 어디에도 비밀이 실릴 자리가 없다. 비밀이 앱을 지나는 통로는 셋이다 — 엔진에
+ * 건네는 stdin(KyuCommandRunner.standardInput), 엔진이 돌려주는 claude 토큰, 사용자가 붙여넣는
+ * 로그인 코드. 셋 중 어느 것을 받는 필드도 여기 없다. 엔진 호출을 기록하는 [EngineCallFailed] 는
+ * 인자와 stderr 만 받고, 브라우저 로그인 실패를 적는 [ClaudeBrowserLoginFailed] 는 종료 코드만
+ * 받는다 — claude 의 stderr 는 화면까지만 가고 이 파일을 지나지 않는다
+ * (ClaudeAuthenticationFailure 의 머리말이 그 근거다).
+ *
+ * 뒷날 누가 실패를 더 자세히 남기려고 그 스트림들을 얹으려 하면, 그 결정은 이 파일을 고치는
+ * 일이 되어 눈에 띈다.
  */
 sealed interface DiagnosticLogEntry {
 
@@ -121,9 +126,76 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 앱이 claude 에게 자격 증명이 있는지 물었다.
+     *
+     * 성공도 남긴다. 이 앱의 다른 기록은 실패만 남기지만, 여기는 "세션이 왜 안 열리는가" 를
+     * 되짚는 첫 자리다 — 로그인됐다고 판정한 실행에서 세션이 401 로 끝났다면, 그 두 줄이
+     * 나란히 있어야 어긋난 지점이 보인다.
+     *
+     * @param storedTokenUsed 앱이 맡아 둔 토큰을 실어서 물었는가. 토큰 값은 싣지 않는다.
+     */
+    data class ClaudeCredentialsChecked(
+        val credentialsPresent: Boolean,
+        val storedTokenUsed: Boolean,
+    ) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "claude 자격 증명 확인 — ${if (credentialsPresent) "있음" else "없음"}" +
+                " (맡아 둔 토큰 ${if (storedTokenUsed) "실어서" else "없이"} 물음)"
+    }
+
+    /**
+     * claude 를 띄우지 못했다 — 이 머신에 없거나 실행 권한이 없다.
+     *
+     * @param reason 예외가 적은 것. claude 를 **띄우기 전에** 난 실패라 사용자가 친 글자도
+     *   맡아 둔 토큰도 이 문자열에 닿지 않는다.
+     */
+    data class ClaudeCliCouldNotRun(val reason: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "claude 를 부르지 못함 — $reason"
+    }
+
+    /**
+     * 브라우저 로그인이 0 이 아닌 코드로 끝났다.
+     *
+     * **종료 코드만 받는다.** claude 가 stderr 에 적은 것을 여기 실으면, 사용자가 방금 붙여넣은
+     * 코드가 그 문자열에 섞여 있을 가능성을 이 파일이 떠안게 된다 — 실패 갈래를 하나만 재고서
+     * 섞이지 않는다고 단정할 수 없다. 그 문구는 화면까지만 간다.
+     */
+    data class ClaudeBrowserLoginFailed(val exitCode: Int) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "claude 브라우저 로그인 실패 — 종료 코드 $exitCode"
+    }
+
+    /**
+     * 붙여넣은 토큰을 앤트로픽이 거절했다.
+     *
+     * @param claudeMessage claude 가 `result` 에 적은 것. 앤트로픽이 그 토큰에 대해 한 말이라
+     *   사용자가 친 글자가 섞이지 않는다 — 그래서 이 갈래는 이유를 그대로 남긴다.
+     *   401 과 다른 실패(망·한도)를 되짚어 가르는 유일한 근거다.
+     */
+    data class ClaudePastedTokenRefused(val claudeMessage: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "claude 토큰 거절 — $claudeMessage"
+    }
+
+    /**
+     * 맡겨 둔 claude 토큰을 엔진에게 묻지 못했다.
+     *
+     * 화면에는 뜨지 않는 실패다. 저장소가 답하지 않아도 로그인 자체는 할 수 있어서 앱은 그대로
+     * 나아가는데, 그러면 "왜 매번 다시 묻는가" 의 이유가 어디에도 남지 않는다.
+     *
+     * @param reason kyu 가 stderr 에 적은 것. 그 스트림에 토큰이 실리지 않는 것은 엔진 쪽
+     *   시험이 고정한다(claude_auth_test.go).
+     */
+    data class ClaudeTokenStoreUnavailable(val reason: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "claude 토큰 저장소가 답하지 않음 — $reason"
+    }
+
+    /**
      * 아무도 받지 않은 예외가 스레드를 끝냈다.
      *
-     * 이 갈래가 있어야 기록이 "앱이 예상한 실패" 를 넘어선다. 나머지 다섯은 이 앱이 이미 알고
+     * 이 갈래가 있어야 기록이 "앱이 예상한 실패" 를 넘어선다. 나머지 아홉은 이 앱이 이미 알고
      * 있는 실패이고, 진단이 정말 필요한 것은 알지 못했던 쪽이다.
      */
     data class UnhandledFailure(

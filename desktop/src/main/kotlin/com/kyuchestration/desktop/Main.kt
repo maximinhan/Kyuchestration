@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,12 +12,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationStateHolder
+import com.kyuchestration.desktop.claudeauth.kyucli.KyuCliClaudeTokenStore
+import com.kyuchestration.desktop.claudeauth.process.ProcessClaudeCliAuthentication
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
+import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.engine.EngineInstallationStateHolder
 import com.kyuchestration.desktop.engine.bundled.placeBundledEngineWhereItCanRun
 import com.kyuchestration.desktop.engine.githubrelease.GitHubReleaseEngineInstaller
@@ -107,6 +112,19 @@ private fun runDesktopApplication(
             coroutineScope = applicationCoroutineScope,
         )
     }
+    // 엔진 다음 갈림길. 세션을 여는 걸음이 전부 claude 를 띄우는 일이라, 로그인되지 않은
+    // 채로는 워크디렉토리를 열어 봐야 첫 대화에서 막힌다(chat-ui-design.md 7.2).
+    val claudeAuthenticationStateHolder = remember(applicationCoroutineScope) {
+        ClaudeAuthenticationStateHolder(
+            // claude 에게 직접 묻는다. 엔진에는 claude 에게 물을 클라이언트가 없고, 이것은
+            // 세션이 무엇을 띄울지의 물음이 아니라 앱이 자기 온보딩을 위해 하는 물음이다.
+            claudeCliAuthentication = ProcessClaudeCliAuthentication(),
+            // 맡아 두는 일만 엔진에게 시킨다. 이 도구의 비밀이 사는 자리가 거기 하나다.
+            claudeTokenStore = KyuCliClaudeTokenStore(kyuCommandRunner),
+            coroutineScope = applicationCoroutineScope,
+            diagnosticLog = diagnosticLog,
+        )
+    }
     val dashboardStateHolder = remember(applicationCoroutineScope) {
         WorkDirDashboardStateHolder(
             workDirObserver = KyuCliWorkDirObserver(kyuCommandRunner),
@@ -133,7 +151,12 @@ private fun runDesktopApplication(
         EmbeddedTerminalStateHolder(
             // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11). 그 답을 실행하는 것이
             // PTY 어댑터의 일이라, 두 어댑터가 여기서 만난다.
-            sessionTerminalOpener = PtySessionTerminalOpener(KyuCliSessionCommandSource(kyuCommandRunner)),
+            sessionTerminalOpener = PtySessionTerminalOpener(
+                sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
+                // 세션을 띄우는 순간의 값을 묻는다. 조립 시점에는 아직 인증 화면을 지나기 전이라
+                // 값이 없고, 지나고 나면 이 자리가 그것을 답한다.
+                claudeAuthToken = { claudeAuthenticationStateHolder.tokenForSessions.value },
+            ),
             coroutineScope = applicationCoroutineScope,
             diagnosticLog = diagnosticLog,
         )
@@ -144,11 +167,13 @@ private fun runDesktopApplication(
             // 어느 쪽을 묻는지는 이 자리가 정한다 — 화면이 정할 일이 아니다.
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner, SessionMode.Chat),
             chatSessionOpener = ProcessChatSessionOpener(),
+            claudeAuthToken = { claudeAuthenticationStateHolder.tokenForSessions.value },
             coroutineScope = applicationCoroutineScope,
             diagnosticLog = diagnosticLog,
         )
     }
     val engineInstallationState by engineInstallationStateHolder.state.collectAsState()
+    val claudeAuthenticationState by claudeAuthenticationStateHolder.state.collectAsState()
     val dashboardState by dashboardStateHolder.state.collectAsState()
     val initializationState by initializationStateHolder.state.collectAsState()
     val terminalState by terminalStateHolder.state.collectAsState()
@@ -160,6 +185,15 @@ private fun runDesktopApplication(
     // 받아 둘 자리는 앱이 도는 동안 바뀌지 않는다. 그릴 때마다 홈 디렉토리와 os.name 을 다시
     // 읽을 이유가 없다.
     val engineDirectoryLabel = remember { managedEngineDirectory().toString() }
+
+    // 엔진이 선 뒤에 묻는다. 온보딩 순서가 곧 이 순서다 — 토큰을 맡아 두는 자리가 kyu 라서,
+    // 엔진이 아직 없을 때 물으면 "저장소가 답하지 않음" 이 기록에 쌓이고 그 줄은 진짜 문제가
+    // 아니다. 홀더의 생성자에서 곧바로 묻지 않는 이유가 그것이다.
+    LaunchedEffect(engineInstallationState) {
+        if (engineInstallationState == EngineInstallationState.EngineReady) {
+            claudeAuthenticationStateHolder.checkCredentials()
+        }
+    }
 
     // 테마만 상태 홀더 없이 여기 둔다. 다른 상태들은 포트를 부르고 그 결과를 갈래로 옮기는
     // 일이 있어 홀더가 필요하지만, 이것은 사용자가 고른 값 하나이고 옮길 갈래가 없다 —
@@ -201,6 +235,7 @@ private fun runDesktopApplication(
             diagnosticLogPathLabel = diagnosticLogPathLabel,
             engineInstallationState = engineInstallationState,
             engineDirectoryLabel = engineDirectoryLabel,
+            claudeAuthenticationState = claudeAuthenticationState,
             dashboardState = dashboardState,
             initializationState = initializationState,
             chatScreenState = chatScreenState,
@@ -213,6 +248,11 @@ private fun runDesktopApplication(
             onThemePreferenceChosen = { themePreference = it },
             onRetryEngineInstallationRequested = engineInstallationStateHolder::installEngine,
             onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
+            onCheckClaudeCredentialsRequested = claudeAuthenticationStateHolder::checkCredentials,
+            onClaudeBrowserLoginRequested = claudeAuthenticationStateHolder::startBrowserLogin,
+            onClaudeBrowserLoginCodeSubmitted = claudeAuthenticationStateHolder::submitBrowserLoginCode,
+            onClaudeBrowserLoginCancelled = claudeAuthenticationStateHolder::cancelBrowserLogin,
+            onClaudeTokenSubmitted = claudeAuthenticationStateHolder::useToken,
             onOpenWorkDirRequested = {
                 chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory ->
                     // 여는 일과 초기화하는 일이 홀더 둘로 나뉘어 있어 여기서 이어 붙인다. 초기화

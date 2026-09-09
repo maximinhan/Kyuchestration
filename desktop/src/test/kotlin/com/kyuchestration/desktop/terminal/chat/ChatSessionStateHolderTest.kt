@@ -654,6 +654,8 @@ class ChatSessionStateHolderTest {
     ) = ChatSessionStateHolder(
         sessionCommandSource = sessionCommandSource,
         chatSessionOpener = opener,
+        // 이 시험의 관심 밖이다. 자격 증명이 실리는지는 SessionEntryPlanTest 가 본다.
+        claudeAuthToken = { null },
         coroutineScope = backgroundScope,
         diagnosticLog = diagnosticLog,
         baseEnvironment = emptyMap(),

@@ -11,6 +11,7 @@ import (
 // secretServiceVault 는 리눅스 데스크톱의 비밀번호 관리자(secret-service)에 토큰을 맡기는 구현이다.
 type secretServiceVault struct {
 	secretToolPath string
+	namespace      secretNamespace
 }
 
 var _ secretVault = secretServiceVault{}
@@ -24,7 +25,7 @@ func (vault secretServiceVault) kind() StorageKind {
 // secret-tool 은 비밀 값을 인자로 받지 않는다 — 표준 입력에서만 읽는다. 그 설계가 여기서 원하는
 // 것과 같다(토큰이 ps 에 보이지 않는다).
 func (vault secretServiceVault) store(profileName, token string) error {
-	command := exec.Command(vault.secretToolPath, secretToolStoreArguments(profileName)...)
+	command := exec.Command(vault.secretToolPath, secretToolStoreArguments(vault.namespace, profileName)...)
 	command.Stdin = strings.NewReader(token)
 
 	var stderr bytes.Buffer
@@ -37,7 +38,7 @@ func (vault secretServiceVault) store(profileName, token string) error {
 }
 
 func (vault secretServiceVault) lookup(profileName string) (string, error) {
-	command := exec.Command(vault.secretToolPath, secretToolLookupArguments(profileName)...)
+	command := exec.Command(vault.secretToolPath, secretToolLookupArguments(vault.namespace, profileName)...)
 
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -58,7 +59,7 @@ func (vault secretServiceVault) lookup(profileName string) (string, error) {
 }
 
 func (vault secretServiceVault) clear(profileName string) error {
-	command := exec.Command(vault.secretToolPath, secretToolClearArguments(profileName)...)
+	command := exec.Command(vault.secretToolPath, secretToolClearArguments(vault.namespace, profileName)...)
 
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
@@ -78,16 +79,19 @@ func (vault secretServiceVault) clear(profileName string) error {
 //
 // service 와 account 두 속성으로 항목을 특정한다. 조회·삭제가 같은 속성을 써야 같은 항목을
 // 가리키므로 세 함수가 나란히 붙어 있다 — 한 곳만 고치면 저장은 되는데 조회는 빈손이 된다.
-func secretToolStoreArguments(profileName string) []string {
-	return []string{"store", "--label=" + secretToolItemLabel, "service", secretServiceName, "account", profileName}
+func secretToolStoreArguments(namespace secretNamespace, profileName string) []string {
+	return []string{
+		"store", "--label=" + namespace.secretToolItemLabel,
+		"service", namespace.keychainServiceName, "account", profileName,
+	}
 }
 
-func secretToolLookupArguments(profileName string) []string {
-	return []string{"lookup", "service", secretServiceName, "account", profileName}
+func secretToolLookupArguments(namespace secretNamespace, profileName string) []string {
+	return []string{"lookup", "service", namespace.keychainServiceName, "account", profileName}
 }
 
-func secretToolClearArguments(profileName string) []string {
-	return []string{"clear", "service", secretServiceName, "account", profileName}
+func secretToolClearArguments(namespace secretNamespace, profileName string) []string {
+	return []string{"clear", "service", namespace.keychainServiceName, "account", profileName}
 }
 
 // exitCode 는 실행 실패에서 종료 코드를 꺼낸다. 실행 자체가 안 된 경우(바이너리 없음 등)는 -1 이다.

@@ -89,6 +89,38 @@ class SessionEntryPlanTest {
         assertEquals("/home/me", plan.environment["HOME"])
     }
 
+    @Test
+    fun `맡아 둔 claude 토큰을 세션 환경에 싣는다`() {
+        val plan = planFor(claudeAuthToken = "sk-ant-oat01-맡아-둔-가짜")
+
+        // 브라우저 로그인이 막힌 머신에서 세션이 사는 길이 이 한 줄이다. 이름이 어긋나면 앱은
+        // 토큰을 맡아 두고도 세션마다 "Not logged in" 을 만나고, 그 어긋남은 화면에 뜨지 않는다.
+        assertEquals("sk-ant-oat01-맡아-둔-가짜", plan.environment["CLAUDE_CODE_OAUTH_TOKEN"])
+    }
+
+    @Test
+    fun `맡아 둔 것이 없으면 그 환경변수를 아예 두지 않는다`() {
+        val plan = planFor(claudeAuthToken = null)
+
+        // 빈 값을 실으면 claude 는 "자격 증명이 있는데 거절당했다"(401)로 끝난다. 실제 사실은
+        // "앱이 맡아 둔 것이 없다" 이고, 그때 claude 는 자기 자격 증명(브라우저 로그인이 남긴
+        // 것)을 봐야 한다.
+        assertFalse("CLAUDE_CODE_OAUTH_TOKEN" in plan.environment)
+    }
+
+    @Test
+    fun `엔진의 답은 맡아 둔 토큰보다도 위다`() {
+        val plan = planFor(
+            answer = answerWith(environmentToAdd = mapOf("CLAUDE_CODE_OAUTH_TOKEN" to "엔진이-정한-값")),
+            claudeAuthToken = "sk-ant-oat01-맡아-둔-가짜",
+        )
+
+        // 엔진이 이 변수를 답하는 일은 없다 — 문서에 비밀을 싣지 않기로 한 것이 그 이유다
+        // (ClaudeAuthTokenEnvironment). 그래도 순서를 시험으로 적어 두는 이유는, 답하기 시작하는
+        // 날 그 결정이 조용히 무시되면 안 되기 때문이다.
+        assertEquals("엔진이-정한-값", plan.environment["CLAUDE_CODE_OAUTH_TOKEN"])
+    }
+
     private fun answerWith(
         command: List<String> = listOf("claude"),
         workingDirectory: Path = WORK_DIR_PATH,
@@ -99,11 +131,13 @@ class SessionEntryPlanTest {
         answer: SessionCommandAnswer = answerWith(),
         baseEnvironment: Map<String, String> = emptyMap(),
         target: SessionTarget = SessionTarget.Repo("proj-a"),
+        claudeAuthToken: String? = null,
     ) = planSessionEntry(
         sessionCommandAnswer = answer,
         baseEnvironment = baseEnvironment,
         workDirPath = WORK_DIR_PATH,
         target = target,
+        claudeAuthToken = claudeAuthToken,
     )
 
     private companion object {

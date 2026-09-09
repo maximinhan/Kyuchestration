@@ -7,15 +7,6 @@ import (
 	"runtime"
 )
 
-// secretServiceName 은 키체인·secret-service 항목에 붙는 서비스 이름이다.
-//
-// 사용자가 자기 키체인에서 이 항목을 찾아 직접 지울 수 있어야 하므로, 도구 이름을 그대로 쓴다.
-const secretServiceName = "kyu"
-
-// secretToolItemLabel 은 secret-service 항목에 붙는 표시 이름이다.
-// 사용자의 비밀번호 관리자 화면에 그대로 보이는 문구다.
-const secretToolItemLabel = "kyu GitHub token"
-
 // secretVault 는 비밀 값 하나를 이름으로 넣고 꺼내는 플랫폼 의존부다.
 //
 // 이 인터페이스 뒤가 이 패키지의 유일한 플랫폼 의존부다.
@@ -36,48 +27,51 @@ type secretVault interface {
 
 // detectSecretVault 는 이 머신에서 쓸 저장소를 고른다.
 //
+// 이름 공간을 받는다. 어느 저장소를 쓸지는 머신을 보고 정하는 일이지만, 그 저장소 안에서
+// 어느 자리에 넣을지는 부르는 쪽의 사실이다(secretNamespace).
+//
 // 순서: macOS 키체인 → secret-service → 설정 파일. 앞의 둘은 OS 가 잠금 해제와 접근 제어를
 // 맡아주므로 먼저 본다. 파일은 그것들이 없을 때의 폴백이고, 평문이라는 사실을 부르는 쪽이
 // 사용자에게 알린다(StorageKindForNewToken).
 //
 // 저장 자체를 거절하는 길은 택하지 않았다. WSL 처럼 키체인이 없는 환경이 이 도구의 주 사용처인데
 // (설계 문서의 대상 플랫폼), 거기서 kyu clone 을 아예 못 쓰게 만드는 대가가 더 크다.
-func detectSecretVault(configDirectory string) secretVault {
+func detectSecretVault(configDirectory string, namespace secretNamespace) secretVault {
 	if runtime.GOOS == "darwin" {
 		if securityPath, err := exec.LookPath("security"); err == nil {
-			return keychainVault{securityPath: securityPath}
+			return keychainVault{securityPath: securityPath, namespace: namespace}
 		}
 	}
 
-	if secretToolPath, err := exec.LookPath("secret-tool"); err == nil && secretToolAnswers(secretToolPath) {
-		return secretServiceVault{secretToolPath: secretToolPath}
+	if secretToolPath, err := exec.LookPath("secret-tool"); err == nil && secretToolAnswers(secretToolPath, namespace) {
+		return secretServiceVault{secretToolPath: secretToolPath, namespace: namespace}
 	}
 
-	return newFileVault(configDirectory)
+	return newFileVault(configDirectory, namespace)
 }
 
 // vaultForKind 는 프로필에 기록된 저장 위치에 맞는 저장소를 만든다.
 //
 // 지금 이 머신이 고르는 저장소와 다를 수 있다. 폴백으로 파일에 저장한 뒤 키체인이 생긴 머신에서는
 // 옛 프로필을 파일에서 꺼내야 하고, 그 사실은 프로필에 적힌 종류만이 알고 있다.
-func vaultForKind(kind StorageKind, configDirectory string) (secretVault, error) {
+func vaultForKind(kind StorageKind, configDirectory string, namespace secretNamespace) (secretVault, error) {
 	switch kind {
 	case StorageConfigFile:
-		return newFileVault(configDirectory), nil
+		return newFileVault(configDirectory, namespace), nil
 
 	case StorageKeychain:
 		securityPath, err := exec.LookPath("security")
 		if err != nil {
 			return nil, fmt.Errorf("키체인에 저장된 프로필인데 security 를 찾을 수 없습니다: %w", err)
 		}
-		return keychainVault{securityPath: securityPath}, nil
+		return keychainVault{securityPath: securityPath, namespace: namespace}, nil
 
 	case StorageSecretService:
 		secretToolPath, err := exec.LookPath("secret-tool")
 		if err != nil {
 			return nil, fmt.Errorf("secret-service 에 저장된 프로필인데 secret-tool 을 찾을 수 없습니다: %w", err)
 		}
-		return secretServiceVault{secretToolPath: secretToolPath}, nil
+		return secretServiceVault{secretToolPath: secretToolPath, namespace: namespace}, nil
 
 	default:
 		return nil, fmt.Errorf("알 수 없는 저장 위치입니다: %s", kind)
@@ -92,10 +86,10 @@ func vaultForKind(kind StorageKind, configDirectory string) (secretVault, error)
 //
 // 판정 근거는 "없는 항목을 물었을 때의 반응" 이다. 상대가 있으면 secret-tool 은 아무것도 출력하지
 // 않고 종료 코드 1 로 끝난다. 상대가 없으면 종료 코드는 같지만 stderr 에 실패 이유를 적는다.
-func secretToolAnswers(secretToolPath string) bool {
+func secretToolAnswers(secretToolPath string, namespace secretNamespace) bool {
 	// 실제로 있을 리 없는 이름을 묻는다. 사용자의 프로필 이름을 쓰면 그 항목의 잠금 해제를
 	// 요구하는 창이 뜰 수 있는데, 여기서 알고 싶은 것은 저장소의 존재뿐이다.
-	command := exec.Command(secretToolPath, secretToolLookupArguments("__kyu-probe__")...)
+	command := exec.Command(secretToolPath, secretToolLookupArguments(namespace, "__kyu-probe__")...)
 
 	output, err := command.CombinedOutput()
 	if err == nil {

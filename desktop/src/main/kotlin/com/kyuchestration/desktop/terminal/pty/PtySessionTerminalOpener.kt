@@ -28,9 +28,14 @@ import java.nio.file.Path
  * @param baseEnvironment 자식에게 물려줄 바탕 환경. 기본값이 앱이 한 자리에서 정해 둔 환경이라
  *   (ChildProcessEnvironment) 여기서 PATH 를 따로 손보지 않는다 — 엔진의 답에 실행 파일 경로가
  *   아니라 `claude` 라는 이름이 들어 있으므로, 그것을 찾는 것은 이 PATH 다.
+ * @param claudeAuthToken 세션을 띄울 때마다 물어보는 자리. 앱이 맡아 둔 토큰이 없으면 null 이다.
+ *
+ *   값이 아니라 함수인 이유는 시점이다. 이 어댑터는 앱이 뜰 때 한 번 조립되는데, 토큰은 그 뒤에
+ *   사용자가 인증 화면을 지나면서 생길 수 있다 — 값으로 받으면 그 실행 내내 null 이다.
  */
 class PtySessionTerminalOpener(
     private val sessionCommandSource: SessionCommandSource,
+    private val claudeAuthToken: () -> String?,
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
 ) : SessionTerminalOpener {
 
@@ -53,6 +58,7 @@ class PtySessionTerminalOpener(
             baseEnvironment = baseEnvironment,
             workDirPath = workDirPath,
             target = target,
+            claudeAuthToken = claudeAuthToken(),
         )
 
         return openPtyRunningSession(plan, target, sessionCommandAnswer.resumedConversationId)

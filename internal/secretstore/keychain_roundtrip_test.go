@@ -211,7 +211,7 @@ func keychainVaultForIntegrationTest(t *testing.T) keychainVault {
 	if err != nil {
 		t.Skipf("security 가 PATH 에 없어 키체인 왕복 시험을 건너뜁니다: %v", err)
 	}
-	return keychainVault{securityPath: securityPath}
+	return keychainVault{securityPath: securityPath, namespace: gitHubTokenNamespace}
 }
 
 // removeKeychainItemBeforeAndAfter 는 시험 앞뒤로 항목을 지운다.
@@ -238,7 +238,7 @@ func removeKeychainItemBeforeAndAfter(t *testing.T, vault keychainVault, profile
 //
 // 오간 글자를 함께 돌려준다. 이 경로가 어긋나면 "무엇이 안 됐는가" 는 프롬프트 문구에만 남는다.
 func typeTokenIntoSecurityPrompt(securityPath, profileName, token string) (string, error) {
-	command := exec.Command(securityPath, keychainStoreArguments(profileName)...)
+	command := exec.Command(securityPath, keychainStoreArguments(gitHubTokenNamespace, profileName)...)
 
 	terminal, err := pty.Start(command)
 	if err != nil {

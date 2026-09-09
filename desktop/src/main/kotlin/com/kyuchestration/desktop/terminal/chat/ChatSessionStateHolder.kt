@@ -39,6 +39,9 @@ import kotlinx.coroutines.withContext
  * @param sessionCommandSource 무엇을 띄울지 답하는 자리. **챗 모드로 묻는 것**은 이 자리를
  *   조립하는 쪽이 정한다(KyuCliSessionCommandSource 의 sessionMode).
  * @param chatSessionOpener 그 답을 파이프 셋에 물려 띄우는 자리.
+ * @param claudeAuthToken 세션을 띄울 때마다 물어보는 자리. 앱이 맡아 둔 토큰이 없으면 null 이다.
+ *   값이 아니라 함수인 이유는 시점이다 — 이 홀더는 앱이 뜰 때 한 번 조립되는데, 토큰은 그 뒤에
+ *   사용자가 인증 화면을 지나면서 생길 수 있다.
  * @param baseEnvironment 자식에게 물려줄 바탕 환경. PTY 어댑터와 같은 것을 쓴다 — 엔진의 답에
  *   실행 파일 경로가 아니라 `claude` 라는 이름이 들어 있어서, 그것을 찾는 PATH 가 이 값이다.
  */
@@ -46,6 +49,7 @@ import kotlinx.coroutines.withContext
 class ChatSessionStateHolder(
     private val sessionCommandSource: SessionCommandSource,
     private val chatSessionOpener: ChatSessionOpener,
+    private val claudeAuthToken: () -> String?,
     private val coroutineScope: CoroutineScope,
     private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
     private val baseEnvironment: Map<String, String> = childProcessEnvironment(),
@@ -321,6 +325,7 @@ class ChatSessionStateHolder(
                 baseEnvironment = baseEnvironment,
                 workDirPath = workDirPath,
                 target = target,
+                claudeAuthToken = claudeAuthToken(),
             )
 
             return HeldChatSession(

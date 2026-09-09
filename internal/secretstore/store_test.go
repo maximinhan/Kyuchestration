@@ -19,7 +19,7 @@ func newFileBackedStoreForTest(t *testing.T) (*ProfileStore, string) {
 	t.Helper()
 
 	configDirectory := t.TempDir()
-	return newProfileStore(configDirectory, newFileVault(configDirectory)), configDirectory
+	return newProfileStore(configDirectory, newFileVault(configDirectory, gitHubTokenNamespace)), configDirectory
 }
 
 func TestSavedTokenComesBackByProfileName(t *testing.T) {
@@ -138,7 +138,7 @@ func TestFileFallbackWritesTheTokenOwnerOnlyAndKeepsItOutOfTheProfileIndex(t *te
 		t.Fatalf("SaveToken() 실패: %v", err)
 	}
 
-	credentialsInfo, err := os.Stat(filepath.Join(configDirectory, credentialsFileName))
+	credentialsInfo, err := os.Stat(filepath.Join(configDirectory, gitHubTokenNamespace.credentialsFileName))
 	if err != nil {
 		t.Fatalf("자격증명 파일이 없습니다: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestEmptyProfileNameIsRejectedBeforeAnythingIsWritten(t *testing.T) {
 		t.Fatal("SaveToken() 이 빈 이름을 받았습니다, 거절하기를 기대")
 	}
 
-	if _, err := os.Stat(filepath.Join(configDirectory, credentialsFileName)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(configDirectory, gitHubTokenNamespace.credentialsFileName)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("거절했는데 자격증명 파일이 생겼습니다: %v", err)
 	}
 }
