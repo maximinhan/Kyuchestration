@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import java.time.Instant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -29,6 +30,8 @@ sealed interface ChatEntry {
     /**
      * 도구 호출 하나. 부른 순간 [answer] 없이 서고, 결과가 오면 그 자리에서 채워진다.
      *
+     * @param requestedAt 이 호출이 스트림에 실려 온 시각. 도는 동안 카드가 보이는 경과 시간이
+     *   여기서 나온다 — 앱의 시계가 아니라 스트림이 준 값이다(ChatSessionEvent.ToolCallRequested).
      * @param nestedEntries 이 호출 **안쪽**에서 일어난 것들. 서브에이전트가 자기 대화를
      *   `parent_tool_use_id` 를 달고 보내면(3.10) 그것이 여기로 접힌다 — 대화 본문에 풀어 놓으면
      *   메인 대화와 안쪽 대화가 한 줄기로 섞인다.
@@ -37,6 +40,7 @@ sealed interface ChatEntry {
         val toolUseId: String,
         val toolName: String,
         val input: JsonObject,
+        val requestedAt: Instant? = null,
         val answer: ToolCallAnswer? = null,
         val nestedEntries: List<ChatEntry> = emptyList(),
         val subagentRun: SubagentRun? = null,
@@ -106,6 +110,7 @@ data class ToolCallAnswer(
     val failed: Boolean,
     val modelVisibleText: String,
     val typedResult: JsonElement? = null,
+    val answeredAt: Instant? = null,
 )
 
 /**

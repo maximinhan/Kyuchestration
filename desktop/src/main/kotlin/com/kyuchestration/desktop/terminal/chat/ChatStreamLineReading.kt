@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import java.time.Instant
+import java.time.format.DateTimeParseException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -121,6 +123,7 @@ private fun systemEventsIn(line: JsonObject, streamLine: String): List<ChatSessi
  */
 private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
     val parentToolUseId = line.stringOrNull("parent_tool_use_id")
+    val arrivedAt = line.instantOrNull("timestamp")
     val contentBlocks = line.objectOrNull("message")?.arrayOrNull("content")
         ?: return listOf(ChatSessionEvent.Unrecognized(streamLine))
 
@@ -141,6 +144,7 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
                 toolName = block.stringOrNull("name").orEmpty(),
                 input = block.objectOrNull("input") ?: JsonObject(emptyMap()),
                 parentToolUseId = parentToolUseId,
+                requestedAt = arrivedAt,
             )
 
             else -> ChatSessionEvent.Unrecognized(streamLine)
@@ -158,6 +162,7 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
 private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
     val typedResult = line["tool_use_result"]
     val parentToolUseId = line.stringOrNull("parent_tool_use_id")
+    val arrivedAt = line.instantOrNull("timestamp")
     val contentBlocks = line.objectOrNull("message")?.arrayOrNull("content")
         ?: return listOf(ChatSessionEvent.Unrecognized(streamLine))
 
@@ -173,6 +178,7 @@ private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSession
                 failed = block.booleanOrNull("is_error") ?: false,
                 modelVisibleText = modelVisibleTextOf(block["content"]),
                 typedResult = typedResult,
+                answeredAt = arrivedAt,
             )
 
             else -> ChatSessionEvent.Unrecognized(streamLine)
@@ -305,6 +311,20 @@ private fun JsonObject.booleanOrNull(key: String): Boolean? =
 private fun JsonObject.doubleOrNull(key: String): Double? = (this[key] as? JsonPrimitive)?.doubleOrNull
 
 private fun JsonObject.longOrNull(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
+
+/**
+ * 그 줄에 실려 온 시각. 없거나 우리가 읽지 못하는 모양이면 null 이다.
+ *
+ * 읽지 못한 것을 "지금" 으로 대신하지 않는다. 그러면 아주 오래전에 시작한 도구가 방금 시작한
+ * 것으로 그려지고, 그 화면은 틀렸다는 사실조차 말하지 않는다 — 없으면 경과 시간을 안 그린다.
+ */
+private fun JsonObject.instantOrNull(key: String): Instant? = stringOrNull(key)?.let {
+    try {
+        Instant.parse(it)
+    } catch (failure: DateTimeParseException) {
+        null
+    }
+}
 
 private fun JsonObject.objectOrNull(key: String): JsonObject? = this[key] as? JsonObject
 

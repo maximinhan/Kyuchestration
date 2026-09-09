@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,9 @@ import com.kyuchestration.desktop.terminal.chat.ToolCallAnswer
 import com.kyuchestration.desktop.terminal.chat.TurnOutcome
 import com.kyuchestration.desktop.theme.KyuTheme
 import java.nio.file.Path
+import java.time.Duration
+import java.time.Instant
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -70,10 +74,15 @@ internal fun ChatEntryView(
         is ChatEntry.AssistantThought -> ThinkingBlock(entry.text)
         // 서브에이전트 카드로 갈리는 근거는 도구 이름이 아니라 스트림이 말해 준 사실이다
         // (ChatEntry.SubagentRun) — 그 이름은 판마다 달라진다.
-        is ChatEntry.ToolCall -> if (entry.subagentRun != null) {
-            SubagentCard(entry, entry.subagentRun, sessionWorkingDirectory, onPermissionChoiceMade)
-        } else {
-            ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+        is ChatEntry.ToolCall -> when {
+            entry.subagentRun != null ->
+                SubagentCard(entry, entry.subagentRun, sessionWorkingDirectory, onPermissionChoiceMade)
+
+            // 위임은 도구 이름으로 갈린다. 서브에이전트와 달리 이 이름은 우리 엔진이 정하는
+            // 것이라(claude_command.go), 판이 바뀌어도 우리가 바꾸지 않는 한 그대로다.
+            entry.toolName == RUN_IN_REPO_TOOL_NAME -> DelegationCard(entry)
+
+            else -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
         }
 
         is ChatEntry.PermissionAsked ->
@@ -181,7 +190,7 @@ private fun ToolCallCard(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 ToolCallSummary(toolLabel, cardContent)
                 Spacer(Modifier.width(10.dp))
-                ToolCallStatus(entry.answer)
+                ToolCallStatus(entry.answer, entry.requestedAt)
             }
         },
     ) {
@@ -407,7 +416,7 @@ private fun fileName(filePath: String): String =
  * 규율이다(WorkDirSessionPanel 의 SessionChip).
  */
 @Composable
-private fun ToolCallStatus(answer: ToolCallAnswer?) {
+private fun ToolCallStatus(answer: ToolCallAnswer?, requestedAt: Instant?) {
     val (label, color) = when {
         answer == null -> "도는 중" to MaterialTheme.colorScheme.onSurfaceVariant
         answer.failed -> "실패" to KyuTheme.statusColors.failure
@@ -417,6 +426,10 @@ private fun ToolCallStatus(answer: ToolCallAnswer?) {
     Text("●", color = color, style = MaterialTheme.typography.labelSmall)
     Spacer(Modifier.width(5.dp))
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
+
+    if (answer == null) {
+        RunningElapsedText(requestedAt)
+    }
 
     // 실패한 까닭을 머리말에 그대로 붙인다. 카드를 펴지 않아도 무엇이 잘못됐는지 보여야 한다.
     if (answer?.failed == true) {
@@ -430,6 +443,40 @@ private fun ToolCallStatus(answer: ToolCallAnswer?) {
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/**
+ * 도는 중인 것 옆에 흐르는 경과 시간(6.6 — "도구가 도는 중 · 카드에 경과 시간").
+ *
+ * **시작한 때는 스트림이 주고, 지금은 이 기계의 시계가 준다.** 앞의 것을 앱이 재지 않는 이유는
+ * 두 숫자가 갈리지 않게 하려는 것이고(ChatSessionEvent.ToolCallRequested), 뒤의 것을 스트림이
+ * 줄 수 없는 이유는 도는 동안 아무 줄도 오지 않기 때문이다 — 위임이 그 예다(3.10 가).
+ *
+ * **진행 막대가 아니다.** 몇 걸음 중 몇 번째인지는 아무도 말해 주지 않는다(원칙 15). 이 줄이
+ * 말하는 것은 "아직 돌고 있고, 이만큼 됐다" 하나다.
+ */
+@Composable
+internal fun RunningElapsedText(since: Instant?) {
+    if (since == null) {
+        return
+    }
+
+    var now by remember(since) { mutableStateOf(Instant.now()) }
+    LaunchedEffect(since) {
+        while (true) {
+            delay(ELAPSED_TICK_MILLIS)
+            now = Instant.now()
+        }
+    }
+
+    val label = runningElapsedLabel(Duration.between(since, now).toMillis()) ?: return
+    Spacer(Modifier.width(8.dp))
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**
@@ -799,6 +846,9 @@ private const val MONOSPACE_BLOCK_MAX_LINES = 40
  * 적어 두어, 사용자가 "다 본 것" 과 "일부만 본 것" 을 가를 수 있게 한다.
  */
 private const val DIFF_LINES_SHOWN_IN_CARD = 30
+
+/** 경과 시간이 다시 그려지는 주기. 1 초보다 잦게 그릴 이유가 없다 — 화면이 적는 단위가 초다. */
+private const val ELAPSED_TICK_MILLIS = 1_000L
 
 /** 상세 패널의 폭과 높이. 창(1360dp)보다 좁게 두어 뒤의 대화가 가장자리에 남아 있게 한다. */
 private val FULL_TEXT_PANEL_WIDTH = 900.dp

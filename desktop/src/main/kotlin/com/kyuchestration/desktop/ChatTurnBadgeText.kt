@@ -58,6 +58,29 @@ internal fun turnElapsedLabel(durationMillis: Long): String? = when {
     }
 }
 
+/**
+ * 아직 도는 중인 것이 얼마나 됐는가.
+ *
+ * 턴 배지와 자릿수를 다르게 둔다. 끝난 턴의 시간은 한 번 적히고 마는 값이라 0.1 초까지 적지만,
+ * 이 값은 1 초마다 다시 그려진다 — 소수점이 매초 흔들리면 카드가 무엇을 말하는지보다 그
+ * 움직임이 먼저 눈에 든다.
+ *
+ * 0 이하는 null 이다. 스트림이 준 시각이 이 기계의 시계보다 앞설 수 있고(둘은 다른 시계다),
+ * 그때 "-2초" 를 적으면 화면이 거짓말을 한다.
+ */
+internal fun runningElapsedLabel(durationMillis: Long): String? {
+    if (durationMillis <= 0) {
+        return null
+    }
+
+    val totalSeconds = durationMillis / MILLIS_PER_SECOND
+    if (totalSeconds < SECONDS_PER_MINUTE) {
+        return "${totalSeconds}초"
+    }
+
+    return "${totalSeconds / SECONDS_PER_MINUTE}분 ${totalSeconds % SECONDS_PER_MINUTE}초"
+}
+
 private fun groupedNumber(value: Long): String = String.format(Locale.ROOT, "%,d", value)
 
 private const val MILLIS_PER_SECOND = 1_000L

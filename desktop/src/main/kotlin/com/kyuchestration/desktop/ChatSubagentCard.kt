@@ -119,6 +119,10 @@ private fun SubagentStatus(entry: ChatEntry.ToolCall, run: SubagentRun) {
     Spacer(Modifier.width(5.dp))
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
 
+    if (entry.answer == null) {
+        RunningElapsedText(entry.requestedAt)
+    }
+
     val progress = runningProgressText(entry, run)
     if (progress != null) {
         Spacer(Modifier.width(8.dp))

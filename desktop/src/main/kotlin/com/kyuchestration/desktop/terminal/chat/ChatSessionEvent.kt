@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import java.time.Instant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -73,12 +74,19 @@ sealed interface ChatSessionEvent {
      *
      * 조각(`input_json_delta`)은 이 이벤트로 오지 않는다. 잘린 JSON 이라 그 자체로 파싱되지 않고,
      * 완성본이 곧 오기 때문이다(3.3).
+     *
+     * @param requestedAt 이 줄에 실려 온 시각(`timestamp`). 없는 줄에서는 null 이다.
+     *
+     *   **앱이 시계를 보지 않는다.** 도는 도구의 경과 시간을 그리려면 시작한 때가 필요한데, 그
+     *   값이 스트림에 이미 있다 — 앱이 자기 시계로 다시 재면 두 숫자가 갈리고, 갈린 것을 발견하는
+     *   자리는 사용자의 화면이다(TurnFinished 의 `duration_ms` 에 대해 정한 것과 같다).
      */
     data class ToolCallRequested(
         val toolUseId: String,
         val toolName: String,
         val input: JsonObject,
         val parentToolUseId: String?,
+        val requestedAt: Instant?,
     ) : ChatSessionEvent
 
     /**
@@ -95,6 +103,7 @@ sealed interface ChatSessionEvent {
         val failed: Boolean,
         val modelVisibleText: String,
         val typedResult: JsonElement?,
+        val answeredAt: Instant?,
     ) : ChatSessionEvent
 
     /**

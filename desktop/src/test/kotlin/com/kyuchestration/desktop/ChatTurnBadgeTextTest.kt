@@ -49,6 +49,23 @@ class ChatTurnBadgeTextTest {
     }
 
     @Test
+    fun `도는 중인 것의 경과 시간은 초 단위로만 흐른다`() {
+        // 1 초마다 다시 그려지는 값이라 소수점을 두지 않는다 — 흔들리는 자릿수가 카드의 내용보다
+        // 먼저 눈에 든다.
+        assertEquals("12초", runningElapsedLabel(12_400))
+        assertEquals("1분 5초", runningElapsedLabel(65_900))
+        assertEquals("10분 0초", runningElapsedLabel(600_000))
+    }
+
+    @Test
+    fun `아직 1 초가 안 됐거나 시계가 뒤집힌 자리는 말하지 않는다`() {
+        // 스트림이 준 시각과 이 기계의 시계는 다른 시계다. 뒤집힌 값을 "-2초" 로 적으면
+        // 화면이 거짓말을 한다.
+        assertNull(runningElapsedLabel(0))
+        assertNull(runningElapsedLabel(-2_000))
+    }
+
+    @Test
     fun `재지 못한 시간은 말하지 않는다`() {
         // 중단된 턴의 result 에는 duration_ms 가 없었다(A.9). 0 초라고 적으면 재지 못한 것이
         // 잰 것처럼 보인다.

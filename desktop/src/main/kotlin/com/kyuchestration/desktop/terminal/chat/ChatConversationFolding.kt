@@ -71,6 +71,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
                 toolUseId = event.toolUseId,
                 toolName = event.toolName,
                 input = event.input,
+                requestedAt = event.requestedAt,
             ),
             event.parentToolUseId,
         ),
@@ -83,6 +84,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
                 failed = event.failed,
                 modelVisibleText = event.modelVisibleText,
                 typedResult = event.typedResult,
+                answeredAt = event.answeredAt,
             ),
         ),
     )

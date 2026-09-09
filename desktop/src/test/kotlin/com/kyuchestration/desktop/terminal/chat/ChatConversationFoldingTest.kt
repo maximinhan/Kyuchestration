@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -155,6 +156,19 @@ class ChatConversationFoldingTest {
         val answer = assertNotNull(card.answer)
         assertEquals("1\thello from fake repo\n2\t", answer.modelVisibleText)
         assertFalse(answer.failed)
+    }
+
+    @Test
+    fun `도구 카드는 그 호출이 오간 시각을 스트림에서 받는다`() {
+        // 도는 도구의 경과 시간을 그리려면 시작한 때가 필요한데, 그 값이 스트림에 이미 있다.
+        // 앱이 자기 시계로 다시 재면 두 숫자가 갈리고, 갈린 것을 발견하는 자리는 사용자의 화면이다.
+        val requested = conversationAfter(RecordedChatStreamLines.ASSISTANT_TOOL_USE)
+        val pending = assertIs<ChatEntry.ToolCall>(requested.entries.single())
+        assertEquals(Instant.parse("2026-09-04T06:45:47.437Z"), pending.requestedAt)
+
+        val answered = requested.after(RecordedChatStreamLines.TOOL_RESULT)
+        val card = assertIs<ChatEntry.ToolCall>(answered.entries.single())
+        assertEquals(Instant.parse("2026-09-04T06:45:47.489Z"), card.answer?.answeredAt)
     }
 
     @Test
