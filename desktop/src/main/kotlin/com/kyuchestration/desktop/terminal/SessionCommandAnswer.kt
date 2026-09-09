@@ -11,7 +11,7 @@ import java.nio.file.Path
  * 두 구현이 조용히 갈라지고, 갈라진 것을 발견하는 자리는 "메인 세션이 레포 지침을 안 읽는다" 라
  * 그때 어느 쪽이 틀렸는지 알아내는 데 오래 걸린다.
  *
- * @param command PTY 에서 실행할 argv. 순서가 곧 계약이다(session_command_json.go).
+ * @param command 앱이 실행할 argv. 순서가 곧 계약이다(session_command_json.go).
  * @param workingDirectory 그 프로세스의 작업 디렉토리. 레포 세션에서 이 한 줄이 그 레포의
  *   `.mcp.json`·`CLAUDE.md`·에이전트를 살린다.
  * @param environmentToAdd 앱이 자기 바탕 환경에 **더할** 것. 전체 환경이 아니다 — 엔진은 앱이
@@ -21,8 +21,8 @@ import java.nio.file.Path
  * @param resumedConversationId 이 명령이 이어가는 대화의 ID. 새 대화면 null.
  *
  *   **앱이 이어가기 실패를 가려내는 근거가 이것 하나다**(설계 문서 5.5.4). 적혀 있던 대화의
- *   전사가 사라졌으면 `claude` 는 즉시 종료 코드 1 로 끝나는데, 앱이 보는 것은 곧바로 닫힌
- *   PTY 뿐이라 사용자가 `/exit` 한 것과 구분되지 않는다.
+ *   전사가 사라졌으면 `claude` 는 즉시 종료 코드 1 로 끝나는데, 앱이 보는 것은 곧바로 끝난
+ *   프로세스뿐이라 사용자가 세션을 끝낸 것과 구분되지 않는다.
  *
  *   명령 안에도 같은 값이 있지만 argv 를 되읽지 않는다. 그러면 앱이 `--resume` 뒤의 자리를
  *   아는 셈이 되고, 그 앎은 엔진에만 있어야 한다(설계 원칙 11).

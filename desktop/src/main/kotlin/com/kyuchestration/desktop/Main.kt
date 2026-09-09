@@ -35,7 +35,6 @@ import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
-import com.kyuchestration.desktop.terminal.SessionMode
 import com.kyuchestration.desktop.terminal.chat.ChatSessionStateHolder
 import com.kyuchestration.desktop.terminal.chat.ProcessChatSessionOpener
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
@@ -146,9 +145,8 @@ private fun runDesktopApplication(
     }
     val chatSessionStateHolder = remember(applicationCoroutineScope) {
         ChatSessionStateHolder(
-            // 챗 모드로 묻는다. 엔진이 답하는 argv 가 터미널의 것과 통째로 다르고(설계 5.2),
-            // 어느 쪽을 묻는지는 이 자리가 정한다 — 화면이 정할 일이 아니다.
-            sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner, SessionMode.Chat),
+            // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11).
+            sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
             chatSessionOpener = ProcessChatSessionOpener(),
             // 세션을 띄우는 순간의 값을 묻는다. 조립 시점에는 아직 인증 화면을 지나기 전이라
             // 값이 없고, 지나고 나면 이 자리가 그것을 답한다.

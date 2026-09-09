@@ -5,7 +5,6 @@ import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
-import com.kyuchestration.desktop.terminal.SessionMode
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
@@ -16,14 +15,12 @@ import java.nio.file.Path
  * 앱은 세션 명령을 스스로 조립하지 않는다. 그 지식은 엔진 안에 있고, 이 표면이 그것을
  * 프로세스 경계 너머로 건네준다(설계 문서 5.2).
  *
- * @param sessionMode 무엇으로 부릴 세션을 물을지. 부르는 자리마다 정하지 않고 여기서 한 번
- *   정하는 이유는, 이 값이 물음이 아니라 **묻는 쪽이 어떤 화면인가**여서다 — 챗 화면은 늘
- *   챗 모드를 묻고 터미널 화면은 늘 터미널 모드를 묻는다. 기본값이 터미널인 것은 3 단계가
- *   화면을 갈아 끼우기 전까지 앱이 여는 것이 터미널이기 때문이다.
+ * **늘 챗 모드로 묻는다.** 어느 모드를 물을지 고르는 자리가 있었지만, 앱이 여는 화면이 챗
+ * 하나가 되면서(chat-ui-design.md 9 절 7 단계) 고를 것이 남지 않았다. 엔진의 터미널 모드는
+ * 그대로 있다 — 사람이 자기 터미널에서 `kyu session-command` 를 치는 길은 앱과 무관하다.
  */
 class KyuCliSessionCommandSource(
     private val kyuCommandRunner: KyuCommandRunner,
-    private val sessionMode: SessionMode = SessionMode.Terminal,
 ) : SessionCommandSource {
 
     override fun sessionCommandFor(
@@ -32,7 +29,7 @@ class KyuCliSessionCommandSource(
         conversationChoice: SessionConversationChoice,
         approvalSocketPath: Path?,
     ): SessionCommandAnswer {
-        val arguments = sessionCommandArguments(target, conversationChoice, sessionMode, approvalSocketPath)
+        val arguments = sessionCommandArguments(target, conversationChoice, approvalSocketPath)
 
         val result = try {
             // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
@@ -71,7 +68,6 @@ class KyuCliSessionCommandSource(
 private fun sessionCommandArguments(
     target: SessionTarget,
     conversationChoice: SessionConversationChoice,
-    sessionMode: SessionMode,
     approvalSocketPath: Path?,
 ): List<String> {
     val repoArgument = when (target) {
@@ -86,14 +82,6 @@ private fun sessionCommandArguments(
         SessionConversationChoice.StartNewConversation -> listOf(FORGET_CONVERSATION_OPTION)
     }
 
-    // 챗 모드에는 옵션이 붙는다. 붙는 것은 이 한 낱말뿐이고, 그것이 어떤 플래그로 옮겨지는지는
-    // 엔진만 안다(claude_command.go 의 chatModeFlags) — 앱이 그 목록을 알기 시작하면 조립 지식이
-    // 두 곳에 놓인다(설계 원칙 11).
-    val modeOption = when (sessionMode) {
-        SessionMode.Terminal -> emptyList()
-        SessionMode.Chat -> listOf(CHAT_MODE_OPTION)
-    }
-
     // 승인 소켓은 앱이 정하고 엔진이 옮긴다(설계 5.2). 엔진은 이 경로를 --mcp-config 의 ask 서버
     // 인자와 --permission-prompt-tool 로 옮기는데, 그 조립을 앱이 알기 시작하면 지식이 두 곳에
     // 놓인다 — 앱이 아는 것은 "우리가 이 자리에서 듣고 있다" 하나다(원칙 11).
@@ -101,7 +89,11 @@ private fun sessionCommandArguments(
         ?.let { listOf(APPROVAL_SOCKET_OPTION, it.toString()) }
         .orEmpty()
 
-    return listOf("session-command") + repoArgument + conversationOption + modeOption + approvalSocketOption + "--json"
+    // 챗 모드는 이 한 낱말로 청한다. 그것이 어떤 플래그로 옮겨지는지는 엔진만 안다
+    // (claude_command.go 의 chatModeFlags) — 앱이 그 목록을 알기 시작하면 조립 지식이 두 곳에
+    // 놓인다(설계 원칙 11).
+    return listOf("session-command") + repoArgument + conversationOption + CHAT_MODE_OPTION +
+        approvalSocketOption + "--json"
 }
 
 /** 앱이 연 승인 소켓의 자리를 넘기는 옵션(session_command.go 의 approvalSocketOptionName). */

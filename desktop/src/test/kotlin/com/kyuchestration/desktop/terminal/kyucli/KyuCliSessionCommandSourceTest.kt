@@ -5,7 +5,6 @@ import com.kyuchestration.desktop.kyu.KyuCommandResult
 import com.kyuchestration.desktop.kyu.RecordingKyuCommandRunner
 import com.kyuchestration.desktop.kyu.succeedingKyuCommandResult
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
-import com.kyuchestration.desktop.terminal.SessionMode
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.io.IOException
@@ -22,7 +21,10 @@ class KyuCliSessionCommandSourceTest {
 
         KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Repo("proj-a"), CONTINUE, approvalSocketPath = null)
 
-        assertEquals(listOf(listOf("session-command", "proj-a", "--json")), runner.receivedArguments)
+        // --chat 이 늘 붙는다. 앱이 여는 화면이 챗 하나뿐이라 고를 것이 없고, 그것이 어떤
+        // 플래그로 옮겨지는지는 엔진만 안다(설계 원칙 11). 이 낱말이 빠지면 앱은 파이프에
+        // 문 프로세스에게 대화형 argv 를 주게 되고, 그 세션은 한 마디도 답하지 못한다.
+        assertEquals(listOf(listOf("session-command", "proj-a", "--chat", "--json")), runner.receivedArguments)
     }
 
     @Test
@@ -33,28 +35,7 @@ class KyuCliSessionCommandSourceTest {
 
         // 메인 세션은 이름이 아니라 인자가 없는 것으로 가리킨다. main 을 붙이면 main 이라는
         // 이름의 레포를 찾다가 "없는 레포입니다" 로 끝난다.
-        assertEquals(listOf(listOf("session-command", "--json")), runner.receivedArguments)
-    }
-
-    @Test
-    fun `챗 화면은 챗 모드로 묻는다`() {
-        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
-
-        KyuCliSessionCommandSource(runner, SessionMode.Chat)
-            .sessionCommandFor(WORK_DIR_PATH, SessionTarget.Repo("proj-a"), CONTINUE, approvalSocketPath = null)
-
-        // 붙는 것은 이 한 낱말뿐이다. 어떤 플래그로 옮겨지는지는 엔진만 안다(설계 원칙 11).
-        assertEquals(listOf(listOf("session-command", "proj-a", "--chat", "--json")), runner.receivedArguments)
-    }
-
-    @Test
-    fun `모드를 말하지 않으면 지금까지의 터미널을 묻는다`() {
-        // 기본값이 바뀌면 3 단계 전의 앱이 PTY 안에서 JSON 을 그리게 된다.
-        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
-
-        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, approvalSocketPath = null)
-
-        assertEquals(listOf(listOf("session-command", "--json")), runner.receivedArguments)
+        assertEquals(listOf(listOf("session-command", "--chat", "--json")), runner.receivedArguments)
     }
 
     @Test
@@ -94,7 +75,7 @@ class KyuCliSessionCommandSourceTest {
 
         // 라벨(main)로 문구를 지어내면 실제로는 부를 수 없는 명령을 알려 주게 된다 —
         // kyu session-command main --json 은 main 이라는 이름의 레포를 찾는다.
-        assertEquals("워크디렉토리에서 kyu session-command --json 를 직접 실행해 이유를 확인하세요.", failure.guidance)
+        assertEquals("워크디렉토리에서 kyu session-command --chat --json 를 직접 실행해 이유를 확인하세요.", failure.guidance)
     }
 
     @Test
@@ -131,7 +112,7 @@ class KyuCliSessionCommandSourceTest {
         // 앱이 기록 파일을 직접 지우지 않는다. 버리는 일은 엔진의 것이고, 앱이 하는 말은
         // 이 옵션 하나다(설계 문서 5.5.4 의 마지막 줄).
         assertEquals(
-            listOf(listOf("session-command", "proj-a", "--forget-conversation", "--json")),
+            listOf(listOf("session-command", "proj-a", "--forget-conversation", "--chat", "--json")),
             runner.receivedArguments,
         )
     }

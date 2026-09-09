@@ -41,27 +41,29 @@ class SessionEntryPlanTest {
 
     @Test
     fun `엔진의 답이 앱의 손질보다 위다`() {
-        val plan = planFor(answer = answerWith(environmentToAdd = mapOf("TERM" to "엔진이-정한-값")))
+        val plan = planFor(answer = answerWith(environmentToAdd = mapOf("KYU_APP_SESSION" to "엔진이-정한-값")))
 
-        // 앱이 다시 덮으면 계약이 "더하라" 고 답한 것이 조용히 무시된다. 실제로 엔진이 TERM 을
+        // 앱이 다시 덮으면 계약이 "더하라" 고 답한 것이 조용히 무시된다. 실제로 엔진이 이 표식을
         // 답하는 일은 없지만, 순서를 시험으로 적어 두지 않으면 다음 사람이 반대로 놓는다.
-        assertEquals("엔진이-정한-값", plan.environment["TERM"])
+        assertEquals("엔진이-정한-값", plan.environment["KYU_APP_SESSION"])
     }
 
     @Test
-    fun `터미널 종류를 xterm-256color 로 고정한다`() {
+    fun `터미널 종류는 이제 정하지 않는다`() {
         val plan = planFor(baseEnvironment = mapOf("TERM" to "dumb"))
 
-        // 앱과 claude 사이에 아무것도 없어서 이 값을 claude 가 직접 읽는다.
-        assertEquals("xterm-256color", plan.environment["TERM"])
+        // xterm-256color 로 덮던 자리였다. 그 근거는 "앱 안의 JediTerm 이 흉내 내는 것이 xterm
+        // 계열이다" 였고, 터미널이 사라지면서 근거가 통째로 없어졌다 — 파이프에 물린 claude 앞에는
+        // 그릴 터미널이 없다. 없는 터미널을 있다고 말하지 않고 물려받은 값을 그대로 넘긴다.
+        assertEquals("dumb", plan.environment["TERM"])
     }
 
     @Test
     fun `사용자의 tmux 안에서 앱을 띄웠어도 그 표식은 자식에게 넘기지 않는다`() {
         val plan = planFor(baseEnvironment = mapOf("TMUX" to "/tmp/tmux-1000/default,1234,0"))
 
-        // GUI 프로세스가 어디서 떴는지에 대한 사실이지 앱 안 PTY 의 사실이 아니다. 그대로 넘기면
-        // claude 가 자기가 tmux 안에 있다고 믿는다(claude --help 의 --tmux).
+        // GUI 프로세스가 어디서 떴는지에 대한 사실이지 앱이 띄운 자식의 사실이 아니다. 그대로
+        // 넘기면 claude 가 자기가 tmux 안에 있다고 믿는다(claude --help 의 --tmux).
         assertFalse("TMUX" in plan.environment)
     }
 
@@ -69,8 +71,8 @@ class SessionEntryPlanTest {
     fun `앱이 보유한 세션임을 자식 환경에 남긴다`() {
         val plan = planFor(target = SessionTarget.Repo("proj-a"))
 
-        // 앱이 죽었는데 SIGHUP 을 무시하고 살아남은 자식은 앱 어디에도 보이지 않는다. 그때 그
-        // 프로세스를 찾을 수 있는 자리가 ps 뿐이라 표식을 남긴다(설계 문서 8 절 1 번).
+        // 앱이 죽었는데 살아남은 자식은 앱 어디에도 보이지 않는다. 그때 그 프로세스를 찾을 수
+        // 있는 자리가 ps 뿐이라 표식을 남긴다(app-owned-sessions-design.md 8 절 1 번).
         assertEquals("WorkDir-featureX-proj-a", plan.environment["KYU_APP_SESSION"])
     }
 
