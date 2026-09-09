@@ -67,7 +67,7 @@ internal fun Path.readTextOrEmpty(): String = runCatching { readText() }.getOrDe
  * 그 파일이 생길 때까지 기다린다. 끝내 없으면 false.
  *
  * 고정 시간을 자지 않는다. 프로세스 기동에 걸리는 시간을 상수로 두면 느린 기계에서 헛되이
- * 깨지고 빠른 기계에서는 그만큼 기다린다 — PTY 검증이 이미 지키는 규율이다(SessionProcessRecording).
+ * 깨지고 빠른 기계에서는 그만큼 기다린다.
  */
 internal fun waitUntilFileAppears(path: Path): Boolean {
     repeat(POLL_ATTEMPTS) {
