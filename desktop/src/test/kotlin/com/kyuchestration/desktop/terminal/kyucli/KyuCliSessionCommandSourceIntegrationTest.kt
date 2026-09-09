@@ -137,6 +137,13 @@ class KyuCliSessionCommandSourceIntegrationTest {
     private companion object {
         /** 카드를 그냥 누른 자리. 옵션이 붙지 않는 쪽이 이 표면의 기본이다. */
         val CONTINUE = SessionConversationChoice.ContinueRecordedConversation
+
+        /** 임시 레포에 커밋을 남길 때 쓰는 정체성. 이 값이 어디에도 남지 않게 명령 인자로만 준다. */
+        val GIT_WITH_TEST_IDENTITY = listOf(
+            "git",
+            "-c", "user.email=test@kyuchestration",
+            "-c", "user.name=kyu test",
+        )
     }
 
     private fun gitRepository(repositoryPath: Path): Path {
@@ -146,8 +153,15 @@ class KyuCliSessionCommandSourceIntegrationTest {
         return repositoryPath
     }
 
+    /**
+     * 정체성을 명령마다 준다 — 이 기계의 전역 git 설정에 기대지 않는다.
+     *
+     * `user.email` 이 없는 머신에서 `git commit` 은 "Author identity unknown" 으로 죽는다.
+     * kyu 가 PATH 에 있고 git 정체성이 없는 자리가 실제로 있다(막 만든 컨테이너·CI 러너).
+     * 관찰 쪽 통합 검증이 이미 같은 자세를 지킨다(KyuCliWorkDirObserverIntegrationTest).
+     */
     private fun git(repositoryPath: Path, vararg arguments: String) {
-        val process = ProcessBuilder(listOf("git") + arguments)
+        val process = ProcessBuilder(GIT_WITH_TEST_IDENTITY + arguments)
             .directory(repositoryPath.toFile())
             .redirectErrorStream(true)
             .start()

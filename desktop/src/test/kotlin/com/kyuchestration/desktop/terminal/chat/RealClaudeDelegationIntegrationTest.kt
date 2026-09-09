@@ -66,8 +66,8 @@ class RealClaudeDelegationIntegrationTest {
 
     @Test
     fun `서브에이전트를 띄우면 안쪽 대화가 그 카드 안에 접힌다`(): Unit = runBlocking {
-        temporaryDirectory.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
         val holder = stateHolderOrSkip()
+        temporaryDirectory.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
         waitUntilChatIsOnScreen(holder)
@@ -109,10 +109,10 @@ class RealClaudeDelegationIntegrationTest {
 
     @Test
     fun `레포에 일을 시키면 위임 카드가 서고 그 결말을 말한다`(): Unit = runBlocking {
+        val holder = stateHolderOrSkip()
         val repositoryPath = gitRepositoryIn(temporaryDirectory.resolve(DELEGATED_REPO_NAME))
         repositoryPath.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
 
-        val holder = stateHolderOrSkip()
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
         waitUntilChatIsOnScreen(holder)
 
@@ -154,6 +154,13 @@ class RealClaudeDelegationIntegrationTest {
     private fun ChatEntry.ToolCall.nestedIds(): Set<String> =
         nestedEntries.filterIsInstance<ChatEntry.ToolCall>().map { it.toolUseId }.toSet()
 
+    /**
+     * 이 검증을 켠 자리인지 먼저 가른다. **아무것도 하기 전에 부른다.**
+     *
+     * 순서가 규율인 이유는 CI 가 알려줬다. 임시 레포를 먼저 만들고 이것을 나중에 불렀더니,
+     * `claude` 가 없어 건너뛰었어야 할 머신에서 `git commit` 이 먼저 돌다 실패했다 — 건너뛸
+     * 시험이 남긴 실패라 원인이 이 파일에 있다는 것조차 화면에서 읽히지 않았다.
+     */
     private fun stateHolderOrSkip(): ChatSessionStateHolder {
         if (System.getenv(OPT_IN_VARIABLE) != "1") {
             abort<Unit>("$OPT_IN_VARIABLE=1 이 아니라 건너뜁니다 — 이 검증은 진짜 claude 를 부릅니다")
@@ -221,8 +228,15 @@ class RealClaudeDelegationIntegrationTest {
         return repositoryPath
     }
 
+    /**
+     * 정체성을 명령마다 준다 — 이 기계의 전역 git 설정에 기대지 않는다.
+     *
+     * `user.email` 이 없는 머신에서 `git commit` 은 "Author identity unknown" 으로 죽는다. CI
+     * 러너가 그런 자리이고, 이 앱의 다른 통합 검증이 이미 같은 자세를 지킨다
+     * (KyuCliWorkDirObserverIntegrationTest).
+     */
     private fun git(repositoryPath: Path, vararg arguments: String) {
-        val process = ProcessBuilder(listOf("git") + arguments)
+        val process = ProcessBuilder(GIT_WITH_TEST_IDENTITY + arguments)
             .directory(repositoryPath.toFile())
             .redirectErrorStream(true)
             .start()
@@ -234,6 +248,13 @@ class RealClaudeDelegationIntegrationTest {
 
         /** 이 검증을 일부러 켜는 자리. 다른 실 claude 검증과 같은 이름을 쓴다 — 켜는 이유가 같다. */
         const val OPT_IN_VARIABLE = "KYU_CLAUDE_CHAT_INTEGRATION"
+
+        /** 임시 레포에 커밋을 남길 때 쓰는 정체성. 이 값이 어디에도 남지 않게 명령 인자로만 준다. */
+        val GIT_WITH_TEST_IDENTITY = listOf(
+            "git",
+            "-c", "user.email=test@kyuchestration",
+            "-c", "user.name=kyu test",
+        )
 
         const val NOTE_FILE_NAME = "NOTE.md"
 
