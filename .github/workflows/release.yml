@@ -118,9 +118,12 @@ jobs:
           # 아니라 여기서 드러나게 한다.
           if-no-files-found: error
 
-  # 리눅스 · WSL 용 설치 패키지. 윈도우 네이티브용 msi 는 만들지 않는다 — PTY 를 여는 pty4j 가
-  # ConPTY 위에서 실제로 도는지 아무도 확인한 적이 없다(app-owned-sessions-design.md 부록 A).
+  # 리눅스 · WSL 용 설치 패키지. 윈도우 네이티브용 msi 는 만들지 않는다 — 이 릴리스가 윈도우
+  # 엔진 바이너리를 내지 않아(위 크로스 컴파일 목록) 설치는 되고 부를 것이 없는 패키지가 된다.
   # 윈도우 사용자는 WSL 안에서 이 deb 를 쓴다.
+  #
+  # pty4j 가 ConPTY 위에서 도는지 모른다는 이유가 여기 함께 적혀 있었다. 그 의존이 사라져
+  # (chat-ui-design.md 7.4) 남은 이유는 엔진 하나다.
   desktop-deb:
     needs: resolve-version
     runs-on: ubuntu-latest

@@ -947,7 +947,9 @@ MaterialTheme(
 
 ## 7. 터미널 뷰의 처지
 
-**결론: 한 단계 동안 "원시 터미널로 보기" 로 남기고, 삭제 조건을 지금 적어둔다.**
+**결론: 지웠다 (2026-09-09 · PR 61). 무엇이 사라졌는지는 7.4 에 적는다.**
+
+아래는 그 결론에 이르기까지의 기록이다. 한 단계 동안 "원시 터미널로 보기" 로 남기고 삭제 조건을 적어 두었고(7.2), 그 조건이 4 단계와 6.5 단계의 실측으로 채워졌다(7.1 · 7.3).
 
 원칙은 미사용 코드를 즉시 지우라고 말한다. 그런데 지금 그 코드는 **쓰이고 있고**, 챗이 그 자리를 다 덮는지는 3 절이 아직 답하지 못한 부분이 있었다. **그 셋을 4 단계가 쟀다 — 7.1 이 답이고, 7.2 가 그래서 좁아진 삭제 조건이다.**
 
@@ -1004,7 +1006,7 @@ orchestration 3.2 의 짐작이 맞았다: **헤드리스는 그 관문을 타�
 | 챗이 기본이 된다 | 9 절 4 단계 ✅ |
 | 터미널은 세션 머리말의 메뉴 안 "원시 터미널로 보기" 로만 열린다 | 4 단계 ✅ |
 | **로그인이 필요한 상태를 앱이 다룬다** | **9 절 6.5 단계** — 아래 결정과 7.3 |
-| **터미널 코드를 삭제한다** | 9 절 7 단계 — 조건이 채워졌다 |
+| **터미널 코드를 삭제한다** | 9 절 7 단계 ✅ (2026-09-09 · PR 61 — 7.4) |
 
 **결정 (2026-09-08 · 사용자).** 앞 문단이 후보로 적었던 셋 중 **(다) 앱이 로그인 흐름을 직접 태운다** 를 고른다. 브라우저 인증을 앱이 구동하고, 그것이 서지 않는 자리를 위해 **토큰 붙여넣기 폴백**을 둔다. 참고한 것은 다른 도구들이 같은 물음에 낸 답이다 — GitHub CLI 의 기기 코드 흐름, 그리고 "브라우저로 로그인" 버튼 아래에 "토큰으로 대신 로그인" 을 두는 배치.
 
@@ -1075,6 +1077,39 @@ stdin 을 파이프로 물려 띄우면 stdout·stderr 에 한 글자도 내지 
 
 **대가 하나를 적어둔다.** 이 검증은 **실제로 한 턴을 쓴다** — 토큰이 유효하면 그만큼 청구된다. 프롬프트를 한 글자로 두어 최소화했지만 0 은 아니다. 이보다 싼 길은 없었다: `auth status` 는 (나)처럼 유효성을 보지 않고, `claude` 에 "이 토큰이 통하나" 만 묻는 하위 명령은 없다.
 
+### 7.4 지웠다 (2026-09-09 · PR 61)
+
+7.2 가 적어 둔 조건이 6.5 단계로 채워져, 앱에서 터미널이 통째로 사라졌다.
+
+| 사라진 것 | 무엇이었나 |
+|---|---|
+| `EmbeddedTerminalPane` · `HeldSessionTerminalWidgets` | 터미널 화면과, 보유한 세션마다 살려 두던 JediTerm 위젯 |
+| `EmbeddedTerminalStateHolder` · `EmbeddedTerminalState` · `HeldSession` · `OpenedSessionTerminal` · `SessionTerminalOpener` | 터미널 세션을 쥐던 상태와 그 포트 |
+| `terminal/pty/`(`PtySessionTerminalOpener` · `SessionTtyConnector`) | 진짜 PTY 를 열고 JediTerm 을 그것에 잇던 어댑터 |
+| `ConversationPaneContent` · 챗 머리말의 "원시 터미널로 보기" | 두 화면 모델 사이의 갈래 |
+| `SessionMode` | 엔진에게 무엇을 물을지 고르던 갈래. 이제 늘 `--chat` 이다 |
+| `TERM=xterm-256color` 를 덮던 한 줄 | 근거가 "JediTerm 이 흉내 내는 것이 xterm 계열이다" 하나였다(5.3.1) |
+| JediTerm · pty4j · slf4j-simple 의존과 JetBrains 의 `intellij-dependencies` 저장소 | 그 저장소는 Central 에 없는 JediTerm 하나 때문에 열어 둔 자리였다 |
+| PTY 를 실제로 열어 재던 검증 넷 | `PtySessionTerminalOpenerTest` · `SessionTtyConnectorTest` · `HeldSessionProcessLifecycleTest` · `EmbeddedTerminalStateHolderTest` |
+
+**패키지가 줄었다.** 같은 명령(`clean build buildBundledEngine createDistributable packageDeb`)으로 잰 값이다.
+
+| 잰 것 | 전 | 후 | 차이 |
+|---|---|---|---|
+| deb | 70 441 986 B | 64 242 242 B | **-5.9 MiB** (-8.8 %) |
+| 앱 이미지 | 164 309 773 B | 157 624 723 B | **-6.4 MiB** (-4.1 %) |
+| `lib/app` 의 jar | 63 개 | 56 개 | jediterm-core · jediterm-ui · pty4j · jna · jna-platform · slf4j-api · slf4j-simple |
+
+**pty4j 하나가 JNA 둘을 데리고 있었다.** 직접 적은 의존 셋을 지웠는데 사라진 jar 은 일곱이다 — 줄어든 5 MB 의 절반이 아무도 이름을 적지 않은 자리에서 나왔다.
+
+**남겨 둔 자리 셋을 적어둔다.**
+
+- **`TerminalSessionFailure` 라는 이름.** 이제 담는 것은 챗 세션의 진입 실패뿐이라 `SessionEntryFailure` 가 맞다. 이 PR 에서 바꾸지 않은 것은 그 개명이 `terminal/chat/` 의 파일 열 개를 건드리는데 그 자리를 6 단계가 쥐고 있어서다. 삭제와 개명을 한 PR 에 섞으면 리뷰가 둘로 갈린다.
+- **엔진의 터미널 모드.** `kyu session-command` 는 `--chat` 없이도 그대로 답한다. 사람이 자기 터미널에서 그 답을 받아 `claude` 를 직접 띄우는 길은 앱과 무관하고, 그것까지 지우는 것은 이 문서가 정한 일이 아니다.
+- **`app-owned-sessions-design.md`.** PTY 와 JediTerm 으로 가득한 문서지만 그것은 그때의 결정 기록이라 고쳐 쓰지 않는다. 뒤집힌 자리는 이 문서가 말한다.
+
+**잃은 것도 적어둔다.** 챗이 아직 그리지 못하는 것이 나오면 이제 그것을 원시 화면으로 볼 길이 없다. 그 위험을 감수할 수 있다고 판단한 근거가 7.1 과 7.3 의 실측이고, 되돌려야 하는 날에는 이 PR 을 되짚으면 된다 — 지운 것이 한 줄기로 모여 있다.
+
 ---
 
 ## 8. 검토한 대안과 기각 사유
@@ -1136,7 +1171,7 @@ stdin 을 파이프로 물려 띄우면 stdout·stderr 에 한 글자도 내지 
 | **5** | **권한 브리지** — `kyu mcp ask`(5.2.2), 앱의 소켓 수신(5.4), `PermissionRequestCard`(6.4) | 승인이 필요한 일을 시키면 **앱 안에 카드가 뜬다**. 거절하면 파일이 안 생기고 모델이 이유를 안다. **인자를 고쳐 허용하면 고친 대로 돈다**. 소켓을 짧은 런타임 경로에 여는 것을 긴 워크디렉토리 이름으로 확인한다(3.7 의 107 바이트) |
 | **6** | **위임과 서브에이전트** — `DelegationCard`(5.7), `SubagentCard`, `parentToolUseId` 중첩, `permission_denials` 표시 | 메인에게 레포 작업을 시키면 위임 카드가 뜨고 경과 시간이 흐른다. 서브에이전트를 띄우면 안쪽 대화가 접힌 채로 보인다 |
 | **6.5** | **Claude 로그인** — 앱이 자격 증명을 알아보고(`claude auth status --json`), 없으면 브라우저 로그인을 태우거나 토큰을 받는다. `kyu claude-auth` 가 그 토큰을 맡는다(7.2·7.3) | 자격 증명이 없는 설치에서 앱을 띄우면 엔진 다음에 로그인 화면이 서고, 로그인하면 워크디렉토리로 넘어간다. 로그인된 머신에서는 이 화면이 지나가지도 않는다 |
-| **7** | **터미널 삭제** — 7 절의 조건이 채워졌다(6.5) | JediTerm·pty4j 의존과 `EmbeddedTerminalPane`·`HeldSessionTerminalWidgets`·`terminal/pty/` 가 사라진다. **패키지 크기가 준다** |
+| **7** ✅ | **터미널 삭제** — 7 절의 조건이 채워졌다(6.5) | JediTerm·pty4j 의존과 `EmbeddedTerminalPane`·`HeldSessionTerminalWidgets`·`terminal/pty/` 가 사라진다. **패키지 크기가 준다** — 잰 값은 7.4 다(deb -5.9 MiB) |
 
 **1·2 를 병렬로 두는 이유**: 둘이 겹치는 파일이 없다. 1 은 `KyuchestrationDesktopScreen.kt` 와 새 테마 파일을, 2 는 `internal/cli/` 와 새 `terminal/chat/` 을 만진다. 그리고 1 은 눈으로만 판정되고 2 는 테스트로만 판정된다 — 리뷰의 성격도 갈린다.
 
@@ -1150,6 +1185,10 @@ stdin 을 파이프로 물려 띄우면 stdout·stderr 에 한 글자도 내지 
 다루는 자리가 터미널 밖에 섰다(7.2). 6.5 라는 번호를 쓰는 이유는 이것이 처음부터 계획에 있던
 단계가 아니라 7 단계의 조건에서 자란 것이기 때문이다. 번호를 밀어 6 을 7 로 만들면 이미 머지된
 PR 들이 가리키는 번호가 어긋난다.
+
+**7 단계는 2026-09-09 에 끝났다(PR 61).** 무엇이 사라졌고 패키지가 얼마나 줄었는지는 7.4 에
+적었다. 6 단계와 나란히 진행했다 — 지운 것이 터미널 쪽이고 6 단계가 만드는 것이 `terminal/chat/`
+안이라 겹치는 파일이 거의 없었다.
 
 ---
 
