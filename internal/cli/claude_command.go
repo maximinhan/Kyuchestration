@@ -353,7 +353,7 @@ func sessionEnvironment(request sessionCommandRequest) []sessionEnvironmentEntry
 	// 메인 세션에만 등록되므로(설계 문서 5.2.1) 레포 세션에 실어 보내면 읽을 상대가 없다.
 	//
 	// 하위 세션에도 싣지 않는다. 하위의 kyu 서버는 ask_parent 하나뿐이라 이 표식을 읽을 상대가 없다.
-	if request.bypassPermissions && request.repoName == "" && request.childID == "" {
+	if request.bypassPermissions && request.repoName == "" && !request.childSessionRequested {
 		environment = append(environment, sessionEnvironmentEntry{name: bypassPermissionsEnvName, value: bypassPermissionsEnvValue})
 	}
 
