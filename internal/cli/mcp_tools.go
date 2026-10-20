@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -95,7 +96,7 @@ func newListReposTool(workDirPath string) mcpserver.Tool {
 			"properties":           map[string]any{},
 			"additionalProperties": false,
 		},
-		Call: func(json.RawMessage) (mcpserver.ToolResult, error) {
+		Call: func(context.Context, json.RawMessage) (mcpserver.ToolResult, error) {
 			return listReposToolAnswer(workDirPath)
 		},
 	}

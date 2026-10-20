@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // runServeForTest 는 kyu mcp serve 를 stdio 그대로 세우고 initialize 뒤 요청들을 보낸다.
@@ -311,5 +317,98 @@ func TestSessionTreeToolsRefuseMissingRequiredArgumentsAndUnknownOnes(t *testing
 	}
 	if len(app.questions) != 0 {
 		t.Error("인자가 잘못된 요청이 앱까지 갔습니다")
+	}
+}
+
+func TestAnInterruptedAwaitClosesTheAppConnectionAndTheServerGoesOn(t *testing.T) {
+	// 실측 3.2 — 사람이 await_session 대기 중에 중단하면 claude 가 notifications/cancelled 를 보낸다.
+	// 서버는 기다림만 접고(앱 연결을 닫는다, 6.4) 하위는 건드리지 않는다. 연결을 쥐고 있으면 앱은
+	// 아무도 받지 않을 기다림을 최대 3,000 초 동안 들고 있다.
+	socketPath := filepath.Join(shortDirForTest(t), "app.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("가짜 앱 소켓을 열지 못했습니다: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	awaitReceived := make(chan string, 1)
+	awaitConnectionClosed := make(chan struct{})
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+
+		reader := bufio.NewReader(connection)
+		awaitLine, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		awaitReceived <- awaitLine
+
+		// 답하지 않는다 — 하위들이 아직 도는 중인 앱이다. 엔진이 연결을 닫으면 이 읽기가 끝난다.
+		io.Copy(io.Discard, reader)
+		close(awaitConnectionClosed)
+	}()
+
+	requestReader, requestWriter := io.Pipe()
+	answerReader, answerWriter := io.Pipe()
+	served := make(chan error, 1)
+	go func() {
+		served <- ManageOrchestrationTools(requestReader, answerWriter, io.Discard,
+			append([]string{mcpServeSubcommandName}, mainServeArgsForTest(t, socketPath)...))
+		answerWriter.Close()
+	}()
+
+	answeredLines := make(chan string, 8)
+	go func() {
+		scanner := bufio.NewScanner(answerReader)
+		for scanner.Scan() {
+			answeredLines <- scanner.Text()
+		}
+		close(answeredLines)
+	}()
+
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"await_session","arguments":{"waitSeconds":3000}}}`)
+
+	select {
+	case awaitLine := <-awaitReceived:
+		if !strings.Contains(awaitLine, `"kind":"await"`) {
+			t.Fatalf("앱이 받은 줄 = %s, await 를 기대", awaitLine)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("await 가 앱에 닿지 않았습니다")
+	}
+
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2,"reason":"AbortError: remote-cancel"}}`)
+
+	select {
+	case <-awaitConnectionClosed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("취소 알림을 받고도 엔진이 앱 연결을 닫지 않았습니다")
+	}
+
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","id":3,"method":"ping"}`)
+	requestWriter.Close()
+
+	var answeredIDs []string
+	for line := range answeredLines {
+		var message mcpMessageForTest
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			t.Fatalf("서버가 답한 줄을 JSON 으로 읽지 못했습니다: %v\n%s", err, line)
+		}
+		answeredIDs = append(answeredIDs, string(message.ID))
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("kyu mcp serve 실패: %v", err)
+	}
+
+	if !slices.Contains(answeredIDs, "3") {
+		t.Errorf("답한 ID = %q, 취소 뒤의 ping(3)에도 답하기를 기대", answeredIDs)
+	}
+	if slices.Contains(answeredIDs, "2") {
+		t.Errorf("답한 ID = %q, 취소된 await(2)에는 답하지 않기를 기대", answeredIDs)
 	}
 }

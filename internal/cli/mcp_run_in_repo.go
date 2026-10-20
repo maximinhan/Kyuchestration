@@ -156,7 +156,7 @@ func newRunInRepoTool(workDirPath string, bypassPermissions bool) mcpserver.Tool
 	}
 }
 
-func (dispatcher *delegationDispatcher) delegate(rawArguments json.RawMessage) (mcpserver.ToolResult, error) {
+func (dispatcher *delegationDispatcher) delegate(ctx context.Context, rawArguments json.RawMessage) (mcpserver.ToolResult, error) {
 	var arguments runInRepoArguments
 	if err := json.Unmarshal(rawArguments, &arguments); err != nil {
 		return refuseDelegation(fmt.Sprintf("run_in_repo 의 인자를 읽지 못했습니다: %v", err)), nil
@@ -195,7 +195,7 @@ func (dispatcher *delegationDispatcher) delegate(rawArguments json.RawMessage) (
 	}
 	defer dispatcher.releaseRepo(repo.Name)
 
-	return dispatcher.runAndAnswer(repo, arguments.Prompt, assignment)
+	return dispatcher.runAndAnswer(ctx, repo, arguments.Prompt, assignment)
 }
 
 // claimRepoAndConversation 은 이 레포를 잡고 이번 위임이 쓸 대화를 정한다.
@@ -245,6 +245,7 @@ func (dispatcher *delegationDispatcher) releaseRepo(repoName string) {
 
 // runAndAnswer 는 위임을 실행하고, 이어갈 수 없게 된 대화는 한 번 다시 연다.
 func (dispatcher *delegationDispatcher) runAndAnswer(
+	ctx context.Context,
 	repo workdir.Repo,
 	prompt string,
 	assignment workdir.ConversationAssignment,
@@ -252,7 +253,10 @@ func (dispatcher *delegationDispatcher) runAndAnswer(
 	// 상한은 도구 호출 하나에 하나다. 폴백까지 가는 경우에 회차마다 새 예산을 주면 메인이
 	// 기다리는 시간이 상한의 두 배가 된다 — 이 숫자가 답하는 물음은 "메인이 얼마나 기다릴
 	// 것인가" 이지 "한 프로세스가 얼마나 돌 것인가" 가 아니다.
-	timeLimited, stopWaiting := context.WithTimeout(context.Background(), delegationTimeLimit)
+	//
+	// ctx 에서 잇는다. 사람이 이 호출을 중단하면(claude 가 notifications/cancelled 로 거둔다) 위임된
+	// claude 도 함께 끝나야 한다 — 받을 이 없는 일이 레포를 계속 고치고 그 레포를 붙들게 두지 않는다.
+	timeLimited, stopWaiting := context.WithTimeout(ctx, delegationTimeLimit)
 	defer stopWaiting()
 
 	outcome, err := dispatcher.runDelegation(timeLimited, repo, prompt, assignment)

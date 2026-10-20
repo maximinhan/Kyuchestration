@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -89,7 +90,7 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 				"createDirectory": map[string]any{"type": "boolean", "description": "참이면 cwd 를 새로 만든다"},
 				"title":           map[string]any{"type": "string", "description": "화면의 탭 이름. 생략하면 cwd 의 마지막 이름"},
 			}),
-			Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
+			Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 				var request spawnSessionRequest
 				if refusal, refused := decodeToolArguments(arguments, &request); refused {
 					return refusal, nil
@@ -98,7 +99,7 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 					return missingArgumentResult(spawnSessionToolName, "prompt"), nil
 				}
 				request.Kind = spawnSessionRequestKind
-				return relaySessionTreeRequest(appSocketPath, request)
+				return relaySessionTreeRequest(ctx, appSocketPath, request)
 			},
 		},
 		{
@@ -108,7 +109,7 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 				"id":      map[string]any{"type": "string", "description": "spawn_session 이 답한 하위의 id"},
 				"message": map[string]any{"type": "string"},
 			}),
-			Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
+			Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 				var request sendToSessionRequest
 				if refusal, refused := decodeToolArguments(arguments, &request); refused {
 					return refusal, nil
@@ -120,7 +121,7 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 					return missingArgumentResult(sendToSessionToolName, "message"), nil
 				}
 				request.Kind = sendToSessionRequestKind
-				return relaySessionTreeRequest(appSocketPath, request)
+				return relaySessionTreeRequest(ctx, appSocketPath, request)
 			},
 		},
 		{
@@ -130,21 +131,21 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 				"ids":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1},
 				"waitSeconds": map[string]any{"type": "integer", "minimum": 1, "maximum": maximumAwaitWaitSeconds},
 			}),
-			Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
-				return awaitSessions(appSocketPath, arguments)
+			Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
+				return awaitSessions(ctx, appSocketPath, arguments)
 			},
 		},
 		{
 			Name:        listSessionsToolName,
 			Description: listSessionsToolDescription,
 			InputSchema: objectSchema(nil, map[string]any{}),
-			Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
+			Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 				var request listSessionsRequest
 				if refusal, refused := decodeToolArguments(arguments, &request); refused {
 					return refusal, nil
 				}
 				request.Kind = listSessionsRequestKind
-				return relaySessionTreeRequest(appSocketPath, request)
+				return relaySessionTreeRequest(ctx, appSocketPath, request)
 			},
 		},
 		{
@@ -153,7 +154,7 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 			InputSchema: objectSchema([]string{"id"}, map[string]any{
 				"id": map[string]any{"type": "string"},
 			}),
-			Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
+			Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 				var request endSessionRequest
 				if refusal, refused := decodeToolArguments(arguments, &request); refused {
 					return refusal, nil
@@ -162,7 +163,7 @@ func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
 					return missingArgumentResult(endSessionToolName, "id"), nil
 				}
 				request.Kind = endSessionRequestKind
-				return relaySessionTreeRequest(appSocketPath, request)
+				return relaySessionTreeRequest(ctx, appSocketPath, request)
 			},
 		},
 	}
@@ -180,7 +181,7 @@ func childSessionTools(appSocketPath string) []mcpserver.Tool {
 			InputSchema: objectSchema([]string{"message"}, map[string]any{
 				"message": map[string]any{"type": "string"},
 			}),
-			Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
+			Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 				var request askParentRequest
 				if refusal, refused := decodeToolArguments(arguments, &request); refused {
 					return refusal, nil
@@ -189,7 +190,7 @@ func childSessionTools(appSocketPath string) []mcpserver.Tool {
 					return missingArgumentResult(askParentToolName, "message"), nil
 				}
 				request.Kind = askParentRequestKind
-				return relaySessionTreeRequest(appSocketPath, request)
+				return relaySessionTreeRequest(ctx, appSocketPath, request)
 			},
 		},
 	}
@@ -238,7 +239,7 @@ type askParentRequest struct {
 //
 // 범위 밖을 깎아 맞추지 않고 거절한다. 3600 을 준 모델에게 조용히 3000 을 기다리게 하면, 모델은
 // 자기가 정한 시간을 기다렸다고 믿고 그 다음 판단을 한다.
-func awaitSessions(appSocketPath string, arguments json.RawMessage) (mcpserver.ToolResult, error) {
+func awaitSessions(ctx context.Context, appSocketPath string, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 	var request awaitSessionRequest
 	if refusal, refused := decodeToolArguments(arguments, &request); refused {
 		return refusal, nil
@@ -261,15 +262,15 @@ func awaitSessions(appSocketPath string, arguments json.RawMessage) (mcpserver.T
 
 	request.Kind = awaitSessionRequestKind
 	request.WaitSeconds = &waitSeconds
-	return relaySessionTreeRequest(appSocketPath, request)
+	return relaySessionTreeRequest(ctx, appSocketPath, request)
 }
 
 // relaySessionTreeRequest 는 요청 한 줄을 앱에게 보내고, 앱의 답을 도구 결과로 옮긴다.
 //
 // 앱의 거절은 {"error": "…"} 한 모양이다(6.4) — 모르는 kind 도, 트리 규칙에 걸린 요청도 같다. 그것을
 // 도구 오류로 올려야 모델이 하위가 뜨지 않았다는 것과 고칠 것을 함께 안다.
-func relaySessionTreeRequest(appSocketPath string, request any) (mcpserver.ToolResult, error) {
-	answerLine, err := exchangeLineWithApp(appSocketPath, request)
+func relaySessionTreeRequest(ctx context.Context, appSocketPath string, request any) (mcpserver.ToolResult, error) {
+	answerLine, err := exchangeLineWithApp(ctx, appSocketPath, request)
 	if err != nil {
 		return toolErrorResult(fmt.Sprintf(
 			"이 세션을 연 앱에 닿지 못했습니다 (%v) — 앱 창이 살아 있는지 사용자에게 확인하세요", err)), nil
