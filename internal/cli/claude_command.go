@@ -156,6 +156,11 @@ func mainSessionCommand(
 ) []string {
 	command := claudeCommand(request, conversationFlags, mcpSetup)
 
+	// 세션 트리 도구는 앱 소켓이 있을 때만 열리므로(mcp.go 의 orchestrationTools) 규약도 그때만 잇는다.
+	if request.appSocketPath != "" {
+		command = append(command, appendSystemPromptFlagName, parentSessionConventionText())
+	}
+
 	// 붙일 레포 수만큼 미리 늘린다. 아래 반복이 레포마다 두 자리씩 더하는데,
 	// 그때마다 슬라이스가 자라면 레포가 많은 워크디렉토리에서 같은 목록을 여러 번 복사하게 된다.
 	command = slices.Grow(command, 2*len(repos))
@@ -346,7 +351,9 @@ func sessionEnvironment(request sessionCommandRequest) []sessionEnvironmentEntry
 
 	// bypass 표식은 메인 세션에만 붙는다. 이것을 읽는 상대는 오케스트레이션 서버이고, 그 서버는
 	// 메인 세션에만 등록되므로(설계 문서 5.2.1) 레포 세션에 실어 보내면 읽을 상대가 없다.
-	if request.bypassPermissions && request.repoName == "" {
+	//
+	// 하위 세션에도 싣지 않는다. 하위의 kyu 서버는 ask_parent 하나뿐이라 이 표식을 읽을 상대가 없다.
+	if request.bypassPermissions && request.repoName == "" && request.childID == "" {
 		environment = append(environment, sessionEnvironmentEntry{name: bypassPermissionsEnvName, value: bypassPermissionsEnvValue})
 	}
 

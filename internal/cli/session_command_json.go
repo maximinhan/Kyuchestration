@@ -22,7 +22,9 @@ import (
 //	              "--add-dir", "/home/me/work/WorkDir-featureX/proj-a"],
 //	  "cwd": "/home/me/work/WorkDir-featureX",
 //	  "env": { "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1" },
-//	  "resumedConversationId": null            // 이어가기로 열었으면 그 대화의 ID
+//	  "resumedConversationId": null,           // 이어가기로 열었으면 그 대화의 ID
+//	  "childSession": null,                    // --child 답에서만: {id, cwd, title, conversationId}
+//	  "approvalRequired": null                 // --child 답에서 관문에 걸렸을 때만: {cwd, fingerprint, executionConfigs}
 //	}
 //
 // 명령에 무엇이 실리는지는 판이 아니다. --mcp-config 가 더해진 것은 조립이 바뀐 것이지 문서의
@@ -78,6 +80,47 @@ type sessionCommandJSONDocument struct {
 	// 빈 문자열이 아니라 null 이다. 빈 문자열로 두면 "이어간 적 없음" 이 두 모양이 되고,
 	// 읽는 쪽이 그 둘을 갈라야 할 이유가 이 문서에는 없다.
 	ResumedConversationID *string `json:"resumedConversationId"`
+
+	// ChildSession 은 하위 세션 답(--child)에서 배정한 하위의 사실이다. 다른 답에서는 null 이다.
+	//
+	// 앱은 이 값으로 spawn 의 답({id, cwd, conversationId, state})을 만든다(session-tree-design.md 6.4).
+	// conversationId 를 argv 의 --session-id 에서 되읽게 하지 않는 것은 resumedConversationId 와 같은
+	// 이유다 — 조립 규칙은 엔진에만 있다(원칙 11).
+	ChildSession *childSessionJSON `json:"childSession"`
+
+	// ApprovalRequired 는 하위의 자리에 사람이 승인하지 않은 실행 유발 설정이 있을 때만 채워진다(6.9).
+	//
+	// 그때 command 는 빈 배열이다. 앱은 이 내용을 사람에게 보이고, 승인하면 fingerprint 를
+	// --approve-fingerprint 로 붙여 다시 묻는다. 거절하면 spawn 을 "사람이 이 폴더의 설정을 승인하지
+	// 않았습니다" 로 거절한다.
+	ApprovalRequired *approvalRequiredJSON `json:"approvalRequired"`
+}
+
+// childSessionJSON 은 하위 세션 답의 childSession 이다.
+type childSessionJSON struct {
+	ID string `json:"id"`
+
+	// Cwd 는 링크를 따라간 자리의 워크디렉토리 기준 / 경로다. 앱이 살아 있는 하위의 자리를 셀 때
+	// (--live-child-cwd) 이 값을 그대로 넘긴다.
+	Cwd            string `json:"cwd"`
+	Title          string `json:"title"`
+	ConversationID string `json:"conversationId"`
+}
+
+// approvalRequiredJSON 은 사람에게 보일 관문의 물음이다.
+type approvalRequiredJSON struct {
+	Cwd string `json:"cwd"`
+
+	// Fingerprint 는 지금 내용의 지문이다. 승인은 자리가 아니라 이 지문에 대한 것이다.
+	Fingerprint      string                `json:"fingerprint"`
+	ExecutionConfigs []executionConfigJSON `json:"executionConfigs"`
+}
+
+// executionConfigJSON 은 걸린 설정 파일 하나다. 무엇을 승인하는지 모르는 승인은 관문이 아니라 내용을 통째로 싣는다.
+type executionConfigJSON struct {
+	RelativePath string `json:"relativePath"`
+	AbsolutePath string `json:"absolutePath"`
+	Content      string `json:"content"`
 }
 
 // writeSessionCommandAsJSON 은 조립 결과를 앱이 실행할 문서 하나로 내보낸다.
@@ -87,6 +130,8 @@ func writeSessionCommandAsJSON(
 	cwd string,
 	environment []sessionEnvironmentEntry,
 	conversation sessionConversation,
+	childSession *childSessionJSON,
+	approvalRequired *approvalRequiredJSON,
 ) error {
 	// 늘 만든다. nil map 은 null 로 직렬화되는데, 그 null 은 앱이 자기 환경에 얹는 자리에서
 	// 빈 객체와 다르게 다뤄야 하는 값이 된다.
@@ -107,5 +152,7 @@ func writeSessionCommandAsJSON(
 		Cwd:                   cwd,
 		Env:                   environmentToAdd,
 		ResumedConversationID: resumedConversationID,
+		ChildSession:          childSession,
+		ApprovalRequired:      approvalRequired,
 	})
 }

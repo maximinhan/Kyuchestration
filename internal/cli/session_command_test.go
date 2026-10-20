@@ -771,7 +771,8 @@ func TestTheMainChatRegistersTheAskServerBesideTheOrchestrationServer(t *testing
 	assertAskServerRegistration(t, registration, "/run/user/1000/kyu/a1.sock")
 
 	commandWithoutPermissionFlag := splitPermissionPromptToolForTest(t, commandWithoutRegistration)
-	commandWithoutChatFlags := splitChatModeFlagsForTest(t, commandWithoutPermissionFlag)
+	_, commandWithoutConvention := splitAppendSystemPromptForTest(t, commandWithoutPermissionFlag)
+	commandWithoutChatFlags := splitChatModeFlagsForTest(t, commandWithoutConvention)
 	_, _, rest := splitConversationFlagsForTest(t, commandWithoutChatFlags)
 	assertRestOfCommand(t, rest, []string{"--add-dir", filepath.Join(workDirPath, "alpha-commons")})
 }
