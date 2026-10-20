@@ -18,6 +18,7 @@ import com.kyuchestration.desktop.terminal.planSessionEntry
 import com.kyuchestration.desktop.terminal.resumeFailureSuspected
 import java.io.IOException
 import java.nio.file.Path
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -170,6 +171,19 @@ class ChatSessionStateHolder(
      * 돌아서(3.3) 이 줄이 실제로 늦추는 것은 없다.
      */
     private val childSpawning = Mutex()
+
+    private val mutableGateQuestions = MutableStateFlow<List<ChildSessionGateQuestion>>(emptyList())
+
+    /**
+     * 사람에게 물을 관문들(6.9). 화면이 맨 앞의 것을 대화 상자로 세운다.
+     *
+     * 목록인 것은 화면이 하나씩 보이더라도 상태가 하나로 줄지 않게 하려는 것이다 — spawn 은 차례로 돌아 지금은
+     * 둘이 겹칠 일이 없지만, 겹친 날 뒤의 물음이 앞의 것을 덮어 영영 답을 못 받는 일이 없게 한다.
+     */
+    val gateQuestions: StateFlow<List<ChildSessionGateQuestion>> = mutableGateQuestions.asStateFlow()
+
+    /** 아직 답하지 않은 관문 물음의 답 자리. 하위 이름이 열쇠다 — spawn 하나에 물음은 한 번에 하나다. */
+    private val gateDecisions = mutableMapOf<String, CompletableDeferred<Boolean>>()
 
     /**
      * 그 세션의 챗을 연다. 이미 보유 중이면 다시 띄우지 않고 화면만 그쪽으로 옮긴다.
@@ -499,18 +513,32 @@ class ChatSessionStateHolder(
             approvedFingerprint = null,
         )
 
-        val opening = try {
-            withContext(sessionEntryDispatcher) { openChildSession(parent.workDirPath, childTarget, commandRequest) }
-        } catch (failure: TerminalSessionFailure) {
-            return SessionTreeAnswer.Refused(refusalReasonFor(failure))
-        }
+        // 관문에 걸리면 사람에게 묻고, 승인한 지문으로 다시 묻는다. 다시 걸리면 사람이 본 뒤 파일이 바뀐
+        // 것이라 지금 내용으로 또 묻는다 — 엔진이 지금 내용의 지문만 적는다(childSessionApprovalNeeded).
+        var approvedFingerprint: String? = null
+        val opened: ChildSessionOpening.Opened
+        while (true) {
+            val attempt = commandRequest.copy(approvedFingerprint = approvedFingerprint)
+            val opening = try {
+                withContext(sessionEntryDispatcher) { openChildSession(parent.workDirPath, childTarget, attempt) }
+            } catch (failure: TerminalSessionFailure) {
+                return SessionTreeAnswer.Refused(refusalReasonFor(failure))
+            }
 
-        val opened = when (opening) {
-            is ChildSessionOpening.Opened -> opening
-            is ChildSessionOpening.GateRequired -> return SessionTreeAnswer.Refused(
-                "${opening.gate.relativeCwd} 의 실행 설정(${opening.gate.executionConfigs.joinToString { it.relativePath }})을 " +
-                    "사람이 아직 승인하지 않았습니다",
-            )
+            when (opening) {
+                is ChildSessionOpening.Opened -> {
+                    opened = opening
+                    break
+                }
+
+                is ChildSessionOpening.GateRequired -> {
+                    val question = ChildSessionGateQuestion(assignment.childId, request.prompt, opening.gate)
+                    if (!askPersonAboutGate(question)) {
+                        return SessionTreeAnswer.Refused("사람이 이 폴더(${opening.gate.relativeCwd})의 설정을 승인하지 않았습니다")
+                    }
+                    approvedFingerprint = opening.gate.fingerprint
+                }
+            }
         }
 
         // 기다리는 동안 메인이 끝났다. 원칙 17 — 상위가 없는 하위는 서지 않는다.
@@ -542,6 +570,30 @@ class ChatSessionStateHolder(
                     "필요하면 사람에게 물으세요"
             },
         )
+    }
+
+    /**
+     * 관문 대화 상자를 세우고 사람의 답을 기다린다. 승인했으면 참.
+     *
+     * 상한을 두지 않는다. 사람이 그 파일을 읽는 데 얼마가 걸리든 그동안 상위의 도구 호출이 기다린다 — 승인
+     * 카드에 상한을 두지 않은 이유와 같다(chat-ui 5.4.1). 메인이 끝나면 그 자리에서 거절로 풀린다(6.13).
+     */
+    private suspend fun askPersonAboutGate(question: ChildSessionGateQuestion): Boolean {
+        val decision = CompletableDeferred<Boolean>()
+        gateDecisions[question.childId] = decision
+        mutableGateQuestions.value = mutableGateQuestions.value + question
+        return decision.await()
+    }
+
+    /**
+     * 관문 대화 상자에 사람이 답했다.
+     *
+     * 이미 답한 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
+     */
+    fun answerGateQuestion(childId: String, approved: Boolean) {
+        val decision = gateDecisions.remove(childId) ?: return
+        mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.childId == childId }
+        decision.complete(approved)
     }
 
     /** 하위 하나를 엔진에게 묻고 띄운다. 띄우지 못하면 그 하위의 소켓을 닫고 실패를 그대로 던진다. */
@@ -825,6 +877,17 @@ class ChatSessionStateHolder(
         toolsAllowedForSession.remove(target)
     }
 }
+
+/**
+ * 사람에게 보일 관문 하나(6.9) — 어느 하위를, 무엇을 시키려고, 어떤 설정 때문에 묻는가.
+ *
+ * @param prompt 상위가 그 하위에게 시키려던 일. 사람이 "이 설정으로 무엇이 돌게 되는가" 를 판단할 재료다.
+ */
+data class ChildSessionGateQuestion(
+    val childId: String,
+    val prompt: String,
+    val gate: ChildSessionGate,
+)
 
 /** 하위 하나를 띄우려 한 결과 — 띄웠거나, 관문에 걸려 아무것도 띄우지 않았다(6.9). */
 private sealed interface ChildSessionOpening {
