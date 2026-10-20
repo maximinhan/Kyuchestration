@@ -7,6 +7,7 @@
 명령 이름 `kyu` 는 프로젝트 이름에서 땄다 — 뀨케스트레이션의 앞 글자다.
 
 - 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md)
+- 다음 설계(승인 대기): [session-tree-design.md](session-tree-design.md) — 메인이 하위 세션을 낳고 대화한다
 - 핵심 원칙: **프로세스는 격리, 지식은 공유**
 - 스택: Go — `kyu` 는 엔진이고, 세션을 열고 화면을 그리는 것은 데스크톱 앱이다
 - 터미널 대신 창으로 쓰려면: [데스크톱 앱](#데스크톱-앱)
