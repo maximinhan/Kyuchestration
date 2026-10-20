@@ -211,6 +211,8 @@ sealed interface ChatSessionEvent {
      *   **앱이 직접 재지 않는다.** 보낸 순간부터 재는 길도 있지만, 큐에 들어간 둘 이상이 한 턴으로
      *   합쳐지면(3.11) 앱이 잡은 시작점은 그 턴의 시작이 아니다. 잰 값이 스트림에 있는데 앱이 다시
      *   재면 두 숫자가 갈리고, 갈린 것을 발견하는 자리는 사용자의 화면이다.
+     * @param resultText 그 턴의 마지막 답 텍스트(`result`). 화면은 같은 글을 `assistant` 로 이미 그렸으므로 쓰지 않고,
+     *   하위의 턴이 끝났을 때 상위에게 가는 결과가 이것이다(session-tree 6.6). 없는 줄(실패한 턴)에서는 null 이다.
      */
     data class TurnFinished(
         val outcome: TurnOutcome,
@@ -218,6 +220,7 @@ sealed interface ChatSessionEvent {
         val usage: TurnUsage,
         val permissionDenials: List<PermissionDenial>,
         val durationMillis: Long,
+        val resultText: String?,
     ) : ChatSessionEvent
 
     /** `rate_limit_event` — 한도 사용률을 창 두 개로 준다(3.12). 턴마다 온다. */

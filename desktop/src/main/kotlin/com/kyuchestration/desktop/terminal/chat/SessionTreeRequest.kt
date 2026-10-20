@@ -1,13 +1,17 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
@@ -29,6 +33,14 @@ sealed interface SessionTreeRequest {
         val createDirectory: Boolean,
         val title: String?,
     ) : SessionTreeRequest
+
+    /**
+     * 상위가 하위들에게 전할 일이 생길 때까지 기다린다(6.6).
+     *
+     * @param childIds 기다릴 하위들. null 이면 살아 있는 하위 전부다 — 엔진이 빈 배열을 거절하므로 "아무도" 는 오지 않는다.
+     * @param waitSeconds 아무 일 없이 기다릴 최대 시간. 범위(1..3000)는 엔진이 이미 지켰다(6.7).
+     */
+    data class AwaitSessions(val childIds: List<String>?, val waitSeconds: Int) : SessionTreeRequest
 
     /** 상위가 하위에게 말한다(6.2 의 `send_to_session`). */
     data class SendToSession(val childId: String, val message: String) : SessionTreeRequest
@@ -60,6 +72,14 @@ sealed interface SessionTreeAnswer {
      * 그 턴의 도구 경계에서 끼어든다(3.1). 상위가 그 차이를 알아야 해서 통로를 답에 싣는다(6.2).
      */
     data object DeliveredAsMessage : SessionTreeAnswer
+
+    /**
+     * 기다림이 끝났다 — 전할 일이 생겼거나, 아무 일 없이 시간이 다 됐다(6.6).
+     *
+     * @param events 그때까지 쌓인 사건 전부. 시간이 다 된 것이면 비어 있다.
+     * @param stillRunning 기다린 하위 중 아직 살아 있는 것. 상위가 다시 기다릴지를 정하는 재료다.
+     */
+    data class Awaited(val events: List<SessionTreeEvent>, val stillRunning: List<String>) : SessionTreeAnswer
 
     data class Ended(val childId: String) : SessionTreeAnswer
 
@@ -99,6 +119,11 @@ internal fun answerLineFor(answer: SessionTreeAnswer): String = when (answer) {
     }
 
     is SessionTreeAnswer.DeliveredAsMessage -> buildJsonObject { put("delivered", DELIVERED_AS_MESSAGE) }
+
+    is SessionTreeAnswer.Awaited -> buildJsonObject {
+        putJsonArray("events") { answer.events.forEach { event -> addJsonObject { putSessionTreeEvent(event) } } }
+        putJsonArray("stillRunning") { answer.stillRunning.forEach { add(it) } }
+    }
 
     is SessionTreeAnswer.Ended -> buildJsonObject {
         put("id", answer.childId)
@@ -155,6 +180,8 @@ internal fun sessionTreeRequestFrom(kind: String, requestObject: JsonObject): Se
             )
         }
 
+        AWAIT_REQUEST_KIND -> awaitSessionsFrom(requestObject)
+
         SEND_REQUEST_KIND -> requestObject.nonEmptyStringOrNull("id")?.let { childId ->
             requestObject.nonEmptyStringOrNull("message")?.let { message -> SessionTreeRequest.SendToSession(childId, message) }
         }
@@ -166,6 +193,23 @@ internal fun sessionTreeRequestFrom(kind: String, requestObject: JsonObject): Se
         else -> return SessionTreeRequestReading.NotSessionTreeKind
     }
     return request?.let(SessionTreeRequestReading::Read) ?: SessionTreeRequestReading.Unreadable
+}
+
+/**
+ * `await` 줄을 읽는다. `waitSeconds` 는 엔진이 늘 싣는다 — 없으면 판이 어긋난 것이라 읽지 못한 줄이다.
+ *
+ * 빈 `ids` 도 읽지 못한 줄로 둔다. 엔진이 그것을 모델에게 거절하므로(awaitSessions) 여기까지 오면 판이 어긋난 것이고,
+ * 그것을 "전부" 로 읽으면 상위가 고르지 않은 하위의 사건에 깨어난다.
+ */
+private fun awaitSessionsFrom(requestObject: JsonObject): SessionTreeRequest.AwaitSessions? {
+    val waitSeconds = (requestObject["waitSeconds"] as? JsonPrimitive)?.intOrNull ?: return null
+    val childIds = when (val ids = requestObject["ids"]) {
+        null, JsonNull -> null
+        is JsonArray -> ids.map { (it as? JsonPrimitive)?.takeIf { id -> id.isString }?.content ?: return null }
+            .takeIf { it.isNotEmpty() } ?: return null
+        else -> return null
+    }
+    return SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }
 
 /** 줄 하나를 세션 트리 요청으로 읽어 본 결과. */
@@ -181,6 +225,7 @@ private fun JsonObject.nonEmptyStringOrNull(key: String): String? = stringOrNull
 
 /** 이 앱이 받는 세션 트리 kind 들(mcp_session_tree.go 의 *RequestKind). */
 private const val SPAWN_REQUEST_KIND = "spawn"
+private const val AWAIT_REQUEST_KIND = "await"
 private const val SEND_REQUEST_KIND = "send"
 private const val END_REQUEST_KIND = "end"
 private const val LIST_REQUEST_KIND = "list"

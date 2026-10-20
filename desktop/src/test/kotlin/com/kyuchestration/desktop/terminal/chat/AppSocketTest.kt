@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -27,6 +28,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -159,17 +161,13 @@ class AppSocketTest {
 
     @Test
     fun `모르는 kind 의 요청은 error 로 거절하고 화면에는 올리지 않는다`(): Unit = runBlocking {
-        // await · send · ask_parent 는 4b 가 채운다(session-tree-design.md 7 절). 그 전에 그런 줄이 오면 승인
-        // 카드로 오해하지 않고, 답하지 않아 상대를 영영 세워 두지도 않는다 — 이 앱이 그 요청을 모른다는 것을
-        // 그 줄의 답으로 말한다.
+        // 이 앱보다 먼저 올라간 엔진이 새 kind 를 보내는 자리다. 승인 카드로 오해하지 않고, 답하지 않아 상대를 영영
+        // 세워 두지도 않는다 — 이 앱이 그 요청을 모른다는 것을 그 줄의 답으로 말한다.
         val socket = openSocket()
 
-        val answer = askOverTheSocket(
-            socket.socketPath,
-            """{"kind":"await","ids":null,"waitSeconds":1800}""",
-        )
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"run_in_repo","repo":"proj-a"}""")
 
-        assertTrue(answer.getValue("error").contains("await"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
+        assertTrue(answer.getValue("error").contains("run_in_repo"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
         assertFalse("decision" in answer, "모르는 요청에 승인 결정으로 답했습니다: $answer")
         assertNull(
             withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.permissionRequests.first() },
@@ -303,6 +301,35 @@ class AppSocketTest {
     }
 
     @Test
+    fun `await 요청은 기다릴 하위와 시간을 들고 올라간다`(): Unit = runBlocking {
+        // 엔진의 awaitSessionRequest 모양 그대로다(mcp_session_tree.go) — ids 를 생략하면 null 로 오고 waitSeconds 는 늘 실린다.
+        val socket = openSocket()
+
+        // 요청 하나가 연결 하나이고 답을 받아야 끝나므로, 하나씩 받아 그때그때 답한다.
+        val answering = async {
+            socket.sessionTreeRequests.take(2)
+                .onEach { it.answerWith(SessionTreeAnswer.Awaited(emptyList(), emptyList())) }
+                .toList()
+        }
+
+        withTimeout(TEST_TIMEOUT_MILLIS) {
+            askOverTheSocket(socket.socketPath, """{"kind":"await","ids":["child-1","child-2"],"waitSeconds":60}""")
+        }
+        withTimeout(TEST_TIMEOUT_MILLIS) {
+            askOverTheSocket(socket.socketPath, """{"kind":"await","ids":null,"waitSeconds":1800}""")
+        }
+        val requests = withTimeout(TEST_TIMEOUT_MILLIS) { answering.await() }
+
+        assertEquals(
+            listOf(
+                SessionTreeRequest.AwaitSessions(childIds = listOf("child-1", "child-2"), waitSeconds = 60),
+                SessionTreeRequest.AwaitSessions(childIds = null, waitSeconds = 1800),
+            ),
+            requests.map { it.request },
+        )
+    }
+
+    @Test
     fun `필드가 빠진 세션 트리 요청에는 승인 거부가 아니라 error 로 답한다`(): Unit = runBlocking {
         // 이 줄은 승인 물음이 아니다 — deny 로 답하면 엔진은 그것을 앱의 답으로 읽지 못하고 판이 어긋났다고 말한다.
         val socket = openSocket()
@@ -326,7 +353,7 @@ class AppSocketTest {
     /**
      * `kyu mcp ask` 노릇 — 물음 한 줄을 보내고 답 한 줄을 되읽는다.
      *
-     * 답의 필드를 문자열 맵으로 되돌린다. 객체 필드(updatedInput)는 원문 그대로 담으므로, 앱이
+     * 답의 필드를 문자열 맵으로 되돌린다. 객체·배열 필드(updatedInput · events)는 원문 그대로 담으므로, 앱이
      * 보낸 인자가 이 자리에서 한 번 더 손질되지 않는 것도 함께 확인된다.
      */
     private suspend fun askOverTheSocket(socketPath: Path, questionLine: String): Map<String, String> {
@@ -346,7 +373,7 @@ class AppSocketTest {
         assertTrue(answerLine != null, "앱이 답하지 않았습니다")
         val answer = assertIs<JsonObject>(Json.parseToJsonElement(answerLine))
         return answer.mapValues { (_, value) ->
-            if (value is JsonObject) value.toString() else value.jsonPrimitive.content
+            if (value is JsonObject || value is JsonArray) value.toString() else value.jsonPrimitive.content
         }
     }
 

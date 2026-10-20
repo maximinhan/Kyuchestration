@@ -4,7 +4,9 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
@@ -80,4 +82,186 @@ class ChildSessionDialogueStateHolderTest {
         assertEquals(UserMessageSender.Human, bed.child(1).sentMessages.last().sender)
         assertEquals(SessionTarget.Child("child-1"), bed.holder.state.value.target)
     }
+
+    @Test
+    fun `await 는 하위의 턴이 끝날 때까지 기다렸다가 그 결과를 담아 답한다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        assertNull(asked.answerSoFar(), "전할 일이 없는데 답했습니다")
+
+        bed.child(1).finishTurnOnLastSentMessage(result = "포트를 5433 으로 고쳤다")
+        runCurrent()
+
+        val awaited = assertIs<SessionTreeAnswer.Awaited>(asked.answerSoFar())
+        assertEquals(
+            listOf<SessionTreeEvent>(
+                SessionTreeEvent.TurnCompleted(
+                    childId = "child-1",
+                    result = "포트를 5433 으로 고쳤다",
+                    isError = false,
+                    triggeredBy = TurnTrigger.Parent,
+                    costUsd = 0.25,
+                    durationMillis = 1_200,
+                ),
+            ),
+            awaited.events,
+        )
+        assertEquals(listOf("child-1"), awaited.stillRunning)
+    }
+
+    @Test
+    fun `기다리기 전에 쌓인 사건은 다음 await 가 곧바로 다 받는다`() = runTest {
+        // 상위가 깨어나 답을 쓰는 사이 다른 하위의 턴이 끝날 수 있다 — 잃지 않고 한 번에 담는다(6.6).
+        val bed = mainWithChildrenTestBed(childCount = 2)
+        startMainTurn(bed)
+        bed.child(1).finishTurnOnLastSentMessage(result = "하나")
+        bed.child(2).finishTurnOnLastSentMessage(result = "둘")
+        runCurrent()
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        val awaited = assertIs<SessionTreeAnswer.Awaited>(asked.answerSoFar())
+        assertEquals(listOf("하나", "둘"), awaited.events.map { assertIs<SessionTreeEvent.TurnCompleted>(it).result })
+        assertEquals(listOf("child-1", "child-2"), awaited.stillRunning)
+    }
+
+    @Test
+    fun `아무 일 없이 기다림 시간이 지나면 빈 사건과 살아 있는 하위로 답한다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest(waitSeconds = 60))
+        advanceTimeBy(59_000)
+        runCurrent()
+        assertNull(asked.answerSoFar())
+
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        assertEquals(SessionTreeAnswer.Awaited(events = emptyList(), stillRunning = listOf("child-1")), asked.answerSoFar())
+    }
+
+    @Test
+    fun `ids 로 고른 하위의 사건만 깨우고 나머지는 다음 기다림에 남는다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 2)
+        startMainTurn(bed)
+        val waitingForSecond = bed.mainChannel.askSessionTree(awaitRequest(childIds = listOf("child-2")))
+        runCurrent()
+
+        bed.child(1).finishTurnOnLastSentMessage(result = "하나")
+        runCurrent()
+        assertNull(waitingForSecond.answerSoFar(), "고르지 않은 하위의 사건에 깨어났습니다")
+
+        bed.child(2).finishTurnOnLastSentMessage(result = "둘")
+        runCurrent()
+        val second = assertIs<SessionTreeAnswer.Awaited>(waitingForSecond.answerSoFar())
+        assertEquals(listOf("둘"), second.events.map { assertIs<SessionTreeEvent.TurnCompleted>(it).result })
+        assertEquals(listOf("child-2"), second.stillRunning)
+
+        val next = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        assertEquals(
+            listOf("하나"),
+            assertIs<SessionTreeAnswer.Awaited>(next.answerSoFar()).events.map { assertIs<SessionTreeEvent.TurnCompleted>(it).result },
+        )
+    }
+
+    @Test
+    fun `하위가 스스로 끝나면 session_ended 로 깨운다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        bed.child(1).emit(ChatSessionEvent.SessionEnded(exitCode = 137))
+        runCurrent()
+
+        assertEquals(
+            SessionTreeAnswer.Awaited(
+                events = listOf(SessionTreeEvent.SessionEnded("child-1", ChildEndReason.Crashed, exitCode = 137)),
+                stillRunning = emptyList(),
+            ),
+            asked.answerSoFar(),
+        )
+    }
+
+    @Test
+    fun `상위가 끝낸 하위도 다음 기다림이 session_ended 로 받는다`() = runTest {
+        // 6.13 — 상위의 다음 await_session 이 session_ended 를 받는다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        bed.mainChannel.askSessionTree(SessionTreeRequest.EndSession("child-1"))
+        runCurrent()
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        assertEquals(
+            SessionTreeAnswer.Awaited(
+                events = listOf(SessionTreeEvent.SessionEnded("child-1", ChildEndReason.EndedByParent, exitCode = null)),
+                stillRunning = emptyList(),
+            ),
+            asked.answerSoFar(),
+        )
+    }
+
+    @Test
+    fun `기다릴 살아 있는 하위도 쌓인 사건도 없으면 곧바로 빈 사건으로 답한다`() = runTest {
+        // 기다려도 올 것이 없다. waitSeconds 를 다 채우면 상위의 턴이 이유 없이 그만큼 묶인다.
+        val bed = mainWithChildrenTestBed(childCount = 0)
+        startMainTurn(bed)
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        assertEquals(SessionTreeAnswer.Awaited(events = emptyList(), stillRunning = emptyList()), asked.answerSoFar())
+    }
+
+    @Test
+    fun `사람이 하위 화면에서 시킨 턴은 사람이 시킨 것으로 상위에게 간다`() = runTest {
+        // 상위는 자기가 시키지 않은 턴의 결과를 받는다 — 그 사실을 알아야 결과를 제 일의 답으로 읽지 않는다(6.6).
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        bed.child(1).finishTurnOnLastSentMessage(result = "첫 일")
+        bed.holder.showChildSession("child-1")
+        bed.holder.sendUserMessage("이것도 해 줘")
+        runCurrent()
+        bed.child(1).finishTurnOnLastSentMessage(result = "사람의 일", outcome = TurnOutcome.Failed)
+        runCurrent()
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        val events = assertIs<SessionTreeAnswer.Awaited>(asked.answerSoFar()).events
+            .map { assertIs<SessionTreeEvent.TurnCompleted>(it) }
+        assertEquals(listOf(TurnTrigger.Parent, TurnTrigger.Human), events.map { it.triggeredBy })
+        assertEquals(listOf(false, true), events.map { it.isError })
+    }
+
+    @Test
+    fun `없는 하위를 기다리라고 하면 거절한다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest(childIds = listOf("child-1", "child-9")))
+        runCurrent()
+
+        assertTrue("child-9" in assertIs<SessionTreeAnswer.Refused>(asked.answerSoFar()).reason)
+    }
+
+    @Test
+    fun `하위의 소켓으로 온 await 는 거절한다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        val asked = bed.childChannel(1).askSessionTree(awaitRequest())
+        runCurrent()
+
+        assertIs<SessionTreeAnswer.Refused>(asked.answerSoFar())
+    }
+
+    private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
+        SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }

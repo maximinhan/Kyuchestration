@@ -18,14 +18,17 @@ import com.kyuchestration.desktop.terminal.planSessionEntry
 import com.kyuchestration.desktop.terminal.resumeFailureSuspected
 import java.io.IOException
 import java.nio.file.Path
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -184,6 +187,22 @@ class ChatSessionStateHolder(
 
     /** 아직 답하지 않은 관문 물음의 답 자리. 하위 이름이 열쇠다 — spawn 하나에 물음은 한 번에 하나다. */
     private val gateDecisions = mutableMapOf<String, CompletableDeferred<Boolean>>()
+
+    /**
+     * 상위가 `await_session` 으로 기다리는 중이면 그 기다림(6.11 의 `pendingAwait`). **원칙 18 의 갈림길이 이 값 하나다** —
+     * 있으면 사건이 이 기다림의 답으로 가고, 없으면 상위에게 사용자 메시지로 간다.
+     *
+     * 하나뿐이다. 상위의 도구 호출은 차례로 돌아서(3.3) 기다림 둘이 함께 열려 있을 수 없다.
+     */
+    private var pendingAwait: PendingAwait? = null
+
+    /**
+     * 상위에게 아직 전하지 못한 사건들. 일어난 차례대로다.
+     *
+     * 사건이 곧바로 가지 못하는 때가 있다 — 상위가 다른 하위만 고른 기다림 중이거나, 기다림 사이에서 답을 쓰는 중이다.
+     * 그 사건들은 여기 남아 다음 기다림이 한 번에 받는다(6.6 의 "쌓인 사건을 다 담는다").
+     */
+    private val undeliveredParentEvents = mutableListOf<SessionTreeEvent>()
 
     /**
      * 그 세션의 챗을 연다. 이미 보유 중이면 다시 띄우지 않고 화면만 그쪽으로 옮긴다.
@@ -390,6 +409,7 @@ class ChatSessionStateHolder(
      */
     private suspend fun endChildrenOfMain() {
         withdrawGateQuestions()
+        forgetParentDialogue()
         val liveChildren = mutableSessionTree.value.children.filter { it.lifecycle == ChildLifecycle.Running }
         coroutineScope {
             liveChildren.map { async { endChildSession(it, ChildEndReason.ParentEnded) } }.awaitAll()
@@ -554,6 +574,8 @@ class ChatSessionStateHolder(
         when (val request = asked.request) {
             is SessionTreeRequest.SpawnSession ->
                 coroutineScope.launch { asked.answerWith(spawnChildSession(requester, request)) }
+
+            is SessionTreeRequest.AwaitSessions -> awaitChildSessions(asked, request)
 
             is SessionTreeRequest.SendToSession -> asked.answerWith(sendToChildSession(request.childId, request.message))
 
@@ -758,6 +780,92 @@ class ChatSessionStateHolder(
         return SessionTreeAnswer.DeliveredAsMessage
     }
 
+    /**
+     * 상위가 하위들에게 전할 일이 생길 때까지 기다린다(6.6).
+     *
+     * 이미 쌓인 사건이 있으면 곧바로 답한다. 기다릴 살아 있는 하위가 없으면 그것도 곧바로 답한다 — 올 것이 없는데
+     * `waitSeconds` 를 다 채우면 상위의 턴이 이유 없이 그만큼 묶인다.
+     */
+    private fun awaitChildSessions(asked: AskedSessionTreeRequest, request: SessionTreeRequest.AwaitSessions) {
+        val tree = mutableSessionTree.value
+        val unknownChildIds = request.childIds.orEmpty().filter { tree.child(it) == null }
+        if (unknownChildIds.isNotEmpty()) {
+            asked.answerWith(
+                SessionTreeAnswer.Refused(
+                    "그런 하위 세션이 없습니다: ${unknownChildIds.joinToString()} — list_sessions 로 확인하세요",
+                ),
+            )
+            return
+        }
+
+        // 생략은 "살아 있는 하위 전부" 다(6.6). 끝난 하위까지 고르는 것이 그 뜻을 지킨다 — 끝난 하위는 더 일어날 일이
+        // 없지만, 끝나기 전후에 쌓인 사건(마지막 턴 · 끝남)은 아직 상위에게 가지 않았을 수 있다.
+        val watchedChildIds = request.childIds?.toSet() ?: tree.children.map { it.childId }.toSet()
+
+        // 앞선 기다림이 아직 열려 있다면 그 호출은 이미 거둬졌다 — 상위의 도구 호출은 차례로 돈다(3.3). 연결이 끊긴
+        // 것을 소켓이 아직 알리지 못한 짧은 틈이다. 빈 답으로 닫고 새 기다림을 연다.
+        pendingAwait?.let { answerPendingAwait(emptyList()) }
+
+        val expiry = coroutineScope.launch {
+            delay(request.waitSeconds.seconds)
+            if (pendingAwait?.asked === asked) {
+                answerPendingAwait(emptyList())
+            }
+        }
+        pendingAwait = PendingAwait(asked, watchedChildIds, expiry)
+
+        deliverParentEvents()
+
+        val nothingCanHappen = watchedChildIds.none { mutableSessionTree.value.child(it)?.lifecycle == ChildLifecycle.Running }
+        if (pendingAwait?.asked === asked && nothingCanHappen) {
+            answerPendingAwait(emptyList())
+        }
+    }
+
+    /** 열린 기다림에 답하고 닫는다. 기다린 하위 중 아직 살아 있는 것을 함께 싣는다. */
+    private fun answerPendingAwait(events: List<SessionTreeEvent>) {
+        val await = pendingAwait ?: return
+        pendingAwait = null
+        await.expiry.cancel()
+
+        val stillRunning = mutableSessionTree.value.children
+            .filter { it.childId in await.watchedChildIds && it.lifecycle == ChildLifecycle.Running }
+            .map { it.childId }
+        await.asked.answerWith(SessionTreeAnswer.Awaited(events, stillRunning))
+    }
+
+    /** 상위에게 전할 일이 생겼다. 원칙 18 의 길로 보낸다([deliverParentEvents]). */
+    private fun tellParent(event: SessionTreeEvent) {
+        undeliveredParentEvents += event
+        deliverParentEvents()
+    }
+
+    /**
+     * 쌓인 사건을 지금 들을 수 있는 통로로 보낸다(원칙 18).
+     *
+     * 상위가 기다리고 있으면 그 기다림이 고른 하위의 사건을 전부 담아 답한다. 고르지 않은 하위의 사건은 남는다.
+     */
+    private fun deliverParentEvents() {
+        val await = pendingAwait ?: return
+        val deliverable = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
+        if (deliverable.isEmpty()) {
+            return
+        }
+        undeliveredParentEvents.removeAll(deliverable)
+        answerPendingAwait(deliverable)
+    }
+
+    /**
+     * 상위가 끝났다. 기다림과 쌓인 사건을 놓는다 — 전할 상대가 없다.
+     *
+     * 기다림에 답하지 않는다. 상위의 소켓이 닫히면서 그 연결이 끊기고, 답을 받을 도구 호출도 그 프로세스와 함께 사라졌다.
+     */
+    private fun forgetParentDialogue() {
+        pendingAwait?.expiry?.cancel()
+        pendingAwait = null
+        undeliveredParentEvents.clear()
+    }
+
     /** 상위가 `end_session` 으로 하위를 끝낸다(6.13). 이미 끝난 하위면 그대로 끝났다고 답한다. */
     private suspend fun endChildSessionForParent(childId: String): SessionTreeAnswer {
         val node = mutableSessionTree.value.child(childId)
@@ -778,6 +886,10 @@ class ChatSessionStateHolder(
     private suspend fun endChildSession(node: ChildSessionNode, reason: ChildEndReason) {
         updateChild(node.childId) {
             it.copy(lifecycle = ChildLifecycle.Ended(reason, exitCode = null), waitingFor = ChildWaitingFor.Nothing)
+        }
+        // 상위가 끝나서 함께 끝난 하위는 알릴 상위가 없다.
+        if (reason != ChildEndReason.ParentEnded) {
+            tellParent(SessionTreeEvent.SessionEnded(node.childId, reason, exitCode = null))
         }
 
         val held = mutableHeldSessions.value.firstOrNull { it.target == node.target } ?: return
@@ -858,7 +970,12 @@ class ChatSessionStateHolder(
     }
 
     private fun receive(target: SessionTarget, event: ChatSessionEvent) {
+        val entriesBefore = conversations[target]?.entries.orEmpty()
         updateConversation(target) { it.after(event) }
+
+        if (target is SessionTarget.Child && event is ChatSessionEvent.TurnFinished) {
+            tellParentChildTurnFinished(target.childId, event, turnTriggerOf(entriesBefore))
+        }
 
         if (event is ChatSessionEvent.SessionEnded) {
             if (target is SessionTarget.Child) {
@@ -869,12 +986,37 @@ class ChatSessionStateHolder(
     }
 
     /**
+     * 하위의 턴 하나가 끝났다는 것을 상위에게 알린다(6.6). 하위의 매 턴이 상위를 깨운다 — 사람이 하위 탭에서 시킨 턴도
+     * 그렇다(v1 의 판단 · 8 절 2 번).
+     *
+     * 끝난 하위의 마지막 턴은 알리지 않는다. 앱이 끝낸 하위는 stdin 이 닫혀 진행 중이던 턴을 마치는데, 상위는 이미
+     * 그 하위가 끝났다는 사건을 받았다.
+     */
+    private fun tellParentChildTurnFinished(childId: String, finished: ChatSessionEvent.TurnFinished, trigger: TurnTrigger) {
+        if (mutableSessionTree.value.child(childId)?.lifecycle != ChildLifecycle.Running) {
+            return
+        }
+        tellParent(
+            SessionTreeEvent.TurnCompleted(
+                childId = childId,
+                result = finished.resultText.orEmpty(),
+                isError = finished.outcome != TurnOutcome.Completed,
+                triggeredBy = trigger,
+                costUsd = finished.costUsd,
+                durationMillis = finished.durationMillis,
+            ),
+        )
+    }
+
+    /**
      * 하위의 프로세스가 끝났다는 사실을 트리에 적는다.
      *
      * 살아 있던 하위면 스스로 끝난 것이다 — 0 이면 끝났고, 아니면 죽었다. 앱이 이미 끝낸 하위면 이유는 그대로
      * 두고 종료 코드만 채운다.
      */
     private fun recordChildExit(childId: String, exitCode: Int) {
+        val endedByItself = mutableSessionTree.value.child(childId)?.lifecycle == ChildLifecycle.Running
+
         updateChild(childId) { node ->
             when (val lifecycle = node.lifecycle) {
                 is ChildLifecycle.Running -> node.copy(
@@ -887,6 +1029,12 @@ class ChatSessionStateHolder(
 
                 is ChildLifecycle.Ended -> node.copy(lifecycle = lifecycle.copy(exitCode = lifecycle.exitCode ?: exitCode))
             }
+        }
+
+        // 트리를 먼저 고친 뒤에 알린다. 기다림의 답이 싣는 stillRunning 이 이 하위를 아직 살아 있다고 말하지 않게.
+        if (endedByItself) {
+            val lifecycle = mutableSessionTree.value.child(childId)?.lifecycle as? ChildLifecycle.Ended ?: return
+            tellParent(SessionTreeEvent.SessionEnded(childId, lifecycle.reason, exitCode))
         }
     }
 
@@ -1023,6 +1171,18 @@ private fun refusalReasonFor(failure: TerminalSessionFailure): String =
  * 상위가 하위에게 넣는 말의 접두(6.5). 하위의 규약 문구가 이 접두를 상위의 말로 읽는다(session_command_child.go).
  */
 private const val PARENT_MESSAGE_PREFIX = "[상위 세션] "
+
+/**
+ * 상위의 열린 기다림 하나.
+ *
+ * @param watchedChildIds 이 기다림이 고른 하위들. 이들의 사건만 이 기다림을 깨운다.
+ * @param expiry `waitSeconds` 가 다 되면 빈 답으로 닫는 자리. 먼저 답하면 거둔다.
+ */
+private class PendingAwait(
+    val asked: AskedSessionTreeRequest,
+    val watchedChildIds: Set<String>,
+    val expiry: Job,
+)
 
 /** 어느 세션의 어느 도구 호출에 대한 물음인가. */
 private data class AskedPermissionKey(val target: SessionTarget, val toolUseId: String)

@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -234,6 +235,25 @@ class ChatStreamLineReadingTest {
         assertEquals(263, finished.usage.outputTokens)
         assertEquals(26703, finished.usage.cacheReadInputTokens, "캐시 적중이 따로 와야 비용을 설명할 수 있다")
         assertEquals(emptyList(), finished.permissionDenials)
+    }
+
+    @Test
+    fun `턴의 끝은 그 턴의 마지막 답 텍스트를 함께 준다`() {
+        // 하위의 턴이 끝나면 이 텍스트가 상위에게 간다(session-tree 6.6 의 turn_completed.result).
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn(RecordedChatStreamLines.RESULT_SUCCESS),
+        )
+
+        assertTrue(finished.resultText.orEmpty().startsWith("첫 줄: `hello from fake repo`"), finished.resultText)
+    }
+
+    @Test
+    fun `답 텍스트가 없는 턴의 끝은 null 이다`() {
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn("""{"type":"result","subtype":"error_during_execution","total_cost_usd":0.01}"""),
+        )
+
+        assertNull(finished.resultText)
     }
 
     @Test

@@ -322,3 +322,39 @@ internal class MainWithChildrenTestBed(
     /** n 번째로 띄운 하위의 소켓(1 부터) — 하위의 kyu mcp serve 가 묻는 자리다. */
     fun childChannel(ordinal: Int): FakeAppSocketChannel = channels[ordinal]
 }
+
+/**
+ * 메인의 턴 하나를 연다 — 사람이 메인에게 말하고 그 말이 되돌아왔다.
+ *
+ * 상위가 `await_session` 을 부르는 것은 언제나 자기 턴 안이다. 쉬는 상위에게는 사건이 사용자 메시지로 가므로(6.6),
+ * 도구 답의 갈래를 보는 시험은 이 자리에서 시작한다.
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal fun TestScope.startMainTurn(bed: MainWithChildrenTestBed) {
+    check(bed.holder.state.value.target == SessionTarget.Main) { "화면이 메인에 있어야 사람이 메인에게 말한다" }
+    bed.holder.sendUserMessage("하위들에게 일을 시켜")
+    runCurrent()
+    bed.main.echoLastSentMessage()
+    runCurrent()
+}
+
+/** 마지막으로 받은 말이 되돌아온다 — 그 말의 턴이 시작한다. */
+internal fun FakeChatSession.echoLastSentMessage() {
+    val message = sentMessages.last()
+    emit(ChatSessionEvent.UserMessageEchoed(text = message.text, parentToolUseId = null, messageUuid = message.uuid))
+}
+
+/** 마지막으로 받은 말로 턴 하나를 돌고 끝낸다. */
+internal fun FakeChatSession.finishTurnOnLastSentMessage(result: String, outcome: TurnOutcome = TurnOutcome.Completed) {
+    echoLastSentMessage()
+    emit(turnFinishedWith(result, outcome))
+}
+
+internal fun turnFinishedWith(result: String?, outcome: TurnOutcome = TurnOutcome.Completed) = ChatSessionEvent.TurnFinished(
+    outcome = outcome,
+    costUsd = 0.25,
+    usage = TurnUsage(inputTokens = 3, outputTokens = 41, cacheReadInputTokens = 0, cacheCreationInputTokens = 0),
+    permissionDenials = emptyList(),
+    durationMillis = 1_200,
+    resultText = result,
+)

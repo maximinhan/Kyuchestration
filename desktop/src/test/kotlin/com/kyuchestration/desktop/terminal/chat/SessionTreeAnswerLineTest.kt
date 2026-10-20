@@ -70,6 +70,48 @@ class SessionTreeAnswerLineTest {
     }
 
     @Test
+    fun `기다림의 답은 쌓인 사건과 아직 살아 있는 하위를 담는다`() {
+        val line = answerLineFor(
+            SessionTreeAnswer.Awaited(
+                events = listOf(
+                    SessionTreeEvent.TurnCompleted(
+                        childId = "child-1",
+                        result = "포트를 5433 으로 고쳤다",
+                        isError = false,
+                        triggeredBy = TurnTrigger.Parent,
+                        costUsd = 0.12,
+                        durationMillis = 4200,
+                    ),
+                    SessionTreeEvent.SessionEnded(childId = "child-2", reason = ChildEndReason.Crashed, exitCode = 137),
+                    SessionTreeEvent.SessionEnded(childId = "child-3", reason = ChildEndReason.EndedByHuman, exitCode = null),
+                ),
+                stillRunning = listOf("child-1"),
+            ),
+        )
+
+        // 6.6 의 SessionEvent 모양이다. 종류는 type 으로 가른다.
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"events":[
+                     {"type":"turn_completed","id":"child-1","result":"포트를 5433 으로 고쳤다","isError":false,
+                      "triggeredBy":"parent","costUsd":0.12,"durationMs":4200},
+                     {"type":"session_ended","id":"child-2","reason":"crashed","exitCode":137},
+                     {"type":"session_ended","id":"child-3","reason":"ended_by_human"}
+                   ],"stillRunning":["child-1"]}""",
+            ),
+            Json.parseToJsonElement(line),
+        )
+    }
+
+    @Test
+    fun `아무 일 없이 시간이 지난 기다림은 빈 사건으로 답한다`() {
+        assertEquals(
+            """{"events":[],"stillRunning":["child-1"]}""",
+            answerLineFor(SessionTreeAnswer.Awaited(events = emptyList(), stillRunning = listOf("child-1"))),
+        )
+    }
+
+    @Test
     fun `거절은 error 한 모양이다`() {
         val answer = Json.parseToJsonElement(answerLineFor(SessionTreeAnswer.Refused("그런 하위 세션이 없습니다"))) as JsonObject
 
