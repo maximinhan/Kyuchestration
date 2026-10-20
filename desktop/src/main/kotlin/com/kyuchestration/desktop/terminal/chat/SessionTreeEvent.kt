@@ -52,6 +52,17 @@ sealed interface SessionTreeEvent {
     ) : OfChild
 
     /**
+     * 하위가 `ask_parent` 로 물었다. 하위의 턴은 상위의 답을 기다리며 멈춰 있다.
+     *
+     * @param askId 그 물음의 이름. 상위가 `send_to_session` 으로 답하면 그 답의 `askId` 로 어느 물음에 답했는지를 안다.
+     */
+    data class AskedParent(
+        override val childId: String,
+        val message: String,
+        val askId: String,
+    ) : OfChild
+
+    /**
      * 사람이 기다리는 상위에게 말했다(6.5 의 셋째 줄).
      *
      * **내용이 없다.** 사람의 말은 stdin 으로 가서 도구 결과 바로 뒤에 같은 턴으로 붙는다(3.1). 내용을 여기에도 담으면
@@ -84,6 +95,13 @@ internal fun JsonObjectBuilder.putSessionTreeEvent(event: SessionTreeEvent) {
             put("id", event.childId)
             put("reason", event.reason.wireName)
             event.exitCode?.let { put("exitCode", it) }
+        }
+
+        is SessionTreeEvent.AskedParent -> {
+            put("type", "asked_parent")
+            put("id", event.childId)
+            put("message", event.message)
+            put("askId", event.askId)
         }
 
         is SessionTreeEvent.UserSpoke -> put("type", "user_spoke")
@@ -120,6 +138,8 @@ internal fun parentNoticeTextFor(event: SessionTreeEvent.OfChild): String = when
     }
 
     is SessionTreeEvent.SessionEnded -> "${childPrefix(event.childId, listOf("끝남"))} ${endedSentenceFor(event)}"
+
+    is SessionTreeEvent.AskedParent -> "${childPrefix(event.childId, listOf("질문"))} ${event.message}"
 }
 
 private fun childPrefix(childId: String, labels: List<String>): String =

@@ -61,14 +61,14 @@ data class ChildSessionNode(
 /**
  * 하위가 지금 무엇을 기다리는가(6.2 의 `waitingFor`). 상위가 하위의 침묵을 해석할 재료다.
  *
- * 설계의 넷 중 `parent`(`ask_parent` 대기)는 그 도구가 서는 4b 에서 더한다 — 지금은 그 상태에 들
- * 길이 없다.
- *
  * @param wireName 앱 소켓의 답에 실리는 낱말.
  */
 enum class ChildWaitingFor(val wireName: String) {
     Nothing("nothing"),
     Model("model"),
+
+    /** `ask_parent` 로 상위의 답을 기다린다. 상위가 `send_to_session` 으로 답할 때까지 하위의 턴이 멈춰 있다. */
+    Parent("parent"),
     Approval("approval"),
 }
 
@@ -123,13 +123,19 @@ fun nextChildSessionId(recordedChildIds: Set<String>, lastAssignedOrdinal: Int):
  * 하위의 대화에서 지금 기다리는 것을 읽는다.
  *
  * **승인이 먼저다.** 승인 물음이 걸린 턴은 사람의 답 없이 나아가지 못하므로, 턴이 도는 중이라고 답하면
- * 상위는 기다리면 될 일로 읽는다.
+ * 상위는 기다리면 될 일로 읽는다. 상위에게 묻는 중인 것도 같은 까닭으로 모델보다 앞선다 — 그 턴은 상위의 답 없이
+ * 나아가지 못한다. 하위의 도구 호출은 차례로 돌아(3.3) 둘이 함께 걸리지는 않는다.
  *
  * **보낸 말이 남아 있으면 모델을 기다린다.** 첫 프롬프트를 쓴 직후에는 그 말이 아직 되돌아오지 않아
  * 턴이 시작되지 않은 것처럼 보이지만, 하위는 이미 일을 받았다.
  */
-fun childWaitingFor(conversation: ChatConversation, approvalPending: Boolean): ChildWaitingFor = when {
+fun childWaitingFor(
+    conversation: ChatConversation,
+    approvalPending: Boolean,
+    parentQuestionPending: Boolean,
+): ChildWaitingFor = when {
     approvalPending -> ChildWaitingFor.Approval
+    parentQuestionPending -> ChildWaitingFor.Parent
     conversation.turnState != TurnState.Idle || conversation.pendingUserMessages.isNotEmpty() -> ChildWaitingFor.Model
     else -> ChildWaitingFor.Nothing
 }

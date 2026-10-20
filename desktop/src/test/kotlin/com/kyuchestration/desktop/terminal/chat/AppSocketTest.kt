@@ -386,6 +386,23 @@ class AppSocketTest {
     }
 
     @Test
+    fun `ask_parent 요청은 그 물음을 들고 올라가고 상위의 답을 그대로 되돌린다`(): Unit = runBlocking {
+        // 하위의 kyu mcp serve --child 가 보낸다(mcp_session_tree.go 의 askParentRequest). 어느 하위인지는 이 소켓이 말한다.
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            assertEquals(SessionTreeRequest.AskParent(message = "포트는?"), asked.request)
+            asked.answerWith(SessionTreeAnswer.ParentAnswered("5433"))
+        }
+
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"ask_parent","message":"포트는?"}""")
+        answering.await()
+
+        assertEquals(mapOf("answer" to "5433"), answer)
+    }
+
+    @Test
     fun `필드가 빠진 세션 트리 요청에는 승인 거부가 아니라 error 로 답한다`(): Unit = runBlocking {
         // 이 줄은 승인 물음이 아니다 — deny 로 답하면 엔진은 그것을 앱의 답으로 읽지 못하고 판이 어긋났다고 말한다.
         val socket = openSocket()

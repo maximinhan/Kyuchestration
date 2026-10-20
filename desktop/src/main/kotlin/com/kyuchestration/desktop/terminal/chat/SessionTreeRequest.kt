@@ -46,6 +46,14 @@ sealed interface SessionTreeRequest {
 
     data class EndSession(val childId: String) : SessionTreeRequest
 
+    /**
+     * 하위가 상위에게 묻고 답을 기다린다(6.3). 하위의 `kyu mcp serve --child` 가 보낸다.
+     *
+     * 어느 하위의 물음인지는 담지 않는다 — 소켓이 세션마다 하나라 연결 자체가 그것을 말한다(6.4). 하위가 다른 하위를
+     * 사칭할 자리가 없다.
+     */
+    data class AskParent(val message: String) : SessionTreeRequest
+
     data object ListSessions : SessionTreeRequest
 }
 
@@ -71,6 +79,23 @@ sealed interface SessionTreeAnswer {
      * 그 턴의 도구 경계에서 끼어든다(3.1). 상위가 그 차이를 알아야 해서 통로를 답에 싣는다(6.2).
      */
     data object DeliveredAsMessage : SessionTreeAnswer
+
+    /**
+     * 하위가 `ask_parent` 로 기다리고 있어서 상위의 말이 그 물음의 답이 되었다(6.5). 하위의 새 턴을 열지 않는다.
+     *
+     * @param askId 답해진 물음. 상위가 자기가 어느 물음에 답했는지를 확인하는 재료다.
+     */
+    data class DeliveredAsAnswer(val askId: String) : SessionTreeAnswer
+
+    /** 하위의 물음에 상위가 답했다. 하위의 `ask_parent` 가 이것을 결과로 받는다. */
+    data class ParentAnswered(val answer: String) : SessionTreeAnswer
+
+    /**
+     * 하위의 물음이 답 없이 끝났다 — 상위가 끝났거나, 그 하위가 끝나는 중이다(6.3 · 6.13).
+     *
+     * 오류가 아니라 정상의 결과다. 하위의 모델은 이것을 읽고 답 없이 할 수 있는 데까지 한다.
+     */
+    data class AskEnded(val reason: AskEndReason) : SessionTreeAnswer
 
     /**
      * 기다림이 끝났다 — 전할 일이 생겼거나, 아무 일 없이 시간이 다 됐다(6.6).
@@ -126,6 +151,15 @@ internal fun answerLineFor(answer: SessionTreeAnswer): String = when (answer) {
     }
 
     is SessionTreeAnswer.DeliveredAsMessage -> buildJsonObject { put("delivered", DELIVERED_AS_MESSAGE) }
+
+    is SessionTreeAnswer.DeliveredAsAnswer -> buildJsonObject {
+        put("delivered", DELIVERED_AS_ANSWER)
+        put("askId", answer.askId)
+    }
+
+    is SessionTreeAnswer.ParentAnswered -> buildJsonObject { put("answer", answer.answer) }
+
+    is SessionTreeAnswer.AskEnded -> buildJsonObject { put("ended", answer.reason.wireName) }
 
     is SessionTreeAnswer.Awaited -> buildJsonObject {
         putJsonArray("events") { answer.events.forEach { event -> addJsonObject { putSessionTreeEvent(event) } } }
@@ -195,6 +229,8 @@ internal fun sessionTreeRequestFrom(kind: String, requestObject: JsonObject): Se
 
         END_REQUEST_KIND -> requestObject.nonEmptyStringOrNull("id")?.let(SessionTreeRequest::EndSession)
 
+        ASK_PARENT_REQUEST_KIND -> requestObject.nonEmptyStringOrNull("message")?.let(SessionTreeRequest::AskParent)
+
         LIST_REQUEST_KIND -> SessionTreeRequest.ListSessions
 
         else -> return SessionTreeRequestReading.NotSessionTreeKind
@@ -235,6 +271,7 @@ private const val SPAWN_REQUEST_KIND = "spawn"
 private const val AWAIT_REQUEST_KIND = "await"
 private const val SEND_REQUEST_KIND = "send"
 private const val END_REQUEST_KIND = "end"
+private const val ASK_PARENT_REQUEST_KIND = "ask_parent"
 private const val LIST_REQUEST_KIND = "list"
 
 private const val RUNNING_STATE = "running"
@@ -242,3 +279,14 @@ private const val ENDED_STATE = "ended"
 
 /** `send_to_session` 의 `delivered` 낱말(6.2). */
 private const val DELIVERED_AS_MESSAGE = "as_message"
+private const val DELIVERED_AS_ANSWER = "as_answer"
+
+/**
+ * 하위의 물음이 답 없이 끝난 이유(6.3 의 `ended`).
+ *
+ * @param wireName 하위의 `ask_parent` 결과에 실리는 낱말.
+ */
+enum class AskEndReason(val wireName: String) {
+    ParentEnded("parent_ended"),
+    SessionEnded("session_ended"),
+}

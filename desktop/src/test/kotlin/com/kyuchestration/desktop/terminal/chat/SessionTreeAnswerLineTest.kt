@@ -121,6 +121,39 @@ class SessionTreeAnswerLineTest {
     }
 
     @Test
+    fun `하위의 물음은 기다림의 사건으로 그 물음과 askId 를 싣는다`() {
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"events":[{"type":"asked_parent","id":"child-1","message":"포트는?","askId":"ask-1"}],"stillRunning":["child-1"]}""",
+            ),
+            Json.parseToJsonElement(
+                answerLineFor(
+                    SessionTreeAnswer.Awaited(
+                        events = listOf(SessionTreeEvent.AskedParent("child-1", "포트는?", askId = "ask-1")),
+                        stillRunning = listOf("child-1"),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `물음의 답이 된 말은 as_answer 와 그 물음의 askId 로 답한다`() {
+        assertEquals(
+            """{"delivered":"as_answer","askId":"ask-1"}""",
+            answerLineFor(SessionTreeAnswer.DeliveredAsAnswer(askId = "ask-1")),
+        )
+    }
+
+    @Test
+    fun `하위의 물음에는 answer 아니면 ended 로 답한다`() {
+        // 6.3 — ask_parent → { answer } | { ended: "parent_ended" | "session_ended" }.
+        assertEquals("""{"answer":"5433"}""", answerLineFor(SessionTreeAnswer.ParentAnswered("5433")))
+        assertEquals("""{"ended":"parent_ended"}""", answerLineFor(SessionTreeAnswer.AskEnded(AskEndReason.ParentEnded)))
+        assertEquals("""{"ended":"session_ended"}""", answerLineFor(SessionTreeAnswer.AskEnded(AskEndReason.SessionEnded)))
+    }
+
+    @Test
     fun `거절은 error 한 모양이다`() {
         val answer = Json.parseToJsonElement(answerLineFor(SessionTreeAnswer.Refused("그런 하위 세션이 없습니다"))) as JsonObject
 

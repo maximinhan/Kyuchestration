@@ -462,6 +462,163 @@ class ChildSessionDialogueStateHolderTest {
         assertEquals(ChildWaitingFor.Model, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
     }
 
+    @Test
+    fun `하위가 물으면 기다리던 상위가 그 물음을 담아 곧바로 깨어난다`() = runTest {
+        // 완료 확인 ② — 상위가 await_session 중이었는데도 즉시 답한다. stdin 으로 보내면 기다림이 끝날 때까지 안 닿는다(3.1).
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val waiting = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("테스트 DB 포트는 5432? 5433?"))
+        runCurrent()
+
+        assertEquals(
+            SessionTreeAnswer.Awaited(
+                events = listOf(SessionTreeEvent.AskedParent("child-1", "테스트 DB 포트는 5432? 5433?", askId = "ask-1")),
+                stillRunning = listOf("child-1"),
+            ),
+            waiting.answerSoFar(),
+        )
+        assertNull(question.answerSoFar(), "상위가 답하기 전에 하위의 물음이 풀렸습니다")
+        assertEquals(ChildWaitingFor.Parent, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
+    }
+
+    @Test
+    fun `상위가 send 하면 하위가 묻는 중이었으므로 그 물음의 답이 된다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        bed.child(1).echoLastSentMessage()
+        startMainTurn(bed)
+        val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+        val sentToChildBefore = bed.child(1).sentMessages.size
+
+        val sent = bed.mainChannel.askSessionTree(SessionTreeRequest.SendToSession("child-1", "5433 을 써"))
+        runCurrent()
+
+        assertEquals(SessionTreeAnswer.DeliveredAsAnswer(askId = "ask-1"), sent.answerSoFar())
+        assertEquals(SessionTreeAnswer.ParentAnswered("5433 을 써"), question.answerSoFar())
+        assertEquals(sentToChildBefore, bed.child(1).sentMessages.size, "답이 하위의 stdin 에도 갔습니다")
+        assertEquals(ChildWaitingFor.Model, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
+    }
+
+    @Test
+    fun `물음에 답한 뒤의 send 는 다시 stdin 으로 간다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+        bed.mainChannel.askSessionTree(SessionTreeRequest.SendToSession("child-1", "5433"))
+        runCurrent()
+
+        val second = bed.mainChannel.askSessionTree(SessionTreeRequest.SendToSession("child-1", "그리고 README 도 고쳐"))
+        runCurrent()
+
+        assertEquals(SessionTreeAnswer.DeliveredAsMessage, second.answerSoFar())
+        assertEquals("[상위 세션] 그리고 README 도 고쳐", bed.child(1).sentMessages.last().text)
+    }
+
+    @Test
+    fun `쉬는 상위에게는 하위의 물음이 하위의 말로 stdin 에 간다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는 5432? 5433?"))
+        runCurrent()
+
+        val told = bed.main.sentMessages.single()
+        assertEquals("[하위 세션 child-1 · 질문] 포트는 5432? 5433?", told.text)
+        assertEquals(UserMessageSender.ChildSession("child-1"), told.sender)
+    }
+
+    @Test
+    fun `턴 중인 상위가 나중에 기다리면 쌓인 물음을 곧바로 받는다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+
+        val waiting = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        assertEquals(
+            listOf<SessionTreeEvent>(SessionTreeEvent.AskedParent("child-1", "포트는?", askId = "ask-1")),
+            assertIs<SessionTreeAnswer.Awaited>(waiting.answerSoFar()).events,
+        )
+    }
+
+    @Test
+    fun `물음의 연결이 끊기면 물음을 거두고 아직 전하지 못한 그 물음도 지운다`() = runTest {
+        // 사람이 하위의 턴을 중단했다. 상위가 나중에 그 물음에 답하면 그 말은 아무도 기다리지 않는 답이 된다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        bed.child(1).echoLastSentMessage()
+        startMainTurn(bed)
+        val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+
+        question.closeConnection()
+        runCurrent()
+
+        assertEquals(ChildWaitingFor.Model, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
+        val waiting = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        assertNull(waiting.answerSoFar(), "거둬진 물음이 상위에게 갔습니다")
+        val sent = bed.mainChannel.askSessionTree(SessionTreeRequest.SendToSession("child-1", "5433"))
+        runCurrent()
+        assertEquals(SessionTreeAnswer.DeliveredAsMessage, sent.answerSoFar())
+    }
+
+    @Test
+    fun `상위가 묻는 중인 하위를 끝내면 그 물음은 session_ended 로 답해진다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+
+        bed.mainChannel.askSessionTree(SessionTreeRequest.EndSession("child-1"))
+        runCurrent()
+
+        assertEquals(SessionTreeAnswer.AskEnded(AskEndReason.SessionEnded), question.answerSoFar())
+    }
+
+    @Test
+    fun `상위가 끝나면 하위의 물음은 parent_ended 로 답해진다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+
+        bed.holder.endOnScreenSession()
+        runCurrent()
+
+        assertEquals(SessionTreeAnswer.AskEnded(AskEndReason.ParentEnded), question.answerSoFar())
+    }
+
+    @Test
+    fun `하위가 묻는 중에 사람이 하위에게 친 말은 stdin 으로만 가고 물음은 그대로다`() = runTest {
+        // 6.5 의 넷째 줄 — 물음은 상위에게 한 것이다. 사람이 그 답을 가로채면 상위는 답하지 않은 물음이 답해진 것을 모른다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
+        runCurrent()
+        bed.holder.showChildSession("child-1")
+
+        bed.holder.sendUserMessage("5433 이야")
+        runCurrent()
+
+        assertNull(question.answerSoFar())
+        assertEquals("5433 이야", bed.child(1).sentMessages.last().text)
+        assertEquals(ChildWaitingFor.Parent, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
+    }
+
+    @Test
+    fun `메인의 소켓으로 온 ask_parent 는 거절한다`() = runTest {
+        // 메인에게는 물을 상위가 없다. 하위의 kyu 서버만 이 도구를 갖는다(6.3).
+        val bed = mainWithChildrenTestBed(childCount = 0)
+
+        val question = bed.mainChannel.askSessionTree(SessionTreeRequest.AskParent("누구에게?"))
+        runCurrent()
+
+        assertIs<SessionTreeAnswer.Refused>(question.answerSoFar())
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }
