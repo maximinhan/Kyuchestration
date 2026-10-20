@@ -107,6 +107,25 @@ sealed interface ChatSessionEvent {
     ) : ChatSessionEvent
 
     /**
+     * 오래 도는 도구가 아직 살아 있다(`tool_progress` · `heartbeat: true` — session-tree 3.4).
+     *
+     * `claude` 가 스스로 약 28.5 초마다 낸다. **진행이 아니라 살아 있다는 신호다** — 경과 시간만
+     * 담고 서버가 무엇을 하는지는 담지 않는다. 그래서 화면이 새로 그릴 것은 없다: 도는 카드는 이미
+     * [ToolCallRequested.requestedAt] 으로 경과 시간을 그리고 있다. 이 갈래가 있는 것은 이 줄을
+     * [Unrecognized] 로 흘려 "판이 바뀌었다" 는 신호를 턴마다 덮지 않기 위해서다.
+     *
+     * @param toolUseId 기다리고 있는 도구 호출의 id. 줄의 `tool_use_id` 는 `<호출 id>-heartbeat-0`
+     *   처럼 지어낸 값이라 카드를 찾는 열쇠가 못 되고, 진짜 id 는 `parent_tool_use_id` 에 실려 온다.
+     *   서브에이전트의 [AssistantTextArrived.parentToolUseId] 와 같은 이름이지만 뜻이 다르다.
+     * @param elapsedSeconds 그 호출이 돈 시간(`elapsed_time_seconds`).
+     */
+    data class ToolCallHeartbeat(
+        val toolUseId: String,
+        val toolName: String,
+        val elapsedSeconds: Long,
+    ) : ChatSessionEvent
+
+    /**
      * 관문이 열렸다 — 이 도구 호출을 해도 되는지 사람에게 묻는다(3.5 · 5.4).
      *
      * **이 갈래만 스트림에서 오지 않는다.** `claude` 는 승인이 필요한 호출마다 MCP 도구를 부르고,

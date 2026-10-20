@@ -44,6 +44,7 @@ internal fun chatSessionEventsFrom(streamLine: String): List<ChatSessionEvent> {
         "stream_event" -> streamFragmentEventsIn(line, streamLine)
         "result" -> listOf(turnFinishedIn(line))
         "rate_limit_event" -> listOf(usageWindowsIn(line))
+        "tool_progress" -> toolProgressEventsIn(line, streamLine)
 
         // 앱이 보낸 제어 요청의 답이다(3.8). 중단이 받아들여졌다는 사실은 뒤이어 오는
         // result(Interrupted)가 말하므로, 이 줄이 화면에 더할 것은 없다.
@@ -218,6 +219,26 @@ private fun streamFragmentEventsIn(line: JsonObject, streamLine: String): List<C
 
         else -> listOf(ChatSessionEvent.Unrecognized(streamLine))
     }
+}
+
+/**
+ * 오래 도는 도구의 하트비트(session-tree 3.4).
+ *
+ * **잰 것은 `heartbeat: true` 하나다.** 그 밖의 `tool_progress` — 진행을 실제로 담은 줄이 오는 판이
+ * 있다면 — 를 하트비트로 읽으면 담긴 것을 버리게 되므로 원문째로 들고 나간다.
+ */
+private fun toolProgressEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
+    if (line.booleanOrNull("heartbeat") != true) {
+        return listOf(ChatSessionEvent.Unrecognized(streamLine))
+    }
+
+    return listOf(
+        ChatSessionEvent.ToolCallHeartbeat(
+            toolUseId = line.stringOrNull("parent_tool_use_id").orEmpty(),
+            toolName = line.stringOrNull("tool_name").orEmpty(),
+            elapsedSeconds = line.longOrNull("elapsed_time_seconds") ?: 0,
+        ),
+    )
 }
 
 /**

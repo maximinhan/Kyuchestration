@@ -478,6 +478,21 @@ class ChatConversationFoldingTest {
         assertEquals(PermissionAnswer.AllowedForThisSession, card.answer)
     }
 
+    @Test
+    fun `하트비트는 대화를 바꾸지 않는다`() {
+        // 살아 있다는 신호일 뿐 서버가 무엇을 하는지 담지 않는다(session-tree 3.4). 도는 카드의
+        // 경과 시간은 이미 호출 시각으로 그리고 있으므로, 이 줄이 할 일은 그 카드를 흔들지 않는 것이다.
+        val waiting = conversationAfter(
+            RecordedChatStreamLines.USER_MESSAGE_REPLAYED_WITH_APP_UUID,
+            RecordedChatStreamLines.ASSISTANT_TOOL_USE,
+        )
+
+        val afterHeartbeat = waiting.after(RecordedChatStreamLines.TOOL_PROGRESS_HEARTBEAT)
+
+        assertEquals(waiting, afterHeartbeat)
+        assertEquals(TurnState.Running, afterHeartbeat.turnState)
+    }
+
     /**
      * 관문이 연 물음 하나.
      *

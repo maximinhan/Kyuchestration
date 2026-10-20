@@ -269,6 +269,29 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `오래 도는 도구의 하트비트는 그 도구 호출의 id 와 경과 초로 온다`() {
+        // 줄의 tool_use_id 는 "<호출 id>-heartbeat-0" 처럼 지어낸 값이다. 카드를 찾는 열쇠는
+        // parent_tool_use_id 쪽이다(session-tree 3.4).
+        val heartbeat = assertIs<ChatSessionEvent.ToolCallHeartbeat>(
+            onlyEventIn(RecordedChatStreamLines.TOOL_PROGRESS_HEARTBEAT),
+        )
+
+        assertEquals("toolu_011WCSpQLBFCKWodtL7rKgF1", heartbeat.toolUseId)
+        assertEquals("mcp__probe__slow", heartbeat.toolName)
+        assertEquals(28, heartbeat.elapsedSeconds)
+    }
+
+    @Test
+    fun `하트비트가 아닌 tool_progress 는 재지 못했으므로 모르는 줄이다`() {
+        // 잰 것은 heartbeat: true 하나다. 진짜 진행을 담은 줄이 오는 날 그것을 하트비트로 읽으면
+        // 담긴 것을 버리게 된다 — 원문째로 들고 나가 그날을 알아챈다.
+        val progress = """{"type":"tool_progress","tool_use_id":"toolu_1","tool_name":"Bash",""" +
+            """"parent_tool_use_id":null,"elapsed_time_seconds":3}"""
+
+        assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(progress))
+    }
+
+    @Test
     fun `이어갈 대화를 찾지 못한 턴은 실패로 온다`() {
         // 없는 대화를 resume 하면 result 가 error_during_execution 으로 한 줄 오고 종료 코드가 1 이다(3.9).
         val line = """{"type":"result","subtype":"error_during_execution","result":null,""" +
