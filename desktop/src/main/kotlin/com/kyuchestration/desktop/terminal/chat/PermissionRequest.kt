@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop.terminal.chat
 
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -52,18 +51,25 @@ sealed interface PermissionDecision {
  *
  * **답하지 않는 것도 성립한다.** 사람이 커피를 마시러 가면 이 물음은 그대로 남아 있고, `claude`
  * 는 기다린다(실측 3.7 이 150 초를 쟀다). 세션이 끝나면 소켓이 닫히면서 연결이 끊기고, 그때
- * `kyu mcp ask` 가 EOF 를 거절로 읽는다.
+ * `kyu mcp ask` 가 EOF 를 거절로 읽는다. 반대로 사람이 그 턴을 중단하면 `kyu mcp ask` 가 먼저 연결을 닫고,
+ * 앱은 그것으로 카드를 거둔다([awaitConnectionClosedBeforeAnswer]).
  */
 class AskedPermission internal constructor(val request: PermissionRequest) {
 
-    private val decided = CompletableDeferred<PermissionDecision>()
+    internal val decision = ConnectionAnswer<PermissionDecision>()
 
     /**
      * 이 물음에 답한다. 두 번 불러도 첫 답만 간다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
      */
     fun answerWith(decision: PermissionDecision) {
-        decided.complete(decision)
+        this.decision.complete(decision)
     }
 
-    internal suspend fun awaitDecision(): PermissionDecision = decided.await()
+    internal suspend fun awaitDecision(): PermissionDecision = decision.answered.await()
+
+    /** 그 도구 호출이 중단되어 `kyu mcp ask` 가 연결을 닫았다. */
+    internal fun markConnectionClosed() = decision.markConnectionClosed()
+
+    /** 답하기 전에 연결이 끊겼으면 참 — 그 카드는 거둬야 한다. */
+    suspend fun awaitConnectionClosedBeforeAnswer(): Boolean = decision.awaitConnectionClosedBeforeAnswer()
 }

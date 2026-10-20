@@ -177,4 +177,12 @@ sealed interface PermissionAnswer {
      * @param reason 모델에게 그대로 간 문구(A.5). 사용자가 적지 않았으면 앱이 정한 기본 문구다.
      */
     data class Denied(val reason: String) : PermissionAnswer
+
+    /**
+     * 아무도 답하지 않았는데 물음이 거둬졌다 — 사람이 그 턴을 중단해 `kyu mcp ask` 가 연결을 닫았다(session-tree 6.4).
+     *
+     * 거절과 가른다. 거절은 사람이 한 결정이고 이것은 그 도구 호출이 사라진 사실이다 — 거절로 적으면 사람은 자기가
+     * 누른 적 없는 거부를 전사에서 읽는다.
+     */
+    data object Withdrawn : PermissionAnswer
 }

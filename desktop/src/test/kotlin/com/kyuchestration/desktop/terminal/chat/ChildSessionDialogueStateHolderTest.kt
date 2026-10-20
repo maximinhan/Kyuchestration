@@ -9,6 +9,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
 
 /**
  * 상위와 하위가 서로 말하는 길(session-tree-design.md 6.5 · 6.6 — 7 절 4b).
@@ -399,6 +400,66 @@ class ChildSessionDialogueStateHolderTest {
         runCurrent()
 
         assertNull(asked.answerSoFar())
+    }
+
+    @Test
+    fun `기다림의 연결이 끊기면 그 기다림만 지우고 하위는 그대로 둔다`() = runTest {
+        // 사람이 "그만 기다려" 를 눌렀다고 하위의 일이 지워지면 안 된다(6.6 · 3.2). 하위를 끝내는 것은 end_session 의 일이다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val interrupted = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        interrupted.closeConnection()
+        runCurrent()
+        bed.child(1).finishTurnOnLastSentMessage(result = "일은 계속됐다")
+        runCurrent()
+
+        assertNull(interrupted.answerSoFar(), "끊긴 기다림에 답했습니다")
+        assertEquals(0, bed.child(1).endSessionCount)
+        assertEquals(ChildLifecycle.Running, bed.holder.sessionTree.value.child("child-1")?.lifecycle)
+        // 끊긴 기다림이 가져가지 못한 사건은 다음 기다림이 받는다.
+        val next = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        assertEquals(
+            listOf("일은 계속됐다"),
+            assertIs<SessionTreeAnswer.Awaited>(next.answerSoFar()).events.map { assertIs<SessionTreeEvent.TurnCompleted>(it).result },
+        )
+    }
+
+    @Test
+    fun `기다림이 끊긴 뒤 상위의 턴이 끝나면 쌓인 사건은 stdin 으로 간다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val interrupted = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        interrupted.closeConnection()
+        runCurrent()
+        bed.child(1).finishTurnOnLastSentMessage(result = "일은 계속됐다")
+        runCurrent()
+
+        bed.main.emit(turnFinishedWith(null, TurnOutcome.InterruptedDuringToolWait))
+        runCurrent()
+
+        assertEquals("[하위 세션 child-1 · 턴 끝] 일은 계속됐다", bed.main.sentMessages.last().text)
+    }
+
+    @Test
+    fun `하위의 승인 카드가 떠 있는 중에 연결이 끊기면 카드를 거두고 하위는 다시 모델을 기다린다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        bed.child(1).echoLastSentMessage()
+        val asked = bed.childChannel(1).ask("Bash", "toolu_child", buildJsonObject {})
+        runCurrent()
+        assertEquals(ChildWaitingFor.Approval, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
+
+        asked.closeConnection()
+        runCurrent()
+
+        bed.holder.showChildSession("child-1")
+        val card = (bed.holder.state.value as ChatScreenState.ChatOnScreen).conversation.entries
+            .filterIsInstance<ChatEntry.PermissionAsked>().single()
+        assertEquals(PermissionAnswer.Withdrawn, card.answer)
+        assertEquals(ChildWaitingFor.Model, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
     }
 
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =

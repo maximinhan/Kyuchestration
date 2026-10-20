@@ -138,7 +138,7 @@ internal class FakeAppSocketChannel(
         val asked = AskedPermission(PermissionRequest(toolName = toolName, input = input, toolUseId = toolUseId))
         val answering = answeringScope.async { asked.awaitDecision() }
         incoming.trySend(asked)
-        return AskedForTest(asked.request, answering)
+        return AskedForTest(asked, answering)
     }
 
     /** 이 세션의 kyu mcp serve 노릇 — 세션 트리 요청 하나를 보내고, 앱이 되돌린 답을 들여다볼 자리를 돌려준다. */
@@ -146,7 +146,7 @@ internal class FakeAppSocketChannel(
         val asked = AskedSessionTreeRequest(request)
         val answering = answeringScope.async { asked.awaitAnswer() }
         incomingSessionTreeRequests.trySend(asked)
-        return AskedSessionTreeForTest(answering)
+        return AskedSessionTreeForTest(asked, answering)
     }
 
     override suspend fun close() {
@@ -157,10 +157,15 @@ internal class FakeAppSocketChannel(
 }
 
 /** 물어 둔 승인 하나 — 그 물음과, 지금까지 되돌아온 결정. */
-internal class AskedForTest(val request: PermissionRequest, private val answering: Deferred<PermissionDecision>) {
+internal class AskedForTest(private val asked: AskedPermission, private val answering: Deferred<PermissionDecision>) {
+
+    val request: PermissionRequest get() = asked.request
 
     /** 되돌아온 결정. 아직 답하지 않았으면 null 이다 — 시험이 기다리지 않고 들여다본다. */
     fun decisionSoFar(): PermissionDecision? = if (answering.isCompleted) answering.getCompleted() else null
+
+    /** 물어 온 쪽이 답을 받기 전에 연결을 닫는다 — 그 도구 호출이 중단된 자리다(PR 68). */
+    fun closeConnection() = asked.markConnectionClosed()
 }
 
 internal class RecordingChatSessionOpener : ChatSessionOpener {
@@ -227,10 +232,19 @@ internal class FakeChatSession(private val onEnded: (FakeChatSession) -> Unit = 
 }
 
 /** 보내 둔 세션 트리 요청 하나 — 지금까지 되돌아온 답. */
-internal class AskedSessionTreeForTest(private val answering: Deferred<SessionTreeAnswer>) {
+internal class AskedSessionTreeForTest(
+    private val asked: AskedSessionTreeRequest,
+    private val answering: Deferred<SessionTreeAnswer>,
+) {
 
     /** 되돌아온 답. 아직 답하지 않았으면 null 이다. */
     fun answerSoFar(): SessionTreeAnswer? = if (answering.isCompleted) answering.getCompleted() else null
+
+    /**
+     * 엔진이 답을 받기 전에 연결을 닫는다 — 상위의 도구 호출이 중단되어 `kyu mcp serve` 가 취소를 받은 자리다
+     * (session-tree 3.2 · PR 68).
+     */
+    fun closeConnection() = asked.markConnectionClosed()
 }
 
 /**

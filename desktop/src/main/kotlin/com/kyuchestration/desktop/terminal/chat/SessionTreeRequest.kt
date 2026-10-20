@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop.terminal.chat
 
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -97,14 +96,22 @@ sealed interface SessionTreeAnswer {
  */
 class AskedSessionTreeRequest(val request: SessionTreeRequest) {
 
-    private val answered = CompletableDeferred<SessionTreeAnswer>()
+    internal val answer = ConnectionAnswer<SessionTreeAnswer>()
 
     /** 답한다. 두 번 불러도 첫 답만 간다. */
     fun answerWith(answer: SessionTreeAnswer) {
-        answered.complete(answer)
+        this.answer.complete(answer)
     }
 
-    internal suspend fun awaitAnswer(): SessionTreeAnswer = answered.await()
+    internal suspend fun awaitAnswer(): SessionTreeAnswer = answer.answered.await()
+
+    /** 그 도구 호출이 중단되어 `kyu mcp serve` 가 연결을 닫았다(3.2 · PR 68). */
+    internal fun markConnectionClosed() = answer.markConnectionClosed()
+
+    /**
+     * 답하기 전에 연결이 끊겼으면 참. 상위의 기다림 · 관문 물음 · 하위의 물음이 이것으로 거둬진다 — 하위는 그대로다(6.6).
+     */
+    suspend fun awaitConnectionClosedBeforeAnswer(): Boolean = answer.awaitConnectionClosedBeforeAnswer()
 }
 
 /** 세션 트리 요청의 답을 엔진이 읽을 한 줄로 옮긴다. */

@@ -73,6 +73,23 @@ class ChildSessionGateStateHolderTest {
     }
 
     @Test
+    fun `관문을 묻는 중에 spawn 의 연결이 끊기면 물음을 거두고 아무것도 띄우지 않는다`() = runTest {
+        // 상위의 spawn_session 호출이 중단됐다(PR 68). 답을 받을 쪽이 사라졌는데 대화 상자가 남으면, 사람이 승인한 뒤에
+        // 상위가 모르는 하위가 뜬다.
+        val bed = gateTestBed(gates = listOf(GATE))
+        val asked = bed.mainChannel.askSessionTree(spawn())
+        runCurrent()
+
+        asked.closeConnection()
+        runCurrent()
+
+        assertEquals(emptyList(), bed.holder.gateQuestions.value)
+        assertEquals(1, bed.childSource.askedRequests.size)
+        assertEquals(1, bed.opener.openedSessions.size)
+        assertEquals(emptyList(), bed.holder.sessionTree.value.children)
+    }
+
+    @Test
     fun `사람이 본 뒤 설정이 바뀌었으면 지금 내용으로 다시 묻는다`() = runTest {
         // 엔진은 지문이 지금 내용의 것일 때만 승인을 적는다(childSessionApprovalNeeded) — 바뀐 것은 새 물음이다.
         val changedGate = GATE.copy(

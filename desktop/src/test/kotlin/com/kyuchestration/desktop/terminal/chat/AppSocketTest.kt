@@ -191,12 +191,68 @@ class AppSocketTest {
                 connection.reader().readLine()
             }
         }
-        withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
 
         socket.close()
 
         assertNull(withTimeout(TEST_TIMEOUT_MILLIS) { asking.await() }, "소켓을 닫았는데 답이 돌아왔습니다")
+        // 그 물음을 지켜보던 쪽도 풀린다 — 오지 않을 답을 앱이 꺼질 때까지 기다리지 않는다.
+        assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { asked.awaitConnectionClosedBeforeAnswer() })
         assertFalse(socket.socketPath.exists(), "소켓 파일이 남았습니다 — 그 자리가 다음 세션의 발에 걸린다")
+    }
+
+    @Test
+    fun `답을 받기 전에 상대가 연결을 닫으면 그 요청이 끊겼다고 알린다`(): Unit = runBlocking {
+        // 상위의 await_session 이 중단되면 kyu mcp serve 가 연결을 닫는다(PR 68 · 6.4). 앱은 그것으로 그 기다림만 지운다.
+        val socket = openSocket()
+
+        val asking = async(Dispatchers.IO) {
+            SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).use { connection ->
+                connection.writer().apply {
+                    write("""{"kind":"await","ids":null,"waitSeconds":1800}""")
+                    newLine()
+                    flush()
+                }
+            }
+        }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+        asking.await()
+
+        assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { asked.awaitConnectionClosedBeforeAnswer() })
+    }
+
+    @Test
+    fun `답을 기다리던 승인 물음의 연결이 끊겨도 그 물음이 끊겼다고 알린다`(): Unit = runBlocking {
+        val socket = openSocket()
+
+        val asking = async(Dispatchers.IO) {
+            SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).use { connection ->
+                connection.writer().apply {
+                    write(question("toolu_cancelled"))
+                    newLine()
+                    flush()
+                }
+            }
+        }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
+        asking.await()
+
+        assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { asked.awaitConnectionClosedBeforeAnswer() })
+    }
+
+    @Test
+    fun `답한 요청은 끊긴 것으로 알리지 않는다`(): Unit = runBlocking {
+        // 답을 쓴 뒤 앱이 연결을 닫는 것은 정상의 끝이다. 그것을 상대가 닫은 것으로 읽으면 이미 답한 기다림을 또 지운다.
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            asked.answerWith(SessionTreeAnswer.Awaited(emptyList(), emptyList()))
+            asked
+        }
+        askOverTheSocket(socket.socketPath, """{"kind":"await","ids":null,"waitSeconds":1800}""")
+
+        assertFalse(withTimeout(TEST_TIMEOUT_MILLIS) { answering.await().awaitConnectionClosedBeforeAnswer() })
     }
 
     @Test

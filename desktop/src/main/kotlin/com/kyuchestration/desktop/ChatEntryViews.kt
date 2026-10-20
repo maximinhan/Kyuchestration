@@ -855,6 +855,9 @@ private fun PermissionAnswerLine(answer: PermissionAnswer, toolLabel: String) {
             "이 세션의 규칙이 허용했습니다 — 묻지 않았습니다" to KyuTheme.statusColors.caution
 
         is PermissionAnswer.Denied -> "거부했습니다 — ${answer.reason}" to KyuTheme.statusColors.failure
+
+        is PermissionAnswer.Withdrawn ->
+            "답하기 전에 이 물음이 거둬졌습니다 — 그 턴이 중단되었습니다" to KyuTheme.statusColors.caution
     }
 
     Text(text = text, style = MaterialTheme.typography.labelMedium, color = color)

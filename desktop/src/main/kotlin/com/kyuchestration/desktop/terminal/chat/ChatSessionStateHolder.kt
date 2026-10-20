@@ -186,7 +186,7 @@ class ChatSessionStateHolder(
     val gateQuestions: StateFlow<List<ChildSessionGateQuestion>> = mutableGateQuestions.asStateFlow()
 
     /** 아직 답하지 않은 관문 물음의 답 자리. 하위 이름이 열쇠다 — spawn 하나에 물음은 한 번에 하나다. */
-    private val gateDecisions = mutableMapOf<String, CompletableDeferred<Boolean>>()
+    private val gateDecisions = mutableMapOf<String, CompletableDeferred<GateAnswer>>()
 
     /**
      * 상위가 `await_session` 으로 기다리는 중이면 그 기다림(6.11 의 `pendingAwait`). **원칙 18 의 갈림길이 이 값 하나다** —
@@ -431,12 +431,12 @@ class ChatSessionStateHolder(
         mutableSessionTree.value = SessionTree()
     }
 
-    /** 사람에게 묻던 관문을 거절로 풀고 대화 상자를 내린다. */
+    /** 사람에게 묻던 관문을 거두고 대화 상자를 내린다. */
     private fun withdrawGateQuestions() {
         val pendingDecisions = gateDecisions.values.toList()
         gateDecisions.clear()
         mutableGateQuestions.value = emptyList()
-        pendingDecisions.forEach { it.complete(false) }
+        pendingDecisions.forEach { it.complete(GateAnswer.Withdrawn) }
     }
 
     /**
@@ -582,7 +582,7 @@ class ChatSessionStateHolder(
 
         when (val request = asked.request) {
             is SessionTreeRequest.SpawnSession ->
-                coroutineScope.launch { asked.answerWith(spawnChildSession(requester, request)) }
+                coroutineScope.launch { asked.answerWith(spawnChildSession(requester, request, asked)) }
 
             is SessionTreeRequest.AwaitSessions -> awaitChildSessions(asked, request)
 
@@ -605,6 +605,7 @@ class ChatSessionStateHolder(
     private suspend fun spawnChildSession(
         parent: HeldChatSession,
         request: SessionTreeRequest.SpawnSession,
+        asked: AskedSessionTreeRequest,
     ): SessionTreeAnswer = childSpawning.withLock {
         val recordedChildIds = try {
             withContext(sessionEntryDispatcher) {
@@ -649,14 +650,20 @@ class ChatSessionStateHolder(
 
                 is ChildSessionOpening.GateRequired -> {
                     val question = ChildSessionGateQuestion(assignment.childId, request.prompt, opening.gate)
-                    val approved = askPersonAboutGate(question)
+                    val gateAnswer = askPersonAboutGate(question, asked)
                     if (parent !in mutableHeldSessions.value) {
                         return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
                     }
-                    if (!approved) {
-                        return SessionTreeAnswer.Refused("사람이 이 폴더(${opening.gate.relativeCwd})의 설정을 승인하지 않았습니다")
+                    when (gateAnswer) {
+                        GateAnswer.Approved -> approvedFingerprint = opening.gate.fingerprint
+                        GateAnswer.Declined -> return SessionTreeAnswer.Refused(
+                            "사람이 이 폴더(${opening.gate.relativeCwd})의 설정을 승인하지 않았습니다",
+                        )
+                        // 이 답을 받을 연결은 이미 없다. 띄우지 않는 것이 요점이고 문구는 기록일 뿐이다.
+                        GateAnswer.Withdrawn -> return SessionTreeAnswer.Refused(
+                            "관문을 묻는 사이 spawn_session 호출이 거둬져 하위를 띄우지 않았습니다",
+                        )
                     }
-                    approvedFingerprint = opening.gate.fingerprint
                 }
             }
         }
@@ -693,16 +700,30 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 관문 대화 상자를 세우고 사람의 답을 기다린다. 승인했으면 참.
+     * 관문 대화 상자를 세우고 사람의 답을 기다린다.
      *
      * 상한을 두지 않는다. 사람이 그 파일을 읽는 데 얼마가 걸리든 그동안 상위의 도구 호출이 기다린다 — 승인
-     * 카드에 상한을 두지 않은 이유와 같다(chat-ui 5.4.1). 메인이 끝나면 그 자리에서 거절로 풀린다(6.13).
+     * 카드에 상한을 두지 않은 이유와 같다(chat-ui 5.4.1). 메인이 끝나거나, 그 spawn 의 연결이 끊기면 그 자리에서
+     * 거둬진다(6.13 · 6.4) — 답을 받을 쪽이 사라졌는데 사람이 승인하면 상위가 모르는 하위가 뜬다.
      */
-    private suspend fun askPersonAboutGate(question: ChildSessionGateQuestion): Boolean {
-        val decision = CompletableDeferred<Boolean>()
+    private suspend fun askPersonAboutGate(question: ChildSessionGateQuestion, asked: AskedSessionTreeRequest): GateAnswer {
+        val decision = CompletableDeferred<GateAnswer>()
         gateDecisions[question.childId] = decision
         mutableGateQuestions.value = mutableGateQuestions.value + question
-        return decision.await()
+
+        val watchingConnection = coroutineScope.launch {
+            if (asked.awaitConnectionClosedBeforeAnswer()) {
+                withdrawGateQuestion(question.childId)
+            }
+        }
+        return decision.await().also { watchingConnection.cancel() }
+    }
+
+    /** 그 하위의 관문 물음 하나를 거두고 대화 상자를 내린다. 이미 답한 물음이면 아무 일도 하지 않는다. */
+    private fun withdrawGateQuestion(childId: String) {
+        val decision = gateDecisions.remove(childId) ?: return
+        mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.childId == childId }
+        decision.complete(GateAnswer.Withdrawn)
     }
 
     /**
@@ -713,7 +734,7 @@ class ChatSessionStateHolder(
     fun answerGateQuestion(childId: String, approved: Boolean) {
         val decision = gateDecisions.remove(childId) ?: return
         mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.childId == childId }
-        decision.complete(approved)
+        decision.complete(if (approved) GateAnswer.Approved else GateAnswer.Declined)
     }
 
     /** 하위 하나를 엔진에게 묻고 띄운다. 띄우지 못하면 그 하위의 소켓을 닫고 실패를 그대로 던진다. */
@@ -822,6 +843,15 @@ class ChatSessionStateHolder(
             }
         }
         pendingAwait = PendingAwait(asked, watchedChildIds, expiry)
+
+        // 상위가 기다림을 중단하면 kyu mcp serve 가 연결을 닫는다(3.2 · PR 68). 그 기다림만 지운다 — 하위는 그대로 돌고,
+        // 이 기다림이 가져가지 못한 사건은 쌓인 채 다음 기다림이나 상위의 턴 끝을 기다린다.
+        coroutineScope.launch {
+            if (asked.awaitConnectionClosedBeforeAnswer() && pendingAwait?.asked === asked) {
+                pendingAwait?.expiry?.cancel()
+                pendingAwait = null
+            }
+        }
 
         deliverParentEvents()
 
@@ -961,8 +991,18 @@ class ChatSessionStateHolder(
             return
         }
 
-        askedPermissions[AskedPermissionKey(target, request.toolUseId)] = asked
+        val key = AskedPermissionKey(target, request.toolUseId)
+        askedPermissions[key] = asked
         receive(target, ChatSessionEvent.PermissionRequested(request))
+
+        // 사람이 그 턴을 중단하면 kyu mcp ask 가 연결을 닫는다. 카드를 거둔다 — 남기면 누를 수 있는 척하는 카드가 되고,
+        // 하위의 줄은 아무도 기다리지 않는 승인을 기다린다고 말한다.
+        coroutineScope.launch {
+            if (asked.awaitConnectionClosedBeforeAnswer() && askedPermissions[key] === asked) {
+                askedPermissions.remove(key)
+                updateConversation(target) { it.withPermissionAnswered(request.toolUseId, PermissionAnswer.Withdrawn) }
+            }
+        }
     }
 
     /**
@@ -1192,6 +1232,15 @@ data class ChildSessionGateQuestion(
     val prompt: String,
     val gate: ChildSessionGate,
 )
+
+/** 관문 물음이 어떻게 끝났는가(6.9). */
+private enum class GateAnswer {
+    Approved,
+    Declined,
+
+    /** 사람이 답하기 전에 물음이 거둬졌다 — 메인이 끝났거나, 그 spawn 의 연결이 끊겼다. */
+    Withdrawn,
+}
 
 /** 하위 하나를 띄우려 한 결과 — 띄웠거나, 관문에 걸려 아무것도 띄우지 않았다(6.9). */
 private sealed interface ChildSessionOpening {

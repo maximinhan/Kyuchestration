@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import java.io.BufferedReader
 import java.io.IOException
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
@@ -10,10 +11,13 @@ import java.nio.channels.SocketChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -133,18 +138,22 @@ class AppSocket private constructor(
      * **읽을 수 없는 줄에도 답한다.** 답하지 않으면 그 자식은 영영 기다리고, 그 자식을 기다리는
      * 것은 사용자의 턴이다. 다만 화면에는 세우지 않는다 — 무엇을 승인하는지 말할 수 없는 카드는
      * 사용자에게 물어볼 것이 없는 카드다.
+     *
+     * **답을 기다리는 동안 상대가 닫는 것도 지켜본다.** 도구 호출이 중단되면 상대가 연결을 닫는다(PR 68 · 3.2).
+     * 그때는 답을 쓰지 않고 그 요청이 끊겼다고 알린다 — 홀더가 그 기다림 · 카드 · 대화 상자를 거둔다.
      */
     private suspend fun answerOnce(connection: SocketChannel) {
         connection.use {
-            val requestLine = runInterruptible {
-                Channels.newInputStream(connection).bufferedReader(Charsets.UTF_8).readLine()
-            } ?: return
+            val reader = Channels.newInputStream(connection).bufferedReader(Charsets.UTF_8)
+            val requestLine = runInterruptible { reader.readLine() } ?: return
+
+            val peerClosed = watchForPeerClosing(reader)
 
             val answerLine = when (val received = appSocketRequestFrom(requestLine)) {
                 is AppSocketRequest.Permission -> {
                     val asked = AskedPermission(received.request)
                     incoming.send(asked)
-                    answerLineFor(asked.awaitDecision())
+                    asked.decision.answerUnlessPeerCloses(peerClosed)?.let(::answerLineFor)
                 }
 
                 is AppSocketRequest.Unreadable -> answerLineFor(
@@ -156,7 +165,7 @@ class AppSocket private constructor(
                 is AppSocketRequest.SessionTree -> {
                     val asked = AskedSessionTreeRequest(received.request)
                     incomingSessionTreeRequests.send(asked)
-                    answerLineFor(asked.awaitAnswer())
+                    asked.answer.answerUnlessPeerCloses(peerClosed)?.let(::answerLineFor)
                 }
 
                 // 승인 거부로 답하지 않는다. 이 줄을 보낸 것은 kyu mcp ask 가 아니라 세션 트리 도구라,
@@ -168,7 +177,7 @@ class AppSocket private constructor(
                 )
 
                 is AppSocketRequest.UnknownKind -> unknownKindAnswerLine(received.kind)
-            }
+            } ?: return
 
             runInterruptible {
                 Channels.newOutputStream(connection).bufferedWriter(Charsets.UTF_8).apply {
@@ -178,6 +187,46 @@ class AppSocket private constructor(
                 }
             }
         }
+    }
+
+    /**
+     * 요청 한 줄을 보낸 상대가 연결을 닫을 때 끝나는 자리.
+     *
+     * 상대는 요청 뒤에 아무것도 보내지 않고 답만 기다린다(app_socket.go 의 exchangeLineWithApp). 그래서 그 뒤의 읽기는
+     * 상대가 닫을 때(EOF) 끝난다. 앱이 답을 쓰고 연결을 닫아도 끝나는데, 그때는 이미 답한 뒤라 아무도 이 끝을 보지 않는다.
+     *
+     * **끊기지 않는 읽기로 둔다.** 막힌 읽기를 인터럽트로 풀면 JDK 가 채널을 닫는다 — 답을 쓰기 전에 연결이 사라진다.
+     * 그래서 이 읽기는 연결이 닫혀야만 풀리고, 연결을 닫는 것은 [answerOnce] 의 `use` 다.
+     */
+    private fun watchForPeerClosing(reader: BufferedReader): Deferred<Unit> = listening.async(Dispatchers.IO) {
+        try {
+            while (reader.read() != -1) {
+                // 상대가 더 보낸 바이트는 이 프로토콜에 없는 것이라 읽어 버린다. 끝을 기다리는 것이 이 자리의 일이다.
+            }
+        } catch (closedUnderneath: IOException) {
+            // 앱이 답을 쓰고 연결을 닫아 막힌 읽기가 풀렸다(AsynchronousCloseException). 그것도 "이 연결이 끝났다" 다.
+        }
+    }
+
+    /**
+     * 답을 기다리되, 그 전에 상대가 닫으면 그 사실을 알리고 null 을 돌려준다.
+     *
+     * 둘이 함께 준비돼 있으면 답이 먼저다 — 답할 수 있었던 요청을 끊긴 것으로 적지 않는다.
+     *
+     * 앱이 이 소켓을 닫아 기다림이 거둬질 때([close])도 끊긴 것으로 알린다. 그 연결도 곧 닫히고, 알리지 않으면 끊김을
+     * 지켜보던 홀더 쪽 코루틴이 오지 않을 답을 앱이 꺼질 때까지 기다린다.
+     */
+    private suspend fun <T> ConnectionAnswer<T>.answerUnlessPeerCloses(peerClosed: Deferred<Unit>): T? = try {
+        select {
+            answered.onAwait { it }
+            peerClosed.onAwait {
+                markConnectionClosed()
+                null
+            }
+        }
+    } catch (socketClosing: CancellationException) {
+        markConnectionClosed()
+        throw socketClosing
     }
 
     companion object {
