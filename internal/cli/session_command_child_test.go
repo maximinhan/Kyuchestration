@@ -392,6 +392,22 @@ func TestTheMainChatWithAnAppSocketIsToldWhereChildMessagesComeFrom(t *testing.T
 	}
 }
 
+func TestTheMainChatConventionSaysWhenToSpawnAChildSessionAndWhenToUseASubagent(t *testing.T) {
+	// 모델에게 둘 중 무엇을 고를지 알려야 한다(4.4). Agent 는 claude 의 내장 도구라 그 설명을 우리가
+	// 고칠 수 없으므로, 두 도구를 한자리에서 견주는 기준은 시스템 프롬프트에 있어야 한다(7 절 5 단계).
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, chatModeOptionName, appSocketOptionName, "/run/user/1000/kyu/m1.sock")
+
+	conventionText, _ := splitAppendSystemPromptForTest(t, run.document.Command)
+	for _, wanted := range []string{"Agent", "spawn_session", "탭", "승인 카드", "이 턴 안에서"} {
+		if !strings.Contains(conventionText, wanted) {
+			t.Errorf("상위의 규약 문구 = %q, 선택 기준의 %q 를 담기를 기대", conventionText, wanted)
+		}
+	}
+}
+
 func TestAMainSessionWithoutTheSessionTreeToolsGetsNoConvention(t *testing.T) {
 	// 규약은 세션 트리 도구가 있을 때만 뜻이 있다 — 소켓 없는 세션에는 하위가 없다.
 	workDirPath := makeWorkDir(t)

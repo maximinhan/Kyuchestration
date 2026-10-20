@@ -48,7 +48,22 @@ const (
 	maximumAwaitWaitSeconds = 3000
 )
 
+// subagentOrChildSessionCriterionText 는 서브에이전트와 하위 세션 중 무엇을 고르는지의 기준이다(4.4).
+//
+// 시스템 프롬프트(parentSessionConventionText)와 spawn_session 설명이 이 한 글을 같이 쓴다. 4.4 가 두
+// 자리 모두에 적으라고 했고, 두 자리의 글이 따로 고쳐져 갈라지면 모델은 어느 쪽을 따를지를 또 골라야 한다.
+//
+// 시스템 프롬프트가 본자리인 이유: 견줄 상대인 Agent 는 claude 의 내장 도구라 그 설명을 우리가 고칠 수
+// 없다. 두 도구를 한자리에서 견주는 글은 어느 한 도구의 설명이 아니라 둘 다 보이는 자리에 있어야 하고,
+// 규약을 시스템 프롬프트로 주었을 때 모델이 따른 것을 쟀다(3.5 나).
+const subagentOrChildSessionCriterionText = "일을 맡길 때는 하위 세션(spawn_session)과 서브에이전트(Agent 도구) 중 하나를 고른다. " +
+	"하위 세션은 다른 폴더(레포)에서 그 폴더의 설정으로 해야 하는 일, 오래 걸리는 일, 사람이 지켜보거나 끼어들어야 하는 일, " +
+	"이어서 여러 번 시킬 일에 쓴다 — 하위 세션은 앱에 탭으로 보이고 승인 카드가 사람에게 간다. " +
+	"이 턴 안에서 끝나는 짧은 조사·읽기·요약에는 하위 세션을 띄우지 않는다 — 서브에이전트를 쓰거나 직접 한다."
+
 const spawnSessionToolDescription = `하위 세션 하나를 띄운다. 하위는 자기 cwd 에서 도는 별도의 claude 이고, 사람이 그 탭에서 직접 볼 수 있다.
+
+` + subagentOrChildSessionCriterionText + `
 
 첫 프롬프트를 넣은 순간 답한다 — 하위의 턴이 끝나기를 기다리지 않는다. 결과는 await_session 으로 받거나,
 턴을 끝내고 쉬면 하위의 턴이 끝날 때 "[하위 세션 <id> · 턴 끝]" 메시지로 온다.

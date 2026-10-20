@@ -186,6 +186,35 @@ func TestTheMainRoleWithoutAnAppSocketHasNoSessionTreeTools(t *testing.T) {
 	}
 }
 
+// listedToolDescriptionsForTest 는 tools/list 가 답한 도구마다의 설명이다 — 모델이 읽는 그 글이다.
+func listedToolDescriptionsForTest(t *testing.T, serveArgs []string) map[string]string {
+	t.Helper()
+
+	answered := messageWithIDForTest(t, runServeForTest(t, serveArgs, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`), "2")
+	if answered.Result == nil {
+		t.Fatalf("tools/list 의 답이 없습니다: %+v", answered)
+	}
+
+	descriptions := map[string]string{}
+	for _, tool := range answered.Result.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	return descriptions
+}
+
+func TestSpawnSessionDescriptionCarriesTheSameChoiceCriterionAsTheSystemPrompt(t *testing.T) {
+	// 4.4 — 기준은 도구 설명과 시스템 프롬프트 둘 다에 적는다. 두 자리의 글이 갈라지면 모델은 어느 쪽을
+	// 따를지를 또 골라야 하므로 한 글을 같이 쓴다.
+	descriptions := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))
+
+	if !strings.Contains(descriptions["spawn_session"], subagentOrChildSessionCriterionText) {
+		t.Errorf("spawn_session 의 설명 = %q, 선택 기준을 담기를 기대", descriptions["spawn_session"])
+	}
+	if !strings.Contains(parentSessionConventionText(), subagentOrChildSessionCriterionText) {
+		t.Errorf("상위의 규약 문구 = %q, 같은 선택 기준을 담기를 기대", parentSessionConventionText())
+	}
+}
+
 func TestSpawnSessionCarriesTheRequestToTheAppAndItsAnswerBack(t *testing.T) {
 	// 엔진은 하위를 띄우지 않는다(원칙 16). 요청을 앱에게 옮기고 앱의 답을 옮길 뿐이다 — 줄의 모양이
 	// 6.4 의 계약이다. 주지 않은 선택 인자는 null 로 간다: 앱이 "생략" 과 "빈 값" 을 가르게 한다.
