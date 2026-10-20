@@ -169,9 +169,12 @@ internal class RecordingChatSessionOpener : ChatSessionOpener {
 
     val lastSession: FakeChatSession get() = openedSessions.last()
 
+    /** 끝난 차례대로. 수명 시험이 "하위가 상위보다 먼저" 를 이것으로 본다(6.13). */
+    val endedSessions = mutableListOf<FakeChatSession>()
+
     override suspend fun openChatSession(plan: SessionEntryPlan): OpenedChatSession {
         openedPlans.add(plan)
-        return FakeChatSession().also(openedSessions::add)
+        return FakeChatSession(onEnded = endedSessions::add).also(openedSessions::add)
     }
 }
 
@@ -181,7 +184,7 @@ internal class RecordingChatSessionOpener : ChatSessionOpener {
  * 한계 없는 채널인 것이 진짜 어댑터와 같다(ProcessChatSession) — 받는 쪽이 아직 모으기
  * 시작하지 않았어도 [emit] 한 것이 잃히지 않는다.
  */
-internal class FakeChatSession : OpenedChatSession {
+internal class FakeChatSession(private val onEnded: (FakeChatSession) -> Unit = {}) : OpenedChatSession {
 
     private val incoming = Channel<ChatSessionEvent>(Channel.UNLIMITED)
 
@@ -216,6 +219,7 @@ internal class FakeChatSession : OpenedChatSession {
 
     override suspend fun endSession() {
         endSessionCount++
+        onEnded(this)
         incoming.close()
     }
 }

@@ -205,6 +205,12 @@ class ChatSessionStateHolder(
         // 놓는다 — 남겨 두면 새 대화의 위에 지난 대화가 이어 붙는다.
         conversations.remove(target)
 
+        // 메인을 새로 띄우면 앞 메인의 하위들도 함께 놓는다. 트리는 그 메인 프로세스의 것이고, 새 메인은 그
+        // 하위들을 띄운 적이 없다(6.15 — 하위는 이어가지 않는다).
+        if (target == SessionTarget.Main) {
+            forgetChildren()
+        }
+
         val requestId = latestSessionEntryRequestId
         mutableState.value = ChatScreenState.ChatSessionEntryRunning(target)
 
@@ -321,14 +327,83 @@ class ChatSessionStateHolder(
      */
     suspend fun endOnScreenSession() {
         val target = mutableState.value.target ?: return
+        if (target is SessionTarget.Child) {
+            endChildSessionByHuman(target)
+            return
+        }
+
         latestSessionEntryRequestId++
         mutableState.value = ChatScreenState.NoChatOpen
         conversations.remove(target)
+
+        // 원칙 17 — 메인이 끝나면 하위가 끝난다. 하위 먼저다: 메인이 먼저 끝나면 하위의 물음이 답 없이 끊긴다.
+        if (target == SessionTarget.Main) {
+            endChildrenOfMain()
+            forgetChildren()
+        }
 
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
         // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
         mutableHeldSessions.value = mutableHeldSessions.value - held
         endSessionProcess(held)
+    }
+
+    /**
+     * 하위 하나를 화면에 세운다. 끝난 하위도 전사가 남아 있으면 선다 — 왜 끝났는지 읽을 자리다.
+     *
+     * 패널의 하위 줄과 상위 챗의 spawn 카드 · 승인 띠가 이 길로 온다(6.12).
+     */
+    fun showChildSession(childId: String) {
+        val target = SessionTarget.Child(childId)
+        val conversation = conversations[target] ?: return
+        // 화면이 다른 곳으로 옮겼으니 기다리던 진입은 버린다 — enterSession 이 다른 세션을 고를 때와 같다.
+        latestSessionEntryRequestId++
+        mutableState.value = ChatScreenState.ChatOnScreen(target, conversation)
+    }
+
+    /**
+     * 사람이 하위 화면에서 "세션 끝내기" 를 눌렀다(6.13). 그 하위만 끝나고 상위는 그대로다.
+     *
+     * 화면은 메인으로 돌아간다. 하위의 전사는 남긴다 — 하위는 패널의 줄을 눌러 다시 띄우는 길이 없어서,
+     * 전사가 그 하위가 한 일의 유일한 화면이다.
+     */
+    private suspend fun endChildSessionByHuman(target: SessionTarget.Child) {
+        mutableState.value = conversations[SessionTarget.Main]
+            ?.let { ChatScreenState.ChatOnScreen(SessionTarget.Main, it) }
+            ?: ChatScreenState.NoChatOpen
+
+        val node = mutableSessionTree.value.child(target.childId) ?: return
+        if (node.lifecycle == ChildLifecycle.Running) {
+            endChildSession(node, ChildEndReason.EndedByHuman)
+        }
+    }
+
+    /**
+     * 메인이 끝나 하위를 전부 끝낸다(6.13). 사람에게 묻던 관문도 거둔다 — 띄울 상위가 없다.
+     *
+     * 트리의 하위들은 그대로 두고 끝났다고만 적는다. 놓을지는 부르는 쪽이 정한다 — 사람이 메인을 닫은 것이면
+     * 메인의 전사와 함께 놓고, 메인이 스스로 끝난 것이면 남겨 사람이 무엇이 끝났는지 읽게 한다.
+     */
+    private suspend fun endChildrenOfMain() {
+        withdrawGateQuestions()
+        val liveChildren = mutableSessionTree.value.children.filter { it.lifecycle == ChildLifecycle.Running }
+        coroutineScope {
+            liveChildren.map { async { endChildSession(it, ChildEndReason.ParentEnded) } }.awaitAll()
+        }
+    }
+
+    /** 트리와 하위들의 전사를 놓는다. 그 하위들은 이미 끝났다. */
+    private fun forgetChildren() {
+        mutableSessionTree.value.children.forEach { conversations.remove(it.target) }
+        mutableSessionTree.value = SessionTree()
+    }
+
+    /** 사람에게 묻던 관문을 거절로 풀고 대화 상자를 내린다. */
+    private fun withdrawGateQuestions() {
+        val pendingDecisions = gateDecisions.values.toList()
+        gateDecisions.clear()
+        mutableGateQuestions.value = emptyList()
+        pendingDecisions.forEach { it.complete(false) }
     }
 
     /**
@@ -342,6 +417,10 @@ class ChatSessionStateHolder(
     suspend fun endAllSessions() {
         latestSessionEntryRequestId++
         mutableState.value = ChatScreenState.NoChatOpen
+
+        // 하위 먼저, 상위 나중(6.13). 하위끼리는 한꺼번에 끝낸다.
+        endChildrenOfMain()
+        forgetChildren()
         conversations.clear()
 
         val endingSessions = mutableHeldSessions.value
@@ -533,7 +612,11 @@ class ChatSessionStateHolder(
 
                 is ChildSessionOpening.GateRequired -> {
                     val question = ChildSessionGateQuestion(assignment.childId, request.prompt, opening.gate)
-                    if (!askPersonAboutGate(question)) {
+                    val approved = askPersonAboutGate(question)
+                    if (parent !in mutableHeldSessions.value) {
+                        return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
+                    }
+                    if (!approved) {
                         return SessionTreeAnswer.Refused("사람이 이 폴더(${opening.gate.relativeCwd})의 설정을 승인하지 않았습니다")
                     }
                     approvedFingerprint = opening.gate.fingerprint
@@ -795,6 +878,12 @@ class ChatSessionStateHolder(
             // 우리가 끝낸 세션이다. 끝내는 자리에서 이미 목록에서 뺐다.
             ?: return
         mutableHeldSessions.value = mutableHeldSessions.value - held
+
+        // 메인이 스스로 끝났다(크래시 · 대화 안에서 끝냄). 원칙 17 — 하위도 끝낸다. 트리는 남겨 무엇이
+        // 끝났는지 사람이 읽게 한다.
+        if (target == SessionTarget.Main) {
+            coroutineScope.launch { endChildrenOfMain() }
+        }
 
         // 스스로 끝난 세션의 소켓도 닫는다. 프로세스가 죽으면 그 자식(kyu mcp ask)도 함께 죽으므로
         // 물어올 상대는 이미 없고, 남은 것은 런타임 디렉토리의 파일 하나뿐이다.
