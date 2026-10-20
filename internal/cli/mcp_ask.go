@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/maximinhan/Kyuchestration/internal/mcpserver"
@@ -115,10 +114,19 @@ type permissionRequestArguments struct {
 // 줄 단위 JSON 이다 — kyu 의 MCP 서버가 이미 줄 단위 JSON-RPC 를 말하고(internal/mcpserver),
 // 새 인코딩을 들일 이유가 없다.
 type permissionQuestion struct {
+	// Kind 는 늘 permissionQuestionKind 다. 앱 소켓에는 세션 트리 요청도 오므로 앱은 이 낱말로
+	// 줄을 가른다(session-tree-design.md 6.4).
+	Kind      string          `json:"kind"`
 	ToolName  string          `json:"toolName"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"toolUseId"`
 }
+
+// permissionQuestionKind 는 승인 물음 줄의 kind 다.
+//
+// 앞 판의 물음에는 kind 가 없었고, 앱은 kind 가 없는 줄을 승인 물음으로 읽는다 — 판을 올리지
+// 않고 낱말을 더한 자리다(6.4).
+const permissionQuestionKind = "permission"
 
 // appPermissionAnswer 는 앱이 돌려주는 줄이다(설계 5.4.1).
 type appPermissionAnswer struct {
@@ -158,6 +166,7 @@ func answerPermissionQuestion(socketPath string, arguments json.RawMessage) (mcp
 	}
 
 	answer, err := askTheApp(socketPath, permissionQuestion{
+		Kind:      permissionQuestionKind,
 		ToolName:  request.ToolName,
 		Input:     request.Input,
 		ToolUseID: request.ToolUseID,
@@ -260,24 +269,33 @@ func permissionToolResult(decision permissionDecisionDocument) (mcpserver.ToolRe
 func parseAskArgs(args []string) (string, error) {
 	var socketPath string
 
-	for _, arg := range args {
+	for argIndex := 0; argIndex < len(args); argIndex++ {
+		arg := args[argIndex]
+
 		switch {
-		// 모르는 옵션을 경로로 흘려보내면 그 서버는 있지도 않은 소켓에 묻는 서버가 되고,
-		// 모든 승인이 거절된다.
-		case strings.HasPrefix(arg, "-"):
-			return "", fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, mcpUsageText)
+		case arg == appSocketOptionName && socketPath != "":
+			return "", fmt.Errorf("mcp %s 는 %s 를 한 번만 받습니다\n\n%s",
+				mcpAskSubcommandName, appSocketOptionName, mcpUsageText)
 
-		case socketPath != "":
-			return "", fmt.Errorf("mcp %s 는 소켓 경로 하나만 받습니다 (인자 %d 개를 받음)\n\n%s",
-				mcpAskSubcommandName, len(args), mcpUsageText)
+		case arg == appSocketOptionName:
+			path, err := appSocketPathAfter(args, argIndex, mcpUsageText)
+			if err != nil {
+				return "", err
+			}
+			socketPath = path
+			argIndex++
 
+		// 모르는 옵션이나 자리 인자를 경로로 흘려보내면 그 서버는 있지도 않은 소켓에 묻는 서버가
+		// 되고, 모든 승인이 거절된다. 자리 인자로 경로를 받던 앞 판과 섞이지 않게 하는 자리이기도 하다.
 		default:
-			socketPath = arg
+			return "", fmt.Errorf("mcp %s 가 모르는 인자입니다: %s — 소켓 경로는 %s 로 줍니다\n\n%s",
+				mcpAskSubcommandName, arg, appSocketOptionName, mcpUsageText)
 		}
 	}
 
 	if socketPath == "" {
-		return "", fmt.Errorf("mcp %s 는 어느 소켓에 물을지 알아야 합니다\n\n%s", mcpAskSubcommandName, mcpUsageText)
+		return "", fmt.Errorf("mcp %s 는 어느 소켓에 물을지 알아야 합니다 (%s <경로>)\n\n%s",
+			mcpAskSubcommandName, appSocketOptionName, mcpUsageText)
 	}
 	return socketPath, nil
 }

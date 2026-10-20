@@ -181,18 +181,45 @@ type sessionMcpSetup struct {
 	permissionPromptTool string
 }
 
-// mainSessionMcpSetup 은 메인 세션에 붙일 서버들을 등록으로 옮긴다 — 오케스트레이션과, 있다면 승인.
+// mainSessionMcpSetup 은 메인 세션에 붙일 서버들을 등록으로 옮긴다 — 앱 소켓을 아는 오케스트레이션과, 있다면 승인.
 func mainSessionMcpSetup(workDirAbsolutePath string, request sessionCommandRequest) (sessionMcpSetup, error) {
 	engineExecutablePath, err := os.Executable()
 	if err != nil {
 		return sessionMcpSetup{}, fmt.Errorf("이 엔진의 실행 경로를 알아내지 못해 MCP 서버를 등록할 수 없습니다: %w", err)
 	}
 
+	// 소켓의 자리는 bypass 와 무관하게 싣는다(session-tree-design.md 6.4). 세션 트리 도구가 하위를
+	// 띄워 달라고 앱에게 묻는 길이 이 소켓이고, 그 필요는 권한 확인을 건너뛰었다고 사라지지 않는다.
+	// bypass 가 정하는 것은 같은 소켓에 승인 서버를 붙일지뿐이다(mcpSetupFor).
+	serveArgs := []string{workDirAbsolutePath}
+	if request.appSocketPath != "" {
+		serveArgs = append(serveArgs, appSocketOptionName, request.appSocketPath)
+	}
+
+	orchestrationServer := engineMcpServer(engineExecutablePath, mcpServeSubcommandName, serveArgs...)
+	orchestrationServer["timeout"] = orchestrationToolTimeoutMilliseconds
+
 	servers := map[string]any{
-		orchestrationServerName: engineMcpServer(engineExecutablePath, mcpServeSubcommandName, workDirAbsolutePath),
+		orchestrationServerName: orchestrationServer,
 	}
 	return mcpSetupFor(servers, engineExecutablePath, request)
 }
+
+// orchestrationToolTimeoutMilliseconds 는 kyu 서버의 도구 호출 하나가 걸릴 수 있는 시간 상한이다
+// (session-tree-design.md 6.7).
+//
+// **환경에 기대지 않고 우리가 정한다.** 등록에 값이 없으면 claude 는 MCP_TOOL_TIMEOUT 을, 그것도
+// 없으면 바이너리의 기본값(≈ 27.8 시간)을 쓴다. 사용자가 다른 서버 때문에 그 환경변수를 짧게
+// 잡아두면 kyu 의 기다리는 도구가 그 값에서 조용히 끊긴다. 서버별 값이 환경변수를 이기는 것을
+// 쟀다(3.4) — 그래서 이 자리에 적는다.
+//
+// **1 시간인 이유.** 세션 트리의 await_session 은 최대 3,000 초를 기다리고 답하는데(6.7), 그
+// 값이 이 상한보다 짧아야 claude 가 먼저 끊지 않는다. 대가로 run_in_repo 의 위임도 1 시간에서
+// 끊긴다 — 1 시간을 넘긴 위임 기록은 이 머신에 없었고, run_in_repo 는 6 단계에서 은퇴한다.
+//
+// 승인 서버(kyu-ask)에는 두지 않는다. 승인을 기다리는 시간은 사람이 고민하는 시간이라 상한을
+// 우리가 정하지 않는다(chat-ui-design.md 5.4.1).
+const orchestrationToolTimeoutMilliseconds = 3_600_000
 
 // repoSessionMcpSetup 은 레포 세션에 붙일 서버를 등록으로 옮긴다 — 있다면 승인 서버 하나뿐이다.
 //
@@ -220,7 +247,7 @@ func mcpSetupFor(servers map[string]any, engineExecutablePath string, request se
 	var setup sessionMcpSetup
 
 	if request.wantsPermissionBridge() {
-		servers[permissionAskServerName] = engineMcpServer(engineExecutablePath, mcpAskSubcommandName, request.approvalSocketPath)
+		servers[permissionAskServerName] = engineMcpServer(engineExecutablePath, mcpAskSubcommandName, appSocketOptionName, request.appSocketPath)
 		setup.permissionPromptTool = permissionPromptToolName()
 	}
 
@@ -244,11 +271,11 @@ func mcpSetupFor(servers map[string]any, engineExecutablePath string, request se
 // 이 엔진이 자기 경로를 적는다(설계 문서 5.2). 설정 파일에 적어두는 길이었다면 바이너리를 옮기거나
 // 올리는 순간 그 파일이 조용히 낡는데, 답하는 쪽이 os.Executable() 로 자기를 적으면 앱이
 // KYU_BINARY_PATH 로 어느 엔진을 겨누든 그 엔진이 등록된다.
-func engineMcpServer(engineExecutablePath, subcommandName, subcommandArgument string) map[string]any {
+func engineMcpServer(engineExecutablePath, subcommandName string, subcommandArgs ...string) map[string]any {
 	return map[string]any{
 		"type":    "stdio",
 		"command": engineExecutablePath,
-		"args":    []string{mcpCommandName, subcommandName, subcommandArgument},
+		"args":    append([]string{mcpCommandName, subcommandName}, subcommandArgs...),
 	}
 }
 

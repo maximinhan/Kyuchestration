@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.Flow
 interface PermissionRequestChannel {
 
     /**
-     * 이 통로의 자리. 엔진에게 `--approval-socket` 으로 넘어가는 값이 이것이다(설계 5.2).
+     * 이 통로의 자리. 엔진에게 `--app-socket` 으로 넘어가는 값이 이것이다(설계 5.2).
      *
      * **앱이 정해 엔진에게 준다.** 엔진이 스스로 정하면 앱이 그것을 되읽어야 하고, 그러면 소켓을
      * 여는 쪽과 자리를 정하는 쪽이 갈린다.

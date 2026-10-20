@@ -168,7 +168,7 @@ func runAskServerForTest(t *testing.T, socketPath string, requestLines ...string
 		strings.NewReader(strings.Join(requestLines, "\n")+"\n"),
 		&answered,
 		&strings.Builder{},
-		[]string{mcpAskSubcommandName, socketPath},
+		[]string{mcpAskSubcommandName, appSocketOptionName, socketPath},
 	); err != nil {
 		t.Fatalf("kyu mcp ask 실패: %v", err)
 	}
@@ -255,6 +255,22 @@ func TestTheAppIsAskedWithTheToolNameAndInputAndToolUseIdClaudeSent(t *testing.T
 	}
 	if string(question["input"]) != `{"file_path":"/tmp/probe.txt","content":"WRITTEN\n"}` {
 		t.Errorf("input = %s, claude 가 준 인자 그대로를 기대", question["input"])
+	}
+}
+
+func TestTheQuestionLineSaysItIsAPermissionQuestion(t *testing.T) {
+	// 앱 소켓에는 승인 물음 말고 세션 트리 요청도 온다(session-tree-design.md 6.4). 앱은 줄의
+	// kind 로 그 둘을 가르므로, 승인 물음도 자기가 무엇인지 말해야 한다.
+	app := startFakeAppForTest(t, func([]byte) []byte {
+		return []byte(`{"decision":"allow"}`)
+	})
+
+	callRequestPermissionForTest(t, app.socketPath,
+		`{"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_kind"}`)
+
+	question := app.answeredQuestion(t)
+	if string(question["kind"]) != `"permission"` {
+		t.Errorf("kind = %s, want \"permission\"", question["kind"])
 	}
 }
 
@@ -368,5 +384,19 @@ func TestAskNeedsToKnowWhichSocketToAsk(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), mcpAskSubcommandName) {
 		t.Errorf("오류 = %q, 사용법을 함께 알리기를 기대", err)
+	}
+}
+
+func TestAskTakesTheSocketOnlyThroughTheAppSocketOption(t *testing.T) {
+	// 경로를 자리 인자로 받던 판과 섞이지 않게 한다. 자리 인자를 조용히 받으면 엔진과 앱 중
+	// 한쪽만 올라간 조합이 "되는 줄" 알고 돌다가, 세션 트리 요청이 같은 소켓으로 오는 날 엇갈린다.
+	err := ManageOrchestrationTools(strings.NewReader(""), &strings.Builder{}, &strings.Builder{},
+		[]string{mcpAskSubcommandName, "/tmp/kyu/positional.sock"})
+
+	if err == nil {
+		t.Fatal("자리 인자로 소켓을 준 mcp ask 가 성공했습니다 — --app-socket 만 받기를 기대")
+	}
+	if !strings.Contains(err.Error(), appSocketOptionName) {
+		t.Errorf("오류 = %q, %s 로 주라는 안내를 기대", err, appSocketOptionName)
 	}
 }
