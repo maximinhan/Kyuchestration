@@ -215,6 +215,36 @@ func TestSpawnSessionDescriptionCarriesTheSameChoiceCriterionAsTheSystemPrompt(t
 	}
 }
 
+func TestWithTheSessionTreeRunInRepoSaysItIsRetiringAndPointsToSpawnSession(t *testing.T) {
+	// 6.16 의 "순서" — 둘이 함께 있는 동안은 run_in_repo 설명에 은퇴 예정을 적고 spawn_session 이 그
+	// 자리를 가리킨다. "레포에서 일을 시킨다" 에 길이 둘이면 모델은 매번 하나를 고르고, run_in_repo 를
+	// 고르는 것이 곧 승인 카드를 피하는 길이 된다.
+	descriptions := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))
+
+	for _, wanted := range []string{"은퇴 예정", "spawn_session"} {
+		if !strings.Contains(descriptions["run_in_repo"], wanted) {
+			t.Errorf("run_in_repo 의 설명 = %q, %q 를 담기를 기대", descriptions["run_in_repo"], wanted)
+		}
+	}
+	if !strings.Contains(descriptions["spawn_session"], "run_in_repo") {
+		t.Errorf("spawn_session 의 설명 = %q, run_in_repo 의 자리를 가리키기를 기대", descriptions["spawn_session"])
+	}
+	if !strings.Contains(descriptions["list_repos"], "spawn_session") {
+		t.Errorf("list_repos 의 설명 = %q, 레포 이름을 spawn_session 의 cwd 로 쓰는 길을 기대", descriptions["list_repos"])
+	}
+}
+
+func TestWithoutTheSessionTreeRunInRepoDoesNotPointToAMissingTool(t *testing.T) {
+	// 소켓 없이 뜬 서버에는 spawn_session 이 없다. 거기서 그 도구를 가리키면 모델은 없는 도구를 찾는다.
+	descriptions := listedToolDescriptionsForTest(t, []string{makeWorkDir(t)})
+
+	for _, toolName := range []string{"run_in_repo", "list_repos"} {
+		if strings.Contains(descriptions[toolName], "spawn_session") {
+			t.Errorf("소켓 없는 상위의 %s 설명 = %q, 없는 spawn_session 을 가리키지 않기를 기대", toolName, descriptions[toolName])
+		}
+	}
+}
+
 func TestSpawnSessionCarriesTheRequestToTheAppAndItsAnswerBack(t *testing.T) {
 	// 엔진은 하위를 띄우지 않는다(원칙 16). 요청을 앱에게 옮기고 앱의 답을 옮길 뿐이다 — 줄의 모양이
 	// 6.4 의 계약이다. 주지 않은 선택 인자는 null 로 간다: 앱이 "생략" 과 "빈 값" 을 가르게 한다.

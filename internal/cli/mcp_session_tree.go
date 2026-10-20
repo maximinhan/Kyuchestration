@@ -65,6 +65,8 @@ const spawnSessionToolDescription = `하위 세션 하나를 띄운다. 하위�
 
 ` + subagentOrChildSessionCriterionText + `
 
+레포에서 일을 시킬 때도 이 도구를 쓴다 — cwd 에 레포 이름(list_repos 의 name)을 준다. run_in_repo 는 은퇴 예정이다.
+
 첫 프롬프트를 넣은 순간 답한다 — 하위의 턴이 끝나기를 기다리지 않는다. 결과는 await_session 으로 받거나,
 턴을 끝내고 쉬면 하위의 턴이 끝날 때 "[하위 세션 <id> · 턴 끝]" 메시지로 온다.
 
