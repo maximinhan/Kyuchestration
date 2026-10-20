@@ -21,7 +21,7 @@ const mcpUsageText = `사용법: kyu mcp <serve|approve|ask> [인자]
 
   kyu mcp serve <워크디렉토리>   메인 세션에 붙는 오케스트레이션 MCP 서버를 stdio 로 연다 — 기계용
   kyu mcp approve <repo>        그 레포의 실행 유발 설정을 눈으로 확인하고 위임을 승인한다
-  kyu mcp ask <소켓 경로>        승인 물음을 그 소켓 너머의 앱에게 중계한다 — 기계용
+  kyu mcp ask --app-socket <경로>  승인 물음을 그 소켓 너머의 앱에게 중계한다 — 기계용
 
 serve 와 ask 는 사람이 직접 부르는 명령이 아니다. kyu session-command --json 이 답하는 세션 명령의
 --mcp-config 에 두 명령이 실려 있고, claude 가 그것을 자식 프로세스로 띄운다.

@@ -317,7 +317,7 @@ class ChatSessionStateHolder(
                 workDirPath = workDirPath,
                 target = target,
                 conversationChoice = conversationChoice,
-                approvalSocketPath = permissionChannel.socketPath,
+                appSocketPath = permissionChannel.socketPath,
             )
 
             val plan = planSessionEntry(

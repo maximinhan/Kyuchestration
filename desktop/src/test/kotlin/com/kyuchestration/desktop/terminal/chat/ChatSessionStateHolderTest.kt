@@ -719,10 +719,10 @@ class ChatSessionStateHolderTest {
             workDirPath: Path,
             target: SessionTarget,
             conversationChoice: SessionConversationChoice,
-            approvalSocketPath: Path?,
+            appSocketPath: Path?,
         ): SessionCommandAnswer {
             askedTargets.add(target)
-            askedApprovalSocketPaths.add(approvalSocketPath)
+            askedApprovalSocketPaths.add(appSocketPath)
             return respond()
         }
     }

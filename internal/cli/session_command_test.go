@@ -690,8 +690,9 @@ func assertAskServerRegistration(t *testing.T, registration mcpConfigForTest, so
 	}
 	// 앱이 정한 경로가 그대로 실려야 한다. 엔진이 경로를 스스로 정하면 앱이 그것을 되읽어야
 	// 하고, 소켓을 여는 쪽과 정하는 쪽이 갈린다(설계 5.2).
-	if !slices.Equal(server.Args, []string{"mcp", "ask", socketPath}) {
-		t.Errorf("kyu-ask args = %q, want %q", server.Args, []string{"mcp", "ask", socketPath})
+	wantArgs := []string{"mcp", "ask", "--app-socket", socketPath}
+	if !slices.Equal(server.Args, wantArgs) {
+		t.Errorf("kyu-ask args = %q, want %q", server.Args, wantArgs)
 	}
 }
 
@@ -702,7 +703,7 @@ func TestTheMainChatRegistersTheAskServerBesideTheOrchestrationServer(t *testing
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	run := runSessionCommandForTest(t, chatModeOptionName, approvalSocketOptionName, "/run/user/1000/kyu/a1.sock")
+	run := runSessionCommandForTest(t, chatModeOptionName, appSocketOptionName, "/run/user/1000/kyu/a1.sock")
 
 	registration, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
 	if _, registered := registration.McpServers["kyu"]; !registered {
@@ -723,7 +724,7 @@ func TestARepoChatGetsTheAskServerWithoutTheOrchestrationServer(t *testing.T) {
 	makeCleanRepo(t, workDirPath, "alpha-commons")
 	t.Chdir(workDirPath)
 
-	run := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName, approvalSocketOptionName, "/tmp/kyu/r1.sock")
+	run := runSessionCommandForTest(t, "alpha-commons", chatModeOptionName, appSocketOptionName, "/tmp/kyu/r1.sock")
 
 	registration, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
 	if _, registered := registration.McpServers["kyu"]; registered {
@@ -745,7 +746,7 @@ func TestBypassPermissionsLeavesTheApprovalBridgeOutOfTheCommand(t *testing.T) {
 	t.Chdir(workDirPath)
 
 	run := runSessionCommandForTest(t, "alpha-commons",
-		chatModeOptionName, bypassPermissionsOptionName, approvalSocketOptionName, "/tmp/kyu/r2.sock")
+		chatModeOptionName, bypassPermissionsOptionName, appSocketOptionName, "/tmp/kyu/r2.sock")
 
 	if slices.Contains(run.document.Command, "--permission-prompt-tool") {
 		t.Errorf("명령 = %q, bypass 세션에는 승인 플래그가 없기를 기대", run.document.Command)
@@ -755,7 +756,7 @@ func TestBypassPermissionsLeavesTheApprovalBridgeOutOfTheCommand(t *testing.T) {
 	}
 }
 
-func TestAChatWithoutAnApprovalSocketCarriesNoPermissionFlag(t *testing.T) {
+func TestAChatWithoutAnAppSocketCarriesNoPermissionFlag(t *testing.T) {
 	// 소켓을 열지 않은 앱(뒤처진 판)이 그대로 챗을 연다. 그 세션에 승인 플래그만 붙이면 관문이
 	// 열릴 때마다 물어볼 상대가 없어 모든 호출이 거절된다.
 	workDirPath := makeWorkDir(t)
@@ -769,7 +770,7 @@ func TestAChatWithoutAnApprovalSocketCarriesNoPermissionFlag(t *testing.T) {
 	}
 }
 
-func TestTheApprovalSocketIsOnlyForChatSessions(t *testing.T) {
+func TestTheAppSocketIsOnlyForChatSessions(t *testing.T) {
 	// PTY 세션에는 브리지를 물릴 자리가 없다 — 그 화면의 승인은 claude 가 직접 그린다.
 	// 조용히 무시하면 앱은 카드가 뜰 것이라 믿고, 그 믿음은 관문이 열릴 때까지 드러나지 않는다.
 	workDirPath := makeWorkDir(t)
@@ -778,7 +779,7 @@ func TestTheApprovalSocketIsOnlyForChatSessions(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	err := AnswerSessionCommand(&out, &errOut,
-		[]string{"alpha-commons", approvalSocketOptionName, "/tmp/kyu/r3.sock", machineJSONOptionName})
+		[]string{"alpha-commons", appSocketOptionName, "/tmp/kyu/r3.sock", machineJSONOptionName})
 
 	if err == nil {
 		t.Fatalf("--chat 없이 소켓을 준 요청이 성공했습니다: %s", out.String())
@@ -788,15 +789,34 @@ func TestTheApprovalSocketIsOnlyForChatSessions(t *testing.T) {
 	}
 }
 
-func TestTheApprovalSocketOptionNeedsAPath(t *testing.T) {
+func TestTheAppSocketOptionNeedsAPath(t *testing.T) {
 	// 값 없이 온 옵션을 조용히 넘기면 그다음 인자가 소켓 경로로 읽힌다 — 레포 이름이 소켓이 된다.
 	workDirPath := makeWorkDir(t)
 	t.Chdir(workDirPath)
 
 	var out, errOut bytes.Buffer
-	err := AnswerSessionCommand(&out, &errOut, []string{chatModeOptionName, approvalSocketOptionName, machineJSONOptionName})
+	err := AnswerSessionCommand(&out, &errOut, []string{chatModeOptionName, appSocketOptionName, machineJSONOptionName})
 
 	if err == nil {
 		t.Fatalf("경로 없이 준 소켓 옵션이 성공했습니다: %s", out.String())
+	}
+}
+
+func TestTheOldApprovalSocketNameIsRefusedOutLoud(t *testing.T) {
+	// 이름이 담는 것이 승인 하나가 아니게 되어 --app-socket 으로 옮겼다(session-tree-design.md 6.4).
+	// 옛 이름을 별칭으로 받아 두면 뒤처진 앱이 "되는 줄" 알고 계속 쓰다가 3 단계의 요청이 오는 날
+	// 엇갈린다 — 모르는 옵션으로 거절해 앱과 엔진의 판이 어긋났다는 것을 그 자리에서 보인다.
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	var out, errOut bytes.Buffer
+	err := AnswerSessionCommand(&out, &errOut,
+		[]string{chatModeOptionName, "--approval-socket", "/tmp/kyu/old.sock", machineJSONOptionName})
+
+	if err == nil {
+		t.Fatalf("옛 이름으로 준 소켓 옵션이 성공했습니다: %s", out.String())
+	}
+	if !strings.Contains(err.Error(), "--approval-socket") {
+		t.Errorf("오류 = %q, 모르는 옵션의 이름을 알리기를 기대", err)
 	}
 }

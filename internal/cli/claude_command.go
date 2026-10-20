@@ -220,7 +220,7 @@ func mcpSetupFor(servers map[string]any, engineExecutablePath string, request se
 	var setup sessionMcpSetup
 
 	if request.wantsPermissionBridge() {
-		servers[permissionAskServerName] = engineMcpServer(engineExecutablePath, mcpAskSubcommandName, request.approvalSocketPath)
+		servers[permissionAskServerName] = engineMcpServer(engineExecutablePath, mcpAskSubcommandName, appSocketOptionName, request.appSocketPath)
 		setup.permissionPromptTool = permissionPromptToolName()
 	}
 
@@ -244,11 +244,11 @@ func mcpSetupFor(servers map[string]any, engineExecutablePath string, request se
 // 이 엔진이 자기 경로를 적는다(설계 문서 5.2). 설정 파일에 적어두는 길이었다면 바이너리를 옮기거나
 // 올리는 순간 그 파일이 조용히 낡는데, 답하는 쪽이 os.Executable() 로 자기를 적으면 앱이
 // KYU_BINARY_PATH 로 어느 엔진을 겨누든 그 엔진이 등록된다.
-func engineMcpServer(engineExecutablePath, subcommandName, subcommandArgument string) map[string]any {
+func engineMcpServer(engineExecutablePath, subcommandName string, subcommandArgs ...string) map[string]any {
 	return map[string]any{
 		"type":    "stdio",
 		"command": engineExecutablePath,
-		"args":    []string{mcpCommandName, subcommandName, subcommandArgument},
+		"args":    append([]string{mcpCommandName, subcommandName}, subcommandArgs...),
 	}
 }
 

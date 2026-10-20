@@ -52,7 +52,7 @@ import kotlinx.serialization.json.put
 class PermissionRequestSocket private constructor(
     private val listeningChannel: ServerSocketChannel,
 
-    /** 이 소켓의 자리. 엔진에게 `--approval-socket` 으로 넘어가는 값이 이것이다. */
+    /** 이 소켓의 자리. 엔진에게 `--app-socket` 으로 넘어가는 값이 이것이다. */
     override val socketPath: Path,
 ) : PermissionRequestChannel {
 

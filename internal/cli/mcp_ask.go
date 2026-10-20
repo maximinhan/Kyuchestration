@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/maximinhan/Kyuchestration/internal/mcpserver"
@@ -260,24 +259,33 @@ func permissionToolResult(decision permissionDecisionDocument) (mcpserver.ToolRe
 func parseAskArgs(args []string) (string, error) {
 	var socketPath string
 
-	for _, arg := range args {
+	for argIndex := 0; argIndex < len(args); argIndex++ {
+		arg := args[argIndex]
+
 		switch {
-		// 모르는 옵션을 경로로 흘려보내면 그 서버는 있지도 않은 소켓에 묻는 서버가 되고,
-		// 모든 승인이 거절된다.
-		case strings.HasPrefix(arg, "-"):
-			return "", fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, mcpUsageText)
+		case arg == appSocketOptionName && socketPath != "":
+			return "", fmt.Errorf("mcp %s 는 %s 를 한 번만 받습니다\n\n%s",
+				mcpAskSubcommandName, appSocketOptionName, mcpUsageText)
 
-		case socketPath != "":
-			return "", fmt.Errorf("mcp %s 는 소켓 경로 하나만 받습니다 (인자 %d 개를 받음)\n\n%s",
-				mcpAskSubcommandName, len(args), mcpUsageText)
+		case arg == appSocketOptionName:
+			path, err := appSocketPathAfter(args, argIndex, mcpUsageText)
+			if err != nil {
+				return "", err
+			}
+			socketPath = path
+			argIndex++
 
+		// 모르는 옵션이나 자리 인자를 경로로 흘려보내면 그 서버는 있지도 않은 소켓에 묻는 서버가
+		// 되고, 모든 승인이 거절된다. 자리 인자로 경로를 받던 앞 판과 섞이지 않게 하는 자리이기도 하다.
 		default:
-			socketPath = arg
+			return "", fmt.Errorf("mcp %s 가 모르는 인자입니다: %s — 소켓 경로는 %s 로 줍니다\n\n%s",
+				mcpAskSubcommandName, arg, appSocketOptionName, mcpUsageText)
 		}
 	}
 
 	if socketPath == "" {
-		return "", fmt.Errorf("mcp %s 는 어느 소켓에 물을지 알아야 합니다\n\n%s", mcpAskSubcommandName, mcpUsageText)
+		return "", fmt.Errorf("mcp %s 는 어느 소켓에 물을지 알아야 합니다 (%s <경로>)\n\n%s",
+			mcpAskSubcommandName, appSocketOptionName, mcpUsageText)
 	}
 	return socketPath, nil
 }

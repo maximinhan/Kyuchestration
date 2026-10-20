@@ -111,7 +111,7 @@ class RealClaudeChatSessionIntegrationTest {
                 conversationChoice = SessionConversationChoice.ContinueRecordedConversation,
                 // 이 검증은 승인 브리지를 재지 않는다 — 그것은 5 단계의 검증이
                 // (RealClaudePermissionBridgeIntegrationTest) 자기 소켓을 열고 잰다.
-                approvalSocketPath = null,
+                appSocketPath = null,
             )
 
         return planSessionEntry(

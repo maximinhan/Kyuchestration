@@ -19,7 +19,7 @@ class KyuCliSessionCommandSourceTest {
     fun `레포 세션은 그 이름을 인자로 받는다`() {
         val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
 
-        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Repo("proj-a"), CONTINUE, approvalSocketPath = null)
+        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Repo("proj-a"), CONTINUE, appSocketPath = null)
 
         // --chat 이 늘 붙는다. 앱이 여는 화면이 챗 하나뿐이라 고를 것이 없고, 그것이 어떤
         // 플래그로 옮겨지는지는 엔진만 안다(설계 원칙 11). 이 낱말이 빠지면 앱은 파이프에
@@ -31,7 +31,7 @@ class KyuCliSessionCommandSourceTest {
     fun `메인 세션은 레포 이름 자리를 비운다`() {
         val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
 
-        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, approvalSocketPath = null)
+        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
 
         // 메인 세션은 이름이 아니라 인자가 없는 것으로 가리킨다. main 을 붙이면 main 이라는
         // 이름의 레포를 찾다가 "없는 레포입니다" 로 끝난다.
@@ -42,7 +42,7 @@ class KyuCliSessionCommandSourceTest {
     fun `묻는 자리는 워크디렉토리다`() {
         val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
 
-        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, approvalSocketPath = null)
+        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
 
         // 이 명령은 경로 인자를 받지 않는다. 자리를 주지 않으면 앱을 띄운 디렉토리가 워크디렉토리로 읽힌다.
         assertEquals(listOf<Path?>(WORK_DIR_PATH), runner.receivedWorkingDirectories)
@@ -55,7 +55,7 @@ class KyuCliSessionCommandSourceTest {
         }
 
         val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
-            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Repo("proj-z"), CONTINUE, approvalSocketPath = null)
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Repo("proj-z"), CONTINUE, appSocketPath = null)
         }
 
         assertEquals(1, failure.exitCode)
@@ -70,7 +70,7 @@ class KyuCliSessionCommandSourceTest {
         }
 
         val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
-            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, approvalSocketPath = null)
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
         }
 
         // 라벨(main)로 문구를 지어내면 실제로는 부를 수 없는 명령을 알려 주게 된다 —
@@ -83,7 +83,7 @@ class KyuCliSessionCommandSourceTest {
         val runner = RecordingKyuCommandRunner { throw KyuCommandFailure.ExecutableNotFound() }
 
         assertFailsWith<TerminalSessionFailure.KyuExecutableNotFound> {
-            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, approvalSocketPath = null)
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
         }
     }
 
@@ -94,7 +94,7 @@ class KyuCliSessionCommandSourceTest {
         }
 
         assertFailsWith<TerminalSessionFailure.KyuFailedToStart> {
-            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, approvalSocketPath = null)
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
         }
     }
 
@@ -106,13 +106,32 @@ class KyuCliSessionCommandSourceTest {
             WORK_DIR_PATH,
             SessionTarget.Repo("proj-a"),
             SessionConversationChoice.StartNewConversation,
-            approvalSocketPath = null,
+            appSocketPath = null,
         )
 
         // 앱이 기록 파일을 직접 지우지 않는다. 버리는 일은 엔진의 것이고, 앱이 하는 말은
         // 이 옵션 하나다(설계 문서 5.5.4 의 마지막 줄).
         assertEquals(
             listOf(listOf("session-command", "proj-a", "--forget-conversation", "--chat", "--json")),
+            runner.receivedArguments,
+        )
+    }
+
+    @Test
+    fun `앱이 연 소켓의 자리는 --app-socket 으로 넘어간다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
+
+        KyuCliSessionCommandSource(runner).sessionCommandFor(
+            WORK_DIR_PATH,
+            SessionTarget.Main,
+            CONTINUE,
+            appSocketPath = Path.of("/run/user/1000/kyuchestration/s1.sock"),
+        )
+
+        // 옵션 이름이 엔진과 맺은 계약이다(app_socket.go 의 appSocketOptionName). 엔진은 옛 이름
+        // --approval-socket 을 모르는 옵션으로 거절하므로, 여기가 어긋나면 챗이 하나도 열리지 않는다.
+        assertEquals(
+            listOf(listOf("session-command", "--chat", "--app-socket", "/run/user/1000/kyuchestration/s1.sock", "--json")),
             runner.receivedArguments,
         )
     }
