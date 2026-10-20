@@ -32,31 +32,50 @@ class KyuCliSessionCommandSource(
     ): SessionCommandAnswer {
         val arguments = sessionCommandArguments(target, conversationChoice, appSocketPath)
 
-        val result = try {
-            // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
-            // 실행된 디렉토리를 워크디렉토리로 읽는다(session_command.go 의 currentWorkDir).
-            kyuCommandRunner.run(arguments, workingDirectory = workDirPath)
-        } catch (failure: KyuCommandFailure) {
-            // 실행기는 "부르지 못했다" 는 사실만 던진다. 그 사실을 세션에 들어가려던 사람에게 할
-            // 말로 옮기는 것이 이 어댑터의 몫이다.
-            throw when (failure) {
-                is KyuCommandFailure.ExecutableNotFound -> TerminalSessionFailure.KyuExecutableNotFound()
-                is KyuCommandFailure.FailedToStart ->
-                    TerminalSessionFailure.KyuFailedToStart(failure.processStartFailure)
-            }
-        }
+        val standardOutput = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = target.label)
 
-        if (result.exitCode != 0) {
-            throw TerminalSessionFailure.SessionCommandRefused(
-                targetLabel = target.label,
-                exitCode = result.exitCode,
-                arguments = arguments,
-                standardError = result.standardError.trim(),
-            )
-        }
-
-        return parseKyuSessionCommandOutput(result.standardOutput)
+        return parseKyuSessionCommandOutput(standardOutput)
     }
+}
+
+/**
+ * `kyu session-command` 를 워크디렉토리에서 부르고, 답한 stdout 을 돌려준다.
+ *
+ * 사람이 연 세션과 하위 세션이 함께 쓴다. 둘 다 "부르지 못했다 · 거절했다" 를 세션에 들어가려던 쪽에게 할
+ * 말로 옮기는 일이 같다 — 다른 것은 묻는 옵션과 답을 읽는 모양뿐이다.
+ *
+ * @param targetLabel 거절 문구가 어느 세션의 것인지 말할 이름.
+ */
+internal fun runSessionCommand(
+    kyuCommandRunner: KyuCommandRunner,
+    arguments: List<String>,
+    workDirPath: Path,
+    targetLabel: String,
+): String {
+    val result = try {
+        // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
+        // 실행된 디렉토리를 워크디렉토리로 읽는다(session_command.go 의 currentWorkDir).
+        kyuCommandRunner.run(arguments, workingDirectory = workDirPath)
+    } catch (failure: KyuCommandFailure) {
+        // 실행기는 "부르지 못했다" 는 사실만 던진다. 그 사실을 세션에 들어가려던 사람에게 할
+        // 말로 옮기는 것이 이 어댑터의 몫이다.
+        throw when (failure) {
+            is KyuCommandFailure.ExecutableNotFound -> TerminalSessionFailure.KyuExecutableNotFound()
+            is KyuCommandFailure.FailedToStart ->
+                TerminalSessionFailure.KyuFailedToStart(failure.processStartFailure)
+        }
+    }
+
+    if (result.exitCode != 0) {
+        throw TerminalSessionFailure.SessionCommandRefused(
+            targetLabel = targetLabel,
+            exitCode = result.exitCode,
+            arguments = arguments,
+            standardError = result.standardError.trim(),
+        )
+    }
+
+    return result.standardOutput
 }
 
 /**
@@ -98,10 +117,10 @@ private fun sessionCommandArguments(
 }
 
 /** 앱이 이 세션을 위해 연 소켓의 자리를 넘기는 옵션(app_socket.go 의 appSocketOptionName). */
-private const val APP_SOCKET_OPTION = "--app-socket"
+internal const val APP_SOCKET_OPTION = "--app-socket"
 
 /** 파이프로 부릴 스트림 모드로 답하라는 옵션(session_command.go 의 chatModeOptionName). */
-private const val CHAT_MODE_OPTION = "--chat"
+internal const val CHAT_MODE_OPTION = "--chat"
 
 /**
  * 적혀 있는 대화를 버리고 새 대화로 답하라는 옵션(session_command.go 의 forgetConversationOptionName).
