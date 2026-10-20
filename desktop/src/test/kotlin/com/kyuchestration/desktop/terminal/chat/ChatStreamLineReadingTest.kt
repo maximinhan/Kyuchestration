@@ -440,6 +440,60 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `2_1_304 핸드백 판의 서브에이전트 보고는 그 카드를 가리키는 말로 온다`() {
+        // 사용자 설정이 실린 2.1.304 의 서브에이전트는 마지막 보고를 텍스트 블록이 아니라
+        // SubagentHandback 도구 호출의 message 로 낸다(chat-ui 3.10.2). 그것을 도구 호출로 읽으면
+        // 서브에이전트가 한 말은 안쪽 대화 어디에도 서지 않는다.
+        val events = RecordedChatStreamLines.SUBAGENT_HANDBACK_RUN_2_1_304.flatMap(::chatSessionEventsFrom)
+
+        val said = events.filterIsInstance<ChatSessionEvent.AssistantTextArrived>().single()
+        assertEquals("toolu_01CexzLEeteFpus8sbb3waLJ", said.parentToolUseId)
+        assertTrue("DELEGATE-2026" in said.text, said.text)
+        assertEquals(
+            listOf("Agent", "Read"),
+            events.filterIsInstance<ChatSessionEvent.ToolCallRequested>().map { it.toolName },
+        )
+    }
+
+    @Test
+    fun `서브에이전트 실측 원출력은 두 판 모두 모르는 줄 없이 읽는다`() {
+        // 2.1.259 와 2.1.304(핸드백 판 · 텍스트 판) 셋 다 읽어야 한다 — 앱이 claude 의 판을 고르지 않는다.
+        val runs = mapOf(
+            "2.1.259" to listOf(
+                RecordedChatStreamLines.AGENT_TOOL_USE,
+                RecordedChatStreamLines.TASK_STARTED,
+                RecordedChatStreamLines.SUBAGENT_PROMPT_ECHOED,
+                RecordedChatStreamLines.SUBAGENT_TEXT,
+                RecordedChatStreamLines.TASK_PROGRESS,
+                RecordedChatStreamLines.SUBAGENT_TOOL_USE,
+                RecordedChatStreamLines.SUBAGENT_TOOL_RESULT,
+                RecordedChatStreamLines.TASK_UPDATED,
+                RecordedChatStreamLines.TASK_NOTIFICATION,
+                RecordedChatStreamLines.AGENT_RESULT,
+            ),
+            "2.1.304 핸드백" to RecordedChatStreamLines.SUBAGENT_HANDBACK_RUN_2_1_304,
+            "2.1.304 텍스트" to RecordedChatStreamLines.SUBAGENT_TEXT_RUN_2_1_304,
+        )
+
+        runs.forEach { (version, lines) ->
+            val unrecognized = lines.flatMap(::chatSessionEventsFrom).filterIsInstance<ChatSessionEvent.Unrecognized>()
+            assertEquals(emptyList(), unrecognized, "$version 판에서 모르는 줄이 나왔다")
+        }
+    }
+
+    @Test
+    fun `메인 세션의 SubagentHandback 은 지어내지 않고 도구 호출로 둔다`() {
+        // 핸드백을 말로 읽는 근거는 그것이 서브에이전트 안쪽(parent_tool_use_id 가 채워진 줄)에서
+        // 왔다는 것이다. 메인 세션이 그 이름을 부르는 줄은 재지 못했으므로 원래 모양 그대로 둔다.
+        val handbackLine = RecordedChatStreamLines.SUBAGENT_HANDBACK_RUN_2_1_304
+            .single { "\"name\":\"SubagentHandback\"" in it }
+            .replace("\"parent_tool_use_id\":\"toolu_01CexzLEeteFpus8sbb3waLJ\"", "\"parent_tool_use_id\":null")
+
+        val requested = assertIs<ChatSessionEvent.ToolCallRequested>(onlyEventIn(handbackLine))
+        assertEquals("SubagentHandback", requested.toolName)
+    }
+
+    @Test
     fun `모르는 system subtype 도 원문째로 들고 나간다`() {
         // 아는 subtype 들(status · hook_started …)은 조용히 지나가고, 모르는 것만 원문으로 나간다.
         // 둘을 섞으면 턴마다 오는 줄이 "판이 바뀌었다" 는 신호를 덮는다.
