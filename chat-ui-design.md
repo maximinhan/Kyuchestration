@@ -374,6 +374,39 @@ app-owned 3.4 가 이 안을 통째로 기각했다. 그 문서의 제목이 이
 
 **되돌아온 사용자 메시지에도 `parent_tool_use_id` 가 실린다.** 서브에이전트가 받은 프롬프트가 그 모양으로 오는데, 그것을 보지 않으면 사용자가 쓴 적 없는 말풍선이 메인 전사에 서고 그 줄이 턴의 시작으로 읽힌다(3.14 의 규칙이 여기서 한 겹 더 필요하다).
 
+#### 3.10.2 2.1.304 가 바꾼 것 — 서브에이전트의 보고가 `SubagentHandback` 으로 온다 (2026-10-20 · `claude` 2.1.304)
+
+실 `claude` 통합 검증(`RealClaudeDelegationIntegrationTest`)이 *"서브에이전트가 한 말이 오지 않았다"* 로 깨져서 다시 쟀다. 카드와 안쪽 도구 호출은 서는데 안쪽 말풍선이 없었다. 같은 프롬프트(서브에이전트에게 `NOTE.md` 의 지문을 읽혀 보고하게 함)를 네 가지로 돌렸다.
+
+| 실행 | 사용자 설정 | 모델 | `--forward-subagent-text` | 서브에이전트의 마지막 말이 오는 모양 |
+|---|---|---|---|---|
+| 엔진 명령 그대로(`kyu session-command --chat`) | 실림 | `claude-fable-5-1` | 있음 | **`assistant`(parent) `tool_use: SubagentHandback{message}`** — 안쪽 텍스트 블록 0 개 |
+| 같은 명령에서 플래그만 뺌 | 실림 | `claude-fable-5-1` | 없음 | 위와 같다(핸드백 호출은 도구 호출이라 플래그와 무관하게 온다) |
+| `--setting-sources ""` | 걷어냄 | `claude-opus-5-5` | 있음 | `assistant`(parent) `text` — 2.1.259 와 같다 |
+| `--setting-sources ""` | 걷어냄 | `claude-opus-5-5` | 없음 | 안쪽 텍스트 없음 — 2.1.259 와 같다(3.10.1) |
+| `--setting-sources "" --model claude-fable-5-1` | 걷어냄 | `claude-fable-5-1` | 있음 | `assistant`(parent) `text` — **모델이 아니라 사용자 설정이 핸드백 모드를 켠다** |
+
+어느 설정 항목이 켜는지는 가르지 못했다. 앱은 사용자 설정을 걷어내지 않고 `claude` 를 띄우므로 **앱이 받는 것은 핸드백 쪽**이다. 핸드백 판의 서브에이전트는 시스템 안내(*"Only a SubagentHandback call reaches your caller as your result; plain text you write at the end is not delivered."*)를 받고 보고를 그 호출로만 낸다.
+
+2.1.259(3.10.1 · A.11)와 비교한 차이는 이렇다.
+
+| 자리 | 2.1.259 | 2.1.304 핸드백 판 |
+|---|---|---|
+| 서브에이전트의 마지막 말 | 안쪽 `assistant` `text` 블록 | 안쪽 `assistant` `tool_use: SubagentHandback`, 보고는 `input.message` |
+| 그 호출의 결과 | — | 안쪽 `user` `tool_result` `{"success":true,"message":"Report delivered to your caller."}` |
+| `system/task_notification` | `summary` 가 보고 | `summary` 는 *"This agent's report was delivered to you as a message…"*, **`handback: "send"` · `handback_report.text`** 가 새로 실린다 |
+| 바깥 `Agent` 결과 | 보고 텍스트 + 통계 블록 | 보고를 되풀이하지 않는다(위 안내 문장 + 통계). 곁가지에 `handback`·`handbackReport` |
+| 바깥 결과 뒤 | — | **`user` 줄 하나 더**: `content` 가 문자열 `<agent-message from="…">…</agent-message>`, `isSynthetic: true` · `origin.kind: "peer"` · `parent_tool_use_id: null` |
+| 공통으로 새로 실린 키 | — | 안쪽 줄의 `agent_id`, `task_*` 의 `run_id`, `user` 줄의 `tool_result_meta` |
+
+설정을 걷어낸 2.1.304 에서도 바깥 결과 텍스트는 `[Subagent hand-back] …` 머리말로 감싸여 온다 — 어댑터는 그 텍스트를 해석하지 않으므로 영향이 없다.
+
+**어댑터가 바꾼 것**(`ChatStreamLineReading.kt`):
+
+- 안쪽 줄(`parent_tool_use_id` 가 있는 줄)의 `SubagentHandback` 호출을 **그 에이전트가 한 말**(`AssistantTextArrived`)로 읽는다. 도구 카드로 두면 카드 안에 그 에이전트의 말이 한 줄도 서지 않고, 보고가 JSON 인자 칸에 묻힌다. 메인 세션의 같은 이름 호출은 재지 못했으므로 도구 호출 그대로 둔다. 그 호출의 결과는 이을 카드가 없어 접기 규칙이 조용히 버린다.
+- `origin.kind: "peer"` 인 `user` 줄은 아는 줄로 흘려보낸다. 사용자가 한 말이 아니고, 그 보고는 이미 카드 안에 서 있다.
+- 녹화 자료에 2.1.304 두 벌(핸드백 판 · 설정을 걷어낸 텍스트 판)을 더했다. 2.1.259 줄은 그대로 두고 둘 다 읽히는지 검증한다.
+
 **설계에 미치는 영향**: 오케스트레이션 위임은 MCP 도구라서 (가) 쪽이다 — v1 의 위임 카드는 "도는 중" 과 경과 시간까지만 보인다. 그 이상을 원하면 진행을 **승인 브리지가 이미 쓰는 앱 소켓으로** 밀어야 한다. 5.7 이 그 판단이다.
 
 ### 3.11 큐잉 — 도는 중에 보낸 메시지
@@ -1477,6 +1510,8 @@ system/task_progress       description="Reading README.txt"  last_tool_name="Rea
 assistant  (parent=toolu_0144EDWk…)   tool_use: Read
 user       (parent=toolu_0144EDWk…)   tool_result   ← tool_use_result 곁가지가 없다
 assistant  (parent=toolu_0144EDWk…)   thinking / text              ← 같은 플래그에 달려 있다
+                                                                   (2.1.304 + 사용자 설정이면 이 자리에
+                                                                    tool_use: SubagentHandback 이 온다 — 3.10.2)
 system/task_updated        {"patch":{"status":"completed","end_time":…}}   ← tool_use_id 가 없다
 system/task_notification   tool_use_id=…  status=completed  output_file=…/tasks/aadb20bff6e5d47e9.output
                            summary=…  usage={total_tokens:10849, tool_uses:1, duration_ms:5008}

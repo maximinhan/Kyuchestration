@@ -141,18 +141,43 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
                 parentToolUseId = parentToolUseId,
             )
 
-            "tool_use" -> ChatSessionEvent.ToolCallRequested(
-                toolUseId = block.stringOrNull("id").orEmpty(),
-                toolName = block.stringOrNull("name").orEmpty(),
-                input = block.objectOrNull("input") ?: JsonObject(emptyMap()),
-                parentToolUseId = parentToolUseId,
-                requestedAt = arrivedAt,
-            )
+            "tool_use" -> subagentHandbackOrNull(block, parentToolUseId)
+                ?: ChatSessionEvent.ToolCallRequested(
+                    toolUseId = block.stringOrNull("id").orEmpty(),
+                    toolName = block.stringOrNull("name").orEmpty(),
+                    input = block.objectOrNull("input") ?: JsonObject(emptyMap()),
+                    parentToolUseId = parentToolUseId,
+                    requestedAt = arrivedAt,
+                )
 
             else -> ChatSessionEvent.Unrecognized(streamLine)
         }
     }
 }
+
+/**
+ * 서브에이전트가 `SubagentHandback` 으로 낸 마지막 보고를 그 에이전트가 한 말로 읽는다(3.10.2).
+ *
+ * **사용자 설정이 실린 2.1.304 에서는 서브에이전트의 마지막 말이 텍스트 블록으로 오지 않는다.** 보고가
+ * 이 도구 호출의 `input.message` 에 실리고, 그 줄 말고는 안쪽 대화 어디에도 없다 — 바깥 결과도 그
+ * 보고를 되풀이하지 않는다. 도구 호출로 두면 카드 안에는 그 에이전트가 한 말이 한 줄도 서지 않고,
+ * 같은 보고가 JSON 인자 칸에 묻힌다.
+ *
+ * 말로 읽는 것은 **안쪽 줄일 때만**이다. 메인 세션이 이 이름을 부르는 줄은 재지 못했다. 이 호출의
+ * 도구 결과("Report delivered…")는 이을 카드가 없으므로 접기 규칙이 조용히 버린다.
+ */
+private fun subagentHandbackOrNull(block: JsonObject, parentToolUseId: String?): ChatSessionEvent? {
+    if (parentToolUseId == null || block.stringOrNull("name") != SUBAGENT_HANDBACK_TOOL_NAME) {
+        return null
+    }
+    val report = block.objectOrNull("input")?.stringOrNull("message") ?: return null
+
+    return ChatSessionEvent.AssistantTextArrived(text = report, parentToolUseId = parentToolUseId)
+}
+
+private const val SUBAGENT_HANDBACK_TOOL_NAME = "SubagentHandback"
+
+private const val PEER_MESSAGE_ORIGIN = "peer"
 
 /**
  * `user` 갈래 — 되돌려받은 사용자 메시지와 도구 결과가 같은 모양으로 온다(3.14 · 3.4).
@@ -162,6 +187,13 @@ private fun assistantEventsIn(line: JsonObject, streamLine: String): List<ChatSe
  * 어느 하나에만 붙일 근거가 스트림에 없다.
  */
 private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
+    // 서브에이전트의 핸드백 보고가 메인 모델에게 배달된 자리다(`<agent-message …>`, 3.10.2). 사용자가
+    // 한 말이 아니므로 말풍선으로 세우면 안 되고, 그 보고는 이미 카드 안에 서 있다
+    // (subagentHandbackOrNull). 잰 것은 핸드백이 낸 `peer` 하나다.
+    if (line.objectOrNull("origin")?.stringOrNull("kind") == PEER_MESSAGE_ORIGIN) {
+        return emptyList()
+    }
+
     val typedResult = line["tool_use_result"]
     val parentToolUseId = line.stringOrNull("parent_tool_use_id")
     val arrivedAt = line.instantOrNull("timestamp")

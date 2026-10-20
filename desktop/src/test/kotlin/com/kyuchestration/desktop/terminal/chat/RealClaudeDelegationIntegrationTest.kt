@@ -92,9 +92,13 @@ class RealClaudeDelegationIntegrationTest {
             subagentCard.nestedEntries.any { it is ChatEntry.ToolCall },
             "안쪽 도구 호출이 카드 밖에 있습니다: ${subagentCard.nestedEntries.map { it::class.simpleName }}",
         )
+        // 그 말은 판과 설정에 따라 두 길로 온다 — 안쪽 텍스트 블록(--forward-subagent-text)이거나,
+        // 사용자 설정이 실린 2.1.304 처럼 SubagentHandback 호출의 보고다(chat-ui 3.10.2).
         assertTrue(
             subagentCard.nestedEntries.any { it is ChatEntry.AssistantSaid },
-            "서브에이전트가 한 말이 오지 않았습니다 — 엔진이 --forward-subagent-text 를 붙이는지 보세요",
+            "서브에이전트가 한 말이 오지 않았습니다 — 엔진이 --forward-subagent-text 를 붙이는지, " +
+                "그 판의 서브에이전트가 보고를 어느 모양으로 내는지(SubagentHandback 등) 보세요: " +
+                "${subagentCard.nestedEntries.map { (it as? ChatEntry.ToolCall)?.toolName ?: it::class.simpleName }}",
         )
         assertTrue(
             conversation.entries.none { it is ChatEntry.ToolCall && it.toolUseId in subagentCard.nestedIds() },
