@@ -11,8 +11,18 @@ import kotlinx.serialization.json.put
  */
 sealed interface SessionTreeEvent {
 
-    /** 이 사건이 어느 하위의 것인가. 기다림의 `ids` 가 이 값으로 사건을 고른다. */
-    val childId: String
+    /**
+     * 하위 하나에게 일어난 사건. 상위가 기다리지 않으면 쌓였다가 다음 기다림이나 stdin 으로 간다.
+     *
+     * 사람이 상위에게 말한 것([UserSpoke])과 갈래를 나눈 이유가 그 "쌓인다" 다 — 사람의 말은 기다림이 열려 있을
+     * 때만 사건이고, 그 밖에는 stdin 으로 간 말 그 자체라 쌓아 둘 것이 없다. 쌓이는 목록이 이 타입만 받으므로
+     * 사람의 말이 나중의 기다림을 깨우는 자리가 생기지 않는다.
+     */
+    sealed interface OfChild : SessionTreeEvent {
+
+        /** 이 사건이 어느 하위의 것인가. 기다림의 `ids` 가 이 값으로 사건을 고른다. */
+        val childId: String
+    }
 
     /**
      * 하위의 턴 하나가 끝났다.
@@ -28,7 +38,7 @@ sealed interface SessionTreeEvent {
         val triggeredBy: TurnTrigger,
         val costUsd: Double,
         val durationMillis: Long,
-    ) : SessionTreeEvent
+    ) : OfChild
 
     /**
      * 하위가 끝났다.
@@ -39,7 +49,15 @@ sealed interface SessionTreeEvent {
         override val childId: String,
         val reason: ChildEndReason,
         val exitCode: Int?,
-    ) : SessionTreeEvent
+    ) : OfChild
+
+    /**
+     * 사람이 기다리는 상위에게 말했다(6.5 의 셋째 줄).
+     *
+     * **내용이 없다.** 사람의 말은 stdin 으로 가서 도구 결과 바로 뒤에 같은 턴으로 붙는다(3.1). 내용을 여기에도 담으면
+     * 같은 말이 두 번 보인다(6.6).
+     */
+    data object UserSpoke : SessionTreeEvent
 }
 
 /** 하위의 턴을 누가 열었는가(6.6 의 `triggeredBy`). */
@@ -67,6 +85,8 @@ internal fun JsonObjectBuilder.putSessionTreeEvent(event: SessionTreeEvent) {
             put("reason", event.reason.wireName)
             event.exitCode?.let { put("exitCode", it) }
         }
+
+        is SessionTreeEvent.UserSpoke -> put("type", "user_spoke")
     }
 }
 
@@ -89,7 +109,7 @@ internal fun turnTriggerOf(entriesBeforeTurnEnded: List<ChatEntry>): TurnTrigger
  * 접두가 모델이 출처를 읽는 재료다(3.5 (가)). 상위의 규약 문구가 `[하위 세션 <id> · …]` 로 시작하는 말을 하위의 것으로
  * 읽는다(session_command_child.go 의 parentSessionConventionText) — 그 모양을 바꾸면 규약 문구도 함께 바꾼다.
  */
-internal fun parentNoticeTextFor(event: SessionTreeEvent): String = when (event) {
+internal fun parentNoticeTextFor(event: SessionTreeEvent.OfChild): String = when (event) {
     is SessionTreeEvent.TurnCompleted -> {
         val labels = listOfNotNull(
             "턴 끝",

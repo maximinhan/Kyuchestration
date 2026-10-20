@@ -202,7 +202,7 @@ class ChatSessionStateHolder(
      * 사건이 곧바로 가지 못하는 때가 있다 — 상위가 다른 하위만 고른 기다림 중이거나, 기다림 사이에서 답을 쓰는 중이다.
      * 그 사건들은 여기 남아 다음 기다림이 한 번에 받는다(6.6 의 "쌓인 사건을 다 담는다").
      */
-    private val undeliveredParentEvents = mutableListOf<SessionTreeEvent>()
+    private val undeliveredParentEvents = mutableListOf<SessionTreeEvent.OfChild>()
 
     /**
      * 그 세션의 챗을 연다. 이미 보유 중이면 다시 띄우지 않고 화면만 그쪽으로 옮긴다.
@@ -264,16 +264,26 @@ class ChatSessionStateHolder(
      */
     fun sendUserMessage(text: String) {
         val target = mutableState.value.target ?: return
-        sendUserMessageTo(target, text, UserMessageSender.Human)
+        val written = sendUserMessageTo(target, text, UserMessageSender.Human) ?: return
+
+        // 사람이 기다리는 상위에게 말했다(session-tree 6.5 의 셋째 줄). 기다림을 user_spoke 로 깨운다 — stdin 에 쓴
+        // 뒤에 깨우는 것이 순서다. 그래야 그 말이 도구 결과 바로 뒤에 같은 턴으로 붙는다(3.1).
+        if (target == SessionTarget.Main && pendingAwait != null) {
+            coroutineScope.launch {
+                written.join()
+                wakeParentAwaitBecauseHumanSpoke()
+            }
+        }
     }
 
     /**
      * 그 세션에 말 한 줄을 보낸다. 사람의 입력창과, 상위가 하위에게 하는 말(첫 프롬프트 · `send_to_session`)이 함께 쓴다.
      *
      * @param sender 그 말의 주인. 되돌아온 말풍선을 누구의 것으로 그릴지를 uuid 와 함께 적어 둔다(session-tree 6.12).
+     * @return stdin 에 쓰는 일. 그 세션을 보유하고 있지 않으면 null.
      */
-    private fun sendUserMessageTo(target: SessionTarget, text: String, sender: UserMessageSender) {
-        val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
+    private fun sendUserMessageTo(target: SessionTarget, text: String, sender: UserMessageSender): Job? {
+        val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return null
 
         // uuid 를 보내기 전에 정한다. 쓰기는 다른 스레드에서 나중에 일어나는데, 되돌아온 말을 알아볼
         // 열쇠는 대기 목록에 지금 서야 한다(session-tree 3.5 (다)).
@@ -283,7 +293,7 @@ class ChatSessionStateHolder(
         // 되돌아올 때다(3.11) — 그때까지 이 말은 "기다리는 말" 이다.
         updateConversation(target) { it.copy(pendingUserMessages = it.pendingUserMessages + message) }
 
-        writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(message) }
+        return writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(message) }
     }
 
     /**
@@ -321,7 +331,7 @@ class ChatSessionStateHolder(
         held: HeldChatSession,
         failureNotice: String,
         write: suspend OpenedChatSession.() -> Unit,
-    ) {
+    ): Job =
         coroutineScope.launch {
             try {
                 withContext(standardInputDispatcher) { held.session.write() }
@@ -339,7 +349,6 @@ class ChatSessionStateHolder(
                 }
             }
         }
-    }
 
     /**
      * 보고 있는 챗을 끝낸다. 보유한 다른 세션은 그대로 둔다.
@@ -834,8 +843,20 @@ class ChatSessionStateHolder(
         await.asked.answerWith(SessionTreeAnswer.Awaited(events, stillRunning))
     }
 
+    /**
+     * 사람이 기다리는 상위에게 말했다. 그 기다림이 고른 하위의 쌓인 사건과 함께 [SessionTreeEvent.UserSpoke] 로 답한다.
+     *
+     * stdin 에 쓰는 사이 다른 사건이 먼저 기다림을 닫았으면 할 일이 없다 — 사람의 말은 그 도구 결과 뒤에 붙는다.
+     */
+    private fun wakeParentAwaitBecauseHumanSpoke() {
+        val await = pendingAwait ?: return
+        val deliverable = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
+        undeliveredParentEvents.removeAll(deliverable)
+        answerPendingAwait(deliverable + SessionTreeEvent.UserSpoke)
+    }
+
     /** 상위에게 전할 일이 생겼다. 원칙 18 의 길로 보낸다([deliverParentEvents]). */
-    private fun tellParent(event: SessionTreeEvent) {
+    private fun tellParent(event: SessionTreeEvent.OfChild) {
         undeliveredParentEvents += event
         deliverParentEvents()
     }

@@ -104,6 +104,15 @@ class SessionTreeAnswerLineTest {
     }
 
     @Test
+    fun `사람이 상위에게 말한 사건에는 내용이 없다`() {
+        // 사람의 말은 stdin 으로 가서 도구 결과 바로 뒤에 붙는다(3.1). 여기에도 담으면 같은 말이 두 번 보인다(6.6).
+        assertEquals(
+            """{"events":[{"type":"user_spoke"}],"stillRunning":[]}""",
+            answerLineFor(SessionTreeAnswer.Awaited(events = listOf(SessionTreeEvent.UserSpoke), stillRunning = emptyList())),
+        )
+    }
+
+    @Test
     fun `아무 일 없이 시간이 지난 기다림은 빈 사건으로 답한다`() {
         assertEquals(
             """{"events":[],"stillRunning":["child-1"]}""",

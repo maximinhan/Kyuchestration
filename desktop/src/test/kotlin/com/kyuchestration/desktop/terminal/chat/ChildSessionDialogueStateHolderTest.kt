@@ -330,6 +330,77 @@ class ChildSessionDialogueStateHolderTest {
         assertEquals("[하위 세션 child-1 · 턴 끝 · 실패 · 사람이 시킨 턴] 못 했다", bed.main.sentMessages.single().text)
     }
 
+    @Test
+    fun `사람이 기다리는 상위에게 말하면 user_spoke 로 곧바로 깨우고 그 말은 stdin 으로 간다`() = runTest {
+        // 6.5 의 셋째 줄 — 사람의 말은 stdin 으로 가서 도구 결과 바로 뒤에 같은 턴으로 붙는다(3.1). 기다림이 그 말에도
+        // 일찍 끝나야 사람이 하위를 기다리는 상위와 대화할 수 있다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        bed.holder.sendUserMessage("그만 기다리고 지금까지 상황을 말해")
+        runCurrent()
+
+        assertEquals(
+            SessionTreeAnswer.Awaited(events = listOf(SessionTreeEvent.UserSpoke), stillRunning = listOf("child-1")),
+            asked.answerSoFar(),
+        )
+        val said = bed.main.sentMessages.last()
+        assertEquals("그만 기다리고 지금까지 상황을 말해", said.text)
+        assertEquals(UserMessageSender.Human, said.sender)
+    }
+
+    @Test
+    fun `user_spoke 로 깨울 때 쌓여 있던 그 기다림의 사건도 함께 담는다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 2)
+        startMainTurn(bed)
+        val asked = bed.mainChannel.askSessionTree(awaitRequest(childIds = listOf("child-2")))
+        runCurrent()
+        bed.child(1).finishTurnOnLastSentMessage(result = "고르지 않은 하위의 일")
+        runCurrent()
+
+        bed.holder.sendUserMessage("어떻게 돼 가?")
+        runCurrent()
+
+        assertEquals(listOf<SessionTreeEvent>(SessionTreeEvent.UserSpoke), assertIs<SessionTreeAnswer.Awaited>(asked.answerSoFar()).events)
+        // 고르지 않은 하위의 사건은 여전히 남아 다음 기다림이 받는다.
+        val next = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        assertEquals(
+            listOf("고르지 않은 하위의 일"),
+            assertIs<SessionTreeAnswer.Awaited>(next.answerSoFar()).events.map { assertIs<SessionTreeEvent.TurnCompleted>(it).result },
+        )
+    }
+
+    @Test
+    fun `기다리지 않는 상위에게 사람이 말한 것은 사건으로 남지 않는다`() = runTest {
+        // 사람의 말은 stdin 으로 이미 갔다. 나중의 기다림이 그것으로 깨면 상위는 이미 읽은 말 때문에 일찍 깬다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+
+        bed.holder.sendUserMessage("참고로 테스트 DB 는 5433 이야")
+        runCurrent()
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        assertNull(asked.answerSoFar())
+    }
+
+    @Test
+    fun `사람이 하위에게 말하면 기다리는 상위는 깨지 않는다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        bed.holder.showChildSession("child-1")
+
+        bed.holder.sendUserMessage("하위에게 직접")
+        runCurrent()
+
+        assertNull(asked.answerSoFar())
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }
