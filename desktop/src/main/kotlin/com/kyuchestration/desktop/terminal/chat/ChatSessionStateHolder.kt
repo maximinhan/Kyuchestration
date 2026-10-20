@@ -314,6 +314,10 @@ class ChatSessionStateHolder(
         // 그러려면 앱이 이미 듣고 있어야 한다. 열지 못하면 세션도 열지 않는다 — 승인이 필요한
         // 일이 나올 때까지 멀쩡해 보이다가 그때부터 아무것도 못 하는 세션이 되는 것보다,
         // 화면이 먼저 말하는 편이 낫다(원칙 12 · TerminalSessionFailure.ApprovalSocketFailedToOpen).
+        //
+        // 챗 세션이면 조건 없이 연다. 이 소켓은 승인만의 것이 아니라 그 세션의 앱 소켓이고
+        // (session-tree-design.md 6.4), 그 소켓에 승인 서버를 붙일지는 엔진이 bypass 로 정한다 —
+        // 앱이 그 조건을 따라 소켓을 열고 말고를 가르면 같은 지식이 두 곳에 놓인다.
         val permissionChannel = permissionRequestChannelOpener.openPermissionRequestChannel()
 
         try {
@@ -321,7 +325,7 @@ class ChatSessionStateHolder(
                 workDirPath = workDirPath,
                 target = target,
                 conversationChoice = conversationChoice,
-                approvalSocketPath = permissionChannel.socketPath,
+                appSocketPath = permissionChannel.socketPath,
             )
 
             val plan = planSessionEntry(

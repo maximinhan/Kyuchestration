@@ -192,13 +192,13 @@ class RealClaudePermissionBridgeIntegrationTest {
         return PermissionRequestSocket.openAt(socketDirectory.resolve(newPermissionSocketFileName()))
     }
 
-    private fun sessionPlanAskingThrough(approvalSocketPath: Path): SessionEntryPlan {
+    private fun sessionPlanAskingThrough(appSocketPath: Path): SessionEntryPlan {
         val answer = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
             .sessionCommandFor(
                 workDirPath = temporaryDirectory,
                 target = SessionTarget.Main,
                 conversationChoice = SessionConversationChoice.ContinueRecordedConversation,
-                approvalSocketPath = approvalSocketPath,
+                appSocketPath = appSocketPath,
             )
 
         val plan = planSessionEntry(

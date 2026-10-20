@@ -44,14 +44,6 @@ const resumeFlagName = "--resume"
 // 없는 쪽이 그것이어서다. 앱에서 이 옵션이 붙는 순간 앞 대화를 가리키던 기록은 사라진다.
 const forgetConversationOptionName = "--forget-conversation"
 
-// approvalSocketOptionName 은 앱이 연 승인 소켓의 경로를 넘기는 옵션이다(chat-ui-design.md 5.2).
-//
-// **경로를 앱이 정한다.** 소켓을 여는 것은 앱이고 — 결정을 내리는 쪽이므로 — 엔진은 그 경로를
-// argv 의 어느 자리에 넣을지만 안다. 엔진이 경로를 스스로 정하면 앱이 그것을 되읽어야 하고,
-// 그러면 답 문서에 필드가 하나 늘면서 "엔진이 정하고 앱이 따른다" 와 "앱이 정하고 엔진이 옮긴다"
-// 가 한 표면에 섞인다.
-const approvalSocketOptionName = "--approval-socket"
-
 const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] --json
 
   kyu session-command --json            메인 세션이 실행할 것 (명령·cwd·더할 환경)
@@ -62,7 +54,7 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
   --chat                 파이프로 부릴 스트림 모드로 답한다 — 앱의 챗 화면이 쓴다
-  --approval-socket <경로>  승인 물음을 나를 앱 소켓의 자리 — --chat 과 함께만 쓴다
+  --app-socket <경로>    앱이 이 세션을 위해 연 소켓의 자리 — --chat 과 함께만 쓴다
 
 이 명령은 --json 으로만 답한다 — 답이 사람이 읽고 무엇을 할 것이 아니라 앱이 실행할 것이다.
 세션을 실제로 여는 것은 이 답을 받은 데스크톱 앱이다.`
@@ -118,9 +110,9 @@ type sessionCommandRequest struct {
 	// 실리는 플래그뿐이고, 앱은 자기가 --chat 을 붙여 물었다는 것을 이미 안다.
 	chatMode bool
 
-	// approvalSocketPath 는 앱이 승인 물음을 받으려고 열어 둔 소켓의 자리다. 비어 있으면
-	// 이 세션에는 승인 브리지가 없다.
-	approvalSocketPath string
+	// appSocketPath 는 앱이 이 세션을 위해 열어 둔 소켓의 자리다(app_socket.go). 비어 있으면
+	// 이 세션의 자식들에게는 앱에게 물을 길이 없다.
+	appSocketPath string
 }
 
 // wantsPermissionBridge 는 이 세션에 승인 브리지를 붙일지다.
@@ -129,7 +121,7 @@ type sessionCommandRequest struct {
 // 불리지 않는 것을 보였다 — 등록해봐야 아무도 부르지 않는 프로세스가 하나 뜰 뿐이고, 붙이지
 // 않는 편이 "bypass 로 열었는데 승인 카드가 뜰지도 모른다" 는 물음 자체를 없앤다(설계 5.2).
 func (request sessionCommandRequest) wantsPermissionBridge() bool {
-	return request.approvalSocketPath != "" && !request.bypassPermissions
+	return request.appSocketPath != "" && !request.bypassPermissions
 }
 
 // parseSessionCommandArgs 는 인자를 세션 요청으로 옮긴다.
@@ -146,15 +138,13 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 		case arg == machineJSONOptionName:
 			asJSON = true
 
-		case arg == approvalSocketOptionName:
-			argIndex++
-			// 뒤에 아무것도 없거나 다음 옵션이 온 것을 경로로 읽지 않는다. 읽어버리면 그 세션은
-			// "--json" 이라는 소켓에 묻는 세션이 되고, 그 실패는 관문이 처음 열릴 때까지 숨는다.
-			if argIndex >= len(args) || strings.HasPrefix(args[argIndex], "-") {
-				return sessionCommandRequest{}, fmt.Errorf("%s 뒤에는 앱이 연 소켓의 경로가 와야 합니다\n\n%s",
-					approvalSocketOptionName, sessionCommandUsageText)
+		case arg == appSocketOptionName:
+			socketPath, err := appSocketPathAfter(args, argIndex, sessionCommandUsageText)
+			if err != nil {
+				return sessionCommandRequest{}, err
 			}
-			request.approvalSocketPath = args[argIndex]
+			request.appSocketPath = socketPath
+			argIndex++
 
 		case arg == repoClaudeMdOptionName:
 			request.loadRepoClaudeMd = true
@@ -190,9 +180,9 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 
 	// PTY 세션에는 브리지를 물릴 자리가 없다 — 그 화면의 승인은 claude 가 직접 그린다(설계 7.1).
 	// 조용히 무시하면 앱은 승인 카드가 뜰 것이라 믿고, 그 믿음은 관문이 열릴 때까지 드러나지 않는다.
-	if request.approvalSocketPath != "" && !request.chatMode {
+	if request.appSocketPath != "" && !request.chatMode {
 		return sessionCommandRequest{}, fmt.Errorf("%s 는 %s 와 함께만 쓸 수 있습니다 — PTY 세션의 승인은 claude 가 그 화면에 직접 그립니다",
-			approvalSocketOptionName, chatModeOptionName)
+			appSocketOptionName, chatModeOptionName)
 	}
 
 	if !asJSON {

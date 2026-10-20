@@ -27,9 +27,9 @@ class KyuCliSessionCommandSource(
         workDirPath: Path,
         target: SessionTarget,
         conversationChoice: SessionConversationChoice,
-        approvalSocketPath: Path?,
+        appSocketPath: Path?,
     ): SessionCommandAnswer {
-        val arguments = sessionCommandArguments(target, conversationChoice, approvalSocketPath)
+        val arguments = sessionCommandArguments(target, conversationChoice, appSocketPath)
 
         val result = try {
             // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
@@ -68,7 +68,7 @@ class KyuCliSessionCommandSource(
 private fun sessionCommandArguments(
     target: SessionTarget,
     conversationChoice: SessionConversationChoice,
-    approvalSocketPath: Path?,
+    appSocketPath: Path?,
 ): List<String> {
     val repoArgument = when (target) {
         is SessionTarget.Main -> emptyList()
@@ -82,22 +82,22 @@ private fun sessionCommandArguments(
         SessionConversationChoice.StartNewConversation -> listOf(FORGET_CONVERSATION_OPTION)
     }
 
-    // 승인 소켓은 앱이 정하고 엔진이 옮긴다(설계 5.2). 엔진은 이 경로를 --mcp-config 의 ask 서버
-    // 인자와 --permission-prompt-tool 로 옮기는데, 그 조립을 앱이 알기 시작하면 지식이 두 곳에
-    // 놓인다 — 앱이 아는 것은 "우리가 이 자리에서 듣고 있다" 하나다(원칙 11).
-    val approvalSocketOption = approvalSocketPath
-        ?.let { listOf(APPROVAL_SOCKET_OPTION, it.toString()) }
+    // 앱 소켓은 앱이 정하고 엔진이 옮긴다(chat-ui-design.md 5.2). 엔진은 이 경로를 --mcp-config 의
+    // 서버 인자들로 옮기는데(session-tree-design.md 6.4), 어느 서버에 실을지를 앱이 알기 시작하면
+    // 지식이 두 곳에 놓인다 — 앱이 아는 것은 "우리가 이 자리에서 듣고 있다" 하나다(원칙 11).
+    val appSocketOption = appSocketPath
+        ?.let { listOf(APP_SOCKET_OPTION, it.toString()) }
         .orEmpty()
 
     // 챗 모드는 이 한 낱말로 청한다. 그것이 어떤 플래그로 옮겨지는지는 엔진만 안다
     // (claude_command.go 의 chatModeFlags) — 앱이 그 목록을 알기 시작하면 조립 지식이 두 곳에
     // 놓인다(설계 원칙 11).
     return listOf("session-command") + repoArgument + conversationOption + CHAT_MODE_OPTION +
-        approvalSocketOption + "--json"
+        appSocketOption + "--json"
 }
 
-/** 앱이 연 승인 소켓의 자리를 넘기는 옵션(session_command.go 의 approvalSocketOptionName). */
-private const val APPROVAL_SOCKET_OPTION = "--approval-socket"
+/** 앱이 이 세션을 위해 연 소켓의 자리를 넘기는 옵션(app_socket.go 의 appSocketOptionName). */
+private const val APP_SOCKET_OPTION = "--app-socket"
 
 /** 파이프로 부릴 스트림 모드로 답하라는 옵션(session_command.go 의 chatModeOptionName). */
 private const val CHAT_MODE_OPTION = "--chat"
