@@ -165,7 +165,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
      * 프로브 서버 하나만 붙인 `claude` 를 답한다(설계 부록 B 의 구동기와 같은 플래그).
      *
      * `--setting-sources ""` · `--strict-mcp-config` 는 시험을 돌리는 사람의 전역 설정과 다른 MCP
-     * 서버가 섞이지 않게 한다. 승인 소켓은 쓰지 않는다 — 프로브 도구는 `--allowedTools` 로 허용했다.
+     * 서버가 섞이지 않게 한다. 앱 소켓은 쓰지 않는다 — 프로브 도구는 `--allowedTools` 로 허용했다.
      */
     private class ProbeSessionCommandSource(private val probeServer: Path) : SessionCommandSource {
 
@@ -173,7 +173,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
             workDirPath: Path,
             target: SessionTarget,
             conversationChoice: SessionConversationChoice,
-            approvalSocketPath: Path?,
+            appSocketPath: Path?,
         ): SessionCommandAnswer {
             val mcpConfig = buildJsonObject {
                 putJsonObject("mcpServers") {
