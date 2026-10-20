@@ -3,7 +3,13 @@ package com.kyuchestration.desktop.terminal.chat
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.terminal.AssignedChildSession
+import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
+import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
+import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
+import com.kyuchestration.desktop.terminal.ChildSessionGate
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
+import com.kyuchestration.desktop.terminal.RecordedChildSessionIds
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -23,6 +29,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -50,6 +58,10 @@ import kotlinx.coroutines.withContext
 class ChatSessionStateHolder(
     private val sessionCommandSource: SessionCommandSource,
     private val chatSessionOpener: ChatSessionOpener,
+    /** 하위 세션이 무엇을 띄울지 답하는 자리(`--child`). 관문의 물음도 여기서 온다(6.9). */
+    private val childSessionCommandSource: ChildSessionCommandSource,
+    /** 기록에 이미 적힌 하위 이름들. 다음 이름을 그 뒤에서 센다(nextChildSessionId). */
+    private val recordedChildSessionIds: RecordedChildSessionIds,
     private val claudeAuthToken: () -> String?,
     private val coroutineScope: CoroutineScope,
     private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
@@ -139,6 +151,26 @@ class ChatSessionStateHolder(
      */
     private var latestSessionEntryRequestId = 0L
 
+    private val mutableSessionTree = MutableStateFlow(SessionTree())
+
+    /**
+     * 메인 아래 하위 세션들(session-tree-design.md 6.11). 패널이 이것으로 하위 줄을 그리고, `list_sessions` 가
+     * 이것을 그대로 답한다 — 화면과 상위가 같은 사실을 본다(원칙 16).
+     */
+    val sessionTree: StateFlow<SessionTree> = mutableSessionTree.asStateFlow()
+
+    /** 이번 실행에서 하위에게 준 이름의 수. 기록과 함께 다음 이름을 정한다(nextChildSessionId). */
+    private var lastAssignedChildOrdinal = 0
+
+    /**
+     * spawn 을 한 번에 하나씩 돌린다.
+     *
+     * 살아 있는 하위의 자리를 엔진에게 넘기는 것과 띄운 하위를 트리에 세우는 것 사이가 비면, 같은 자리를
+     * 고른 두 spawn 이 서로를 모른 채 둘 다 엔진의 cwd 규칙(6.8)을 지난다. 상위의 도구 호출은 어차피 차례로
+     * 돌아서(3.3) 이 줄이 실제로 늦추는 것은 없다.
+     */
+    private val childSpawning = Mutex()
+
     /**
      * 그 세션의 챗을 연다. 이미 보유 중이면 다시 띄우지 않고 화면만 그쪽으로 옮긴다.
      *
@@ -193,6 +225,11 @@ class ChatSessionStateHolder(
      */
     fun sendUserMessage(text: String) {
         val target = mutableState.value.target ?: return
+        sendUserMessageTo(target, text)
+    }
+
+    /** 그 세션에 말 한 줄을 보낸다. 사람의 입력창과 상위가 하위에게 넣는 첫 프롬프트가 함께 쓴다. */
+    private fun sendUserMessageTo(target: SessionTarget, text: String) {
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
 
         // uuid 를 보내기 전에 정한다. 쓰기는 다른 스레드에서 나중에 일어나는데, 되돌아온 말을 알아볼
@@ -343,6 +380,7 @@ class ChatSessionStateHolder(
                 resumedConversationId = answer.resumedConversationId,
                 workingDirectory = plan.workingDirectory,
                 appSocketChannel = appSocketChannel,
+                workDirPath = workDirPath,
             )
         } catch (failure: Throwable) {
             // 세션이 서지 못했으면 그 소켓에 물어올 자식도 없다. 닫지 않으면 아무도 붙지 않는
@@ -353,14 +391,23 @@ class ChatSessionStateHolder(
     }
 
     private fun holdAndShow(held: HeldChatSession) {
-        val conversation = ChatConversation(
+        hold(held)
+        conversations[held.target]?.let { mutableState.value = ChatScreenState.ChatOnScreen(held.target, it) }
+    }
+
+    /**
+     * 세션을 보유하고 그 세션이 말하는 것을 받기 시작한다. 화면은 옮기지 않는다.
+     *
+     * 하위 세션이 이 길로만 선다 — 상위가 띄운 하위가 사람이 보던 화면을 빼앗으면, 사람은 자기가 무엇을
+     * 하다 이 화면에 왔는지 잃는다.
+     */
+    private fun hold(held: HeldChatSession) {
+        conversations[held.target] = ChatConversation(
             target = held.target,
             workingDirectory = held.workingDirectory,
             resumedConversationId = held.resumedConversationId,
         )
-        conversations[held.target] = conversation
         mutableHeldSessions.value = mutableHeldSessions.value + held
-        mutableState.value = ChatScreenState.ChatOnScreen(held.target, conversation)
 
         // 이어간 대화의 ID 자체는 남기지 않는다. 뒤에 오는 종료를 읽는 근거는 "이어갔는가" 이고,
         // ID 는 그 판단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다.
@@ -382,6 +429,207 @@ class ChatSessionStateHolder(
         coroutineScope.launch {
             held.appSocketChannel.permissionRequests.collect { asked -> receivePermissionRequest(held.target, asked) }
         }
+
+        // 세션 트리 요청도 같은 소켓으로 온다(6.4). 메인이 아닌 세션의 소켓에도 듣는다 — 듣지 않으면 그
+        // 요청은 거절도 받지 못한 채 서 있고, 그 세션의 claude 는 도구 답을 기다리며 멎는다.
+        coroutineScope.launch {
+            held.appSocketChannel.sessionTreeRequests.collect { asked -> receiveSessionTreeRequest(held, asked) }
+        }
+    }
+
+    /**
+     * 세션 트리 요청 하나가 올라왔다.
+     *
+     * **앱이 소켓마다 역할을 안다**(6.3). 하위를 띄우고 거두는 것은 메인뿐이다 — 레포 세션과 하위 세션의
+     * 소켓으로 온 요청은 거절한다. 하위의 kyu 서버에는 이 도구들이 없으니 정상이면 오지 않는 요청이지만,
+     * 소켓은 줄을 받을 뿐 누가 보냈는지 고르지 않는다.
+     */
+    private fun receiveSessionTreeRequest(requester: HeldChatSession, asked: AskedSessionTreeRequest) {
+        if (requester.target != SessionTarget.Main) {
+            asked.answerWith(
+                SessionTreeAnswer.Refused(
+                    "하위 세션은 메인 세션만 띄우고 거둡니다 — 이 세션(${requester.target.label})의 요청은 받지 않습니다",
+                ),
+            )
+            return
+        }
+
+        when (val request = asked.request) {
+            is SessionTreeRequest.SpawnSession ->
+                coroutineScope.launch { asked.answerWith(spawnChildSession(requester, request)) }
+
+            is SessionTreeRequest.EndSession ->
+                coroutineScope.launch { asked.answerWith(endChildSessionForParent(request.childId)) }
+
+            is SessionTreeRequest.ListSessions ->
+                asked.answerWith(SessionTreeAnswer.Listed(mutableSessionTree.value.children))
+        }
+    }
+
+    /**
+     * 상위의 부탁대로 하위 하나를 띄우고, 첫 프롬프트를 넣은 뒤 답한다(6.2 — 하위의 턴을 기다리지 않는다).
+     *
+     * 순서가 판단이다: 이름 → 소켓 → 엔진 → 프로세스 → 트리 → 첫 프롬프트. 소켓이 엔진보다 먼저인 이유는
+     * 사람이 연 세션과 같다 — 엔진이 그 자리를 하위의 `--mcp-config` 에 싣는다.
+     */
+    private suspend fun spawnChildSession(
+        parent: HeldChatSession,
+        request: SessionTreeRequest.SpawnSession,
+    ): SessionTreeAnswer = childSpawning.withLock {
+        val recordedChildIds = try {
+            withContext(sessionEntryDispatcher) {
+                recordedChildSessionIds.childSessionIdsRecordedUnderMain(parent.workDirPath)
+            }
+        } catch (failure: IOException) {
+            return SessionTreeAnswer.Refused("대화 기록을 읽지 못해 하위의 이름을 정하지 못했습니다 (${failure.message})")
+        }
+
+        // 이름을 쓴 것으로 먼저 센다. 엔진이 거절했어도 그 이름이 기록에 적혔을 수 있다 — 같은 실행에서 다시
+        // 고르면 엔진이 "이미 적혀 있다" 로 또 거절한다.
+        val assignment = nextChildSessionId(recordedChildIds, lastAssignedChildOrdinal)
+        lastAssignedChildOrdinal = assignment.ordinal
+        val childTarget = SessionTarget.Child(assignment.childId)
+
+        val commandRequest = ChildSessionCommandRequest(
+            childId = assignment.childId,
+            requestedCwd = request.requestedCwd,
+            createDirectory = request.createDirectory,
+            title = request.title,
+            liveChildRelativeCwds = mutableSessionTree.value.liveChildRelativeCwds,
+            approvedFingerprint = null,
+        )
+
+        val opening = try {
+            withContext(sessionEntryDispatcher) { openChildSession(parent.workDirPath, childTarget, commandRequest) }
+        } catch (failure: TerminalSessionFailure) {
+            return SessionTreeAnswer.Refused(refusalReasonFor(failure))
+        }
+
+        val opened = when (opening) {
+            is ChildSessionOpening.Opened -> opening
+            is ChildSessionOpening.GateRequired -> return SessionTreeAnswer.Refused(
+                "${opening.gate.relativeCwd} 의 실행 설정(${opening.gate.executionConfigs.joinToString { it.relativePath }})을 " +
+                    "사람이 아직 승인하지 않았습니다",
+            )
+        }
+
+        // 기다리는 동안 메인이 끝났다. 원칙 17 — 상위가 없는 하위는 서지 않는다.
+        if (parent !in mutableHeldSessions.value) {
+            endSessionProcess(opened.held)
+            return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
+        }
+
+        val assigned = opened.assignedChildSession
+        hold(opened.held)
+        mutableSessionTree.value = mutableSessionTree.value.withChild(
+            ChildSessionNode(
+                childId = assigned.childId,
+                title = assigned.title,
+                relativeCwd = assigned.relativeCwd,
+                workingDirectory = opened.held.workingDirectory,
+                conversationId = assigned.conversationId,
+            ),
+        )
+        sendUserMessageTo(childTarget, PARENT_MESSAGE_PREFIX + request.prompt)
+
+        SessionTreeAnswer.Spawned(
+            childId = assigned.childId,
+            relativeCwd = assigned.relativeCwd,
+            title = assigned.title,
+            conversationId = assigned.conversationId,
+            notice = personOpenedSessionAtTheSamePlace(opened.held.workingDirectory)?.let { repoLabel ->
+                "사람이 연 레포 세션 $repoLabel 이 같은 자리에서 살아 있습니다 — 서로의 수정을 덮을 수 있으니 " +
+                    "필요하면 사람에게 물으세요"
+            },
+        )
+    }
+
+    /** 하위 하나를 엔진에게 묻고 띄운다. 띄우지 못하면 그 하위의 소켓을 닫고 실패를 그대로 던진다. */
+    private suspend fun openChildSession(
+        workDirPath: Path,
+        childTarget: SessionTarget.Child,
+        commandRequest: ChildSessionCommandRequest,
+    ): ChildSessionOpening {
+        val appSocketChannel = appSocketChannelOpener.openAppSocketChannel()
+
+        try {
+            val ready = when (
+                val answer = childSessionCommandSource.childSessionCommandFor(
+                    workDirPath,
+                    commandRequest,
+                    appSocketChannel.socketPath,
+                )
+            ) {
+                is ChildSessionCommandAnswer.Ready -> answer
+                is ChildSessionCommandAnswer.ApprovalRequired -> {
+                    // 아무것도 띄우지 않았다. 이 소켓에 물어올 자식도 없다.
+                    appSocketChannel.close()
+                    return ChildSessionOpening.GateRequired(answer.gate)
+                }
+            }
+
+            val plan = planSessionEntry(
+                sessionCommandAnswer = ready.sessionCommandAnswer,
+                baseEnvironment = baseEnvironment,
+                workDirPath = workDirPath,
+                target = childTarget,
+                claudeAuthToken = claudeAuthToken(),
+            )
+
+            val held = HeldChatSession(
+                target = childTarget,
+                session = chatSessionOpener.openChatSession(plan),
+                resumedConversationId = null,
+                workingDirectory = plan.workingDirectory,
+                appSocketChannel = appSocketChannel,
+                workDirPath = workDirPath,
+            )
+            return ChildSessionOpening.Opened(held, ready.assignedChildSession)
+        } catch (failure: Throwable) {
+            appSocketChannel.close()
+            throw failure
+        }
+    }
+
+    /** 같은 자리에서 살아 있는 사람이 연 레포 세션의 라벨. 없으면 null(6.8). */
+    private fun personOpenedSessionAtTheSamePlace(childWorkingDirectory: Path): String? =
+        mutableHeldSessions.value
+            .firstOrNull {
+                it.target is SessionTarget.Repo && it.workingDirectory.normalize() == childWorkingDirectory.normalize()
+            }
+            ?.target?.label
+
+    /** 상위가 `end_session` 으로 하위를 끝낸다(6.13). 이미 끝난 하위면 그대로 끝났다고 답한다. */
+    private suspend fun endChildSessionForParent(childId: String): SessionTreeAnswer {
+        val node = mutableSessionTree.value.child(childId)
+            ?: return SessionTreeAnswer.Refused("그런 하위 세션이 없습니다: $childId — list_sessions 로 확인하세요")
+
+        if (node.lifecycle == ChildLifecycle.Running) {
+            endChildSession(node, ChildEndReason.EndedByParent)
+        }
+        return SessionTreeAnswer.Ended(childId)
+    }
+
+    /**
+     * 살아 있는 하위 하나를 끝내고, 트리에 그 이유를 적는다.
+     *
+     * 트리를 먼저 고친다. 프로세스가 끝나며 오는 `SessionEnded` 는 이미 끝난 하위의 종료 코드만 채운다 —
+     * 순서가 뒤집히면 앱이 끝낸 하위가 스스로 끝난 것으로 적힌다.
+     */
+    private suspend fun endChildSession(node: ChildSessionNode, reason: ChildEndReason) {
+        updateChild(node.childId) {
+            it.copy(lifecycle = ChildLifecycle.Ended(reason, exitCode = null), waitingFor = ChildWaitingFor.Nothing)
+        }
+
+        val held = mutableHeldSessions.value.firstOrNull { it.target == node.target } ?: return
+        // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
+        mutableHeldSessions.value = mutableHeldSessions.value - held
+        endSessionProcess(held)
+    }
+
+    private fun updateChild(childId: String, change: (ChildSessionNode) -> ChildSessionNode) {
+        val node = mutableSessionTree.value.child(childId) ?: return
+        mutableSessionTree.value = mutableSessionTree.value.withChild(change(node))
     }
 
     /**
@@ -454,7 +702,32 @@ class ChatSessionStateHolder(
         updateConversation(target) { it.after(event) }
 
         if (event is ChatSessionEvent.SessionEnded) {
+            if (target is SessionTarget.Child) {
+                recordChildExit(target.childId, event.exitCode)
+            }
             markSessionEnded(target, event.exitCode)
+        }
+    }
+
+    /**
+     * 하위의 프로세스가 끝났다는 사실을 트리에 적는다.
+     *
+     * 살아 있던 하위면 스스로 끝난 것이다 — 0 이면 끝났고, 아니면 죽었다. 앱이 이미 끝낸 하위면 이유는 그대로
+     * 두고 종료 코드만 채운다.
+     */
+    private fun recordChildExit(childId: String, exitCode: Int) {
+        updateChild(childId) { node ->
+            when (val lifecycle = node.lifecycle) {
+                is ChildLifecycle.Running -> node.copy(
+                    lifecycle = ChildLifecycle.Ended(
+                        reason = if (exitCode == 0) ChildEndReason.Exited else ChildEndReason.Crashed,
+                        exitCode = exitCode,
+                    ),
+                    waitingFor = ChildWaitingFor.Nothing,
+                )
+
+                is ChildLifecycle.Ended -> node.copy(lifecycle = lifecycle.copy(exitCode = lifecycle.exitCode ?: exitCode))
+            }
         }
     }
 
@@ -515,6 +788,18 @@ class ChatSessionStateHolder(
         if (onScreen is ChatScreenState.ChatOnScreen && onScreen.target == target) {
             mutableState.value = ChatScreenState.ChatOnScreen(target, changed)
         }
+
+        // 하위의 대화가 바뀌면 그 하위가 기다리는 것도 바뀐다 — 패널의 표시와 list_sessions 가 이 값을 본다.
+        if (target is SessionTarget.Child) {
+            val approvalPending = askedPermissions.keys.any { it.target == target }
+            updateChild(target.childId) { node ->
+                if (node.lifecycle == ChildLifecycle.Running) {
+                    node.copy(waitingFor = childWaitingFor(changed, approvalPending))
+                } else {
+                    node
+                }
+            }
+        }
     }
 
     /**
@@ -540,6 +825,28 @@ class ChatSessionStateHolder(
         toolsAllowedForSession.remove(target)
     }
 }
+
+/** 하위 하나를 띄우려 한 결과 — 띄웠거나, 관문에 걸려 아무것도 띄우지 않았다(6.9). */
+private sealed interface ChildSessionOpening {
+
+    /** 띄웠다 — 보유할 세션과, 엔진이 배정한 사실. */
+    class Opened(val held: HeldChatSession, val assignedChildSession: AssignedChildSession) : ChildSessionOpening
+
+    class GateRequired(val gate: ChildSessionGate) : ChildSessionOpening
+}
+
+/**
+ * 하위를 띄우지 못한 이유를 상위 모델이 읽을 한 문장으로 옮긴다.
+ *
+ * 엔진의 거절이면 stderr 가 곧 이유다(cwd 규칙 — 6.8). 그 문구가 모델에게 고칠 것을 말한다.
+ */
+private fun refusalReasonFor(failure: TerminalSessionFailure): String =
+    listOfNotNull(failure.message, failure.guidance.takeIf { it.isNotBlank() }).joinToString(" — ")
+
+/**
+ * 상위가 하위에게 넣는 말의 접두(6.5). 하위의 규약 문구가 이 접두를 상위의 말로 읽는다(session_command_child.go).
+ */
+private const val PARENT_MESSAGE_PREFIX = "[상위 세션] "
 
 /** 어느 세션의 어느 도구 호출에 대한 물음인가. */
 private data class AskedPermissionKey(val target: SessionTarget, val toolUseId: String)

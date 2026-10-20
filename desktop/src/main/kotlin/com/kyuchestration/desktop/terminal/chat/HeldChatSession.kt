@@ -31,4 +31,7 @@ data class HeldChatSession(
      * 끝날 때 함께 닫힌다 — 열어 둔 채로 두면 아무도 붙지 않는 소켓이 런타임 디렉토리에 쌓인다.
      */
     val appSocketChannel: AppSocketChannel,
+
+    /** 이 세션을 연 워크디렉토리. 메인이 하위를 띄울 때 엔진에게 묻는 자리이자 기록이 있는 자리다. */
+    val workDirPath: Path,
 )
