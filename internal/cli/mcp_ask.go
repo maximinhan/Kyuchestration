@@ -1,13 +1,10 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"runtime/debug"
-	"time"
 
 	"github.com/maximinhan/Kyuchestration/internal/mcpserver"
 )
@@ -45,21 +42,6 @@ const requestPermissionToolDescription = `이 도구 호출을 사람이 승인�
 
 모델에게 보이는 도구가 아니다. claude 가 --permission-prompt-tool 로 이 도구를 가리키면
 승인이 필요한 호출마다 claude 자신이 부른다.`
-
-// appAnswerReadLimit 은 앱의 답 한 줄에서 읽을 최대 바이트다.
-//
-// 앱이 고친 인자가 이 줄에 실려 온다 — Write 의 내용이 통째로 들어갈 수 있어 넉넉해야 한다.
-// 그래도 한계를 두는 이유는 소켓 너머가 앱이라는 보장이 코드에 없어서다: 끝없이 흘려보내는
-// 상대를 만나면 이 프로세스가 메모리를 다 쓸 때까지 읽는다.
-const appAnswerReadLimit = 8 << 20
-
-// appConnectTimeout 은 앱 소켓에 붙는 데까지 기다리는 시간이다.
-//
-// **답을 기다리는 시간에는 시한이 없다.** 실측 3.7 이 150 초 뒤의 답도 통과하는 것을 쟀고,
-// 상한을 우리가 정하면 그 숫자보다 오래 고민한 사용자가 이유 없이 거절당한다(설계 5.4.1).
-// 여기 있는 시한은 "붙는" 데까지만이다 — 앱이 없으면 곧바로 실패하는 자리라 이 값이 걸리는
-// 경우는 소켓 파일은 있는데 듣는 쪽이 멎어 있는 때뿐이다.
-const appConnectTimeout = 5 * time.Second
 
 // relayPermissionQuestions 는 그 소켓의 앱에게 승인을 묻는 stdio MCP 서버를 연다.
 //
@@ -201,31 +183,11 @@ func answerPermissionQuestion(socketPath string, arguments json.RawMessage) (mcp
 	}
 }
 
-// askTheApp 은 소켓 하나를 열어 물음 한 줄을 보내고 답 한 줄을 받는다.
-//
-// 물음마다 새로 연다. 연결 하나를 계속 쥐고 있으면 두 물음이 겹칠 때 어느 답이 어느 물음의
-// 것인지를 이 프로토콜 안에 새로 만들어야 하는데(요청 ID 와 그것을 맞추는 자리), 물음마다
-// 연결을 여는 한 그 짝은 연결 자체가 진다.
+// askTheApp 은 승인 물음 한 줄을 앱에게 보내고 결정 한 줄을 받는다.
 func askTheApp(socketPath string, question permissionQuestion) (appPermissionAnswer, error) {
-	connection, err := net.DialTimeout("unix", socketPath, appConnectTimeout)
+	answerLine, err := exchangeLineWithApp(socketPath, question)
 	if err != nil {
 		return appPermissionAnswer{}, err
-	}
-	defer connection.Close()
-
-	askedLine, err := json.Marshal(question)
-	if err != nil {
-		return appPermissionAnswer{}, fmt.Errorf("물음을 조립하지 못했습니다: %w", err)
-	}
-	if _, err := connection.Write(append(askedLine, '\n')); err != nil {
-		return appPermissionAnswer{}, fmt.Errorf("물음을 보내지 못했습니다: %w", err)
-	}
-
-	// 시한을 두지 않는다(appConnectTimeout 의 주석). 앱이 죽으면 소켓이 닫히면서 이 읽기가
-	// EOF 로 끝나므로, 사람이 사라진 경우와 앱이 사라진 경우는 여기서 갈린다.
-	answerLine, err := bufio.NewReader(io.LimitReader(connection, appAnswerReadLimit)).ReadBytes('\n')
-	if err != nil && len(answerLine) == 0 {
-		return appPermissionAnswer{}, fmt.Errorf("앱이 답하지 않고 연결을 닫았습니다: %w", err)
 	}
 
 	var answer appPermissionAnswer
