@@ -2,6 +2,10 @@ package com.kyuchestration.desktop.terminal.kyucli
 
 import com.kyuchestration.desktop.kyu.KyuDocumentFailure
 import com.kyuchestration.desktop.kyu.readKyuJsonDocument
+import com.kyuchestration.desktop.terminal.AssignedChildSession
+import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
+import com.kyuchestration.desktop.terminal.ChildSessionGate
+import com.kyuchestration.desktop.terminal.GatedExecutionConfig
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
@@ -26,29 +30,67 @@ private const val SUPPORTED_SCHEMA_VERSION = 1
  * 그대로 실행할 것이다. 필드를 잘못 읽으면 화면이 어긋나는 것이 아니라 엉뚱한 디렉토리에서
  * 세션이 열린다.
  */
-internal fun parseKyuSessionCommandOutput(rawJson: String): SessionCommandAnswer {
-    val document = try {
-        readKyuJsonDocument(rawJson, SUPPORTED_SCHEMA_VERSION, KyuSessionCommandDocument.serializer())
-    } catch (failure: KyuDocumentFailure) {
-        // 문서를 읽는 쪽은 사실만 던진다. 그 사실을 세션에 들어가려던 사람에게 할 말로 옮기는
-        // 것이 이 어댑터의 몫이다 — 관찰 어댑터가 같은 선에서 하는 일이다.
-        throw when (failure) {
-            is KyuDocumentFailure.UnsupportedSchemaVersion -> TerminalSessionFailure.UnsupportedSchemaVersion(
-                actualSchemaVersion = failure.actualSchemaVersion,
-                supportedSchemaVersion = failure.supportedSchemaVersion,
-            )
+internal fun parseKyuSessionCommandOutput(rawJson: String): SessionCommandAnswer =
+    readSessionCommandDocument(rawJson).asSessionCommandAnswer()
 
-            is KyuDocumentFailure.Unreadable -> TerminalSessionFailure.UnreadableKyuOutput(failure.parseFailure)
-        }
+/**
+ * `kyu session-command --chat --child … --json` 의 stdout 을 하위 세션의 답으로 옮긴다.
+ *
+ * 같은 문서에 두 필드가 더해진 모양이다(session_command_json.go). 둘 중 하나는 반드시 있다 — 둘 다 없으면
+ * 이 필드를 모르는 엔진이 사람 세션의 답을 한 것이라, 그 명령을 하위 자리에 띄우지 않고 읽지 못한 답으로 올린다.
+ */
+internal fun parseKyuChildSessionCommandOutput(rawJson: String): ChildSessionCommandAnswer {
+    val document = readSessionCommandDocument(rawJson)
+
+    document.approvalRequired?.let { gate ->
+        return ChildSessionCommandAnswer.ApprovalRequired(
+            ChildSessionGate(
+                relativeCwd = gate.cwd,
+                fingerprint = gate.fingerprint,
+                executionConfigs = gate.executionConfigs.map {
+                    GatedExecutionConfig(it.relativePath, it.absolutePath, it.content)
+                },
+            ),
+        )
     }
 
-    return SessionCommandAnswer(
-        command = document.command,
-        workingDirectory = Path.of(document.cwd),
-        environmentToAdd = document.env,
-        resumedConversationId = document.resumedConversationId,
+    val childSession = document.childSession
+        ?: throw TerminalSessionFailure.UnreadableKyuOutput(
+            IllegalStateException("하위 세션을 물었는데 답에 childSession 도 approvalRequired 도 없습니다"),
+        )
+
+    return ChildSessionCommandAnswer.Ready(
+        sessionCommandAnswer = document.asSessionCommandAnswer(),
+        assignedChildSession = AssignedChildSession(
+            childId = childSession.id,
+            relativeCwd = childSession.cwd,
+            title = childSession.title,
+            conversationId = childSession.conversationId,
+        ),
     )
 }
+
+private fun readSessionCommandDocument(rawJson: String): KyuSessionCommandDocument = try {
+    readKyuJsonDocument(rawJson, SUPPORTED_SCHEMA_VERSION, KyuSessionCommandDocument.serializer())
+} catch (failure: KyuDocumentFailure) {
+    // 문서를 읽는 쪽은 사실만 던진다. 그 사실을 세션에 들어가려던 사람에게 할 말로 옮기는
+    // 것이 이 어댑터의 몫이다 — 관찰 어댑터가 같은 선에서 하는 일이다.
+    throw when (failure) {
+        is KyuDocumentFailure.UnsupportedSchemaVersion -> TerminalSessionFailure.UnsupportedSchemaVersion(
+            actualSchemaVersion = failure.actualSchemaVersion,
+            supportedSchemaVersion = failure.supportedSchemaVersion,
+        )
+
+        is KyuDocumentFailure.Unreadable -> TerminalSessionFailure.UnreadableKyuOutput(failure.parseFailure)
+    }
+}
+
+private fun KyuSessionCommandDocument.asSessionCommandAnswer() = SessionCommandAnswer(
+    command = command,
+    workingDirectory = Path.of(cwd),
+    environmentToAdd = env,
+    resumedConversationId = resumedConversationId,
+)
 
 @Serializable
 private data class KyuSessionCommandDocument(
@@ -65,4 +107,30 @@ private data class KyuSessionCommandDocument(
      * 처지와 같다.
      */
     val resumedConversationId: String? = null,
+    /** 하위 세션 답(`--child`)에서만 있다. 다른 답에서는 null 이거나, 이 필드를 모르는 엔진이면 아예 없다. */
+    val childSession: KyuChildSessionDocument? = null,
+    /** 하위 세션 답이 관문에 걸렸을 때만 있다(6.9). 그때 [command] 는 빈 배열이다. */
+    val approvalRequired: KyuApprovalRequiredDocument? = null,
+)
+
+@Serializable
+private data class KyuChildSessionDocument(
+    val id: String,
+    val cwd: String,
+    val title: String,
+    val conversationId: String,
+)
+
+@Serializable
+private data class KyuApprovalRequiredDocument(
+    val cwd: String,
+    val fingerprint: String,
+    val executionConfigs: List<KyuExecutionConfigDocument>,
+)
+
+@Serializable
+private data class KyuExecutionConfigDocument(
+    val relativePath: String,
+    val absolutePath: String,
+    val content: String,
 )

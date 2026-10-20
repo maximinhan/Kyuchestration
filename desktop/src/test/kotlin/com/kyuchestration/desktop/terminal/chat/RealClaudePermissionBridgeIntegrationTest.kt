@@ -134,7 +134,7 @@ class RealClaudePermissionBridgeIntegrationTest {
         val askedPermissions = mutableListOf<PermissionRequest>()
         collectInto(received, session)
         launch {
-            socket.requests.collect { asked ->
+            socket.permissionRequests.collect { asked ->
                 askedPermissions += asked.request
                 asked.answerWith(decide(asked.request.input))
             }
@@ -183,13 +183,13 @@ class RealClaudePermissionBridgeIntegrationTest {
         }
     }
 
-    private fun openApprovalSocketOrSkip(): PermissionRequestSocket {
+    private fun openApprovalSocketOrSkip(): AppSocket {
         if (System.getenv(OPT_IN_VARIABLE) != "1") {
             abort<Unit>("$OPT_IN_VARIABLE=1 이 아니라 건너뜁니다 — 이 검증은 진짜 claude 를 부릅니다")
         }
         requireClaudeIsInstalled()
 
-        return PermissionRequestSocket.openAt(socketDirectory.resolve(newPermissionSocketFileName()))
+        return AppSocket.openAt(socketDirectory.resolve(newAppSocketFileName()))
     }
 
     private fun sessionPlanAskingThrough(appSocketPath: Path): SessionEntryPlan {

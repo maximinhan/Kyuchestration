@@ -65,6 +65,8 @@ internal fun ChatEntryView(
     sessionWorkingDirectory: Path?,
     /** 승인 카드의 버튼이 눌린 자리. 도구 호출 하나와 사용자가 고른 것을 함께 올린다. */
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    /** spawn 카드의 "열기" — 그 하위의 챗을 가운데에 세운다(session-tree 6.12). */
+    onOpenChildSessionRequested: (String) -> Unit,
 ) {
     when (entry) {
         // 중단 안내가 사용자 메시지와 같은 모양으로 온다(3.8). 가르는 자리가 여기다 —
@@ -77,13 +79,16 @@ internal fun ChatEntryView(
         // (ChatEntry.SubagentRun) — 그 이름은 판마다 달라진다.
         is ChatEntry.ToolCall -> when {
             entry.subagentRun != null ->
-                SubagentCard(entry, entry.subagentRun, sessionWorkingDirectory, onPermissionChoiceMade)
+                SubagentCard(entry, entry.subagentRun, sessionWorkingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
 
             // 위임은 도구 이름으로 갈린다. 서브에이전트와 달리 이 이름은 우리 엔진이 정하는
             // 것이라(claude_command.go), 판이 바뀌어도 우리가 바꾸지 않는 한 그대로다.
             entry.toolName == RUN_IN_REPO_TOOL_NAME -> DelegationCard(entry)
 
-            else -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
+            // 하위 세션 띄우기도 우리 엔진이 정한 이름이다(mcp_session_tree.go).
+            entry.toolName == SPAWN_SESSION_TOOL_NAME -> SpawnSessionCard(entry, onOpenChildSessionRequested)
+
+            else -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
         }
 
         is ChatEntry.PermissionAsked ->
@@ -177,6 +182,7 @@ private fun ToolCallCard(
     entry: ChatEntry.ToolCall,
     sessionWorkingDirectory: Path?,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    onOpenChildSessionRequested: (String) -> Unit,
 ) {
     // 글자가 흐르는 동안 대화가 프레임마다 새로 나므로, 곁가지를 그때마다 다시 파면 보이는 카드
     // 전부가 패치를 새로 만든다. 이 값을 정하는 것은 셋뿐이라 그 셋을 열쇠로 든다.
@@ -206,7 +212,7 @@ private fun ToolCallCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     entry.nestedEntries.forEach {
-                        ChatEntryView(it, sessionWorkingDirectory, onPermissionChoiceMade)
+                        ChatEntryView(it, sessionWorkingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
                     }
                 }
             }

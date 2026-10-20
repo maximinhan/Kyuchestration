@@ -3,6 +3,8 @@ package com.kyuchestration.desktop.terminal.chat
 import com.kyuchestration.desktop.kyu.realKyuCommandRunnerOrSkip
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.coordrecord.CoordConversationRecordChildSessionIds
+import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import java.util.concurrent.Executors
 import kotlin.io.path.createTempDirectory
@@ -161,6 +163,8 @@ class RealClaudeChatConversationIntegrationTest {
         return ChatSessionStateHolder(
             sessionCommandSource = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip()),
             chatSessionOpener = ProcessChatSessionOpener(),
+            childSessionCommandSource = KyuCliChildSessionCommandSource(realKyuCommandRunnerOrSkip()),
+            recordedChildSessionIds = CoordConversationRecordChildSessionIds(),
             // 이 시험을 돌리는 사람의 claude 는 이미 로그인돼 있다. 앱이 맡아 둔 토큰을 싣는
             // 자리는 여기가 아니라 SessionEntryPlanTest 가 본다.
             claudeAuthToken = { null },

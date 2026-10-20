@@ -41,13 +41,13 @@ import kotlinx.serialization.json.put
  *
  * **시험 함수마다 `: Unit` 을 적어 둔다** — ProcessChatSessionTest 의 머리말이 적어둔 이유 그대로다.
  */
-class PermissionRequestSocketTest {
+class AppSocketTest {
 
     // 이름을 짧게 둔다. AF_UNIX 경로는 107 바이트가 한계라(실측 3.7), 시험 이름이 그대로 들어가는
     // 디렉토리를 쓰면 시험이 재려는 것과 무관한 이유로 소켓이 열리지 않는다.
     private val socketDirectory = createTempDirectory("kyu-sock")
 
-    private val openedSockets = mutableListOf<PermissionRequestSocket>()
+    private val openedSockets = mutableListOf<AppSocket>()
 
     @AfterTest
     fun 열어_둔_소켓과_임시_디렉토리를_치운다() {
@@ -60,7 +60,7 @@ class PermissionRequestSocketTest {
         val socket = openSocket()
 
         val answering = async {
-            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.requests.first() }
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
             assertEquals("Bash", asked.request.toolName)
             assertEquals("toolu_01", asked.request.toolUseId)
             assertEquals("echo ORIGINAL", asked.request.input["command"]?.jsonPrimitive?.content)
@@ -86,7 +86,7 @@ class PermissionRequestSocketTest {
         val socket = openSocket()
 
         val answering = async {
-            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.requests.first() }
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
             asked.answerWith(PermissionDecision.Deny(reason = "이 파일은 손대지 마세요"))
         }
 
@@ -110,7 +110,7 @@ class PermissionRequestSocketTest {
         val firstAsking = async(Dispatchers.IO) { askOverTheSocket(socket.socketPath, question("toolu_first")) }
         val secondAsking = async(Dispatchers.IO) { askOverTheSocket(socket.socketPath, question("toolu_second")) }
 
-        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.requests.take(2).toList() }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.take(2).toList() }
 
         asked.first { it.request.toolUseId == "toolu_second" }
             .answerWith(PermissionDecision.Deny(reason = "둘째"))
@@ -131,7 +131,7 @@ class PermissionRequestSocketTest {
 
         assertEquals("deny", answer.getValue("decision"))
         assertNull(
-            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.requests.first() },
+            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.permissionRequests.first() },
             "읽을 수 없는 줄이 승인 카드가 되었습니다",
         )
     }
@@ -142,7 +142,7 @@ class PermissionRequestSocketTest {
         val socket = openSocket()
 
         val answering = async {
-            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.requests.first() }
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
             assertEquals("toolu_kind", asked.request.toolUseId)
             asked.answerWith(PermissionDecision.Deny(reason = "kind 를 보고 받았다"))
         }
@@ -159,20 +159,20 @@ class PermissionRequestSocketTest {
 
     @Test
     fun `모르는 kind 의 요청은 error 로 거절하고 화면에는 올리지 않는다`(): Unit = runBlocking {
-        // 세션 트리 요청(spawn · await · ask_parent)은 3·4 단계가 채운다(session-tree-design.md 6.4).
-        // 그 전에 그런 줄이 오면 승인 카드로 오해하지 않고, 답하지 않아 상대를 영영 세워 두지도 않는다 —
-        // 이 앱이 그 요청을 모른다는 것을 그 줄의 답으로 말한다.
+        // await · send · ask_parent 는 4b 가 채운다(session-tree-design.md 7 절). 그 전에 그런 줄이 오면 승인
+        // 카드로 오해하지 않고, 답하지 않아 상대를 영영 세워 두지도 않는다 — 이 앱이 그 요청을 모른다는 것을
+        // 그 줄의 답으로 말한다.
         val socket = openSocket()
 
         val answer = askOverTheSocket(
             socket.socketPath,
-            """{"kind":"spawn","prompt":"proj-a 테스트를 고쳐 줘","cwd":"proj-a"}""",
+            """{"kind":"await","ids":null,"waitSeconds":1800}""",
         )
 
-        assertTrue(answer.getValue("error").contains("spawn"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
+        assertTrue(answer.getValue("error").contains("await"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
         assertFalse("decision" in answer, "모르는 요청에 승인 결정으로 답했습니다: $answer")
         assertNull(
-            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.requests.first() },
+            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.permissionRequests.first() },
             "모르는 kind 의 줄이 승인 카드가 되었습니다",
         )
     }
@@ -193,7 +193,7 @@ class PermissionRequestSocketTest {
                 connection.reader().readLine()
             }
         }
-        withTimeout(TEST_TIMEOUT_MILLIS) { socket.requests.first() }
+        withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
 
         socket.close()
 
@@ -209,8 +209,98 @@ class PermissionRequestSocketTest {
         assertEquals("rw-------", PosixFilePermissions.toString(socket.socketPath.getPosixFilePermissions()))
     }
 
-    private fun openSocket(): PermissionRequestSocket =
-        PermissionRequestSocket.openAt(socketDirectory.resolve(newPermissionSocketFileName()))
+    @Test
+    fun `spawn 요청을 세션 트리 요청으로 올리고 앱의 답을 그대로 되돌린다`(): Unit = runBlocking {
+        // 엔진의 spawnSessionRequest 모양 그대로다(mcp_session_tree.go) — 생략한 선택 인자는 null 로 온다.
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            assertEquals(
+                SessionTreeRequest.SpawnSession(
+                    prompt = "proj-a 테스트를 고쳐 줘",
+                    requestedCwd = "proj-a",
+                    createDirectory = false,
+                    title = null,
+                ),
+                asked.request,
+            )
+            asked.answerWith(
+                SessionTreeAnswer.Spawned(
+                    childId = "child-1",
+                    relativeCwd = "proj-a",
+                    title = "proj-a",
+                    conversationId = "5e0c",
+                    notice = null,
+                ),
+            )
+        }
+
+        val answer = askOverTheSocket(
+            socket.socketPath,
+            """{"kind":"spawn","prompt":"proj-a 테스트를 고쳐 줘","cwd":"proj-a","createDirectory":false,"title":null}""",
+        )
+        answering.await()
+
+        // 6.2 의 spawn_session 답 모양이다. 엔진은 이 줄을 모델에게 그대로 옮긴다.
+        assertEquals(
+            mapOf(
+                "id" to "child-1",
+                "cwd" to "proj-a",
+                "title" to "proj-a",
+                "conversationId" to "5e0c",
+                "state" to "running",
+            ),
+            answer,
+        )
+        assertNull(
+            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.permissionRequests.first() },
+            "spawn 요청이 승인 카드가 되었습니다",
+        )
+    }
+
+    @Test
+    fun `end 와 list 요청도 세션 트리 요청으로 올라간다`(): Unit = runBlocking {
+        val socket = openSocket()
+
+        // 요청 하나가 연결 하나이고 답을 받아야 끝나므로, 하나씩 받아 그때그때 답한다.
+        val answering = async {
+            socket.sessionTreeRequests.take(2).collect { asked ->
+                when (asked.request) {
+                    SessionTreeRequest.EndSession("child-2") -> asked.answerWith(SessionTreeAnswer.Ended("child-2"))
+                    SessionTreeRequest.ListSessions -> asked.answerWith(SessionTreeAnswer.Refused("목록을 만들지 못했습니다"))
+                    else -> asked.answerWith(SessionTreeAnswer.Refused("뜻밖의 요청: ${asked.request}"))
+                }
+            }
+        }
+
+        val endAnswer = withTimeout(TEST_TIMEOUT_MILLIS) {
+            askOverTheSocket(socket.socketPath, """{"kind":"end","id":"child-2"}""")
+        }
+        val listAnswer = withTimeout(TEST_TIMEOUT_MILLIS) { askOverTheSocket(socket.socketPath, """{"kind":"list"}""") }
+        withTimeout(TEST_TIMEOUT_MILLIS) { answering.await() }
+
+        assertEquals(mapOf("id" to "child-2", "state" to "ended"), endAnswer)
+        // 거절은 {"error"} 한 모양이다 — 엔진이 그것을 도구 오류로 올린다(relaySessionTreeRequest).
+        assertEquals(mapOf("error" to "목록을 만들지 못했습니다"), listAnswer)
+    }
+
+    @Test
+    fun `필드가 빠진 세션 트리 요청에는 승인 거부가 아니라 error 로 답한다`(): Unit = runBlocking {
+        // 이 줄은 승인 물음이 아니다 — deny 로 답하면 엔진은 그것을 앱의 답으로 읽지 못하고 판이 어긋났다고 말한다.
+        val socket = openSocket()
+
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"end"}""")
+
+        assertTrue(answer.getValue("error").contains("end"), "거절 문구에 요청 kind 가 보이기를 기대: $answer")
+        assertNull(
+            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.sessionTreeRequests.first() },
+            "읽을 수 없는 요청이 트리로 올라갔습니다",
+        )
+    }
+
+    private fun openSocket(): AppSocket =
+        AppSocket.openAt(socketDirectory.resolve(newAppSocketFileName()))
             .also { openedSockets += it }
 
     private fun question(toolUseId: String): String =

@@ -1,28 +1,16 @@
 package com.kyuchestration.desktop.terminal.chat
 
-import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
-import com.kyuchestration.desktop.terminal.SessionCommandAnswer
-import com.kyuchestration.desktop.terminal.SessionCommandSource
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
-import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
-import java.io.IOException
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -508,7 +496,6 @@ class ChatSessionStateHolderTest {
         assertEquals(ChatScreenState.NoChatOpen, holder.state.value)
     }
 
-
     @Test
     fun `엔진에게 물을 때 앱이 연 승인 소켓의 자리를 함께 준다`() = runTest {
         // 소켓을 여는 것은 앱이고(결정을 내리는 쪽이므로), 그 자리를 claude 의 어느 플래그로
@@ -520,7 +507,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         val askedSocketPath = commandSource.askedApprovalSocketPaths.single()
-        assertEquals(APPROVAL_SOCKET_DIRECTORY, askedSocketPath?.parent)
+        assertEquals(TEST_APPROVAL_SOCKET_DIRECTORY, askedSocketPath?.parent)
         // 워크디렉토리 이름이 아무리 길어도 소켓은 짧은 런타임 자리에 열린다(실측 3.7 의 107 바이트).
         assertTrue(
             askedSocketPath.toString().toByteArray().size <= 107,
@@ -530,7 +517,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `올라온 승인 물음이 전사에 카드로 선다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -546,7 +533,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `허용을 누르면 그 결정이 통로로 가고 카드에 남는다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -565,7 +552,7 @@ class ChatSessionStateHolderTest {
     @Test
     fun `인자를 고쳐서 허용하면 고친 것이 통로로 가고 카드가 그 사실을 남긴다`() = runTest {
         // 고친 대로 실제로 실행된다(실측 3.5) — 그래서 이 자리의 편집은 시늉이 아니다.
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -583,7 +570,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `거부하면 그 이유가 그대로 모델에게 갈 결정이 된다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -602,7 +589,7 @@ class ChatSessionStateHolderTest {
     fun `이 세션에서 계속 허용하면 같은 도구의 다음 물음은 묻지 않고 통과한다`() = runTest {
         // 규칙은 앱의 메모리에만 산다(설계 10 절 열린 질문 4 의 v1 결정). 그래도 통과한 것은
         // 카드로 남는다 — 규칙이 무엇을 허용했는지 볼 길이 없으면 그 규칙은 확인할 수 없다.
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -624,7 +611,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `다른 도구는 세션 규칙을 타지 않는다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -642,7 +629,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `세션을 끝내면 승인 통로도 닫고 그 세션의 규칙도 버린다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -671,7 +658,7 @@ class ChatSessionStateHolderTest {
         // 소켓이 닫히면 kyu mcp ask 는 EOF 를 거절로 읽는다(mcp_ask.go). 화면에만 버튼이 살아
         // 있으면 사용자는 누를 수 있는 척하는 카드를 보게 된다.
         val opener = RecordingChatSessionOpener()
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(opener, permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -685,34 +672,8 @@ class ChatSessionStateHolderTest {
         assertIs<PermissionAnswer.Denied>(card.answer)
     }
 
-    private fun ChatSessionStateHolder.enterSessionContinuingConversation(target: SessionTarget) =
+    private fun ChatSessionStateHolder.enterSessionContinuingConversation(target: PersonOpenedSessionTarget) =
         enterSession(WORK_DIR_PATH, target, SessionConversationChoice.ContinueRecordedConversation)
-
-    private fun TestScope.stateHolder(
-        opener: ChatSessionOpener,
-        sessionCommandSource: SessionCommandSource = RecordingSessionCommandSource(),
-        diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
-        permissionChannels: MutableList<FakePermissionRequestChannel> = mutableListOf(),
-    ) = ChatSessionStateHolder(
-        sessionCommandSource = sessionCommandSource,
-        chatSessionOpener = opener,
-        // 이 시험의 관심 밖이다. 자격 증명이 실리는지는 SessionEntryPlanTest 가 본다.
-        claudeAuthToken = { null },
-        coroutineScope = backgroundScope,
-        diagnosticLog = diagnosticLog,
-        baseEnvironment = emptyMap(),
-        permissionRequestChannelOpener = {
-            FakePermissionRequestChannel(
-                socketPath = APPROVAL_SOCKET_DIRECTORY.resolve("s${permissionChannels.size}.sock"),
-                answeringScope = backgroundScope,
-            ).also(permissionChannels::add)
-        },
-        // 앱에서는 엔진에게 묻고 프로세스를 띄우는 동안 화면이 멎지 않도록 IO 로 나간다.
-        sessionEntryDispatcher = StandardTestDispatcher(testScheduler),
-        // stdin 쓰기도 시험의 시계 위에 올린다. 앱에서는 한 번에 하나씩 도는 자리이고, 여기서도
-        // 한 줄씩 차례로 도는 것은 같다 — 다른 것은 그 차례를 시험이 진행시킨다는 것뿐이다.
-        standardInputDispatcher = StandardTestDispatcher(testScheduler),
-    )
 
     /** Write 도구의 인자 하나. 무엇을 쓰는지가 카드에서 읽혀야 하므로 경로를 담는다. */
     private fun writeInput(filePath: String): JsonObject = buildJsonObject {
@@ -744,153 +705,10 @@ class ChatSessionStateHolderTest {
         durationMillis = 1_200,
     )
 
-    private class RecordingSessionCommandSource : SessionCommandSource {
-
-        val askedTargets = mutableListOf<SessionTarget>()
-
-        /** 다음에 열 세션이 이어갈 대화. 진짜 어댑터에서는 엔진의 답이 이 값을 정한다. */
-        var resumedConversationId: String? = null
-
-        private var respond: () -> SessionCommandAnswer = {
-            SessionCommandAnswer(
-                command = ENGINE_ANSWERED_COMMAND,
-                workingDirectory = WORK_DIR_PATH,
-                environmentToAdd = emptyMap(),
-                resumedConversationId = resumedConversationId,
-            )
-        }
-
-        fun respondWith(respond: () -> SessionCommandAnswer) {
-            this.respond = respond
-        }
-
-        /** 엔진이 물음과 함께 받은 승인 소켓의 자리. 브리지 없이 물었으면 null 이다. */
-        val askedApprovalSocketPaths = mutableListOf<Path?>()
-
-        override fun sessionCommandFor(
-            workDirPath: Path,
-            target: SessionTarget,
-            conversationChoice: SessionConversationChoice,
-            appSocketPath: Path?,
-        ): SessionCommandAnswer {
-            askedTargets.add(target)
-            askedApprovalSocketPaths.add(appSocketPath)
-            return respond()
-        }
-    }
-
-    /**
-     * 승인 통로 노릇 — 시험이 물음을 직접 밀어 넣고, 앱이 되돌린 결정을 그대로 들고 있는다.
-     *
-     * 진짜 소켓을 세우지 않는다. 여기서 갈리는 것은 "물음이 카드가 되는가 · 세션 규칙이 그것을
-     * 자동으로 답하는가 · 세션이 끝날 때 통로가 닫히는가" 이고, 그 답에 소켓이 필요하지 않다 —
-     * 소켓 자체의 왕복은 진짜 소켓으로 따로 잰다(PermissionRequestSocketTest).
-     */
-    private class FakePermissionRequestChannel(
-        override val socketPath: Path,
-        /** 되돌아온 결정을 받아 적는 코루틴이 사는 자리. 진짜 통로에서는 그 자리가 소켓 연결이다. */
-        private val answeringScope: CoroutineScope,
-    ) : PermissionRequestChannel {
-
-        private val incoming = Channel<AskedPermission>(Channel.UNLIMITED)
-
-        var closeCount = 0
-            private set
-
-        override val requests: Flow<AskedPermission> = incoming.receiveAsFlow()
-
-        /** 그 도구 호출에 대한 승인을 물어 온다. 되돌아온 결정을 들여다볼 수 있는 자리를 돌려준다. */
-        fun ask(toolName: String, toolUseId: String, input: JsonObject): AskedForTest {
-            val asked = AskedPermission(PermissionRequest(toolName = toolName, input = input, toolUseId = toolUseId))
-            val answering = answeringScope.async { asked.awaitDecision() }
-            incoming.trySend(asked)
-            return AskedForTest(asked.request, answering)
-        }
-
-        override suspend fun close() {
-            closeCount++
-            incoming.close()
-        }
-    }
-
-    /** 물어 둔 승인 하나 — 그 물음과, 지금까지 되돌아온 결정. */
-    private class AskedForTest(val request: PermissionRequest, private val answering: Deferred<PermissionDecision>) {
-
-        /** 되돌아온 결정. 아직 답하지 않았으면 null 이다 — 시험이 기다리지 않고 들여다본다. */
-        fun decisionSoFar(): PermissionDecision? = if (answering.isCompleted) answering.getCompleted() else null
-    }
-
-    private class RecordingChatSessionOpener : ChatSessionOpener {
-
-        val openedPlans = mutableListOf<SessionEntryPlan>()
-        private val openedSessions = mutableListOf<FakeChatSession>()
-
-        val lastSession: FakeChatSession get() = openedSessions.last()
-
-        override suspend fun openChatSession(plan: SessionEntryPlan): OpenedChatSession {
-            openedPlans.add(plan)
-            return FakeChatSession().also(openedSessions::add)
-        }
-    }
-
-    /**
-     * `claude` 자리에 놓는 세션 하나. 무엇이 언제 오는지를 시험이 정한다.
-     *
-     * 한계 없는 채널인 것이 진짜 어댑터와 같다(ProcessChatSession) — 받는 쪽이 아직 모으기
-     * 시작하지 않았어도 [emit] 한 것이 잃히지 않는다.
-     */
-    private class FakeChatSession : OpenedChatSession {
-
-        private val incoming = Channel<ChatSessionEvent>(Channel.UNLIMITED)
-
-        val sentMessages = mutableListOf<OutgoingUserMessage>()
-        private var writesFail = false
-        var endSessionCount = 0
-            private set
-        var interruptCount = 0
-            private set
-
-        override val events: Flow<ChatSessionEvent> = incoming.receiveAsFlow()
-
-        fun emit(event: ChatSessionEvent) {
-            incoming.trySend(event)
-        }
-
-        /** 프로세스가 이미 끝나 stdin 이 닫힌 자리를 만든다. */
-        fun failWrites() {
-            writesFail = true
-        }
-
-        override suspend fun sendUserMessage(message: OutgoingUserMessage) {
-            if (writesFail) {
-                throw IOException("Stream closed")
-            }
-            sentMessages.add(message)
-        }
-
-        override suspend fun interruptCurrentTurn() {
-            interruptCount++
-        }
-
-        override suspend fun endSession() {
-            endSessionCount++
-            incoming.close()
-        }
-    }
-
     private companion object {
-        val WORK_DIR_PATH: Path = Path.of("/home/me/work/WorkDir-featureX")
+        val WORK_DIR_PATH: Path = TEST_WORK_DIR_PATH
 
-        /**
-         * 승인 소켓이 놓이는 자리 — **워크디렉토리 아래가 아니다**(설계 5.4).
-         *
-         * 짧은 런타임 디렉토리에 두는 것이 이 값의 전부다. 워크디렉토리 경로를 쓰면 사용자가 지은
-         * 긴 이름 하나가 107 바이트 한계를 넘겨 승인 기능 전체를 조용히 죽인다(실측 3.7).
-         */
-        val APPROVAL_SOCKET_DIRECTORY: Path = Path.of("/run/user/1000/kyuchestration")
-
-        /** 엔진이 답한 argv. 앱이 이 목록을 짓지 않는다는 것이 이 상수의 뜻이다. */
-        val ENGINE_ANSWERED_COMMAND = listOf("claude", "-p", "--input-format", "stream-json")
+        val ENGINE_ANSWERED_COMMAND = TEST_ENGINE_ANSWERED_COMMAND
 
         const val RESUMED_ID = "211f6974-88a8-4453-9248-a02b0d6febae"
     }

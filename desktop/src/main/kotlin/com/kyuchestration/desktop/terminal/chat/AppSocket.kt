@@ -31,11 +31,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
 /**
- * 세션 하나의 승인 물음을 받는 소켓(chat-ui-design.md 5.4).
+ * 세션 하나의 앱 소켓(chat-ui-design.md 5.4 · session-tree-design.md 6.4).
  *
- * **이 소켓이 곧 그 세션의 앱 소켓이다**(session-tree-design.md 6.4). 줄마다 `kind` 가 붙고, 지금
- * 받는 kind 는 승인 하나다. 세션 트리 요청이 두 번째 사용처로 더해질 때 — 3·4 단계 — 이 클래스의
- * 이름과 자리를 그 모양에 맞춰 다시 정한다.
+ * 승인 물음을 받으려고 열었던 소켓이고, 세션 트리 요청이 두 번째 사용처로 더해지면서 이름을 바꿨다.
+ * 줄마다 `kind` 가 붙는다 — `permission` 은 승인 카드로, `spawn` · `end` · `list` 는 세션 트리로 간다.
  *
  * **왜 소켓인가.** 승인 도구를 여는 `kyu mcp ask` 는 `claude` 의 자식이고, 결정을 내리는 사람은
  * 앱 앞에 있다. 자식에서 부모로 물어볼 통로가 있어야 하는데, TCP 루프백은 같은 머신의 다른
@@ -53,12 +52,12 @@ import kotlinx.serialization.json.put
  * 기다린다(실측 3.7 이 150 초를 쟀다). 세션이 끝나 [close] 가 불리면 그 연결들이 끊기고,
  * 그때 `kyu mcp ask` 가 EOF 를 거절로 읽는다 — 답을 받지 못한 도구가 실행되는 자리가 없다.
  */
-class PermissionRequestSocket private constructor(
+class AppSocket private constructor(
     private val listeningChannel: ServerSocketChannel,
 
     /** 이 소켓의 자리. 엔진에게 `--app-socket` 으로 넘어가는 값이 이것이다. */
     override val socketPath: Path,
-) : PermissionRequestChannel {
+) : AppSocketChannel {
 
     /**
      * 아직 아무도 답하지 않은 물음들이 쌓이는 자리.
@@ -71,7 +70,12 @@ class PermissionRequestSocket private constructor(
     /**
      * 이 세션에 올라온 승인 물음들. 받는 쪽은 하나다(상태 홀더).
      */
-    override val requests: Flow<AskedPermission> = incoming.receiveAsFlow()
+    override val permissionRequests: Flow<AskedPermission> = incoming.receiveAsFlow()
+
+    /** 아직 답하지 않은 세션 트리 요청들. 한계를 두지 않는 이유는 승인 물음과 같다. */
+    private val incomingSessionTreeRequests = Channel<AskedSessionTreeRequest>(Channel.UNLIMITED)
+
+    override val sessionTreeRequests: Flow<AskedSessionTreeRequest> = incomingSessionTreeRequests.receiveAsFlow()
 
     /**
      * 붙는 것을 기다리고 답을 되돌리는 코루틴들이 사는 자리.
@@ -110,6 +114,7 @@ class PermissionRequestSocket private constructor(
         // "물어볼 사람이 사라졌다" 는 뜻이 된다(mcp_ask.go 가 EOF 를 거절로 읽는다).
         listening.cancel()
         incoming.close()
+        incomingSessionTreeRequests.close()
 
         withContext(Dispatchers.IO) {
             runInterruptible {
@@ -122,8 +127,8 @@ class PermissionRequestSocket private constructor(
     /**
      * 붙은 연결 하나를 끝까지 다룬다 — 요청 한 줄을 읽고, 답 한 줄을 쓰고, 끊는다.
      *
-     * **줄의 kind 로 가른다**(session-tree-design.md 6.4). 지금 받는 것은 승인 물음 하나이고,
-     * 세션 트리 요청은 3·4 단계가 더한다. 모르는 kind 에도 답한다 — 거절을 말하는 한 줄로.
+     * **줄의 kind 로 가른다**(session-tree-design.md 6.4). 승인 물음은 카드로, 세션 트리 요청은 트리로
+     * 올리고, 그 답을 기다려 되돌린다. 모르는 kind 에도 답한다 — 거절을 말하는 한 줄로.
      *
      * **읽을 수 없는 줄에도 답한다.** 답하지 않으면 그 자식은 영영 기다리고, 그 자식을 기다리는
      * 것은 사용자의 턴이다. 다만 화면에는 세우지 않는다 — 무엇을 승인하는지 말할 수 없는 카드는
@@ -148,6 +153,20 @@ class PermissionRequestSocket private constructor(
                     ),
                 )
 
+                is AppSocketRequest.SessionTree -> {
+                    val asked = AskedSessionTreeRequest(received.request)
+                    incomingSessionTreeRequests.send(asked)
+                    answerLineFor(asked.awaitAnswer())
+                }
+
+                // 승인 거부로 답하지 않는다. 이 줄을 보낸 것은 kyu mcp ask 가 아니라 세션 트리 도구라,
+                // decision 이 담긴 답은 그쪽에서 "앱의 답을 읽지 못했다" 가 된다.
+                is AppSocketRequest.UnreadableSessionTreeRequest -> answerLineFor(
+                    SessionTreeAnswer.Refused(
+                        "앱이 이 '${received.kind}' 요청을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
+                    ),
+                )
+
                 is AppSocketRequest.UnknownKind -> unknownKindAnswerLine(received.kind)
             }
 
@@ -169,7 +188,7 @@ class PermissionRequestSocket private constructor(
          * @throws TerminalSessionFailure.ApprovalSocketPathTooLong 경로가 107 바이트를 넘을 때.
          * @throws TerminalSessionFailure.ApprovalSocketFailedToOpen 그 밖의 이유로 열지 못했을 때.
          */
-        fun openAt(socketPath: Path): PermissionRequestSocket {
+        fun openAt(socketPath: Path): AppSocket {
             // 길이를 먼저 본다. 이것을 JDK 에게 맡기면 실패 문구가 "Unix domain path too long" 이라
             // 사용자가 무엇을 어떻게 해야 하는지 알 수 없고, 그 실패는 실측이 실제로 만난 것이다(3.7).
             if (socketPath.toString().toByteArray(Charsets.UTF_8).size > UNIX_SOCKET_PATH_LIMIT_BYTES) {
@@ -187,7 +206,7 @@ class PermissionRequestSocket private constructor(
                 listeningChannel.bind(UnixDomainSocketAddress.of(socketPath))
                 restrictToThisUser(socketPath)
 
-                PermissionRequestSocket(listeningChannel, socketPath)
+                AppSocket(listeningChannel, socketPath)
             } catch (failure: IOException) {
                 throw TerminalSessionFailure.ApprovalSocketFailedToOpen(socketPath, failure)
             }
@@ -236,10 +255,16 @@ internal sealed interface AppSocketRequest {
     /**
      * 읽을 수 없는 줄. JSON 이 아니거나, 승인 물음인데 필요한 필드가 없다.
      *
-     * 승인 거부로 답한다. 지금 이 소켓에 붙는 것은 `kyu mcp ask` 하나라 그 줄이 승인 물음이었을
-     * 가능성이 가장 크고, 그렇다면 거부가 안전한 쪽이다.
+     * 승인 거부로 답한다. kind 를 읽기 전에 깨진 줄은 어느 요청이었는지 알 수 없고, 그것이 승인 물음이었다면
+     * 거부가 안전한 쪽이다 — 세션 트리 도구에게는 이 답이 "앱의 답을 읽지 못했다" 는 도구 오류가 되어 역시 아무것도 뜨지 않는다.
      */
     data object Unreadable : AppSocketRequest
+
+    /** 세션 트리 요청(spawn · end · list). 상태 홀더가 트리 연산으로 옮긴다. */
+    data class SessionTree(val request: SessionTreeRequest) : AppSocketRequest
+
+    /** 받는 세션 트리 kind 인데 필드가 모자란 줄. */
+    data class UnreadableSessionTreeRequest(val kind: String) : AppSocketRequest
 
     /** 이 앱이 아직 다루지 않는 kind. */
     data class UnknownKind(val kind: String) : AppSocketRequest
@@ -264,9 +289,14 @@ internal fun appSocketRequestFrom(requestLine: String): AppSocketRequest {
     val kind = (kindElement as? JsonPrimitive)?.takeIf { it.isString }?.content
         ?: return AppSocketRequest.UnknownKind(kindElement.toString())
 
-    return when (kind) {
-        PERMISSION_REQUEST_KIND -> permissionRequestFrom(requestObject)
-        else -> AppSocketRequest.UnknownKind(kind)
+    if (kind == PERMISSION_REQUEST_KIND) {
+        return permissionRequestFrom(requestObject)
+    }
+
+    return when (val reading = sessionTreeRequestFrom(kind, requestObject)) {
+        is SessionTreeRequestReading.Read -> AppSocketRequest.SessionTree(reading.request)
+        is SessionTreeRequestReading.Unreadable -> AppSocketRequest.UnreadableSessionTreeRequest(kind)
+        is SessionTreeRequestReading.NotSessionTreeKind -> AppSocketRequest.UnknownKind(kind)
     }
 }
 
