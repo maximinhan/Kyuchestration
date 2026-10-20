@@ -114,10 +114,19 @@ type permissionRequestArguments struct {
 // 줄 단위 JSON 이다 — kyu 의 MCP 서버가 이미 줄 단위 JSON-RPC 를 말하고(internal/mcpserver),
 // 새 인코딩을 들일 이유가 없다.
 type permissionQuestion struct {
+	// Kind 는 늘 permissionQuestionKind 다. 앱 소켓에는 세션 트리 요청도 오므로 앱은 이 낱말로
+	// 줄을 가른다(session-tree-design.md 6.4).
+	Kind      string          `json:"kind"`
 	ToolName  string          `json:"toolName"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"toolUseId"`
 }
+
+// permissionQuestionKind 는 승인 물음 줄의 kind 다.
+//
+// 앞 판의 물음에는 kind 가 없었고, 앱은 kind 가 없는 줄을 승인 물음으로 읽는다 — 판을 올리지
+// 않고 낱말을 더한 자리다(6.4).
+const permissionQuestionKind = "permission"
 
 // appPermissionAnswer 는 앱이 돌려주는 줄이다(설계 5.4.1).
 type appPermissionAnswer struct {
@@ -157,6 +166,7 @@ func answerPermissionQuestion(socketPath string, arguments json.RawMessage) (mcp
 	}
 
 	answer, err := askTheApp(socketPath, permissionQuestion{
+		Kind:      permissionQuestionKind,
 		ToolName:  request.ToolName,
 		Input:     request.Input,
 		ToolUseID: request.ToolUseID,

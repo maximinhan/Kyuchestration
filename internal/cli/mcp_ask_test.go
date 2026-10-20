@@ -258,6 +258,22 @@ func TestTheAppIsAskedWithTheToolNameAndInputAndToolUseIdClaudeSent(t *testing.T
 	}
 }
 
+func TestTheQuestionLineSaysItIsAPermissionQuestion(t *testing.T) {
+	// 앱 소켓에는 승인 물음 말고 세션 트리 요청도 온다(session-tree-design.md 6.4). 앱은 줄의
+	// kind 로 그 둘을 가르므로, 승인 물음도 자기가 무엇인지 말해야 한다.
+	app := startFakeAppForTest(t, func([]byte) []byte {
+		return []byte(`{"decision":"allow"}`)
+	})
+
+	callRequestPermissionForTest(t, app.socketPath,
+		`{"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_kind"}`)
+
+	question := app.answeredQuestion(t)
+	if string(question["kind"]) != `"permission"` {
+		t.Errorf("kind = %s, want \"permission\"", question["kind"])
+	}
+}
+
 func TestAnAllowWithoutAChangedInputRunsWhatTheModelAskedFor(t *testing.T) {
 	// 앱이 인자를 고치지 않았다는 뜻이다. 원본을 실어야 claude 가 모델이 요청한 그대로 실행한다 —
 	// updatedInput 을 비운 채 보내면 claude 는 인자 없는 호출로 읽는다.
