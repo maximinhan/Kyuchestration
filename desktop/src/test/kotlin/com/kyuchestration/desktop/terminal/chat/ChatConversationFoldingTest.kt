@@ -574,7 +574,7 @@ class ChatConversationFoldingTest {
      * 관문이 연 물음 하나.
      *
      * 이 이벤트만 손으로 짓는다 — 스트림에서 오지 않고 앱의 소켓으로 오는 유일한 갈래라
-     * 녹화해 둘 줄이 없다. 그 줄의 진짜 모양은 진짜 소켓으로 따로 잰다(PermissionRequestSocketTest).
+     * 녹화해 둘 줄이 없다. 그 줄의 진짜 모양은 진짜 소켓으로 따로 잰다(AppSocketTest).
      */
     private fun permissionRequested(toolName: String, toolUseId: String) =
         ChatSessionEvent.PermissionRequested(

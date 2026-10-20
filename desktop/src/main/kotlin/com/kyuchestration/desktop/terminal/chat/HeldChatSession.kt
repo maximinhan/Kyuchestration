@@ -30,5 +30,5 @@ data class HeldChatSession(
      * 세션과 수명이 같다. 세션보다 먼저 열리고(엔진에게 물을 때 그 자리를 함께 줘야 한다) 세션이
      * 끝날 때 함께 닫힌다 — 열어 둔 채로 두면 아무도 붙지 않는 소켓이 런타임 디렉토리에 쌓인다.
      */
-    val permissionChannel: PermissionRequestChannel,
+    val appSocketChannel: AppSocketChannel,
 )

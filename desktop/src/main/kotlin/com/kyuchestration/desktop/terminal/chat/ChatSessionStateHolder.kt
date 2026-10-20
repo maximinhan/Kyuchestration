@@ -61,8 +61,8 @@ class ChatSessionStateHolder(
      * 워크디렉토리가 섞이지 않는 것이 요점이다**: 사용자가 지은 긴 이름 하나가 107 바이트 한계를
      * 넘겨 승인 기능 전체를 조용히 죽이는 것이 실측이 만난 실패다(3.7).
      */
-    private val permissionRequestChannelOpener: PermissionRequestChannelOpener = PermissionRequestChannelOpener {
-        PermissionRequestSocket.openAt(permissionSocketDirectory().resolve(newPermissionSocketFileName()))
+    private val appSocketChannelOpener: AppSocketChannelOpener = AppSocketChannelOpener {
+        AppSocket.openAt(appSocketDirectory().resolve(newAppSocketFileName()))
     },
     /** 엔진에게 묻고 프로세스를 띄우고 끝내는 동안 화면이 멎지 않도록 나가는 자리. */
     private val sessionEntryDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -319,14 +319,14 @@ class ChatSessionStateHolder(
         // 챗 세션이면 조건 없이 연다. 이 소켓은 승인만의 것이 아니라 그 세션의 앱 소켓이고
         // (session-tree-design.md 6.4), 그 소켓에 승인 서버를 붙일지는 엔진이 bypass 로 정한다 —
         // 앱이 그 조건을 따라 소켓을 열고 말고를 가르면 같은 지식이 두 곳에 놓인다.
-        val permissionChannel = permissionRequestChannelOpener.openPermissionRequestChannel()
+        val appSocketChannel = appSocketChannelOpener.openAppSocketChannel()
 
         try {
             val answer = sessionCommandSource.sessionCommandFor(
                 workDirPath = workDirPath,
                 target = target,
                 conversationChoice = conversationChoice,
-                appSocketPath = permissionChannel.socketPath,
+                appSocketPath = appSocketChannel.socketPath,
             )
 
             val plan = planSessionEntry(
@@ -342,12 +342,12 @@ class ChatSessionStateHolder(
                 session = chatSessionOpener.openChatSession(plan),
                 resumedConversationId = answer.resumedConversationId,
                 workingDirectory = plan.workingDirectory,
-                permissionChannel = permissionChannel,
+                appSocketChannel = appSocketChannel,
             )
         } catch (failure: Throwable) {
             // 세션이 서지 못했으면 그 소켓에 물어올 자식도 없다. 닫지 않으면 아무도 붙지 않는
             // 소켓이 런타임 디렉토리에 하나씩 쌓인다.
-            permissionChannel.close()
+            appSocketChannel.close()
             throw failure
         }
     }
@@ -380,7 +380,7 @@ class ChatSessionStateHolder(
         // 승인 물음은 다른 통로로 온다(소켓). 같은 이유로 화면과 무관하게 받는다 — 보고 있지 않은
         // 세션의 물음에 아무도 답하지 않으면 그 세션의 claude 는 관문 앞에서 멈춘 채 산다.
         coroutineScope.launch {
-            held.permissionChannel.requests.collect { asked -> receivePermissionRequest(held.target, asked) }
+            held.appSocketChannel.permissionRequests.collect { asked -> receivePermissionRequest(held.target, asked) }
         }
     }
 
@@ -473,7 +473,7 @@ class ChatSessionStateHolder(
 
         // 스스로 끝난 세션의 소켓도 닫는다. 프로세스가 죽으면 그 자식(kyu mcp ask)도 함께 죽으므로
         // 물어올 상대는 이미 없고, 남은 것은 런타임 디렉토리의 파일 하나뿐이다.
-        coroutineScope.launch { held.permissionChannel.close() }
+        coroutineScope.launch { held.appSocketChannel.close() }
         forgetPermissionsOf(target)
 
         // 잘 끝난 세션은 남기지 않는다 — 사용자가 시킨 일이라 진단할 것이 없다. 화면과 달리 이
@@ -526,7 +526,7 @@ class ChatSessionStateHolder(
      */
     private suspend fun endSessionProcess(held: HeldChatSession) = withContext(sessionEntryDispatcher) {
         held.session.endSession()
-        held.permissionChannel.close()
+        held.appSocketChannel.close()
         forgetPermissionsOf(held.target)
     }
 

@@ -531,7 +531,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `올라온 승인 물음이 전사에 카드로 선다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -547,7 +547,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `허용을 누르면 그 결정이 통로로 가고 카드에 남는다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -566,7 +566,7 @@ class ChatSessionStateHolderTest {
     @Test
     fun `인자를 고쳐서 허용하면 고친 것이 통로로 가고 카드가 그 사실을 남긴다`() = runTest {
         // 고친 대로 실제로 실행된다(실측 3.5) — 그래서 이 자리의 편집은 시늉이 아니다.
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -584,7 +584,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `거부하면 그 이유가 그대로 모델에게 갈 결정이 된다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -603,7 +603,7 @@ class ChatSessionStateHolderTest {
     fun `이 세션에서 계속 허용하면 같은 도구의 다음 물음은 묻지 않고 통과한다`() = runTest {
         // 규칙은 앱의 메모리에만 산다(설계 10 절 열린 질문 4 의 v1 결정). 그래도 통과한 것은
         // 카드로 남는다 — 규칙이 무엇을 허용했는지 볼 길이 없으면 그 규칙은 확인할 수 없다.
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -625,7 +625,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `다른 도구는 세션 규칙을 타지 않는다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -643,7 +643,7 @@ class ChatSessionStateHolderTest {
 
     @Test
     fun `세션을 끝내면 승인 통로도 닫고 그 세션의 규칙도 버린다`() = runTest {
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -672,7 +672,7 @@ class ChatSessionStateHolderTest {
         // 소켓이 닫히면 kyu mcp ask 는 EOF 를 거절로 읽는다(mcp_ask.go). 화면에만 버튼이 살아
         // 있으면 사용자는 누를 수 있는 척하는 카드를 보게 된다.
         val opener = RecordingChatSessionOpener()
-        val channels = mutableListOf<FakePermissionRequestChannel>()
+        val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(opener, permissionChannels = channels)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
@@ -693,7 +693,7 @@ class ChatSessionStateHolderTest {
         opener: ChatSessionOpener,
         sessionCommandSource: SessionCommandSource = RecordingSessionCommandSource(),
         diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
-        permissionChannels: MutableList<FakePermissionRequestChannel> = mutableListOf(),
+        permissionChannels: MutableList<FakeAppSocketChannel> = mutableListOf(),
     ) = ChatSessionStateHolder(
         sessionCommandSource = sessionCommandSource,
         chatSessionOpener = opener,
@@ -702,8 +702,8 @@ class ChatSessionStateHolderTest {
         coroutineScope = backgroundScope,
         diagnosticLog = diagnosticLog,
         baseEnvironment = emptyMap(),
-        permissionRequestChannelOpener = {
-            FakePermissionRequestChannel(
+        appSocketChannelOpener = {
+            FakeAppSocketChannel(
                 socketPath = APPROVAL_SOCKET_DIRECTORY.resolve("s${permissionChannels.size}.sock"),
                 answeringScope = backgroundScope,
             ).also(permissionChannels::add)
@@ -785,20 +785,24 @@ class ChatSessionStateHolderTest {
      *
      * 진짜 소켓을 세우지 않는다. 여기서 갈리는 것은 "물음이 카드가 되는가 · 세션 규칙이 그것을
      * 자동으로 답하는가 · 세션이 끝날 때 통로가 닫히는가" 이고, 그 답에 소켓이 필요하지 않다 —
-     * 소켓 자체의 왕복은 진짜 소켓으로 따로 잰다(PermissionRequestSocketTest).
+     * 소켓 자체의 왕복은 진짜 소켓으로 따로 잰다(AppSocketTest).
      */
-    private class FakePermissionRequestChannel(
+    private class FakeAppSocketChannel(
         override val socketPath: Path,
         /** 되돌아온 결정을 받아 적는 코루틴이 사는 자리. 진짜 통로에서는 그 자리가 소켓 연결이다. */
         private val answeringScope: CoroutineScope,
-    ) : PermissionRequestChannel {
+    ) : AppSocketChannel {
 
         private val incoming = Channel<AskedPermission>(Channel.UNLIMITED)
 
         var closeCount = 0
             private set
 
-        override val requests: Flow<AskedPermission> = incoming.receiveAsFlow()
+        override val permissionRequests: Flow<AskedPermission> = incoming.receiveAsFlow()
+
+        private val incomingSessionTreeRequests = Channel<AskedSessionTreeRequest>(Channel.UNLIMITED)
+
+        override val sessionTreeRequests: Flow<AskedSessionTreeRequest> = incomingSessionTreeRequests.receiveAsFlow()
 
         /** 그 도구 호출에 대한 승인을 물어 온다. 되돌아온 결정을 들여다볼 수 있는 자리를 돌려준다. */
         fun ask(toolName: String, toolUseId: String, input: JsonObject): AskedForTest {
@@ -811,6 +815,7 @@ class ChatSessionStateHolderTest {
         override suspend fun close() {
             closeCount++
             incoming.close()
+            incomingSessionTreeRequests.close()
         }
     }
 

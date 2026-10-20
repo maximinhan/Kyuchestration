@@ -30,7 +30,7 @@ import java.util.UUID
  *   JVM 에는 그 값을 묻는 표준 통로가 없다. 지키려는 것은 "다른 사용자와 한 디렉토리를 쓰지
  *   않는다" 이고, 그 일은 사용자 이름도 똑같이 한다.
  */
-internal fun permissionSocketDirectory(
+internal fun appSocketDirectory(
     osName: String = System.getProperty("os.name").orEmpty(),
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
     userName: String = System.getProperty("user.name").orEmpty(),
@@ -55,7 +55,7 @@ internal fun permissionSocketDirectory(
  * 세션을 다른 워크디렉토리에서 열면 두 세션이 한 소켓을 두고 다툰다 — 그때 어느 세션의 물음인지가
  * 다시 문제가 되는데, 세션마다 소켓을 열면 **연결 자체가 곧 어느 세션인지다**(설계 5.4).
  */
-internal fun newPermissionSocketFileName(): String =
+internal fun newAppSocketFileName(): String =
     UUID.randomUUID().toString().take(SOCKET_NAME_LENGTH) + ".sock"
 
 /** `<8 자>.sock` — 짧게 두는 것이 이 이름의 전부다(107 바이트). */
