@@ -245,6 +245,34 @@ func TestWithoutTheSessionTreeRunInRepoDoesNotPointToAMissingTool(t *testing.T) 
 	}
 }
 
+func TestSessionTreeToolDescriptionsNameTheContractTheModelReadsBack(t *testing.T) {
+	// 모델은 설명에 적힌 낱말로 답을 읽는다. 답에 오는 값(as_answer · turn_completed · ended …)이 설명에
+	// 없으면 모델은 처음 보는 값을 짐작으로 읽는다 — 6.2 · 6.3 · 6.6 · 6.13 의 계약을 설명이 그대로 말한다.
+	mainDescriptions := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))
+	childDescriptions := listedToolDescriptionsForTest(t, childServeArgsForTest("/run/user/1000/kyu/c1.sock"))
+
+	wantedWords := map[string][]string{
+		"spawn_session":   {"순간 답한다", "await_session"},
+		"send_to_session": {"as_answer", "as_message", "순간 답한다"},
+		"await_session": {"turn_completed", "asked_parent", "session_ended", "user_spoke",
+			"events 가 빈", "턴을 끝내", "하위는 그대로"},
+		"list_sessions": {"waitingFor", "ended"},
+		"end_session":   {"session_ended", "await_session"},
+	}
+	for toolName, words := range wantedWords {
+		for _, word := range words {
+			if !strings.Contains(mainDescriptions[toolName], word) {
+				t.Errorf("%s 의 설명 = %q, %q 를 담기를 기대", toolName, mainDescriptions[toolName], word)
+			}
+		}
+	}
+	for _, word := range []string{"답이 있어야", "parent_ended", "session_ended", "턴이 끝나면"} {
+		if !strings.Contains(childDescriptions["ask_parent"], word) {
+			t.Errorf("ask_parent 의 설명 = %q, %q 를 담기를 기대", childDescriptions["ask_parent"], word)
+		}
+	}
+}
+
 func TestSpawnSessionCarriesTheRequestToTheAppAndItsAnswerBack(t *testing.T) {
 	// 엔진은 하위를 띄우지 않는다(원칙 16). 요청을 앱에게 옮기고 앱의 답을 옮길 뿐이다 — 줄의 모양이
 	// 6.4 의 계약이다. 주지 않은 선택 인자는 null 로 간다: 앱이 "생략" 과 "빈 값" 을 가르게 한다.

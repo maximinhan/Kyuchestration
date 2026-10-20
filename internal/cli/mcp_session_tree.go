@@ -74,26 +74,39 @@ cwd 는 워크디렉토리 기준 상대경로다(생략하면 워크디렉토�
 없는 폴더에 띄우려면 createDirectory 를 참으로 준다 — 이미 있는 폴더에 createDirectory 를 주면 거절된다.
 살아 있는 하위 둘은 같은 cwd 를 쓸 수 없다.`
 
-const sendToSessionToolDescription = `하위 세션에게 말을 보낸다.
+const sendToSessionToolDescription = `하위 세션에게 말을 보낸다. 말을 넣은 순간 답한다 — 하위의 응답을 기다리지 않는다.
 
 하위가 ask_parent 로 묻고 기다리는 중이면 그 물음의 답이 되고(delivered: as_answer), 아니면 하위의
-새 사용자 메시지로 들어간다(delivered: as_message — 하위의 새 턴을 연다).`
+새 사용자 메시지로 들어간다(delivered: as_message — 하위의 새 턴을 연다. 하위가 일하는 중이면 그 턴의
+도구 호출 사이에 끼어든다). 하위의 응답은 await_session 이나 "[하위 세션 <id> · …]" 메시지로 온다.`
 
-const awaitSessionToolDescription = `하위 세션들에게 전할 일이 생길 때까지 기다린다 — 턴이 끝났다, 상위에게 물었다, 세션이 끝났다,
-사람이 상위에게 말했다(user_spoke) 중 하나라도 생기면 그때까지 쌓인 사건을 다 담아 답한다.
+// awaitSessionToolDescription 은 사건 종류의 이름을 그대로 적는다(6.6). 답의 events 에 실리는 것이
+// 그 이름이라, 설명에 우리말 풀이만 있으면 모델은 처음 보는 값을 짐작으로 짝짓는다.
+const awaitSessionToolDescription = `하위 세션들에게 전할 일이 생길 때까지 기다린다 — 끝날 때까지가 아니다. 아래 사건 중 하나라도
+생기면 그때까지 쌓인 사건을 다 담아 답한다.
+
+  turn_completed — 하위의 턴이 끝났다(result 에 그 턴의 답)
+  asked_parent   — 하위가 ask_parent 로 물었다. send_to_session 으로 답한다
+  session_ended  — 하위가 끝났다
+  user_spoke     — 사람이 이 세션에 말했다. 내용은 이 도구 결과 바로 뒤에 사람의 메시지로 붙어 온다
 
 ids 를 생략하면 살아 있는 하위 전부를 기다린다. waitSeconds 는 기본 1800, 최대 3000 이다.
-아무 일 없이 그 시간이 지나면 events 가 빈 채로 stillRunning 을 답한다.`
+아무 일 없이 그 시간이 지나면 events 가 빈 채로 stillRunning 을 답한다 — 하위는 아직 도는 중이다.
 
-const listSessionsToolDescription = `이 세션이 띄운 하위 세션 전부를 답한다 — 끝난 것까지. 각 하위의 cwd · 상태 ·
+이 턴 안에서 결과를 받아 이어가야 할 때만 부른다. 부르지 않고 턴을 끝내도 같은 사건이 "[하위 세션 <id> · …]"
+메시지로 온다. 사람이 기다림을 중단하면 기다림만 접히고 하위는 그대로 돈다.`
+
+const listSessionsToolDescription = `이 세션이 띄운 하위 세션 전부를 답한다 — 끝난 것까지(state: ended). 각 하위의 cwd · 상태 ·
 지금 무엇을 기다리는지(waitingFor: nothing · model · parent · approval)가 담긴다.`
 
-const endSessionToolDescription = `하위 세션 하나를 끝낸다. 하위가 ask_parent 로 기다리던 중이면 그 물음은 "상위가 세션을 끝냈습니다" 로 답해진다.`
+const endSessionToolDescription = `하위 세션 하나를 끝낸다. 하위가 ask_parent 로 기다리던 중이면 그 물음은 ended: session_ended 로
+답해진다. 하위의 진행 중인 턴이 곧 끝나지 않으면 끊긴다. 끝난 뒤 다음 await_session 이 session_ended 를 받는다.`
 
 const askParentToolDescription = `너를 띄운 상위 세션에게 묻고 답을 기다린다.
 
 답이 있어야 일을 이어갈 수 있을 때만 쓴다. 결과를 알리는 데는 쓰지 않는다 — 네 턴이 끝나면 그 결과는
-이미 상위에게 간다. 상위가 끝났거나 세션이 끝나면 answer 대신 ended 로 답한다.`
+이미 상위에게 간다. 답 대신 ended 가 오면 더 물을 상위가 없다 — parent_ended(상위가 끝났다) ·
+session_ended(상위나 사람이 이 세션을 끝냈다).`
 
 // sessionTreeTools 는 상위 역할의 서버에 더해질 다섯 도구다(6.2).
 func sessionTreeTools(appSocketPath string) []mcpserver.Tool {
