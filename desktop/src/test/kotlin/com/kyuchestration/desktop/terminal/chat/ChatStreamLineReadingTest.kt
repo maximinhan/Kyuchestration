@@ -257,6 +257,18 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `도구를 기다리던 중에 끊긴 턴도 실패가 아니라 중단으로 온다`() {
+        // terminal_reason 이 aborted_streaming 이 아니라 aborted_tools 다(session-tree 3.2). 하나만
+        // 알면 이 턴이 실패로 그려지는데, 프로세스도 대화도 살아 있다 — 다음 말에 정상으로 답한다.
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn(RecordedChatStreamLines.RESULT_ABORTED_TOOLS),
+        )
+
+        assertEquals(TurnOutcome.InterruptedDuringToolWait, finished.outcome)
+        assertEquals(41243, finished.durationMillis)
+    }
+
+    @Test
     fun `이어갈 대화를 찾지 못한 턴은 실패로 온다`() {
         // 없는 대화를 resume 하면 result 가 error_during_execution 으로 한 줄 오고 종료 코드가 1 이다(3.9).
         val line = """{"type":"result","subtype":"error_during_execution","result":null,""" +

@@ -253,7 +253,11 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
 }
 
 /**
- * 두 필드가 셋을 가른다(3.8 · 3.9).
+ * 두 필드가 넷을 가른다(3.8 · 3.9 · session-tree 3.2).
+ *
+ * **모르는 `terminal_reason` 은 실패다.** 2.1.304 에서 `aborted_tools` 를 몰랐을 때 도구 대기 중의
+ * 중단이 실패로 그려졌다 — 이름이 하나 더 생기는 날 같은 일이 생기지만, 그 턴이 끝났다는 사실은
+ * 그대로 화면에 닿는다(턴의 끝이 아예 오지 않는 것보다 낫다).
  *
  * 중단을 성공보다 **뒤에** 본다. 중단된 턴은 `subtype` 이 `error_during_execution` 이라 순서가
  * 뒤집혀도 답은 같지만, 읽는 사람에게는 "성공이 아니면서 중단인 것" 이라는 순서가 사실에 가깝다.
@@ -261,6 +265,7 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
 private fun turnOutcomeIn(line: JsonObject): TurnOutcome = when {
     line.stringOrNull("subtype") == "success" -> TurnOutcome.Completed
     line.stringOrNull("terminal_reason") == "aborted_streaming" -> TurnOutcome.Interrupted
+    line.stringOrNull("terminal_reason") == "aborted_tools" -> TurnOutcome.InterruptedDuringToolWait
     else -> TurnOutcome.Failed
 }
 

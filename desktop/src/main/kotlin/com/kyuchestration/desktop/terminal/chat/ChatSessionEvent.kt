@@ -221,8 +221,8 @@ data class McpServerStatus(val name: String, val status: String)
 /**
  * 턴이 어떻게 끝났는가.
  *
- * `result` 의 `subtype` 과 `terminal_reason` 두 필드가 이 셋을 가른다(3.8 · 3.9). 화면이 두 필드를
- * 함께 보고 판단하게 두지 않는다 — 한쪽만 보는 자리가 생기면 중단이 실패로 그려진다.
+ * `result` 의 `subtype` 과 `terminal_reason` 두 필드가 이 넷을 가른다(3.8 · 3.9 · session-tree 3.2).
+ * 화면이 두 필드를 함께 보고 판단하게 두지 않는다 — 한쪽만 보는 자리가 생기면 중단이 실패로 그려진다.
  */
 enum class TurnOutcome {
 
@@ -231,6 +231,15 @@ enum class TurnOutcome {
 
     /** 사용자가 끊었다 — `terminal_reason: "aborted_streaming"`(3.8). 대화도 프로세스도 살아 있다. */
     Interrupted,
+
+    /**
+     * 도구 호출을 기다리던 중에 사용자가 끊었다 — `terminal_reason: "aborted_tools"`(session-tree 3.2).
+     *
+     * [Interrupted] 와 같이 대화도 프로세스도 살아 있다. 갈래를 나누는 것은 끊긴 자리가 달라서다 —
+     * 이 턴에서는 도구 호출이 거절된 결과로 닫혔고, MCP 서버는 취소 알림을 받았다. 쓰다 만 글이
+     * 아니라 **돌지 못한 도구**가 남는다.
+     */
+    InterruptedDuringToolWait,
 
     /** 그 밖의 `error_during_execution`. 이어갈 대화를 찾지 못한 경우가 여기다(3.9). */
     Failed,
