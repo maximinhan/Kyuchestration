@@ -13,6 +13,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * 상위의 `kyu mcp serve` 가 앱 소켓으로 보낸 세션 트리 요청(session-tree-design.md 6.4).
@@ -184,6 +185,9 @@ internal fun answerLineFor(answer: SessionTreeAnswer): String = when (answer) {
  * `list_sessions` 의 한 항목(6.2).
  *
  * 끝난 하위는 기다리는 것이 없다 — 끝나기 직전의 값을 그대로 두면 상위는 끝난 하위가 아직 승인을 기다린다고 읽는다.
+ *
+ * `lastTurnResult` 는 아직 끝난 턴이 없으면 null 로 싣는다. 빼면 상위는 "필드가 없다" 와 "결과가 없다" 를 가르지 못한다.
+ * 시각은 ISO-8601(UTC) 이다.
  */
 private fun JsonObjectBuilder.putChildSessionFacts(child: ChildSessionNode) {
     put("id", child.childId)
@@ -202,6 +206,17 @@ private fun JsonObjectBuilder.putChildSessionFacts(child: ChildSessionNode) {
             lifecycle.exitCode?.let { put("exitCode", it) }
         }
     }
+    val lastTurnResult = child.lastTurnResult
+    if (lastTurnResult == null) {
+        put("lastTurnResult", JsonNull)
+    } else {
+        putJsonObject("lastTurnResult") {
+            put("result", lastTurnResult.result)
+            put("isError", lastTurnResult.isError)
+        }
+    }
+    put("startedAt", child.startedAt.toString())
+    child.endedAt?.let { put("endedAt", it.toString()) }
 }
 
 /**

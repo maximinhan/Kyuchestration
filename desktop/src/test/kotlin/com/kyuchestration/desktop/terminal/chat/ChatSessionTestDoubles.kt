@@ -14,6 +14,9 @@ import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.io.IOException
 import java.nio.file.Path
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -72,7 +75,11 @@ internal fun TestScope.stateHolder(
     // stdin 쓰기도 시험의 시계 위에 올린다. 앱에서는 한 번에 하나씩 도는 자리이고, 여기서도
     // 한 줄씩 차례로 도는 것은 같다 — 다른 것은 그 차례를 시험이 진행시킨다는 것뿐이다.
     standardInputDispatcher = StandardTestDispatcher(testScheduler),
+    clock = TEST_CLOCK,
 )
+
+/** 이 시험들의 시계. 하위가 뜬 시각 · 끝난 시각이 이 값으로 적힌다. */
+internal val TEST_CLOCK: Clock = Clock.fixed(Instant.parse("2026-10-20T10:01:12Z"), ZoneOffset.UTC)
 
 internal class RecordingSessionCommandSource : SessionCommandSource {
 

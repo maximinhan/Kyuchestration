@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
+import java.time.Instant
 
 /**
  * 메인 아래 하위 세션들(session-tree-design.md 6.11).
@@ -44,6 +45,10 @@ data class SessionTree(val children: List<ChildSessionNode> = emptyList()) {
  *   `--live-child-cwd` 로 다시 넘길 때 앱이 손대지 않는다.
  * @param workingDirectory 그 `claude` 가 도는 절대 자리. 사람이 연 레포 세션과 같은 자리인지 견주는 근거다.
  * @param conversationId 엔진이 배정한 대화 ID. 기록(`childSessions`)과 이 하위를 잇는다.
+ * @param startedAt 앱이 이 하위를 띄운 시각. 앱의 시계다 — 띄운 것이 앱의 일이라 그 시각도 앱이 안다.
+ * @param lastTurnResult 하위의 마지막 턴이 남긴 결과. 아직 끝난 턴이 없으면 null. 상위가 `list_sessions` 로 하위의
+ *   침묵을 해석하는 재료이고, 앱 재시작 뒤 맥락을 되찾는 재료다(6.15).
+ * @param endedAt 하위가 끝난 시각. 살아 있으면 null.
  */
 data class ChildSessionNode(
     val childId: String,
@@ -51,8 +56,11 @@ data class ChildSessionNode(
     val relativeCwd: String,
     val workingDirectory: Path,
     val conversationId: String,
+    val startedAt: Instant,
     val waitingFor: ChildWaitingFor = ChildWaitingFor.Nothing,
     val lifecycle: ChildLifecycle = ChildLifecycle.Running,
+    val lastTurnResult: ChildTurnResult? = null,
+    val endedAt: Instant? = null,
 ) {
 
     val target: SessionTarget.Child get() = SessionTarget.Child(childId)
@@ -71,6 +79,13 @@ enum class ChildWaitingFor(val wireName: String) {
     Parent("parent"),
     Approval("approval"),
 }
+
+/**
+ * 하위의 턴 하나가 남긴 결과(6.2 의 `lastTurnResult`).
+ *
+ * @param result 그 턴의 마지막 답 텍스트(`result.result`). 실패한 턴에서는 비어 있을 수 있다.
+ */
+data class ChildTurnResult(val result: String, val isError: Boolean)
 
 /** 하위의 수명(6.13). 살아 있거나, 어떤 이유로 끝났다. */
 sealed interface ChildLifecycle {

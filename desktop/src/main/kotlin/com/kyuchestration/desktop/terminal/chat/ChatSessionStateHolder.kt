@@ -18,6 +18,7 @@ import com.kyuchestration.desktop.terminal.planSessionEntry
 import com.kyuchestration.desktop.terminal.resumeFailureSuspected
 import java.io.IOException
 import java.nio.file.Path
+import java.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -95,6 +96,8 @@ class ChatSessionStateHolder(
      * 기다리게 하지 않는다 — 세션마다 자리를 두는 것은 그 기다림이 실제로 문제가 될 때 정한다.
      */
     private val standardInputDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
+    /** 하위가 뜬 시각 · 끝난 시각을 적는 시계(`list_sessions` 의 startedAt · endedAt). */
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
     private val mutableState = MutableStateFlow<ChatScreenState>(ChatScreenState.NoChatOpen)
@@ -754,6 +757,7 @@ class ChatSessionStateHolder(
                 relativeCwd = assigned.relativeCwd,
                 workingDirectory = opened.held.workingDirectory,
                 conversationId = assigned.conversationId,
+                startedAt = clock.instant(),
             ),
         )
         sendUserMessageTo(childTarget, PARENT_MESSAGE_PREFIX + request.prompt, UserMessageSender.ParentSession)
@@ -1040,7 +1044,11 @@ class ChatSessionStateHolder(
         )
 
         updateChild(node.childId) {
-            it.copy(lifecycle = ChildLifecycle.Ended(reason, exitCode = null), waitingFor = ChildWaitingFor.Nothing)
+            it.copy(
+                lifecycle = ChildLifecycle.Ended(reason, exitCode = null),
+                waitingFor = ChildWaitingFor.Nothing,
+                endedAt = clock.instant(),
+            )
         }
         // 상위가 끝나서 함께 끝난 하위는 알릴 상위가 없다.
         if (reason != ChildEndReason.ParentEnded) {
@@ -1139,6 +1147,9 @@ class ChatSessionStateHolder(
         updateConversation(target) { it.after(event) }
 
         if (target is SessionTarget.Child && event is ChatSessionEvent.TurnFinished) {
+            updateChild(target.childId) {
+                it.copy(lastTurnResult = ChildTurnResult(event.resultText.orEmpty(), event.outcome != TurnOutcome.Completed))
+            }
             tellParentChildTurnFinished(target.childId, event, turnTriggerOf(entriesBefore))
         }
         // 상위의 턴이 끝났다 — 그 턴 동안 쌓인 사건을 이제 사용자 메시지로 보낼 수 있다.
@@ -1196,6 +1207,7 @@ class ChatSessionStateHolder(
                         exitCode = exitCode,
                     ),
                     waitingFor = ChildWaitingFor.Nothing,
+                    endedAt = clock.instant(),
                 )
 
                 is ChildLifecycle.Ended -> node.copy(lifecycle = lifecycle.copy(exitCode = lifecycle.exitCode ?: exitCode))

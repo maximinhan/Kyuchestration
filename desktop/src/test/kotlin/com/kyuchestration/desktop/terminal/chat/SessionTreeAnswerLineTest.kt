@@ -1,8 +1,10 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import java.nio.file.Path
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
@@ -35,13 +37,16 @@ class SessionTreeAnswerLineTest {
     }
 
     @Test
-    fun `목록은 끝난 하위까지 상태와 기다리는 것을 담는다`() {
+    fun `목록은 끝난 하위까지 상태와 기다리는 것과 마지막 턴의 결과와 시각을 담는다`() {
+        // 6.2 의 list_sessions 모양이다. 상위가 앱 재시작 뒤 맥락을 되찾는 재료이기도 하다(6.15).
         val line = answerLineFor(
             SessionTreeAnswer.Listed(
                 listOf(
                     childNode("child-1", "proj-a").copy(waitingFor = ChildWaitingFor.Approval),
                     childNode("child-2", "scratch-x").copy(
                         lifecycle = ChildLifecycle.Ended(ChildEndReason.EndedByParent, exitCode = 0),
+                        lastTurnResult = ChildTurnResult(result = "README 를 고쳤다", isError = false),
+                        endedAt = Instant.parse("2026-10-20T10:20:03Z"),
                     ),
                 ),
             ),
@@ -50,13 +55,24 @@ class SessionTreeAnswerLineTest {
         assertEquals(
             Json.parseToJsonElement(
                 """{"sessions":[
-                     {"id":"child-1","title":"child-1","cwd":"proj-a","state":"running","waitingFor":"approval"},
+                     {"id":"child-1","title":"child-1","cwd":"proj-a","state":"running","waitingFor":"approval",
+                      "lastTurnResult":null,"startedAt":"2026-10-20T10:01:12Z"},
                      {"id":"child-2","title":"child-2","cwd":"scratch-x","state":"ended","waitingFor":"nothing",
-                      "endedReason":"ended_by_parent","exitCode":0}
+                      "lastTurnResult":{"result":"README 를 고쳤다","isError":false},"startedAt":"2026-10-20T10:01:12Z",
+                      "endedReason":"ended_by_parent","exitCode":0,"endedAt":"2026-10-20T10:20:03Z"}
                    ]}""",
             ),
             Json.parseToJsonElement(line),
         )
+    }
+
+    @Test
+    fun `묻는 중인 하위는 상위를 기다린다고 답한다`() {
+        val line = answerLineFor(
+            SessionTreeAnswer.Listed(listOf(childNode("child-1", "proj-a").copy(waitingFor = ChildWaitingFor.Parent))),
+        )
+
+        assertTrue(""""waitingFor":"parent"""" in line, line)
     }
 
     @Test
@@ -166,5 +182,6 @@ class SessionTreeAnswerLineTest {
         relativeCwd = relativeCwd,
         workingDirectory = Path.of("/w").resolve(relativeCwd),
         conversationId = "conversation-$childId",
+        startedAt = Instant.parse("2026-10-20T10:01:12Z"),
     )
 }

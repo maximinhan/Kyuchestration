@@ -619,6 +619,25 @@ class ChildSessionDialogueStateHolderTest {
         assertIs<SessionTreeAnswer.Refused>(question.answerSoFar())
     }
 
+    @Test
+    fun `list 는 하위의 마지막 턴 결과와 뜬 시각 끝난 시각을 답한다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 2)
+        startMainTurn(bed)
+        bed.child(1).finishTurnOnLastSentMessage(result = "포트를 고쳤다")
+        bed.mainChannel.askSessionTree(SessionTreeRequest.EndSession("child-2"))
+        runCurrent()
+
+        val listed = bed.mainChannel.askSessionTree(SessionTreeRequest.ListSessions)
+        runCurrent()
+
+        val (first, second) = assertIs<SessionTreeAnswer.Listed>(listed.answerSoFar()).children
+        assertEquals(ChildTurnResult(result = "포트를 고쳤다", isError = false), first.lastTurnResult)
+        assertEquals(TEST_CLOCK.instant(), first.startedAt)
+        assertNull(first.endedAt)
+        assertNull(second.lastTurnResult)
+        assertEquals(TEST_CLOCK.instant(), second.endedAt)
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }

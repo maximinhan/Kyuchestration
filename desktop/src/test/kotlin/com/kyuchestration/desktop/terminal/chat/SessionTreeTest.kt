@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -138,6 +139,7 @@ class SessionTreeTest {
         relativeCwd = relativeCwd,
         workingDirectory = WORK_DIR_PATH.resolve(relativeCwd),
         conversationId = "conversation-$childId",
+        startedAt = Instant.parse("2026-10-20T10:01:12Z"),
     )
 
     private companion object {
