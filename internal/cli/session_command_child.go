@@ -92,7 +92,7 @@ func validateChildSessionRequest(request sessionCommandRequest) error {
 //
 // 순서가 판단이다: 자리 → 관문 → 등록 → 대화. 자리가 틀렸거나 사람이 아직 승인하지 않았으면 대화를
 // 배정하지 않는다 — 답할 수 없는 물음에 기록을 남기면 쓰이지 않을 하위가 기록에 쌓인다.
-func answerForChildSession(out io.Writer, location workDirLocation, request sessionCommandRequest) error {
+func answerForChildSession(out, errOut io.Writer, location workDirLocation, request sessionCommandRequest) error {
 	cwd, err := workdir.PrepareChildSessionCwd(location.absolutePath, workdir.ChildSessionCwdRequest{
 		RequestedPath:   request.childCwd,
 		CreateDirectory: request.createChildDirectory,
@@ -127,6 +127,9 @@ func answerForChildSession(out io.Writer, location workDirLocation, request sess
 	assignment, err := workdir.StartChildSessionConversation(location.absolutePath, childSessionParentLabel, request.childID,
 		workdir.ChildSessionStart{Cwd: cwd.RelativePath, Title: title, StartedAt: time.Now()})
 	if err != nil {
+		return err
+	}
+	if err := writeConversationWarnings(errOut, assignment.Warnings); err != nil {
 		return err
 	}
 

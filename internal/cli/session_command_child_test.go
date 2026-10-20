@@ -238,6 +238,38 @@ func TestAnExplicitChildIdAlreadyRecordedIsStillRefused(t *testing.T) {
 	}
 }
 
+func TestAChildSessionTellsAboutADiscardedRecordOnStderr(t *testing.T) {
+	// 메인·레포 세션과 같은 규율이다(TestSessionCommandTellsAboutADiscardedRecordOnStderr). 기록이 깨져도
+	// 하위는 뜨고, 앞선 기록을 버렸다는 말은 stdout 이 아니라 stderr 로 간다 — stdout 은 앱이 파싱하는
+	// 문서 하나의 자리다. 이 말을 버리면 상위 아래 적혀 있던 하위들의 기록이 소리 없이 사라진다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "proj-a")
+	t.Chdir(workDirPath)
+
+	coordDirectoryPath := filepath.Join(workDirPath, ".coord")
+	if err := os.MkdirAll(coordDirectoryPath, 0o755); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coordDirectoryPath, "conversations.json"), []byte("깨진 기록"), 0o644); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	if err := AnswerSessionCommand(&out, &errOut,
+		append(childArgsForTest("", childCwdOptionName, "proj-a"), machineJSONOptionName)); err != nil {
+		t.Fatalf("AnswerSessionCommand() 실패: %v", err)
+	}
+
+	var document childSessionCommandDocumentForTest
+	decodeMachineJSONForTest(t, out.String(), &document)
+	if document.ChildSession == nil || document.ChildSession.ID != "child-1" {
+		t.Errorf("childSession = %+v, 버린 기록 뒤에도 하위가 child-1 로 뜨기를 기대", document.ChildSession)
+	}
+	if !strings.Contains(errOut.String(), "conversations.json") {
+		t.Errorf("stderr = %q, 버린 기록의 경로를 알리기를 기대", errOut.String())
+	}
+}
+
 func TestAChildCwdRefusalIsAnErrorAndRecordsNothing(t *testing.T) {
 	// cwd 규칙에 걸린 요청은 답할 것이 없는 물음이다 — 종료 코드 1 과 stderr 가 그 구분을 한다.
 	// 앱은 그 문구를 spawn 의 {"error"} 로 상위에게 옮긴다.
