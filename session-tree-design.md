@@ -376,7 +376,9 @@ end_session(id: string)
 | `createDirectory` | 참이면 `cwd` 를 새로 만든다. 이미 있으면 거절한다 — "새로 만든다" 고 했는데 있던 것을 쓰면 상위가 모르는 파일 위에서 하위가 일한다 |
 | `title` | 화면의 탭 이름. 생략하면 `cwd` 의 마지막 이름 |
 
-**`id` 는 앱이 정한다**(원칙 16). `child-1`, `child-2` … 처럼 상위 하나 안에서 증가하는 짧은 이름이다. 모델이 정하게 하면 두 하위가 같은 이름을 고를 수 있고, 그 충돌을 누가 어떻게 알려줄지가 새로 생긴다.
+**`id` 는 엔진이 짓는다**(PR #70). `child-1`, `child-2` … 처럼 상위 하나 안에서 증가하는 짧은 이름이다. 앱은 `kyu session-command --child` 에 id 를 생략해 묻고, 엔진이 `conversations.json` 의 그 상위 기록을 읽어 다음 번호를 지은 뒤 같은 쓰기 안에서 적는다(`internal/workdir/conversations.go` 의 `nextChildSessionID`). 답의 `childSession.id` 가 그 이름이고, 앱은 그것을 받아 트리에 단다. 모델이 정하게 하면 두 하위가 같은 이름을 고를 수 있고, 그 충돌을 누가 어떻게 알려줄지가 새로 생긴다.
+
+**원칙 16 과 어긋나지 않는다.** 원칙 16 이 앱에게 준 것은 프로세스와 말의 소유 — 하위를 띄우고, 말을 나르고, 끝내는 일 — 이다. 이름은 기록의 일부라 기록을 쓰는 쪽이 짓는다. 앱이 기록 파일을 읽어 번호를 세면 파일 형식과 판 규약을 두 곳이 알게 되고(원칙 11), 읽기와 쓰기 사이가 프로세스 경계로 벌어진다. 앱이 id 를 주어 물으면 엔진은 그것을 그대로 쓰되, 이미 적힌 id 면 거절한다.
 
 **`send_to_session` 의 답이 어느 통로로 갔는지를 말한다.** 하위가 `ask_parent` 로 기다리고 있었으면 그 물음의 답이 되고(`as_answer`), 아니면 하위 stdin 에 사용자 메시지로 들어간다(`as_message`). 상위가 이 차이를 알아야 하는 이유는 하나다 — `as_message` 로 간 말은 하위의 **새 턴**을 연다. 하위가 이미 일하는 중이면 그 턴의 도구 경계에서 끼어든다(3.1).
 
@@ -552,7 +554,7 @@ data class SessionTree(
 )
 
 data class ChildSessionNode(
-    val childId: ChildSessionId,                 // "child-1" — 앱이 정한다
+    val childId: ChildSessionId,                 // "child-1" — 엔진이 짓는다(6.2)
     val title: String,
     val workingDirectory: Path,
     val conversation: ChatConversation,          // chat-ui 5.5 의 홀더가 쥐는 것 그대로
