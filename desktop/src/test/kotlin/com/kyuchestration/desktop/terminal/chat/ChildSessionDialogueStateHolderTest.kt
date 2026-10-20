@@ -262,6 +262,74 @@ class ChildSessionDialogueStateHolderTest {
         assertIs<SessionTreeAnswer.Refused>(asked.answerSoFar())
     }
 
+    @Test
+    fun `쉬는 상위에게는 하위의 턴 끝이 하위의 말로 상위의 stdin 에 간다`() = runTest {
+        // 6.6 의 마지막 줄 — 상위는 하위를 띄우고 턴을 끝내도 된다. 하위가 끝나면 앱이 상위를 깨운다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        bed.child(1).finishTurnOnLastSentMessage(result = "포트를 고쳤다")
+        runCurrent()
+
+        val told = bed.main.sentMessages.single()
+        assertEquals("[하위 세션 child-1 · 턴 끝] 포트를 고쳤다", told.text)
+        assertEquals(UserMessageSender.ChildSession("child-1"), told.sender)
+    }
+
+    @Test
+    fun `stdin 으로 간 사건은 다음 기다림이 다시 받지 않는다`() = runTest {
+        // 같은 사실이 두 길로 가면 상위는 같은 결과를 두 번 읽는다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        bed.child(1).finishTurnOnLastSentMessage(result = "포트를 고쳤다")
+        runCurrent()
+        bed.main.echoLastSentMessage()
+        runCurrent()
+
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        assertNull(asked.answerSoFar())
+    }
+
+    @Test
+    fun `턴 중인데 기다리지 않는 상위에게는 사건이 쌓였다가 그 턴이 끝날 때 stdin 으로 간다`() = runTest {
+        // 이 턴 안에서 await 를 부르면 그 답으로 받는다. 부르지 않고 턴을 끝내면 그때 사용자 메시지로 받는다 — 어느 쪽이든 한 번이다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val sentBefore = bed.main.sentMessages.size
+
+        bed.child(1).finishTurnOnLastSentMessage(result = "포트를 고쳤다")
+        runCurrent()
+        assertEquals(sentBefore, bed.main.sentMessages.size, "턴 중인 상위의 stdin 에 썼습니다")
+
+        bed.main.emit(turnFinishedWith("하위를 띄웠다"))
+        runCurrent()
+
+        assertEquals("[하위 세션 child-1 · 턴 끝] 포트를 고쳤다", bed.main.sentMessages.last().text)
+    }
+
+    @Test
+    fun `쉬는 상위에게는 하위가 끝난 것도 그 이유와 함께 간다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        bed.child(1).emit(ChatSessionEvent.SessionEnded(exitCode = 137))
+        runCurrent()
+
+        assertEquals("[하위 세션 child-1 · 끝남] 비정상으로 끝났습니다 (종료 코드 137)", bed.main.sentMessages.single().text)
+    }
+
+    @Test
+    fun `사람이 시킨 턴의 끝과 실패한 턴의 끝은 접두가 그 사실을 말한다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        bed.holder.showChildSession("child-1")
+        bed.holder.sendUserMessage("이것도 해 줘")
+        runCurrent()
+
+        bed.child(1).finishTurnOnLastSentMessage(result = "못 했다", outcome = TurnOutcome.Failed)
+        runCurrent()
+
+        assertEquals("[하위 세션 child-1 · 턴 끝 · 실패 · 사람이 시킨 턴] 못 했다", bed.main.sentMessages.single().text)
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }

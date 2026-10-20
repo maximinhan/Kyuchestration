@@ -843,16 +843,34 @@ class ChatSessionStateHolder(
     /**
      * 쌓인 사건을 지금 들을 수 있는 통로로 보낸다(원칙 18).
      *
-     * 상위가 기다리고 있으면 그 기다림이 고른 하위의 사건을 전부 담아 답한다. 고르지 않은 하위의 사건은 남는다.
+     * | 상위 | 사건이 가는 길 |
+     * |---|---|
+     * | `await_session` 으로 기다리는 중 | 그 기다림이 고른 하위의 사건을 전부 담아 도구의 답으로. 고르지 않은 하위의 것은 남는다 |
+     * | 쉬는 중 | 사건마다 하위의 말로 stdin 에 — 새 턴이 돈다(3.5 (가)) |
+     * | 턴 중인데 기다리지 않는다 | 남겨 둔다. 이 턴 안에서 기다리면 그 답으로, 기다리지 않고 턴을 끝내면 그때 stdin 으로 간다 |
+     *
+     * 셋째 줄에서 곧바로 stdin 에 쓰지 않는 이유가 있다. 그 말은 다음 도구 경계에서야 닿는데(3.1), 그 도구가
+     * `await_session` 이면 기다림이 끝날 때까지 묶이고, 같은 사건을 기다림의 답에도 담으면 상위는 같은 결과를 두 번 읽는다.
      */
     private fun deliverParentEvents() {
-        val await = pendingAwait ?: return
-        val deliverable = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
-        if (deliverable.isEmpty()) {
+        val await = pendingAwait
+        if (await != null) {
+            val deliverable = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
+            if (deliverable.isNotEmpty()) {
+                undeliveredParentEvents.removeAll(deliverable)
+                answerPendingAwait(deliverable)
+            }
             return
         }
-        undeliveredParentEvents.removeAll(deliverable)
-        answerPendingAwait(deliverable)
+
+        if (conversations[SessionTarget.Main]?.turnState != TurnState.Idle) {
+            return
+        }
+        val idleParentEvents = undeliveredParentEvents.toList()
+        undeliveredParentEvents.clear()
+        idleParentEvents.forEach { event ->
+            sendUserMessageTo(SessionTarget.Main, parentNoticeTextFor(event), UserMessageSender.ChildSession(event.childId))
+        }
     }
 
     /**
@@ -975,6 +993,10 @@ class ChatSessionStateHolder(
 
         if (target is SessionTarget.Child && event is ChatSessionEvent.TurnFinished) {
             tellParentChildTurnFinished(target.childId, event, turnTriggerOf(entriesBefore))
+        }
+        // 상위의 턴이 끝났다 — 그 턴 동안 쌓인 사건을 이제 사용자 메시지로 보낼 수 있다.
+        if (target == SessionTarget.Main && event is ChatSessionEvent.TurnFinished) {
+            deliverParentEvents()
         }
 
         if (event is ChatSessionEvent.SessionEnded) {

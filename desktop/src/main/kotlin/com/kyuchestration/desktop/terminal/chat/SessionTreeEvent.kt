@@ -82,3 +82,33 @@ internal fun turnTriggerOf(entriesBeforeTurnEnded: List<ChatEntry>): TurnTrigger
     val opener = thisTurnEntries.firstOrNull { it is ChatEntry.UserSaid } as? ChatEntry.UserSaid
     return if (opener?.sender == UserMessageSender.ParentSession) TurnTrigger.Parent else TurnTrigger.Human
 }
+
+/**
+ * 쉬는 상위에게 사건을 사용자 메시지로 옮길 때의 한 줄(6.5 의 접두).
+ *
+ * 접두가 모델이 출처를 읽는 재료다(3.5 (가)). 상위의 규약 문구가 `[하위 세션 <id> · …]` 로 시작하는 말을 하위의 것으로
+ * 읽는다(session_command_child.go 의 parentSessionConventionText) — 그 모양을 바꾸면 규약 문구도 함께 바꾼다.
+ */
+internal fun parentNoticeTextFor(event: SessionTreeEvent): String = when (event) {
+    is SessionTreeEvent.TurnCompleted -> {
+        val labels = listOfNotNull(
+            "턴 끝",
+            "실패".takeIf { event.isError },
+            "사람이 시킨 턴".takeIf { event.triggeredBy == TurnTrigger.Human },
+        )
+        "${childPrefix(event.childId, labels)} ${event.result}"
+    }
+
+    is SessionTreeEvent.SessionEnded -> "${childPrefix(event.childId, listOf("끝남"))} ${endedSentenceFor(event)}"
+}
+
+private fun childPrefix(childId: String, labels: List<String>): String =
+    "[하위 세션 $childId · ${labels.joinToString(" · ")}]"
+
+private fun endedSentenceFor(event: SessionTreeEvent.SessionEnded): String = when (event.reason) {
+    ChildEndReason.Exited -> "스스로 끝났습니다"
+    ChildEndReason.Crashed -> "비정상으로 끝났습니다 (종료 코드 ${event.exitCode})"
+    ChildEndReason.EndedByHuman -> "사람이 이 하위를 끝냈습니다"
+    ChildEndReason.EndedByParent -> "end_session 으로 끝냈습니다"
+    ChildEndReason.ParentEnded -> "상위가 끝나 함께 끝났습니다"
+}
