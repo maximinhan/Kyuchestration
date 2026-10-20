@@ -24,8 +24,9 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         modelName = event.modelName,
     )
 
-    // 되돌아왔으므로 기다리던 목록에서 뺀다. 같은 말을 두 번 보냈으면 앞의 하나만 빠진다 —
-    // minus 가 첫 항목만 지우는 것이 여기서는 바라는 동작이다(둘째는 아직 안 돌아왔다).
+    // 되돌아왔으므로 기다리던 목록에서 뺀다. 잇는 열쇠는 앱이 정한 uuid 다(session-tree 3.5 (다)) —
+    // 텍스트로 이으면 같은 말을 두 번 보냈을 때 어느 쪽이 돌아왔는지 모르고, claude 가 스스로 지은
+    // 줄(중단 안내)의 문구가 우연히 같으면 아직 안 돌아온 말을 놓는다.
     //
     // **되돌아온 것이 그 턴의 시작이다**(3.11). 큐에 든 말은 그 턴이 시작할 때에야 돌아오므로,
     // 이 자리가 "턴이 실제로 돌고 있다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.
@@ -36,7 +37,7 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
     } else {
         copy(
             entries = entries + ChatEntry.UserSaid(event.text),
-            pendingUserMessages = pendingUserMessages - event.text,
+            pendingUserMessages = pendingUserMessages.filterNot { it.uuid == event.messageUuid },
             // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
             // 읽으면 끊는 중이던 화면이 한순간 되살아난다.
             turnState = if (turnState == TurnState.Interrupting) TurnState.Interrupting else TurnState.Running,
@@ -88,6 +89,14 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
             ),
         ),
     )
+
+    // 도는 카드는 호출 시각으로 경과 시간을 이미 그린다(ChatEntry.ToolCall.requestedAt). 살아 있다는
+    // 신호가 더할 사실이 없다 — 하트비트의 경과 초를 카드에 따로 들면 같은 값을 두 시계가 들게 된다.
+    is ChatSessionEvent.ToolCallHeartbeat -> this
+
+    // 화면이 아직 큐의 모습을 그리지 않는다(session-tree 8 절 6 번). 기다리는 말을 놓는 근거는
+    // 되돌아온 uuid 하나다.
+    is ChatSessionEvent.UserCommandLifecycleChanged -> this
 
     // 관문이 열렸다(3.5). 카드는 대화의 맨 아래에 선다 — 물음의 맥락이 바로 위에 있어야
     // 사용자가 판단할 수 있고(6.4), 그 맥락은 방금 지나간 도구 호출과 모델의 말이다.

@@ -54,10 +54,10 @@ class RealClaudeChatSessionIntegrationTest {
         collectInto(received, session)
 
         try {
-            session.sendUserMessage("이 대화의 암호는 $CONVERSATION_PASSPHRASE 다. 알겠다고만 답해.")
+            session.sendUserMessage(OutgoingUserMessage("이 대화의 암호는 $CONVERSATION_PASSPHRASE 다. 알겠다고만 답해."))
             waitForFinishedTurns(received, turnCount = 1)
 
-            session.sendUserMessage("이 대화의 암호가 뭐였지? 암호만 답해.")
+            session.sendUserMessage(OutgoingUserMessage("이 대화의 암호가 뭐였지? 암호만 답해."))
             waitForFinishedTurns(received, turnCount = 2)
         } finally {
             session.endSession()

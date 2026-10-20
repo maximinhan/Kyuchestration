@@ -194,11 +194,15 @@ class ChatSessionStateHolder(
         val target = mutableState.value.target ?: return
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
 
+        // uuid 를 보내기 전에 정한다. 쓰기는 다른 스레드에서 나중에 일어나는데, 되돌아온 말을 알아볼
+        // 열쇠는 대기 목록에 지금 서야 한다(session-tree 3.5 (다)).
+        val message = OutgoingUserMessage(text)
+
         // 턴 갈래를 여기서 옮기지 않는다. 보낸 것은 아직 시작한 턴이 아니고, 시작은 이 말이
         // 되돌아올 때다(3.11) — 그때까지 이 말은 "기다리는 말" 이다.
-        updateConversation(target) { it.copy(pendingUserMessages = it.pendingUserMessages + text) }
+        updateConversation(target) { it.copy(pendingUserMessages = it.pendingUserMessages + message) }
 
-        writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(text) }
+        writeToSession(target, held, failureNotice = "보내지 못했습니다") { sendUserMessage(message) }
     }
 
     /**

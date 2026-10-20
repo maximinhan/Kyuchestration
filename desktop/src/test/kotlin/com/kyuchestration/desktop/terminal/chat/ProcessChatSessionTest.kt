@@ -72,6 +72,37 @@ class ProcessChatSessionTest {
     }
 
     @Test
+    fun `모르는 type 과 subtype 을 받아도 멈추지 않고 뒤의 줄을 낸다`(): Unit = runBlocking {
+        // 파이프를 읽는 코루틴은 하나뿐이다. 모르는 줄에서 멈추거나 던지면 그 세션의 나머지 출력이
+        // 통째로 끊긴다 — claude 의 판이 오를 때마다 새 type 이 생긴다는 것을 세션 트리 실측이
+        // 다시 보였다(tool_progress · command_lifecycle 이 2.1.259 에는 없었다).
+        val unknownLines = listOf(
+            """{"type":"context_compacted","removed_messages":12}""",
+            """{"type":"system","subtype":"coordinator_mode_changed","enabled":true}""",
+            """{"type":"command_lifecycle","command_uuid":"c","state":"merged","uuid":"u"}""",
+            """{"type":"tool_progress","tool_use_id":"toolu_1","tool_name":"Bash","elapsed_time_seconds":3}""",
+            """{"type":"result",""",
+        )
+        val session = openSession(
+            emitLinesCommand(
+                stdoutLinesFile = linesFile(
+                    temporaryDirectory.resolve("stdout.jsonl"),
+                    unknownLines + RecordedChatStreamLines.TOOL_WAIT_INTERRUPTED_RUN,
+                ),
+            ),
+        )
+
+        val events = session.eventsUntilItEnds()
+
+        assertEquals(unknownLines, events.filterIsInstance<ChatSessionEvent.Unrecognized>().map { it.rawLine })
+        assertEquals(
+            listOf(TurnOutcome.InterruptedDuringToolWait, TurnOutcome.Completed),
+            events.filterIsInstance<ChatSessionEvent.TurnFinished>().map { it.outcome },
+        )
+        assertEquals(ChatSessionEvent.SessionEnded(exitCode = 0), events.last())
+    }
+
+    @Test
     fun `stderr 는 따로 비워져 진단으로 온다`(): Unit = runBlocking {
         // 한 코루틴이 두 파이프를 순서대로 읽으면, 안 읽는 쪽 버퍼가 차는 순간 양쪽이 함께 멎는다.
         // 없는 대화를 이어가려 한 실패가 이 통로로 온다(3.9).
@@ -97,11 +128,11 @@ class ProcessChatSessionTest {
     }
 
     @Test
-    fun `사용자 메시지를 실측이 받은 모양으로 stdin 에 흘린다`(): Unit = runBlocking {
+    fun `사용자 메시지를 앱이 정한 uuid 와 함께 실측이 받은 모양으로 stdin 에 흘린다`(): Unit = runBlocking {
         val receivedLines = temporaryDirectory.resolve("받은-줄.jsonl")
         val session = openSession(recordStandardInputCommand(receivedLines))
 
-        session.sendUserMessage("1 더하기 1은? 숫자만.")
+        session.sendUserMessage(OutgoingUserMessage("1 더하기 1은? 숫자만.", uuid = "11111111-2222-4333-8444-555555555555"))
 
         assertTrue(waitUntilFileHasWholeLine(receivedLines), "보낸 줄이 자식에게 닿지 않았습니다")
         val sent = Json.parseToJsonElement(receivedLines.readText().trim()).jsonObject
@@ -109,6 +140,9 @@ class ProcessChatSessionTest {
         val onlyBlock = sent["message"]?.jsonObject?.get("content")?.jsonArray?.single()?.jsonObject
         assertEquals("text", onlyBlock?.get("type")?.jsonPrimitive?.content)
         assertEquals("1 더하기 1은? 숫자만.", onlyBlock?.get("text")?.jsonPrimitive?.content)
+        // 앱이 정한 uuid 가 줄의 최상위에 실린다. 되돌림과 command_lifecycle 이 이 값을 그대로 되돌려
+        // 준다(session-tree 3.5 (다)) — 앱이 자기가 보낸 말을 알아보는 열쇠다.
+        assertEquals("11111111-2222-4333-8444-555555555555", sent["uuid"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -118,9 +152,9 @@ class ProcessChatSessionTest {
         val receivedLines = temporaryDirectory.resolve("받은-줄.jsonl")
         val session = openSession(recordStandardInputCommand(receivedLines))
 
-        session.sendUserMessage("긴 글을 써 줘.")
+        session.sendUserMessage(OutgoingUserMessage("긴 글을 써 줘."))
         session.interruptCurrentTurn()
-        session.sendUserMessage("방금 무슨 주제를 쓰고 있었지?")
+        session.sendUserMessage(OutgoingUserMessage("방금 무슨 주제를 쓰고 있었지?"))
 
         assertTrue(waitUntil { receivedLines.readTextOrEmpty().lines().count { it.isNotBlank() } == 3 })
         val sentLines = receivedLines.readText().trim().lines().map { Json.parseToJsonElement(it).jsonObject }

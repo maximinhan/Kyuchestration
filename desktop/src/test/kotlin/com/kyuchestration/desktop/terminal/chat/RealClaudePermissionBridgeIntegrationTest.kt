@@ -142,8 +142,10 @@ class RealClaudePermissionBridgeIntegrationTest {
 
         try {
             session.sendUserMessage(
-                "Write 도구로 이 디렉토리에 $REQUESTED_FILE_NAME 파일을 만들고 " +
-                    "안에 $ORIGINAL_CONTENT 라고만 써. 다른 도구는 쓰지 마.",
+                OutgoingUserMessage(
+                    "Write 도구로 이 디렉토리에 $REQUESTED_FILE_NAME 파일을 만들고 " +
+                        "안에 $ORIGINAL_CONTENT 라고만 써. 다른 도구는 쓰지 마.",
+                ),
             )
             waitForFinishedTurns(received, turnCount = 1)
         } finally {

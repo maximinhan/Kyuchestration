@@ -57,6 +57,29 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `앱이 정한 uuid 가 되돌림에 그대로 실려 온다`() {
+        // 앱이 자기가 보낸 말을 알아보는 열쇠다(session-tree 3.5 (다)). 텍스트로 알아보면 같은 말을
+        // 두 번 보냈을 때나 사람이 같은 문구를 직접 쳤을 때 둘을 가르지 못한다.
+        val echoed = assertIs<ChatSessionEvent.UserMessageEchoed>(
+            onlyEventIn(RecordedChatStreamLines.USER_MESSAGE_REPLAYED_WITH_APP_UUID),
+        )
+
+        assertEquals("11111111-2222-4333-8444-000000000001", echoed.messageUuid)
+    }
+
+    @Test
+    fun `앱이 보내지 않은 user 줄은 claude 가 지은 uuid 를 단다`() {
+        // 중단 안내도 같은 모양이다. 그 uuid 는 앱이 보낸 어떤 말과도 맞지 않으므로, 기다리던 말을
+        // 잘못 놓을 일이 없다.
+        val echoed = assertIs<ChatSessionEvent.UserMessageEchoed>(
+            onlyEventIn(RecordedChatStreamLines.INTERRUPTION_ECHOED_FOR_TOOL_USE),
+        )
+
+        assertEquals("[Request interrupted by user for tool use]", echoed.text)
+        assertEquals("53fef7b6-656b-4799-b74e-63a6275f21f5", echoed.messageUuid)
+    }
+
+    @Test
     fun `모델의 텍스트 블록은 완성본으로 온다`() {
         val arrived = assertIs<ChatSessionEvent.AssistantTextArrived>(
             onlyEventIn(RecordedChatStreamLines.ASSISTANT_TEXT),
@@ -257,6 +280,69 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `도구를 기다리던 중에 끊긴 턴도 실패가 아니라 중단으로 온다`() {
+        // terminal_reason 이 aborted_streaming 이 아니라 aborted_tools 다(session-tree 3.2). 하나만
+        // 알면 이 턴이 실패로 그려지는데, 프로세스도 대화도 살아 있다 — 다음 말에 정상으로 답한다.
+        val finished = assertIs<ChatSessionEvent.TurnFinished>(
+            onlyEventIn(RecordedChatStreamLines.RESULT_ABORTED_TOOLS),
+        )
+
+        assertEquals(TurnOutcome.InterruptedDuringToolWait, finished.outcome)
+        assertEquals(41243, finished.durationMillis)
+    }
+
+    @Test
+    fun `오래 도는 도구의 하트비트는 그 도구 호출의 id 와 경과 초로 온다`() {
+        // 줄의 tool_use_id 는 "<호출 id>-heartbeat-0" 처럼 지어낸 값이다. 카드를 찾는 열쇠는
+        // parent_tool_use_id 쪽이다(session-tree 3.4).
+        val heartbeat = assertIs<ChatSessionEvent.ToolCallHeartbeat>(
+            onlyEventIn(RecordedChatStreamLines.TOOL_PROGRESS_HEARTBEAT),
+        )
+
+        assertEquals("toolu_011WCSpQLBFCKWodtL7rKgF1", heartbeat.toolUseId)
+        assertEquals("mcp__probe__slow", heartbeat.toolName)
+        assertEquals(28, heartbeat.elapsedSeconds)
+    }
+
+    @Test
+    fun `하트비트가 아닌 tool_progress 는 재지 못했으므로 모르는 줄이다`() {
+        // 잰 것은 heartbeat: true 하나다. 진짜 진행을 담은 줄이 오는 날 그것을 하트비트로 읽으면
+        // 담긴 것을 버리게 된다 — 원문째로 들고 나가 그날을 알아챈다.
+        val progress = """{"type":"tool_progress","tool_use_id":"toolu_1","tool_name":"Bash",""" +
+            """"parent_tool_use_id":null,"elapsed_time_seconds":3}"""
+
+        assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(progress))
+    }
+
+    @Test
+    fun `앱이 uuid 를 실어 보낸 말의 생애가 그 uuid 로 온다`() {
+        // command_uuid 가 앱이 보낸 uuid 그대로다(session-tree 3.5 (다)). 줄 자신의 uuid 는 따로 있다.
+        val lifecycle = listOf(
+            RecordedChatStreamLines.COMMAND_QUEUED,
+            RecordedChatStreamLines.COMMAND_STARTED,
+            RecordedChatStreamLines.COMMAND_CANCELLED,
+            RecordedChatStreamLines.COMMAND_COMPLETED,
+        ).map { assertIs<ChatSessionEvent.UserCommandLifecycleChanged>(onlyEventIn(it)) }
+
+        assertEquals(
+            listOf(
+                "11111111-2222-4333-8444-000000000001" to UserCommandState.Queued,
+                "11111111-2222-4333-8444-000000000001" to UserCommandState.Started,
+                "11111111-2222-4333-8444-000000000001" to UserCommandState.Cancelled,
+                "11111111-2222-4333-8444-000000000002" to UserCommandState.Completed,
+            ),
+            lifecycle.map { it.commandUuid to it.state },
+        )
+    }
+
+    @Test
+    fun `재지 못한 생애 상태는 모르는 줄이다`() {
+        val unknownState = """{"type":"command_lifecycle","command_uuid":"c","state":"merged","uuid":"u"}"""
+
+        assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(unknownState))
+    }
+
+    @Test
     fun `이어갈 대화를 찾지 못한 턴은 실패로 온다`() {
         // 없는 대화를 resume 하면 result 가 error_during_execution 으로 한 줄 오고 종료 코드가 1 이다(3.9).
         val line = """{"type":"result","subtype":"error_during_execution","result":null,""" +
@@ -304,6 +390,64 @@ class ChatStreamLineReadingTest {
         val unrecognized = assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(newKindOfLine))
 
         assertEquals(newKindOfLine, unrecognized.rawLine)
+    }
+
+    @Test
+    fun `도구 대기 중 중단과 하트비트와 uuid 왕복이 섞인 실측 원출력을 모르는 줄 없이 읽는다`() {
+        // session-tree 7 절 1 단계의 완료 확인. 따로 잰 줄이 아니라 한 실행이 낸 21 줄을 온 순서
+        // 그대로 넣는다 — 세 이벤트가 서로의 사이에 끼어 와도 갈래가 흐트러지지 않아야 한다.
+        val events = RecordedChatStreamLines.TOOL_WAIT_INTERRUPTED_RUN.flatMap(::chatSessionEventsFrom)
+
+        assertEquals(emptyList(), events.filterIsInstance<ChatSessionEvent.Unrecognized>())
+
+        val firstMessage = "11111111-2222-4333-8444-000000000001"
+        val secondMessage = "11111111-2222-4333-8444-000000000002"
+        val milestones = events.mapNotNull { event ->
+            when (event) {
+                is ChatSessionEvent.UserCommandLifecycleChanged -> "${event.commandUuid.takeLast(1)}:${event.state}"
+                is ChatSessionEvent.UserMessageEchoed -> "echo:${event.messageUuid?.takeLast(1)}"
+                is ChatSessionEvent.ToolCallHeartbeat -> "heartbeat:${event.toolName}:${event.elapsedSeconds}"
+                is ChatSessionEvent.ToolCallAnswered -> "answered:failed=${event.failed}"
+                is ChatSessionEvent.TurnFinished -> "turn:${event.outcome}"
+                else -> null
+            }
+        }
+        assertEquals(
+            listOf(
+                "1:Queued",
+                "1:Started",
+                "echo:1",
+                "answered:failed=false",
+                "heartbeat:mcp__probe__slow:28",
+                "answered:failed=true",
+                "echo:5",
+                "turn:InterruptedDuringToolWait",
+                "1:Cancelled",
+                "2:Queued",
+                "2:Started",
+                "echo:2",
+                "turn:Completed",
+                "2:Completed",
+            ),
+            milestones,
+        )
+        assertEquals(
+            listOf(firstMessage, secondMessage),
+            events.filterIsInstance<ChatSessionEvent.UserMessageEchoed>()
+                .mapNotNull { it.messageUuid }
+                .filter { it.startsWith("11111111-") },
+        )
+    }
+
+    @Test
+    fun `모르는 system subtype 도 원문째로 들고 나간다`() {
+        // 아는 subtype 들(status · hook_started …)은 조용히 지나가고, 모르는 것만 원문으로 나간다.
+        // 둘을 섞으면 턴마다 오는 줄이 "판이 바뀌었다" 는 신호를 덮는다.
+        val newSubtype = """{"type":"system","subtype":"coordinator_mode_changed","enabled":true}"""
+
+        val unrecognized = assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(newSubtype))
+
+        assertEquals(newSubtype, unrecognized.rawLine)
     }
 
     @Test

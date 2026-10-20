@@ -44,6 +44,8 @@ internal fun chatSessionEventsFrom(streamLine: String): List<ChatSessionEvent> {
         "stream_event" -> streamFragmentEventsIn(line, streamLine)
         "result" -> listOf(turnFinishedIn(line))
         "rate_limit_event" -> listOf(usageWindowsIn(line))
+        "tool_progress" -> toolProgressEventsIn(line, streamLine)
+        "command_lifecycle" -> userCommandLifecycleEventsIn(line, streamLine)
 
         // 앱이 보낸 제어 요청의 답이다(3.8). 중단이 받아들여졌다는 사실은 뒤이어 오는
         // result(Interrupted)가 말하므로, 이 줄이 화면에 더할 것은 없다.
@@ -171,6 +173,7 @@ private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSession
             "text" -> ChatSessionEvent.UserMessageEchoed(
                 text = block.stringOrNull("text").orEmpty(),
                 parentToolUseId = parentToolUseId,
+                messageUuid = line.stringOrNull("uuid"),
             )
 
             "tool_result" -> ChatSessionEvent.ToolCallAnswered(
@@ -221,6 +224,44 @@ private fun streamFragmentEventsIn(line: JsonObject, streamLine: String): List<C
 }
 
 /**
+ * 오래 도는 도구의 하트비트(session-tree 3.4).
+ *
+ * **잰 것은 `heartbeat: true` 하나다.** 그 밖의 `tool_progress` — 진행을 실제로 담은 줄이 오는 판이
+ * 있다면 — 를 하트비트로 읽으면 담긴 것을 버리게 되므로 원문째로 들고 나간다.
+ */
+private fun toolProgressEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
+    if (line.booleanOrNull("heartbeat") != true) {
+        return listOf(ChatSessionEvent.Unrecognized(streamLine))
+    }
+
+    return listOf(
+        ChatSessionEvent.ToolCallHeartbeat(
+            toolUseId = line.stringOrNull("parent_tool_use_id").orEmpty(),
+            toolName = line.stringOrNull("tool_name").orEmpty(),
+            elapsedSeconds = line.longOrNull("elapsed_time_seconds") ?: 0,
+        ),
+    )
+}
+
+/** 앱이 `uuid` 를 실어 보낸 말의 생애(session-tree 3.5 (다)). 재지 못한 상태는 원문째로 나간다. */
+private fun userCommandLifecycleEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
+    val state = when (line.stringOrNull("state")) {
+        "queued" -> UserCommandState.Queued
+        "started" -> UserCommandState.Started
+        "completed" -> UserCommandState.Completed
+        "cancelled" -> UserCommandState.Cancelled
+        else -> return listOf(ChatSessionEvent.Unrecognized(streamLine))
+    }
+
+    return listOf(
+        ChatSessionEvent.UserCommandLifecycleChanged(
+            commandUuid = line.stringOrNull("command_uuid").orEmpty(),
+            state = state,
+        ),
+    )
+}
+
+/**
  * 턴 하나의 끝(3.1 · 3.12).
  *
  * 모양이 어긋난 `result` 도 [ChatSessionEvent.TurnFinished] 로 옮긴다. 비용과 토큰은 배지 하나가
@@ -253,7 +294,11 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
 }
 
 /**
- * 두 필드가 셋을 가른다(3.8 · 3.9).
+ * 두 필드가 넷을 가른다(3.8 · 3.9 · session-tree 3.2).
+ *
+ * **모르는 `terminal_reason` 은 실패다.** 2.1.304 에서 `aborted_tools` 를 몰랐을 때 도구 대기 중의
+ * 중단이 실패로 그려졌다 — 이름이 하나 더 생기는 날 같은 일이 생기지만, 그 턴이 끝났다는 사실은
+ * 그대로 화면에 닿는다(턴의 끝이 아예 오지 않는 것보다 낫다).
  *
  * 중단을 성공보다 **뒤에** 본다. 중단된 턴은 `subtype` 이 `error_during_execution` 이라 순서가
  * 뒤집혀도 답은 같지만, 읽는 사람에게는 "성공이 아니면서 중단인 것" 이라는 순서가 사실에 가깝다.
@@ -261,6 +306,7 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
 private fun turnOutcomeIn(line: JsonObject): TurnOutcome = when {
     line.stringOrNull("subtype") == "success" -> TurnOutcome.Completed
     line.stringOrNull("terminal_reason") == "aborted_streaming" -> TurnOutcome.Interrupted
+    line.stringOrNull("terminal_reason") == "aborted_tools" -> TurnOutcome.InterruptedDuringToolWait
     else -> TurnOutcome.Failed
 }
 

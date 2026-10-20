@@ -43,8 +43,17 @@ sealed interface ChatSessionEvent {
      * **중단 표시도 이 모양으로 온다.** 턴을 끊으면 `[Request interrupted by user]` 가 `user`
      * 이벤트의 텍스트로 온다(A.9). 그것을 사용자의 말과 가르는 것은 화면의 몫이다 — 어댑터가
      * 문구를 알아보고 다른 갈래로 옮기면, 그 문구가 바뀌는 날 조용히 사용자 말풍선이 된다.
+     *
+     * @param messageUuid 그 줄의 `uuid`. **앱이 stdin 줄에 실어 보낸 `uuid` 가 그대로 돌아온다**
+     *   (session-tree 3.5 (다)) — 앱이 자기가 보낸 말을 알아보는 열쇠다. 앱이 보내지 않은 줄(중단
+     *   안내 · 서브에이전트의 프롬프트)에는 `claude` 가 지은 값이 붙어 오고, 그 값은 앱이 보낸 어떤
+     *   말과도 맞지 않는다. 없는 줄에서는 null 이다.
      */
-    data class UserMessageEchoed(val text: String, val parentToolUseId: String?) : ChatSessionEvent
+    data class UserMessageEchoed(
+        val text: String,
+        val parentToolUseId: String?,
+        val messageUuid: String?,
+    ) : ChatSessionEvent
 
     /**
      * 모델이 텍스트 블록 하나를 **완성**했다.
@@ -105,6 +114,35 @@ sealed interface ChatSessionEvent {
         val typedResult: JsonElement?,
         val answeredAt: Instant?,
     ) : ChatSessionEvent
+
+    /**
+     * 오래 도는 도구가 아직 살아 있다(`tool_progress` · `heartbeat: true` — session-tree 3.4).
+     *
+     * `claude` 가 스스로 약 28.5 초마다 낸다. **진행이 아니라 살아 있다는 신호다** — 경과 시간만
+     * 담고 서버가 무엇을 하는지는 담지 않는다. 그래서 화면이 새로 그릴 것은 없다: 도는 카드는 이미
+     * [ToolCallRequested.requestedAt] 으로 경과 시간을 그리고 있다. 이 갈래가 있는 것은 이 줄을
+     * [Unrecognized] 로 흘려 "판이 바뀌었다" 는 신호를 턴마다 덮지 않기 위해서다.
+     *
+     * @param toolUseId 기다리고 있는 도구 호출의 id. 줄의 `tool_use_id` 는 `<호출 id>-heartbeat-0`
+     *   처럼 지어낸 값이라 카드를 찾는 열쇠가 못 되고, 진짜 id 는 `parent_tool_use_id` 에 실려 온다.
+     *   서브에이전트의 [AssistantTextArrived.parentToolUseId] 와 같은 이름이지만 뜻이 다르다.
+     * @param elapsedSeconds 그 호출이 돈 시간(`elapsed_time_seconds`).
+     */
+    data class ToolCallHeartbeat(
+        val toolUseId: String,
+        val toolName: String,
+        val elapsedSeconds: Long,
+    ) : ChatSessionEvent
+
+    /**
+     * 앱이 `uuid` 를 실어 보낸 말 하나의 생애가 한 걸음 옮겨 갔다(`command_lifecycle` — session-tree 3.5 (다)).
+     *
+     * **`uuid` 를 실어 보낸 말에만 온다.** 실측에서 `uuid` 없이 보낸 말에는 이 줄이 없었다.
+     *
+     * @param commandUuid 앱이 보낸 줄의 `uuid` 그대로(`command_uuid`). 이 줄 자신의 `uuid` 는 따로
+     *   있지만 아무것과도 이어지지 않으므로 싣지 않는다.
+     */
+    data class UserCommandLifecycleChanged(val commandUuid: String, val state: UserCommandState) : ChatSessionEvent
 
     /**
      * 관문이 열렸다 — 이 도구 호출을 해도 되는지 사람에게 묻는다(3.5 · 5.4).
@@ -219,10 +257,32 @@ sealed interface ChatSessionEvent {
 data class McpServerStatus(val name: String, val status: String)
 
 /**
+ * 앱이 보낸 말이 `claude` 안에서 어디까지 왔는가(`command_lifecycle.state`).
+ *
+ * 실측으로 본 넷만 둔다(2026-10-20, 2.1.304). **[Cancelled] 는 설계 3.5 가 재지 않은 것이다** — 도구
+ * 대기 중에 끊은 말이 `completed` 대신 이것으로 끝났다. 그 밖의 값은 갈래를 짓지 않고 원문째
+ * [ChatSessionEvent.Unrecognized] 로 들고 나간다.
+ */
+enum class UserCommandState {
+
+    /** 큐에 들었다. `system/init` 보다도 먼저 온다. */
+    Queued,
+
+    /** 그 말의 턴이 시작됐다. */
+    Started,
+
+    /** 그 말의 턴이 끝났다. `result` 뒤에 온다. */
+    Completed,
+
+    /** 그 말의 턴이 끊겼다. 끊긴 턴의 `result` 뒤에 온다. */
+    Cancelled,
+}
+
+/**
  * 턴이 어떻게 끝났는가.
  *
- * `result` 의 `subtype` 과 `terminal_reason` 두 필드가 이 셋을 가른다(3.8 · 3.9). 화면이 두 필드를
- * 함께 보고 판단하게 두지 않는다 — 한쪽만 보는 자리가 생기면 중단이 실패로 그려진다.
+ * `result` 의 `subtype` 과 `terminal_reason` 두 필드가 이 넷을 가른다(3.8 · 3.9 · session-tree 3.2).
+ * 화면이 두 필드를 함께 보고 판단하게 두지 않는다 — 한쪽만 보는 자리가 생기면 중단이 실패로 그려진다.
  */
 enum class TurnOutcome {
 
@@ -231,6 +291,15 @@ enum class TurnOutcome {
 
     /** 사용자가 끊었다 — `terminal_reason: "aborted_streaming"`(3.8). 대화도 프로세스도 살아 있다. */
     Interrupted,
+
+    /**
+     * 도구 호출을 기다리던 중에 사용자가 끊었다 — `terminal_reason: "aborted_tools"`(session-tree 3.2).
+     *
+     * [Interrupted] 와 같이 대화도 프로세스도 살아 있다. 갈래를 나누는 것은 끊긴 자리가 달라서다 —
+     * 이 턴에서는 도구 호출이 거절된 결과로 닫혔고, MCP 서버는 취소 알림을 받았다. 쓰다 만 글이
+     * 아니라 **돌지 못한 도구**가 남는다.
+     */
+    InterruptedDuringToolWait,
 
     /** 그 밖의 `error_during_execution`. 이어갈 대화를 찾지 못한 경우가 여기다(3.9). */
     Failed,

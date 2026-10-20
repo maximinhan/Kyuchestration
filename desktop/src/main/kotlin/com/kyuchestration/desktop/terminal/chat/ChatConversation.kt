@@ -28,6 +28,8 @@ import java.nio.file.Path
  *   메운다. 그 공백이 실제로 길다 — 턴이 도는 중에 보낸 말은 그 턴이 끝나고 **다음 턴이 시작할
  *   때에야** 되돌아온다(2026-09-04 실측: 보낸 지 78 초 뒤). 이것을 들고 있지 않으면 사용자가
  *   방금 친 말이 그동안 화면 어디에도 없다.
+ *
+ *   되돌아온 것과는 앱이 정한 [OutgoingUserMessage.uuid] 로 잇는다(session-tree 3.5 (다)).
  * @param streamingBlockOrdinal 지금까지 시작된 조각 블록이 몇 번째인가.
  *
  *   **화면이 이 번호를 필요로 한다.** 스트리밍 렌더러의 상태는 덧붙이기 전용이라(5.8의
@@ -43,7 +45,7 @@ data class ChatConversation(
     val modelName: String? = null,
     val resumedConversationId: String? = null,
     val entries: List<ChatEntry> = emptyList(),
-    val pendingUserMessages: List<String> = emptyList(),
+    val pendingUserMessages: List<OutgoingUserMessage> = emptyList(),
     val streamingText: String? = null,
     val streamingBlockOrdinal: Long = 0,
     val turnState: TurnState = TurnState.Idle,

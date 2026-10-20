@@ -560,6 +560,7 @@ private fun PermissionDenialNotice(denials: List<PermissionDenial>) {
 private fun turnOutcomeLabel(outcome: TurnOutcome): String? = when (outcome) {
     TurnOutcome.Completed -> null
     TurnOutcome.Interrupted -> "중단됨"
+    TurnOutcome.InterruptedDuringToolWait -> "중단됨 (도구 대기 중)"
     TurnOutcome.Failed -> "실패"
 }
 
