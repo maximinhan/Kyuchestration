@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.terminal.kyucli
 
 import com.kyuchestration.desktop.kyu.KyuCommandFailure
 import com.kyuchestration.desktop.kyu.KyuCommandRunner
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -25,7 +26,7 @@ class KyuCliSessionCommandSource(
 
     override fun sessionCommandFor(
         workDirPath: Path,
-        target: SessionTarget,
+        target: PersonOpenedSessionTarget,
         conversationChoice: SessionConversationChoice,
         appSocketPath: Path?,
     ): SessionCommandAnswer {
@@ -66,7 +67,7 @@ class KyuCliSessionCommandSource(
  * 이 파일이 컴파일되지 않는다.
  */
 private fun sessionCommandArguments(
-    target: SessionTarget,
+    target: PersonOpenedSessionTarget,
     conversationChoice: SessionConversationChoice,
     appSocketPath: Path?,
 ): List<String> {

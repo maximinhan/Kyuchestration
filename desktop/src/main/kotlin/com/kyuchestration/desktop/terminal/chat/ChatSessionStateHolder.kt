@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.terminal.chat
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -144,7 +145,7 @@ class ChatSessionStateHolder(
      * @param conversationChoice 이 세션이 쓸 대화를 어느 쪽으로 정할지. 여기를 지나 엔진에게 닿고,
      *   엔진이 그 뜻대로 명령을 조립한다(설계 원칙 11).
      */
-    fun enterSession(workDirPath: Path, target: SessionTarget, conversationChoice: SessionConversationChoice) {
+    fun enterSession(workDirPath: Path, target: PersonOpenedSessionTarget, conversationChoice: SessionConversationChoice) {
         latestSessionEntryRequestId++
 
         // 보유 중인 대화로 돌아가는 길이다. 다시 띄우면 돌고 있던 턴이 끊기고 전사를 잃는다.
@@ -307,7 +308,7 @@ class ChatSessionStateHolder(
      */
     private suspend fun openChatSession(
         workDirPath: Path,
-        target: SessionTarget,
+        target: PersonOpenedSessionTarget,
         conversationChoice: SessionConversationChoice,
     ): HeldChatSession {
         // 소켓이 먼저다. 엔진에게 물을 때 그 자리를 함께 줘야 하고(조립은 엔진이 한다 — 원칙 11),

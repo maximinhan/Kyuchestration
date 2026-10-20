@@ -37,6 +37,7 @@ import com.kyuchestration.desktop.dashboard.CardSessionFacts
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.dashboard.mergeCardSessionFacts
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.KyuTheme
@@ -76,7 +77,7 @@ internal fun WorkDirSessionPanel(
      * 줄을 눌러 세션에 들어간다. 어느 대화를 쓸지는 누른 자리가 정한다 — 줄 자체는 이어가기,
      * 줄의 새 대화 버튼은 새로 시작.
      */
-    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
+    onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxHeight()) {

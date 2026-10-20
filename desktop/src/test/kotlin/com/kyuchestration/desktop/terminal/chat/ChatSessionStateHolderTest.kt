@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.terminal.chat
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -685,7 +686,7 @@ class ChatSessionStateHolderTest {
         assertIs<PermissionAnswer.Denied>(card.answer)
     }
 
-    private fun ChatSessionStateHolder.enterSessionContinuingConversation(target: SessionTarget) =
+    private fun ChatSessionStateHolder.enterSessionContinuingConversation(target: PersonOpenedSessionTarget) =
         enterSession(WORK_DIR_PATH, target, SessionConversationChoice.ContinueRecordedConversation)
 
     private fun TestScope.stateHolder(
@@ -746,7 +747,7 @@ class ChatSessionStateHolderTest {
 
     private class RecordingSessionCommandSource : SessionCommandSource {
 
-        val askedTargets = mutableListOf<SessionTarget>()
+        val askedTargets = mutableListOf<PersonOpenedSessionTarget>()
 
         /** 다음에 열 세션이 이어갈 대화. 진짜 어댑터에서는 엔진의 답이 이 값을 정한다. */
         var resumedConversationId: String? = null
@@ -769,7 +770,7 @@ class ChatSessionStateHolderTest {
 
         override fun sessionCommandFor(
             workDirPath: Path,
-            target: SessionTarget,
+            target: PersonOpenedSessionTarget,
             conversationChoice: SessionConversationChoice,
             appSocketPath: Path?,
         ): SessionCommandAnswer {

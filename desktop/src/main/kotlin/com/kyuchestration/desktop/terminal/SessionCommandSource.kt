@@ -32,7 +32,7 @@ fun interface SessionCommandSource {
      */
     fun sessionCommandFor(
         workDirPath: Path,
-        target: SessionTarget,
+        target: PersonOpenedSessionTarget,
         conversationChoice: SessionConversationChoice,
         appSocketPath: Path?,
     ): SessionCommandAnswer

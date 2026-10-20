@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -171,7 +172,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
 
         override fun sessionCommandFor(
             workDirPath: Path,
-            target: SessionTarget,
+            target: PersonOpenedSessionTarget,
             conversationChoice: SessionConversationChoice,
             appSocketPath: Path?,
         ): SessionCommandAnswer {

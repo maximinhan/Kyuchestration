@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
@@ -63,7 +64,7 @@ internal fun ChatConversationPane(
      */
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
-    onStartNewConversationRequested: (SessionTarget) -> Unit,
+    onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (chatScreenState) {
@@ -102,7 +103,7 @@ private fun OpenedChat(
     onInterruptTurnRequested: () -> Unit,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
-    onStartNewConversationRequested: (SessionTarget) -> Unit,
+    onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -129,7 +130,7 @@ private fun OpenedChat(
 private fun ChatHeader(
     conversation: ChatConversation,
     onEndSessionRequested: () -> Unit,
-    onStartNewConversationRequested: (SessionTarget) -> Unit,
+    onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
@@ -165,8 +166,11 @@ private fun ChatHeader(
         Spacer(Modifier.weight(1f))
 
         // 이어가지 못한 자리에서만 뜬다. 늘 두면 사용자가 세션을 끝내려다 대화를 버리게 된다.
-        if (conversation.resumeFailureSuspected) {
-            TextButton(onClick = { onStartNewConversationRequested(conversation.target) }) {
+        // 하위 세션은 언제나 새 대화로 뜨므로 이어가기에 실패할 일이 없다 — 이 갈래에 들 수 있는 것은
+        // 사람이 연 세션뿐이다.
+        val restartableTarget = conversation.target as? PersonOpenedSessionTarget
+        if (conversation.resumeFailureSuspected && restartableTarget != null) {
+            TextButton(onClick = { onStartNewConversationRequested(restartableTarget) }) {
                 Text("새 대화로 시작")
             }
         }

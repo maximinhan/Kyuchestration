@@ -29,6 +29,7 @@ import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatScreenState
@@ -104,7 +105,7 @@ fun KyuchestrationDesktopScreen(
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
+    onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
     onSendUserMessageRequested: (String) -> Unit,
     /** 도는 턴을 끊는 자리(3.8). 대화도 프로세스도 죽지 않는다 — 이번 턴만 끊긴다. */
     onInterruptTurnRequested: () -> Unit,
@@ -210,7 +211,7 @@ private fun OrchestrationShell(
     onCloneRepositoriesRequested: () -> Unit,
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
-    onEnterSessionRequested: (SessionTarget, SessionConversationChoice) -> Unit,
+    onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
     onSendUserMessageRequested: (String) -> Unit,
     onInterruptTurnRequested: () -> Unit,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,

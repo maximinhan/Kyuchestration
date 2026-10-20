@@ -12,7 +12,7 @@ sealed interface SessionTarget {
     /** 화면에 그대로 쓰는 이름. kyu 가 사람에게 쓰는 이름과 같다. */
     val label: String
 
-    data class Repo(val repoName: String) : SessionTarget {
+    data class Repo(val repoName: String) : PersonOpenedSessionTarget {
         override val label: String get() = repoName
     }
 
@@ -21,7 +21,28 @@ sealed interface SessionTarget {
      *
      * main 은 kyu 가 예약한 이름이다(list.go 의 mainRowLabel).
      */
-    data object Main : SessionTarget {
+    data object Main : PersonOpenedSessionTarget {
         override val label: String = "main"
     }
+
+    /**
+     * 메인이 `spawn_session` 으로 띄운 하위 세션(session-tree-design.md 6.11).
+     *
+     * **사람이 여는 세션이 아니다.** 패널의 줄을 눌러 들어가는 길이 없고, 엔진에게 묻는 물음도 다르다
+     * (`--child`). 그래서 [PersonOpenedSessionTarget] 에 들지 않는다 — 들면 "레포 이름 자리에 무엇을
+     * 넣는가" 를 묻는 자리마다 답할 수 없는 갈래가 하나 생긴다.
+     *
+     * @param childId 앱이 정한 이름(`child-1` …). 상위 하나 안에서 다시 쓰지 않는다(6.2).
+     */
+    data class Child(val childId: String) : SessionTarget {
+        override val label: String get() = childId
+    }
 }
+
+/**
+ * 사람이 패널에서 골라 여는 세션 — 메인과 레포.
+ *
+ * 엔진에게 "이 라벨의 세션은 무엇을 띄우는가" 를 묻고(SessionCommandSource), 기록된 대화를 이어가거나
+ * 새로 시작할 수 있는 것이 이 둘이다. 하위 세션은 상위가 띄우고 언제나 새 대화라 이 물음 밖에 있다.
+ */
+sealed interface PersonOpenedSessionTarget : SessionTarget
