@@ -53,6 +53,7 @@ class SpawnSessionAnswerReadingTest {
         assertEquals("도는 중", childSessionStatusLabel(node().copy(waitingFor = ChildWaitingFor.Model)))
         assertEquals("쉬는 중", childSessionStatusLabel(node()))
         assertEquals("승인 대기", childSessionStatusLabel(node().copy(waitingFor = ChildWaitingFor.Approval)))
+        assertEquals("상위에게 묻는 중", childSessionStatusLabel(node().copy(waitingFor = ChildWaitingFor.Parent)))
         assertEquals(
             "끝남 · 상위가 끝냄",
             childSessionStatusLabel(node().copy(lifecycle = ChildLifecycle.Ended(ChildEndReason.EndedByParent, 0))),
