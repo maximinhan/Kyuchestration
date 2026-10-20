@@ -173,6 +173,7 @@ private fun userEventsIn(line: JsonObject, streamLine: String): List<ChatSession
             "text" -> ChatSessionEvent.UserMessageEchoed(
                 text = block.stringOrNull("text").orEmpty(),
                 parentToolUseId = parentToolUseId,
+                messageUuid = line.stringOrNull("uuid"),
             )
 
             "tool_result" -> ChatSessionEvent.ToolCallAnswered(

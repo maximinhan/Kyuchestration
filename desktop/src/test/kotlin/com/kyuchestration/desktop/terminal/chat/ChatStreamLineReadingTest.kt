@@ -57,6 +57,29 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `앱이 정한 uuid 가 되돌림에 그대로 실려 온다`() {
+        // 앱이 자기가 보낸 말을 알아보는 열쇠다(session-tree 3.5 (다)). 텍스트로 알아보면 같은 말을
+        // 두 번 보냈을 때나 사람이 같은 문구를 직접 쳤을 때 둘을 가르지 못한다.
+        val echoed = assertIs<ChatSessionEvent.UserMessageEchoed>(
+            onlyEventIn(RecordedChatStreamLines.USER_MESSAGE_REPLAYED_WITH_APP_UUID),
+        )
+
+        assertEquals("11111111-2222-4333-8444-000000000001", echoed.messageUuid)
+    }
+
+    @Test
+    fun `앱이 보내지 않은 user 줄은 claude 가 지은 uuid 를 단다`() {
+        // 중단 안내도 같은 모양이다. 그 uuid 는 앱이 보낸 어떤 말과도 맞지 않으므로, 기다리던 말을
+        // 잘못 놓을 일이 없다.
+        val echoed = assertIs<ChatSessionEvent.UserMessageEchoed>(
+            onlyEventIn(RecordedChatStreamLines.INTERRUPTION_ECHOED_FOR_TOOL_USE),
+        )
+
+        assertEquals("[Request interrupted by user for tool use]", echoed.text)
+        assertEquals("53fef7b6-656b-4799-b74e-63a6275f21f5", echoed.messageUuid)
+    }
+
+    @Test
     fun `모델의 텍스트 블록은 완성본으로 온다`() {
         val arrived = assertIs<ChatSessionEvent.AssistantTextArrived>(
             onlyEventIn(RecordedChatStreamLines.ASSISTANT_TEXT),

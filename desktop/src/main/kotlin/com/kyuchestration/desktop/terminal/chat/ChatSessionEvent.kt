@@ -43,8 +43,17 @@ sealed interface ChatSessionEvent {
      * **중단 표시도 이 모양으로 온다.** 턴을 끊으면 `[Request interrupted by user]` 가 `user`
      * 이벤트의 텍스트로 온다(A.9). 그것을 사용자의 말과 가르는 것은 화면의 몫이다 — 어댑터가
      * 문구를 알아보고 다른 갈래로 옮기면, 그 문구가 바뀌는 날 조용히 사용자 말풍선이 된다.
+     *
+     * @param messageUuid 그 줄의 `uuid`. **앱이 stdin 줄에 실어 보낸 `uuid` 가 그대로 돌아온다**
+     *   (session-tree 3.5 (다)) — 앱이 자기가 보낸 말을 알아보는 열쇠다. 앱이 보내지 않은 줄(중단
+     *   안내 · 서브에이전트의 프롬프트)에는 `claude` 가 지은 값이 붙어 오고, 그 값은 앱이 보낸 어떤
+     *   말과도 맞지 않는다. 없는 줄에서는 null 이다.
      */
-    data class UserMessageEchoed(val text: String, val parentToolUseId: String?) : ChatSessionEvent
+    data class UserMessageEchoed(
+        val text: String,
+        val parentToolUseId: String?,
+        val messageUuid: String?,
+    ) : ChatSessionEvent
 
     /**
      * 모델이 텍스트 블록 하나를 **완성**했다.
