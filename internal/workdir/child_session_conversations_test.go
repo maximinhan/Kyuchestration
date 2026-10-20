@@ -41,7 +41,7 @@ func readConversationsFileWithChildSessionsForTest(t *testing.T, workDirPath str
 	return record, string(fileContent)
 }
 
-func startChildForTest(t *testing.T, workDirPath, parentLabel, childID, cwd, title string, startedAt time.Time) ConversationAssignment {
+func startChildForTest(t *testing.T, workDirPath, parentLabel, childID, cwd, title string, startedAt time.Time) ChildSessionAssignment {
 	t.Helper()
 
 	assignment, err := StartChildSessionConversation(workDirPath, parentLabel, childID,
@@ -61,9 +61,6 @@ func TestAChildSessionIsRecordedUnderItsParentLabel(t *testing.T) {
 	first := startChildForTest(t, workDirPath, "main", "child-1", "proj-a", "proj-a 포트 수정", startedAt)
 	second := startChildForTest(t, workDirPath, "main", "child-2", "scratch-x", "scratch-x", startedAt.Add(2*time.Second))
 
-	if !first.IsNewConversation || !second.IsNewConversation {
-		t.Error("IsNewConversation = false, 하위 세션은 v1 에서 언제나 새 대화로 뜹니다(6.15)")
-	}
 	if first.ConversationID == second.ConversationID {
 		t.Fatalf("두 하위의 대화 ID 가 %q 로 같습니다", first.ConversationID)
 	}
@@ -143,5 +140,47 @@ func TestAChildIdAlreadyRecordedUnderTheParentIsRefused(t *testing.T) {
 	record, _ := readConversationsFileWithChildSessionsForTest(t, workDirPath)
 	if record.ChildSessions["main"]["child-1"].ConversationID != first.ConversationID {
 		t.Errorf("거절한 요청이 앞 기록을 바꿨습니다: %+v", record.ChildSessions["main"]["child-1"])
+	}
+}
+
+func TestTheFirstChildWithoutAnIdIsNamedChildOne(t *testing.T) {
+	// id 를 비워 물으면 엔진이 짓는다. 기록을 읽는 쪽이 엔진 하나여야 앱이 파일 형식을 알 필요가 없다.
+	workDirPath := t.TempDir()
+
+	assignment := startChildForTest(t, workDirPath, "main", "", "proj-a", "proj-a", time.Now())
+
+	if assignment.ChildID != "child-1" {
+		t.Errorf("ChildID = %q, 빈 기록에서는 child-1 을 기대", assignment.ChildID)
+	}
+	record, _ := readConversationsFileWithChildSessionsForTest(t, workDirPath)
+	if record.ChildSessions["main"]["child-1"].ConversationID != assignment.ConversationID {
+		t.Errorf("childSessions = %+v, 지은 id child-1 아래 배정한 대화가 적히기를 기대", record.ChildSessions)
+	}
+}
+
+func TestAnUnnamedChildTakesOneMoreThanTheLargestNumberNotAGap(t *testing.T) {
+	// 빈 번호(child-2)를 다시 쓰지 않는다. 상위의 전사에 남은 id 는 한 하위만 가리켜야 한다 — 빈 자리가
+	// 왜 비었는지 엔진은 모르고, 그 자리를 채우면 같은 이름이 두 하위를 가리키게 될 수 있다.
+	workDirPath := t.TempDir()
+	startChildForTest(t, workDirPath, "main", "child-1", "proj-a", "proj-a", time.Now())
+	startChildForTest(t, workDirPath, "main", "child-3", "proj-b", "proj-b", time.Now())
+	startChildForTest(t, workDirPath, "main", "reviewer", "proj-c", "proj-c", time.Now())
+
+	assignment := startChildForTest(t, workDirPath, "main", "", "proj-d", "proj-d", time.Now())
+
+	if assignment.ChildID != "child-4" {
+		t.Errorf("ChildID = %q, 가장 큰 번호 3 다음인 child-4 를 기대", assignment.ChildID)
+	}
+}
+
+func TestChildNumbersAreCountedPerParent(t *testing.T) {
+	// id 는 상위 하나 안에서만 유일하다(6.14). 다른 상위의 번호를 세면 기록이 트리라는 뜻이 흐려진다.
+	workDirPath := t.TempDir()
+	startChildForTest(t, workDirPath, "proj-a", "child-7", "proj-a", "proj-a", time.Now())
+
+	assignment := startChildForTest(t, workDirPath, "main", "", "proj-b", "proj-b", time.Now())
+
+	if assignment.ChildID != "child-1" {
+		t.Errorf("ChildID = %q, main 아래 첫 하위라 child-1 을 기대", assignment.ChildID)
 	}
 }

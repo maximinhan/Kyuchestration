@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -191,23 +192,49 @@ type ChildSessionStart struct {
 	StartedAt time.Time
 }
 
-// StartChildSessionConversation 은 이 상위 아래 이 id 의 하위 세션에 새 대화를 배정하고 적는다.
+// ChildSessionAssignment 는 한 상위 아래 하위 세션 하나에 배정한 것이다.
+//
+// ConversationAssignment 와 따로 두는 이유는 IsNewConversation 이 여기서는 늘 참이라(6.15) 물을
+// 것이 아니고, 대신 id 가 답의 일부가 되어서다 — 부르는 쪽이 id 를 비워 물었으면 그것을 지은 것이 엔진이다.
+type ChildSessionAssignment struct {
+	// ChildID 는 기록에 적힌 하위의 id 다. 부르는 쪽이 준 것이거나, 비워 물었으면 엔진이 지은 것이다.
+	ChildID string
+
+	// ConversationID 는 claude 에게 --session-id 로 넘길 새 대화의 ID 다.
+	ConversationID string
+
+	// Warnings 는 ConversationAssignment.Warnings 와 같다.
+	Warnings []string
+}
+
+// childSessionIDPrefix 는 엔진이 짓는 하위 id 의 앞자리다. 뒤에 상위 하나 안의 번호가 붙는다.
+const childSessionIDPrefix = "child-"
+
+// StartChildSessionConversation 은 이 상위 아래 하위 세션 하나에 새 대화를 배정하고 적는다.
 //
 // 언제나 새 대화다. 하위는 v1 에서 이어가지 않는다(6.15) — 상위가 끝나면 하위도 끝나고(원칙 17),
 // 앱 재시작은 상위가 끝난 것이다.
 //
-// 이미 적힌 id 는 거절한다. 같은 id 로 덮으면 앞 하위의 대화 ID 가 사라지고, 상위의 전사에 남은
-// 그 id 가 가리킬 기록이 없어진다. id 는 앱이 정하므로(6.2) 겹친 것은 앱의 실수이고, 그 실수는
-// 조용히 덮기보다 그 자리에서 드러나는 편이 낫다.
-func StartChildSessionConversation(workDirPath, parentLabel, childID string, start ChildSessionStart) (ConversationAssignment, error) {
+// requestedChildID 를 비우면 엔진이 기록을 보고 다음 id 를 짓는다(nextChildSessionID). 짓는 일이
+// 여기 있어야 하는 이유는 같은 기록을 읽고 같은 쓰기 안에서 적기 때문이다 — 앱이 기록 파일을 읽어
+// 번호를 세면 파일 형식과 판 규약을 두 곳이 알게 되고, 읽기와 쓰기 사이가 프로세스 경계로 벌어진다.
+//
+// 준 id 가 이미 적혀 있으면 거절한다. 같은 id 로 덮으면 앞 하위의 대화 ID 가 사라지고, 상위의 전사에
+// 남은 그 id 가 가리킬 기록이 없어진다. 겹친 것은 부르는 쪽의 실수이고, 조용히 다른 id 를 주면 부르는
+// 쪽이 믿는 id 와 기록의 id 가 갈라지므로 그 자리에서 드러낸다.
+func StartChildSessionConversation(workDirPath, parentLabel, requestedChildID string, start ChildSessionStart) (ChildSessionAssignment, error) {
 	records, warnings, err := readConversations(workDirPath)
 	if err != nil {
-		return ConversationAssignment{}, err
+		return ChildSessionAssignment{}, err
 	}
 
 	childrenOfParent := records.childSessions[parentLabel]
+	childID := requestedChildID
+	if childID == "" {
+		childID = nextChildSessionID(childrenOfParent)
+	}
 	if _, recorded := childrenOfParent[childID]; recorded {
-		return ConversationAssignment{}, fmt.Errorf(
+		return ChildSessionAssignment{}, fmt.Errorf(
 			"%s 아래에 하위 세션 %s 가 이미 적혀 있습니다 (%s) — 하위 세션 id 는 상위 하나 안에서 다시 쓰지 않습니다",
 			parentLabel, childID, conversationsFilePath(workDirPath))
 	}
@@ -225,9 +252,30 @@ func StartChildSessionConversation(workDirPath, parentLabel, childID string, sta
 	}
 
 	if err := writeConversations(workDirPath, records); err != nil {
-		return ConversationAssignment{}, err
+		return ChildSessionAssignment{}, err
 	}
-	return ConversationAssignment{ConversationID: newID, IsNewConversation: true, Warnings: warnings}, nil
+	return ChildSessionAssignment{ChildID: childID, ConversationID: newID, Warnings: warnings}, nil
+}
+
+// nextChildSessionID 는 한 상위 아래 적힌 하위들을 보고 다음 id(child-N)를 짓는다.
+//
+// 가장 큰 번호 다음이지, 비어 있는 번호가 아니다. 상위의 전사에 남은 id 는 한 하위만 가리켜야 하는데,
+// 번호가 왜 비었는지(사람이 기록을 고쳤는지 등) 엔진은 모른다 — 채우면 같은 이름이 두 하위를 가리킬
+// 수 있다. child-<양의 정수> 꼴이 아닌 id(앱이 명시한 이름)는 세지 않는다.
+func nextChildSessionID(childrenOfParent map[string]childSessionRecord) string {
+	largestNumber := 0
+	for childID := range childrenOfParent {
+		numberText, hasPrefix := strings.CutPrefix(childID, childSessionIDPrefix)
+		if !hasPrefix {
+			continue
+		}
+		number, err := strconv.Atoi(numberText)
+		if err != nil || number <= 0 {
+			continue
+		}
+		largestNumber = max(largestNumber, number)
+	}
+	return childSessionIDPrefix + strconv.Itoa(largestNumber+1)
 }
 
 // LabelsWithRecordedConversation 은 이 워크디렉토리에서 이어갈 대화가 적혀 있는 라벨을 모은다.
