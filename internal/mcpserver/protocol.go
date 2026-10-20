@@ -14,6 +14,8 @@ package mcpserver
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,7 +71,11 @@ type Tool struct {
 	// 에러를 돌려주는 것과 IsError 를 세우는 것은 다른 일이다. 에러는 "서버가 이 요청을 처리할
 	// 수 없었다" 이고 클라이언트의 오류 화면으로 간다. IsError 는 "도구가 일을 못 했다" 이고
 	// 모델이 읽는 답이 된다.
-	Call func(arguments json.RawMessage) (ToolResult, error)
+	//
+	// ctx 는 클라이언트가 이 호출을 notifications/cancelled 로 거두면 취소된다(session-tree-design.md
+	// 3.2 — 사람이 도구 대기 중에 중단한 경우다). 오래 기다리는 도구는 ctx 가 끝나면 쥐고 있던 것을
+	// 놓고 곧바로 돌아와야 한다. 그때 돌려준 답은 클라이언트에게 가지 않는다.
+	Call func(ctx context.Context, arguments json.RawMessage) (ToolResult, error)
 }
 
 // Serve 는 in 에서 요청을 읽어 out 으로 답한다. in 이 끝나면(클라이언트가 닫으면) 돌아온다.
@@ -86,6 +92,8 @@ func Serve(in io.Reader, out io.Writer, serverName, serverVersion string, tools 
 		tools:    toolsByName(tools),
 		toolList: append([]Tool(nil), tools...),
 		out:      out,
+
+		cancelByRequestID: map[string]*runningRequest{},
 	}
 	return server.readRequests(in)
 }
@@ -117,6 +125,19 @@ type server struct {
 	// inFlight 는 아직 답하지 않은 요청들이다. in 이 끝나도 도는 중인 도구의 답까지 내보낸 뒤에
 	// 돌아가야, 클라이언트가 마지막 위임의 결과를 잃지 않는다.
 	inFlight sync.WaitGroup
+
+	// cancelByRequestID 는 도는 중인 요청을 그 ID 로 찾아 취소하는 자리다. 키는 ID 의 JSON 원문을
+	// 공백 없이 다듬은 것이다 — 요청의 "id":2 와 취소의 "requestId": 2 가 같은 키가 되어야 한다.
+	cancelMutex       sync.Mutex
+	cancelByRequestID map[string]*runningRequest
+}
+
+// runningRequest 는 도는 중인 요청 하나의 취소 손잡이다.
+//
+// 포인터로 맵에 넣는 이유는 같은 ID 가 다시 쓰인 경우다 — 끝난 요청이 자기 자리를 지울 때, 그 ID 로
+// 새로 들어온 요청의 손잡이까지 지우지 않으려면 "내가 넣은 그것인가" 를 가려야 한다.
+type runningRequest struct {
+	cancel context.CancelFunc
 }
 
 // readRequests 는 줄 단위로 요청을 읽어 각각을 따로 처리한다.
@@ -165,8 +186,11 @@ func (server *server) handleLine(line []byte) {
 		return
 	}
 
-	// ID 가 없는 것은 알림이다. 답을 흘리면 클라이언트가 짝 없는 답을 받는다.
+	// ID 가 없는 것은 알림이다. 어떤 알림에도 답하지 않는다 — 답을 흘리면 클라이언트가 짝 없는 답을 받는다.
 	if len(request.ID) == 0 {
+		if request.Method == cancelledNotificationMethod {
+			server.cancelRequest(request.Params)
+		}
 		return
 	}
 
@@ -175,14 +199,78 @@ func (server *server) handleLine(line []byte) {
 		return
 	}
 
+	// 취소 손잡이를 고루틴을 띄우기 전에, 줄을 읽는 이 자리에서 단다. 고루틴 안에서 달면 바로 다음
+	// 줄로 온 취소가 아직 손잡이가 없는 요청을 만나 흘러가고, 그 요청은 끝까지 돈다.
+	ctx, running := server.startRequest(request.ID)
+
 	server.inFlight.Add(1)
 	go func() {
 		defer server.inFlight.Done()
-		server.handleRequest(request)
+		defer server.finishRequest(request.ID, running)
+		server.handleRequest(ctx, request)
 	}()
 }
 
-func (server *server) handleRequest(request jsonRPCRequest) {
+// cancelledNotificationMethod 는 클라이언트가 보낸 요청을 거두는 알림이다(MCP 스펙 cancellation).
+//
+// 실측(session-tree-design.md 3.2)한 모양: 도구 대기 중 interrupt 를 받은 claude 가
+// {"method":"notifications/cancelled","params":{"requestId":2,"reason":"AbortError: remote-cancel"}}
+// 를 보낸다. 시간 상한(MCP_TOOL_TIMEOUT)에 걸려도 같은 알림이 reason 만 바뀌어 온다(3.4).
+const cancelledNotificationMethod = "notifications/cancelled"
+
+func (server *server) startRequest(id json.RawMessage) (context.Context, *runningRequest) {
+	ctx, cancel := context.WithCancel(context.Background())
+	running := &runningRequest{cancel: cancel}
+
+	server.cancelMutex.Lock()
+	defer server.cancelMutex.Unlock()
+	server.cancelByRequestID[requestIDKey(id)] = running
+	return ctx, running
+}
+
+func (server *server) finishRequest(id json.RawMessage, running *runningRequest) {
+	running.cancel()
+
+	server.cancelMutex.Lock()
+	defer server.cancelMutex.Unlock()
+	key := requestIDKey(id)
+	if server.cancelByRequestID[key] == running {
+		delete(server.cancelByRequestID, key)
+	}
+}
+
+// cancelRequest 는 알림이 가리킨 요청의 컨텍스트를 취소한다.
+//
+// 모르는 ID · 이미 끝난 요청 · 읽을 수 없는 params 는 조용히 넘긴다. 스펙이 취소와 답이 엇갈릴 수
+// 있다고 적어둔 자리이고, 알림에는 답할 길도 없다.
+func (server *server) cancelRequest(params json.RawMessage) {
+	var cancelledParams struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if err := json.Unmarshal(params, &cancelledParams); err != nil || len(cancelledParams.RequestID) == 0 {
+		return
+	}
+
+	server.cancelMutex.Lock()
+	running, found := server.cancelByRequestID[requestIDKey(cancelledParams.RequestID)]
+	server.cancelMutex.Unlock()
+
+	if found {
+		running.cancel()
+	}
+}
+
+// requestIDKey 는 ID 의 JSON 원문을 맵 키로 다듬는다. 문자열 "2" 와 숫자 2 는 다른 키로 남는다 —
+// JSON-RPC 에서 둘은 다른 ID 다.
+func requestIDKey(id json.RawMessage) string {
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, id); err != nil {
+		return string(id)
+	}
+	return compacted.String()
+}
+
+func (server *server) handleRequest(ctx context.Context, request jsonRPCRequest) {
 	switch request.Method {
 	case "initialize":
 		server.writeResult(request.ID, server.initializeResult(request.Params))
@@ -195,7 +283,7 @@ func (server *server) handleRequest(request jsonRPCRequest) {
 		server.writeResult(request.ID, map[string]any{"tools": server.describeTools()})
 
 	case "tools/call":
-		server.callTool(request)
+		server.callTool(ctx, request)
 
 	default:
 		server.writeError(request.ID, methodNotFoundErrorCode, fmt.Sprintf("이 서버가 모르는 메서드입니다: %s", request.Method))
@@ -236,7 +324,7 @@ func (server *server) describeTools() []map[string]any {
 	return described
 }
 
-func (server *server) callTool(request jsonRPCRequest) {
+func (server *server) callTool(ctx context.Context, request jsonRPCRequest) {
 	var callParams struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -252,7 +340,14 @@ func (server *server) callTool(request jsonRPCRequest) {
 		return
 	}
 
-	result, err := tool.Call(callParams.Arguments)
+	result, err := tool.Call(ctx, callParams.Arguments)
+
+	// 취소된 요청에는 답하지 않는다(MCP 스펙 cancellation 의 SHOULD NOT). claude 는 그 호출을 이미
+	// 중단으로 닫았고, 늦게 보낸 답은 짝 없는 답이 된다.
+	if ctx.Err() != nil {
+		return
+	}
+
 	if err != nil {
 		server.writeError(request.ID, internalErrorCode, err.Error())
 		return

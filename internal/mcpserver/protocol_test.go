@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,7 +83,7 @@ func probeTool() Tool {
 			"properties": map[string]any{"repo": map[string]any{"type": "string"}},
 			"required":   []any{"repo"},
 		},
-		Call: func(arguments json.RawMessage) (ToolResult, error) {
+		Call: func(_ context.Context, arguments json.RawMessage) (ToolResult, error) {
 			return ToolResult{Text: "받은 인자: " + string(arguments)}, nil
 		},
 	}
@@ -211,7 +212,7 @@ func TestAToolThatCouldNotDoItsJobAnswersAsIsErrorNotAsAProtocolError(t *testing
 	refusingTool := Tool{
 		Name:        "run_in_repo",
 		InputSchema: map[string]any{"type": "object"},
-		Call: func(json.RawMessage) (ToolResult, error) {
+		Call: func(context.Context, json.RawMessage) (ToolResult, error) {
 			return ToolResult{Text: "레포의 .mcp.json 이 아직 승인되지 않았습니다", IsError: true}, nil
 		},
 	}
@@ -317,7 +318,7 @@ func TestALongRunningToolDoesNotBlockTheOtherRequests(t *testing.T) {
 	waitingTool := Tool{
 		Name:        "run_in_repo",
 		InputSchema: map[string]any{"type": "object"},
-		Call: func(json.RawMessage) (ToolResult, error) {
+		Call: func(context.Context, json.RawMessage) (ToolResult, error) {
 			<-released
 			return ToolResult{Text: "끝났다"}, nil
 		},
@@ -372,4 +373,71 @@ func waitUntilAnswered(t *testing.T, answered *lockedStringBuilder, wanted strin
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("%s 를 담은 답이 오지 않았습니다: %s", wanted, answered.String())
+}
+
+func TestACancelledToolCallStopsItsToolAndGetsNoAnswerWhileTheServerGoesOn(t *testing.T) {
+	// 실측 3.2 — 도구 대기 중에 사람이 중단하면 claude 는 notifications/cancelled 를 보낸다. 그것을
+	// 흘려들으면 await_session 은 앱 소켓을 연 채로 50 분까지 남고, 앱은 아무도 받지 않을 기다림을 쥔다.
+	toolStarted := make(chan struct{})
+	toolSawCancellation := make(chan struct{})
+	waitingTool := Tool{
+		Name:        "await_session",
+		InputSchema: map[string]any{"type": "object"},
+		Call: func(ctx context.Context, _ json.RawMessage) (ToolResult, error) {
+			close(toolStarted)
+			<-ctx.Done()
+			close(toolSawCancellation)
+			return ToolResult{Text: "기다림을 접었다", IsError: true}, nil
+		},
+	}
+
+	requestReader, requestWriter := io.Pipe()
+	var answered lockedStringBuilder
+
+	served := make(chan error, 1)
+	go func() {
+		served <- Serve(requestReader, &answered, "kyu-test", "v0", []Tool{waitingTool, probeTool()})
+	}()
+
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"await_session","arguments":{}}}`)
+	<-toolStarted
+
+	// 실측한 모양 그대로다 — requestId 는 받은 요청의 id 와 같은 JSON 값이다.
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2,"reason":"AbortError: remote-cancel"}}`)
+
+	select {
+	case <-toolSawCancellation:
+	case <-time.After(5 * time.Second):
+		t.Fatal("취소 알림을 받고도 도구의 컨텍스트가 취소되지 않았습니다")
+	}
+
+	fmt.Fprintln(requestWriter, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"repo_fingerprint","arguments":{"repo":"api"}}}`)
+	waitUntilAnswered(t, &answered, `"id":3`)
+
+	requestWriter.Close()
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() 실패: %v", err)
+	}
+
+	// MCP 스펙(cancellation): 취소를 받은 쪽은 그 요청에 답하지 않는다. claude 는 이미 그 호출을
+	// 중단으로 닫았으므로 늦게 온 답은 짝 없는 답이 된다.
+	for _, message := range decodeAnsweredLinesForTest(t, answered.String()) {
+		if string(message.ID) == "2" {
+			t.Errorf("취소된 요청 2 에 답했습니다: %s", message.Result)
+		}
+	}
+}
+
+func TestACancellationForARequestThatIsNotRunningChangesNothing(t *testing.T) {
+	// 취소와 답은 엇갈릴 수 있다(스펙이 그렇게 적는다). 이미 끝난 요청, 모르는 ID 의 취소가 다른
+	// 요청을 건드리거나 서버를 멈추면 안 된다.
+	messages := serveLinesForTest(t, []Tool{probeTool()},
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":99,"reason":"늦은 취소"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":"깨진 params"}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"repo_fingerprint","arguments":{"repo":"api"}}}`,
+	)
+
+	if answer := answerWithID(t, messages, "4"); answer.Error != nil {
+		t.Errorf("취소와 무관한 요청이 오류로 끝났습니다: %s", answer.Error.Message)
+	}
 }

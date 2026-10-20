@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,8 +79,8 @@ func newRequestPermissionTool(socketPath string) mcpserver.Tool {
 			"required": []any{"tool_name", "input"},
 		},
 
-		Call: func(arguments json.RawMessage) (mcpserver.ToolResult, error) {
-			return answerPermissionQuestion(socketPath, arguments)
+		Call: func(ctx context.Context, arguments json.RawMessage) (mcpserver.ToolResult, error) {
+			return answerPermissionQuestion(ctx, socketPath, arguments)
 		},
 	}
 }
@@ -141,13 +142,13 @@ type permissionDecisionDocument struct {
 //
 // 어디서 실패하든 거절로 끝난다. 물어보지 못한 것을 허용으로 읽으면 사람이 한 번도 보지 않은
 // 도구가 실행되고, 그 실패는 조용하다 — 안전한 쪽으로 기우는 것이 이 자리의 규율이다.
-func answerPermissionQuestion(socketPath string, arguments json.RawMessage) (mcpserver.ToolResult, error) {
+func answerPermissionQuestion(ctx context.Context, socketPath string, arguments json.RawMessage) (mcpserver.ToolResult, error) {
 	var request permissionRequestArguments
 	if err := json.Unmarshal(arguments, &request); err != nil {
 		return deniedToolResult(fmt.Sprintf("승인 물음을 읽지 못해 실행하지 않았습니다: %v", err))
 	}
 
-	answer, err := askTheApp(socketPath, permissionQuestion{
+	answer, err := askTheApp(ctx, socketPath, permissionQuestion{
 		Kind:      permissionQuestionKind,
 		ToolName:  request.ToolName,
 		Input:     request.Input,
@@ -184,8 +185,8 @@ func answerPermissionQuestion(socketPath string, arguments json.RawMessage) (mcp
 }
 
 // askTheApp 은 승인 물음 한 줄을 앱에게 보내고 결정 한 줄을 받는다.
-func askTheApp(socketPath string, question permissionQuestion) (appPermissionAnswer, error) {
-	answerLine, err := exchangeLineWithApp(socketPath, question)
+func askTheApp(ctx context.Context, socketPath string, question permissionQuestion) (appPermissionAnswer, error) {
+	answerLine, err := exchangeLineWithApp(ctx, socketPath, question)
 	if err != nil {
 		return appPermissionAnswer{}, err
 	}
