@@ -51,9 +51,9 @@ const delegationApprovalsFileSchemaVersion = 1
 // delegationApprovalsFilePermission 은 승인 기록 파일의 권한이다. 사람이 열어 확인할 수 있어야 한다.
 const delegationApprovalsFilePermission = 0o644
 
-// RepoExecutionConfig 는 레포가 제공하는 실행 유발 설정 파일 하나다.
-type RepoExecutionConfig struct {
-	// RelativePath 는 레포 안에서의 자리다(`.claude/settings.json` 처럼 / 로 적는다).
+// ExecutionConfig 는 세션이 뜰 자리(레포 또는 그 안의 폴더)가 제공하는 실행 유발 설정 파일 하나다.
+type ExecutionConfig struct {
+	// RelativePath 는 그 자리 안에서의 자리다(`.claude/settings.json` 처럼 / 로 적는다).
 	// 어느 파일이 걸렸는지를 사람과 모델에게 말할 때 쓴다.
 	RelativePath string
 
@@ -64,11 +64,15 @@ type RepoExecutionConfig struct {
 	Content string
 }
 
-// RepoDelegationApproval 은 한 레포에 위임을 걸어도 되는지에 대한 판정이다.
-type RepoDelegationApproval struct {
-	// ExecutionConfigs 는 이 레포에 실제로 있는 실행 유발 설정 파일들이다. 비어 있으면 물을 것이
-	// 없고, 그것이 대부분의 레포다.
-	ExecutionConfigs []RepoExecutionConfig
+// DelegationApproval 은 한 자리에 위임(run_in_repo)이나 하위 세션을 띄워도 되는지에 대한 판정이다.
+//
+// 판정의 단위가 레포에서 자리(워크디렉토리 기준 상대경로)로 넓어졌다(session-tree-design.md 6.9).
+// 하위 세션은 레포 안의 폴더나 새 폴더에도 뜨고, claude 는 그 자리의 설정을 읽는다 — 레포 단위로
+// 보면 레포를 승인한 것이 그 안 폴더의 다른 .mcp.json 까지 승인한 것이 된다.
+type DelegationApproval struct {
+	// ExecutionConfigs 는 그 자리에 실제로 있는 실행 유발 설정 파일들이다. 비어 있으면 물을 것이
+	// 없고, 그것이 대부분의 자리다(새 폴더는 언제나).
+	ExecutionConfigs []ExecutionConfig
 
 	// Approved 는 지금 그 파일들의 내용이 승인되어 있는지다.
 	Approved bool
@@ -79,55 +83,69 @@ type RepoDelegationApproval struct {
 }
 
 // DelegationIsAllowed 는 이 레포에 지금 위임을 걸어도 되는지다.
-func (approval RepoDelegationApproval) DelegationIsAllowed() bool {
+func (approval DelegationApproval) DelegationIsAllowed() bool {
 	return len(approval.ExecutionConfigs) == 0 || approval.Approved
 }
 
-// InspectRepoDelegationApproval 은 이 레포의 관문 상태를 본다.
-func InspectRepoDelegationApproval(workDirPath string, repo Repo) (RepoDelegationApproval, error) {
-	executionConfigs, err := readRepoExecutionConfigs(repo)
+// InspectDelegationApproval 은 워크디렉토리 기준 자리 하나의 관문 상태를 본다.
+//
+// 레포는 워크디렉토리 바로 아래 폴더라(ScanRepos) 레포 이름이 곧 그 레포의 자리다 — kyu mcp
+// approve 와 run_in_repo 는 레포 이름을, 하위 세션은 cwd 를 넘기고, 둘은 같은 키에 닿는다.
+// 터미널에서 승인한 레포를 앱이 또 묻지 않는 근거가 그것이다(6.9).
+func InspectDelegationApproval(workDirPath, cwdRelativePath string) (DelegationApproval, error) {
+	approvalKey := delegationApprovalKey(cwdRelativePath)
+
+	executionConfigs, err := readExecutionConfigs(filepath.Join(workDirPath, filepath.FromSlash(approvalKey)))
 	if err != nil {
-		return RepoDelegationApproval{}, err
+		return DelegationApproval{}, err
 	}
 	if len(executionConfigs) == 0 {
-		// 이 레포는 위임만으로 도는 설정을 갖고 있지 않다. 한 번도 묻지 않는다.
-		return RepoDelegationApproval{}, nil
+		// 이 자리는 세션을 띄우기만 해도 도는 설정을 갖고 있지 않다. 한 번도 묻지 않는다.
+		return DelegationApproval{}, nil
 	}
 
 	fingerprint := executionConfigsFingerprint(executionConfigs)
 
 	approvals, err := readDelegationApprovals(workDirPath)
 	if err != nil {
-		return RepoDelegationApproval{}, err
+		return DelegationApproval{}, err
 	}
 
-	return RepoDelegationApproval{
+	return DelegationApproval{
 		ExecutionConfigs: executionConfigs,
-		Approved:         approvals[repo.Name] == fingerprint,
+		Approved:         approvals[approvalKey] == fingerprint,
 		Fingerprint:      fingerprint,
 	}, nil
 }
 
-// ApproveRepoDelegation 은 이 레포의 이 내용을 승인으로 적는다.
+// ApproveDelegation 은 이 자리의 이 내용을 승인으로 적는다.
 //
 // 지문을 인자로 받는다. 여기서 파일을 다시 읽으면 사람이 본 내용과 승인되는 내용이 갈릴 수 있다 —
 // 화면에 보인 뒤 사람이 답하기까지 사이에 파일이 바뀌면, 사람이 본 적 없는 것이 승인된다.
-func ApproveRepoDelegation(workDirPath, repoName, fingerprint string) error {
+func ApproveDelegation(workDirPath, cwdRelativePath, fingerprint string) error {
 	approvals, err := readDelegationApprovals(workDirPath)
 	if err != nil {
 		return err
 	}
 
-	approvals[repoName] = fingerprint
+	approvals[delegationApprovalKey(cwdRelativePath)] = fingerprint
 	return writeDelegationApprovals(workDirPath, approvals)
 }
 
-// readRepoExecutionConfigs 는 이 레포에 실제로 있는 실행 유발 설정을 목록 순서대로 읽는다.
-func readRepoExecutionConfigs(repo Repo) ([]RepoExecutionConfig, error) {
-	var executionConfigs []RepoExecutionConfig
+// delegationApprovalKey 는 자리를 승인 기록의 키로 옮긴다 — 정리한 / 구분 상대경로, 루트는 ".".
+//
+// 적는 쪽과 읽는 쪽이 같은 모양으로 옮겨야 한다. "proj-a/" 로 승인하고 "./proj-a" 로 물으면 다른
+// 키가 되어, 사람은 승인했는데 다시 묻는 화면을 만난다.
+func delegationApprovalKey(cwdRelativePath string) string {
+	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(cwdRelativePath)))
+}
+
+// readExecutionConfigs 는 이 자리에 실제로 있는 실행 유발 설정을 목록 순서대로 읽는다.
+func readExecutionConfigs(directoryAbsolutePath string) ([]ExecutionConfig, error) {
+	var executionConfigs []ExecutionConfig
 
 	for _, relativePath := range repoExecutionConfigPaths {
-		absolutePath := filepath.Join(repo.AbsolutePath, filepath.FromSlash(relativePath))
+		absolutePath := filepath.Join(directoryAbsolutePath, filepath.FromSlash(relativePath))
 
 		content, err := os.ReadFile(absolutePath)
 		if errors.Is(err, os.ErrNotExist) {
@@ -139,7 +157,7 @@ func readRepoExecutionConfigs(repo Repo) ([]RepoExecutionConfig, error) {
 			return nil, fmt.Errorf("레포의 설정 파일 읽기 실패 (%s): %w", absolutePath, err)
 		}
 
-		executionConfigs = append(executionConfigs, RepoExecutionConfig{
+		executionConfigs = append(executionConfigs, ExecutionConfig{
 			RelativePath: relativePath,
 			AbsolutePath: absolutePath,
 			Content:      string(content),
@@ -159,7 +177,7 @@ func readRepoExecutionConfigs(repo Repo) ([]RepoExecutionConfig, error) {
 //
 // 파일을 통째로 비교하지 않고 지문으로 두는 이유는 기록 파일이 사람이 열어보는 것이어서다 —
 // 레포마다 설정 전문이 들어가면 승인이 몇 개인지도 눈으로 세지 못한다.
-func executionConfigsFingerprint(executionConfigs []RepoExecutionConfig) string {
+func executionConfigsFingerprint(executionConfigs []ExecutionConfig) string {
 	var canonical strings.Builder
 	for _, config := range executionConfigs {
 		fmt.Fprintf(&canonical, "%s\n%d\n%s", config.RelativePath, len(config.Content), config.Content)
@@ -177,7 +195,9 @@ func delegationApprovalsFilePath(workDirPath string) string {
 type delegationApprovalsFile struct {
 	SchemaVersion int `json:"schemaVersion"`
 
-	// Approvals 는 레포 이름에서 승인된 설정 파일 집합의 지문으로 가는 표다.
+	// Approvals 는 자리(워크디렉토리 기준 상대경로, 레포면 그 이름)에서 승인된 설정 파일 집합의
+	// 지문으로 가는 표다. 키의 뜻이 레포 이름에서 자리로 넓어졌지만 레포 이름이 곧 그 자리라 앞서
+	// 적힌 기록이 그대로 맞고, 판을 올리지 않는다.
 	Approvals map[string]string `json:"approvals"`
 }
 

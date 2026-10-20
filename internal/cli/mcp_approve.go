@@ -62,7 +62,7 @@ func approveRepoDelegation(in io.Reader, out io.Writer, args []string) error {
 		return err
 	}
 
-	approval, err := workdir.InspectRepoDelegationApproval(location.absolutePath, repo)
+	approval, err := workdir.InspectDelegationApproval(location.absolutePath, repo.Name)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func approveRepoDelegation(in io.Reader, out io.Writer, args []string) error {
 		return err
 	}
 
-	if err := workdir.ApproveRepoDelegation(location.absolutePath, repo.Name, approval.Fingerprint); err != nil {
+	if err := workdir.ApproveDelegation(location.absolutePath, repo.Name, approval.Fingerprint); err != nil {
 		return err
 	}
 
@@ -111,7 +111,7 @@ func approveRepoDelegation(in io.Reader, out io.Writer, args []string) error {
 //
 // 여기서는 자르지 않는다. 모델에게 보내는 거절 메시지에는 크기 상한이 있지만(mcp_run_in_repo.go
 // 의 shownConfigLimit), 그쪽은 남의 문맥을 지키는 자리이고 이쪽은 사람이 판단하는 자리다.
-func executionConfigsReviewText(repoName string, executionConfigs []workdir.RepoExecutionConfig) string {
+func executionConfigsReviewText(repoName string, executionConfigs []workdir.ExecutionConfig) string {
 	var screen strings.Builder
 
 	fmt.Fprintf(&screen, `%s 에서 위임 시작만으로 claude 가 읽고 실행에 쓰는 설정 파일 %d 개입니다.
@@ -126,7 +126,7 @@ func executionConfigsReviewText(repoName string, executionConfigs []workdir.Repo
 }
 
 // askAboutRepoExecutionConfigs 는 걸린 파일 전부를 보이고 한 줄로 답을 받는다.
-func askAboutRepoExecutionConfigs(in io.Reader, out io.Writer, repoName string, approval workdir.RepoDelegationApproval) (bool, error) {
+func askAboutRepoExecutionConfigs(in io.Reader, out io.Writer, repoName string, approval workdir.DelegationApproval) (bool, error) {
 	prompt := newInteractivePrompt(in, out)
 
 	// 파이프 너머에는 이 물음에 답할 상대가 없다. 그런데도 읽어버리면 승인이 사람을 한 번도
