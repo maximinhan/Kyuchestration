@@ -96,19 +96,21 @@ class ProcessChatSession internal constructor(private val process: Process) : Op
 
     override val events: Flow<ChatSessionEvent> = incoming.receiveAsFlow()
 
-    override suspend fun sendUserMessage(text: String) {
+    override suspend fun sendUserMessage(message: OutgoingUserMessage) {
         // 실측이 받은 그 모양이다(3.1). content 를 블록 배열로 두는 것은 claude 의 메시지 모양을
-        // 그대로 따르는 것이고, 문자열 하나로 줄여 보내는 길은 재지 않았다.
+        // 그대로 따르는 것이고, 문자열 하나로 줄여 보내는 길은 재지 않았다. uuid 를 최상위에 두는
+        // 것도 실측이 보낸 자리 그대로다(session-tree 3.5 (다)).
         writeLine(
             buildJsonObject {
                 put("type", "user")
+                put("uuid", message.uuid)
                 putJsonObject("message") {
                     put("role", "user")
                     putJsonArray("content") {
                         add(
                             buildJsonObject {
                                 put("type", "text")
-                                put("text", text)
+                                put("text", message.text)
                             },
                         )
                     }

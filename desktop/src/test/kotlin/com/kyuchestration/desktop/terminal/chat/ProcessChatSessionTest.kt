@@ -97,11 +97,11 @@ class ProcessChatSessionTest {
     }
 
     @Test
-    fun `사용자 메시지를 실측이 받은 모양으로 stdin 에 흘린다`(): Unit = runBlocking {
+    fun `사용자 메시지를 앱이 정한 uuid 와 함께 실측이 받은 모양으로 stdin 에 흘린다`(): Unit = runBlocking {
         val receivedLines = temporaryDirectory.resolve("받은-줄.jsonl")
         val session = openSession(recordStandardInputCommand(receivedLines))
 
-        session.sendUserMessage("1 더하기 1은? 숫자만.")
+        session.sendUserMessage(OutgoingUserMessage("1 더하기 1은? 숫자만.", uuid = "11111111-2222-4333-8444-555555555555"))
 
         assertTrue(waitUntilFileHasWholeLine(receivedLines), "보낸 줄이 자식에게 닿지 않았습니다")
         val sent = Json.parseToJsonElement(receivedLines.readText().trim()).jsonObject
@@ -109,6 +109,9 @@ class ProcessChatSessionTest {
         val onlyBlock = sent["message"]?.jsonObject?.get("content")?.jsonArray?.single()?.jsonObject
         assertEquals("text", onlyBlock?.get("type")?.jsonPrimitive?.content)
         assertEquals("1 더하기 1은? 숫자만.", onlyBlock?.get("text")?.jsonPrimitive?.content)
+        // 앱이 정한 uuid 가 줄의 최상위에 실린다. 되돌림과 command_lifecycle 이 이 값을 그대로 되돌려
+        // 준다(session-tree 3.5 (다)) — 앱이 자기가 보낸 말을 알아보는 열쇠다.
+        assertEquals("11111111-2222-4333-8444-555555555555", sent["uuid"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -118,9 +121,9 @@ class ProcessChatSessionTest {
         val receivedLines = temporaryDirectory.resolve("받은-줄.jsonl")
         val session = openSession(recordStandardInputCommand(receivedLines))
 
-        session.sendUserMessage("긴 글을 써 줘.")
+        session.sendUserMessage(OutgoingUserMessage("긴 글을 써 줘."))
         session.interruptCurrentTurn()
-        session.sendUserMessage("방금 무슨 주제를 쓰고 있었지?")
+        session.sendUserMessage(OutgoingUserMessage("방금 무슨 주제를 쓰고 있었지?"))
 
         assertTrue(waitUntil { receivedLines.readTextOrEmpty().lines().count { it.isNotBlank() } == 3 })
         val sentLines = receivedLines.readText().trim().lines().map { Json.parseToJsonElement(it).jsonObject }

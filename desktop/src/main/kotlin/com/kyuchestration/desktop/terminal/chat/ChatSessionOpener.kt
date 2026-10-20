@@ -53,10 +53,13 @@ interface OpenedChatSession {
      * 턴이 도는 중에 보내도 된다 — `claude` 가 큐를 갖고 있다(3.11). 다만 큐에 들어간 둘 이상이
      * 한 턴으로 합쳐질 수 있어, 보낸 수와 돌아오는 `TurnFinished` 수가 같지 않다.
      *
+     * 줄에 [OutgoingUserMessage.uuid] 를 함께 싣는다. 되돌아오는 이벤트가 그 값을 그대로 갖고 온다
+     * (session-tree 3.5 (다)).
+     *
      * @throws java.io.IOException 프로세스가 이미 끝나 stdin 이 닫혀 있을 때. 그 사실은 앞서
      *   [ChatSessionEvent.SessionEnded] 로도 왔다.
      */
-    suspend fun sendUserMessage(text: String)
+    suspend fun sendUserMessage(message: OutgoingUserMessage)
 
     /**
      * 도는 턴을 끊는다. **대화도 프로세스도 죽지 않는다**(3.8).

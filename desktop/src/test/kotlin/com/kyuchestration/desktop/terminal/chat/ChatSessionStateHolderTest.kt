@@ -145,11 +145,11 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("README 를 읽어줘")
         runCurrent()
 
-        assertEquals(listOf("README 를 읽어줘"), opener.lastSession.sentMessages)
+        assertEquals(listOf("README 를 읽어줘"), opener.lastSession.sentMessages.map { it.text })
         // 보낸 말을 앱이 전사에 직접 넣지 않는다 — 되돌아온 것으로만 그린다(3.14).
         val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
         assertEquals(emptyList(), conversation.entries)
-        assertEquals(listOf("README 를 읽어줘"), conversation.pendingUserMessages)
+        assertEquals(opener.lastSession.sentMessages, conversation.pendingUserMessages)
         // 보낸 것은 아직 시작한 턴이 아니다. 시작은 이 말이 되돌아올 때다.
         assertEquals(TurnState.Idle, conversation.turnState)
     }
@@ -183,7 +183,7 @@ class ChatSessionStateHolderTest {
 
         // 되돌아온 말이 result 보다 먼저 온다(실측: 2.4 초 · 80 초). 그 순서를 지키지 않으면
         // 이 검증은 앱에 없는 상태를 만들어 놓고 그 결과를 본다.
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
@@ -205,8 +205,8 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("사과의 색은?")
         runCurrent()
 
-        assertEquals(listOf("긴 답을 줘", "사과의 색은?"), opener.lastSession.sentMessages)
-        assertEquals(listOf("긴 답을 줘", "사과의 색은?"), onScreenConversation(holder).pendingUserMessages)
+        assertEquals(listOf("긴 답을 줘", "사과의 색은?"), opener.lastSession.sentMessages.map { it.text })
+        assertEquals(opener.lastSession.sentMessages, onScreenConversation(holder).pendingUserMessages)
         assertEquals(emptyList(), onScreenConversation(holder).entries)
     }
 
@@ -220,12 +220,54 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("사과의 색은?")
         runCurrent()
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         runCurrent()
 
         val conversation = onScreenConversation(holder)
-        assertEquals(listOf("사과의 색은?"), conversation.pendingUserMessages)
+        assertEquals(listOf("사과의 색은?"), conversation.pendingUserMessages.map { it.text })
         assertEquals(listOf<ChatEntry>(ChatEntry.UserSaid("긴 답을 줘")), conversation.entries)
+    }
+
+    @Test
+    fun `같은 말을 두 번 보내도 되돌아온 쪽만 대기 중에서 빠진다`() = runTest {
+        // 텍스트로 잇던 때는 둘 중 어느 것이 돌아왔는지 가를 수 없었다. 앱이 정한 uuid 가 그대로
+        // 돌아오므로(session-tree 3.5 (다)) 이제는 가른다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("응")
+        holder.sendUserMessage("응")
+        runCurrent()
+        val (first, second) = opener.lastSession.sentMessages
+
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("응", parentToolUseId = null, messageUuid = second.uuid))
+        runCurrent()
+
+        assertEquals(listOf(first), onScreenConversation(holder).pendingUserMessages)
+    }
+
+    @Test
+    fun `앱이 보내지 않은 같은 문구는 기다리는 말을 놓지 않는다`() = runTest {
+        // 중단 안내처럼 claude 가 스스로 지은 user 줄은 앱의 uuid 와 맞지 않는다. 문구가 우연히
+        // 같아도 기다리던 말은 아직 돌아오지 않았다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        holder.sendUserMessage("[Request interrupted by user]")
+        runCurrent()
+
+        opener.lastSession.emit(
+            ChatSessionEvent.UserMessageEchoed(
+                "[Request interrupted by user]",
+                parentToolUseId = null,
+                messageUuid = "b5c0c63f-0e28-4112-8c1b-c55684e91d9c",
+            ),
+        )
+        runCurrent()
+
+        assertEquals(opener.lastSession.sentMessages, onScreenConversation(holder).pendingUserMessages)
     }
 
     @Test
@@ -238,7 +280,7 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("사과의 색은?")
         runCurrent()
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         runCurrent()
         assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
 
@@ -248,9 +290,9 @@ class ChatSessionStateHolderTest {
         runCurrent()
         val betweenTurns = onScreenConversation(holder)
         assertEquals(TurnState.Idle, betweenTurns.turnState)
-        assertEquals(listOf("사과의 색은?"), betweenTurns.pendingUserMessages)
+        assertEquals(listOf("사과의 색은?"), betweenTurns.pendingUserMessages.map { it.text })
 
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("사과의 색은?", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "사과의 색은?"))
         runCurrent()
         assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
     }
@@ -265,7 +307,7 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage("긴 답을 줘")
         holder.sendUserMessage("큐에 드는 말")
         runCurrent()
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
@@ -283,7 +325,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "아주 긴 답을 줘"))
         runCurrent()
 
         holder.interruptOnScreenTurn()
@@ -302,7 +344,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "아주 긴 답을 줘"))
         runCurrent()
         holder.interruptOnScreenTurn()
         runCurrent()
@@ -340,7 +382,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
         holder.sendUserMessage("아주 긴 답을 줘")
-        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("아주 긴 답을 줘", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(echoOfPending(holder, "아주 긴 답을 줘"))
         runCurrent()
 
         holder.interruptOnScreenTurn()
@@ -681,6 +723,16 @@ class ChatSessionStateHolderTest {
     private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
         assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
 
+    /**
+     * 기다리는 말 하나가 되돌아온 모습 — `claude` 가 앱이 정한 uuid 를 그대로 실어 돌려준다
+     * (session-tree 3.5 (다)). uuid 는 홀더가 지었으므로 시험이 지어내지 않고 대기 목록에서 읽는다.
+     */
+    private fun echoOfPending(holder: ChatSessionStateHolder, text: String) = ChatSessionEvent.UserMessageEchoed(
+        text = text,
+        parentToolUseId = null,
+        messageUuid = onScreenConversation(holder).pendingUserMessages.first { it.text == text }.uuid,
+    )
+
     private fun finishedTurn(
         costUsd: Double = 0.25,
         outcome: TurnOutcome = TurnOutcome.Completed,
@@ -791,7 +843,7 @@ class ChatSessionStateHolderTest {
 
         private val incoming = Channel<ChatSessionEvent>(Channel.UNLIMITED)
 
-        val sentMessages = mutableListOf<String>()
+        val sentMessages = mutableListOf<OutgoingUserMessage>()
         private var writesFail = false
         var endSessionCount = 0
             private set
@@ -809,11 +861,11 @@ class ChatSessionStateHolderTest {
             writesFail = true
         }
 
-        override suspend fun sendUserMessage(text: String) {
+        override suspend fun sendUserMessage(message: OutgoingUserMessage) {
             if (writesFail) {
                 throw IOException("Stream closed")
             }
-            sentMessages.add(text)
+            sentMessages.add(message)
         }
 
         override suspend fun interruptCurrentTurn() {

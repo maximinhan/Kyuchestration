@@ -50,16 +50,19 @@ class ChatConversationFoldingTest {
 
     @Test
     fun `되돌아온 말은 기다리던 목록에서 빠진다`() {
-        // 앱이 보낸 것과 되돌아온 것을 잇는 근거는 텍스트 그대로다. 스트림이 주는 다른 열쇠가
-        // 없다 — 되돌아온 줄에는 앱이 붙일 수 있었던 식별자가 없다.
-        val waiting = ChatConversation(
-            target = SessionTarget.Main,
-            pendingUserMessages = listOf("README.txt 를 Read 도구로 읽고 첫 줄을 그대로 답해.", "그다음 것"),
+        // 앱이 보낸 것과 되돌아온 것을 잇는 근거는 앱이 정한 uuid 다(session-tree 3.5 (다)). 그 줄이
+        // 되돌아올 때 같은 값이 실려 온다.
+        val sent = OutgoingUserMessage(
+            text = "Call the mcp__probe__slow tool once with label \"M\" and seconds 90. " +
+                "After it returns, reply with exactly: TURN1-DONE",
+            uuid = "11111111-2222-4333-8444-000000000001",
         )
+        val next = OutgoingUserMessage(text = "그다음 것", uuid = "11111111-2222-4333-8444-000000000002")
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf(sent, next))
 
-        val conversation = waiting.after(RecordedChatStreamLines.USER_MESSAGE_REPLAYED)
+        val conversation = waiting.after(RecordedChatStreamLines.USER_MESSAGE_REPLAYED_WITH_APP_UUID)
 
-        assertEquals(listOf("그다음 것"), conversation.pendingUserMessages)
+        assertEquals(listOf(next), conversation.pendingUserMessages)
         assertIs<ChatEntry.UserSaid>(conversation.entries.single())
     }
 
@@ -76,17 +79,17 @@ class ChatConversationFoldingTest {
     fun `기다리는 말이 남아 있어도 턴이 끝나면 도는 턴은 없다`() {
         // 그 말의 턴은 아직 시작하지 않았다. 도는 것으로 읽으면 그 사이에 누른 중단이 그 말의
         // 첫 낱말을 끊는다.
-        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf(QUEUED_MESSAGE))
 
         val conversation = waiting.after(RecordedChatStreamLines.RESULT_SUCCESS)
 
         assertEquals(TurnState.Idle, conversation.turnState)
-        assertEquals(listOf("큐에 든 말"), conversation.pendingUserMessages)
+        assertEquals(listOf(QUEUED_MESSAGE), conversation.pendingUserMessages)
     }
 
     @Test
     fun `세션이 끝나면 되돌아올 말도 없다`() {
-        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf("큐에 든 말"))
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf(QUEUED_MESSAGE))
 
         val conversation = waiting.after(ChatSessionEvent.SessionEnded(exitCode = 0))
 
@@ -520,5 +523,7 @@ class ChatConversationFoldingTest {
     private companion object {
 
         const val RESUMED_ID = "211f6974-88a8-4453-9248-a02b0d6febae"
+
+        val QUEUED_MESSAGE = OutgoingUserMessage(text = "큐에 든 말", uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
     }
 }

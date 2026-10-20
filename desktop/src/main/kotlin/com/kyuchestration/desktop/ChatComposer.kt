@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
+import com.kyuchestration.desktop.terminal.chat.OutgoingUserMessage
 import com.kyuchestration.desktop.terminal.chat.TurnState
 
 /**
@@ -153,7 +154,7 @@ internal fun ChatComposer(
  * 같은 말이 전사에 말풍선으로 선다.
  */
 @Composable
-private fun PendingUserMessages(pendingUserMessages: List<String>) {
+private fun PendingUserMessages(pendingUserMessages: List<OutgoingUserMessage>) {
     if (pendingUserMessages.isEmpty()) {
         return
     }
@@ -164,7 +165,7 @@ private fun PendingUserMessages(pendingUserMessages: List<String>) {
     ) {
         pendingUserMessages.forEach { pending ->
             Text(
-                text = "대기 중 · $pending",
+                text = "대기 중 · ${pending.text}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
