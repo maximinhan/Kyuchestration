@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -301,6 +302,44 @@ echo "{\"subtype\":\"success\",\"result\":\"했습니다\",\"session_id\":\"$con
 	}
 	if !strings.Contains(secondResult.Text, "alpha-commons") {
 		t.Errorf("거절 = %q, 어느 레포가 돌고 있는지를 알리기를 기대", secondResult.Text)
+	}
+}
+
+func TestAnInterruptedRunInRepoStopsTheDelegationAndFreesTheRepo(t *testing.T) {
+	// 사람이 도구 대기 중에 중단하면 claude 는 그 호출을 거두고 모델에게 "사용자가 원하지 않는다" 를
+	// 전한다(session-tree-design.md 3.2). 위임이 그 뒤에도 돌면 아무도 받지 않을 일이 레포를 고치고,
+	// 그 레포는 끝날 때까지 다음 위임을 거절한다.
+	handshakeDirectoryPath := t.TempDir()
+	startedPath := filepath.Join(handshakeDirectoryPath, "started")
+	t.Setenv("KYU_TEST_STARTED_PATH", startedPath)
+
+	fakeClaudeOnPathForTest(t, `
+cat > /dev/null
+: > "$KYU_TEST_STARTED_PATH"
+while true; do sleep 0.01; done
+`)
+
+	tool := newRunInRepoTool(workDirWithOneRepoForTest(t), false)
+
+	interrupted, interrupt := context.WithCancel(t.Context())
+	firstFinished := make(chan struct{})
+	go func() {
+		defer close(firstFinished)
+		tool.Call(interrupted, json.RawMessage(`{"repo":"alpha-commons","prompt":"하나"}`))
+	}()
+
+	waitUntilFileExistsForTest(t, startedPath)
+	interrupt()
+
+	select {
+	case <-firstFinished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("거둬진 위임이 돌아오지 않았습니다 — 위임된 claude 가 계속 돌고 있습니다")
+	}
+
+	fakeClaudeOnPathForTest(t, claudeAnsweringForTest("둘째"))
+	if second, result := delegateForTest(t, tool, `{"repo":"alpha-commons","prompt":"둘"}`); result.IsError {
+		t.Errorf("거둬진 위임 뒤의 위임이 거절됐습니다: %s (%+v)", result.Text, second)
 	}
 }
 
