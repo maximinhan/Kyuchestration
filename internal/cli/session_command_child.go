@@ -41,8 +41,6 @@ const childSessionParentLabel = mainSessionLabel
 // takeChildSessionValue 는 값을 받는 하위 세션 옵션 하나를 요청에 옮긴다.
 func (request *sessionCommandRequest) takeChildSessionValue(optionName, value string) {
 	switch optionName {
-	case childSessionOptionName:
-		request.childID = value
 	case childCwdOptionName:
 		request.childCwd = value
 	case childTitleOptionName:
@@ -59,7 +57,7 @@ func (request *sessionCommandRequest) takeChildSessionValue(optionName, value st
 // 조용히 무시된 옵션은 앱이 무언가 켜졌다고 믿게 만든다. 하위가 아닌 요청에 붙은 --cwd 를 버리면
 // 앱은 그 자리에 세션이 떴다고 믿는다.
 func validateChildSessionRequest(request sessionCommandRequest) error {
-	if request.childID == "" {
+	if !request.childSessionRequested {
 		if request.childCwd != "" || request.createChildDirectory || request.childTitle != "" ||
 			len(request.liveChildCwds) > 0 || request.approvedFingerprint != "" {
 			return fmt.Errorf("%s · %s · %s · %s · %s 는 %s 와 함께만 씁니다\n\n%s",
@@ -132,11 +130,12 @@ func answerForChildSession(out io.Writer, location workDirLocation, request sess
 		return err
 	}
 
+	// 이 아래의 id 는 요청의 것이 아니라 기록에 적힌 것이다 — 앱이 id 를 비워 물었으면 엔진이 지었다.
 	command := claudeCommand(request, []string{sessionIDFlagName, assignment.ConversationID}, mcpSetup)
-	command = append(command, appendSystemPromptFlagName, childSessionConventionText(request.childID))
+	command = append(command, appendSystemPromptFlagName, childSessionConventionText(assignment.ChildID))
 
 	return writeSessionCommandAsJSON(out, command, cwd.AbsolutePath, sessionEnvironment(request), sessionConversation{},
-		&childSessionJSON{ID: request.childID, Cwd: cwd.RelativePath, Title: title, ConversationID: assignment.ConversationID},
+		&childSessionJSON{ID: assignment.ChildID, Cwd: cwd.RelativePath, Title: title, ConversationID: assignment.ConversationID},
 		nil)
 }
 

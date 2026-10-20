@@ -57,7 +57,7 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
   --app-socket <경로>    앱이 이 세션을 위해 연 소켓의 자리 — --chat 과 함께만 쓴다
 
 하위 세션 (메인이 spawn_session 으로 띄우는 것 — --chat · --app-socket 과 함께만):
-  --child <id>               메인 아래 그 id 의 하위 세션이 실행할 것으로 답한다
+  --child [id]               메인 아래 하위 세션이 실행할 것으로 답한다 — id 를 생략하면 엔진이 child-N 으로 짓는다
   --cwd <상대경로>            하위가 뜰 자리 (워크디렉토리 기준, 생략하면 루트)
   --create-directory         그 자리를 새로 만든다 — 이미 있으면 거절한다
   --title <이름>              화면의 탭 이름 (생략하면 cwd 의 마지막 이름)
@@ -92,7 +92,7 @@ func AnswerSessionCommand(out, errOut io.Writer, args []string) error {
 		return err
 	}
 
-	if request.childID != "" {
+	if request.childSessionRequested {
 		return answerForChildSession(out, location, request)
 	}
 	if request.repoName == "" {
@@ -125,8 +125,12 @@ type sessionCommandRequest struct {
 	// 이 세션의 자식들에게는 앱에게 물을 길이 없다.
 	appSocketPath string
 
-	// childID 가 비어 있지 않으면 메인 아래 하위 세션 요청이다(session-tree-design.md 7 절 3 단계).
+	// childSessionRequested 는 메인 아래 하위 세션 요청인지다(session-tree-design.md 7 절 3 단계).
 	// 나머지 child 필드는 그때만 뜻이 있다.
+	childSessionRequested bool
+
+	// childID 는 앱이 명시한 하위 id 다. 비어 있으면 엔진이 기록을 보고 짓는다
+	// (workdir.StartChildSessionConversation).
 	childID string
 
 	// childCwd 는 상위가 고른 자리다 — 워크디렉토리 기준 상대경로, 비어 있으면 루트.
@@ -150,11 +154,23 @@ type sessionCommandRequest struct {
 // 뒤에 아무것도 없거나 다음 옵션이 온 것을 값으로 읽지 않는다. 읽어버리면 "--json" 이라는 이름의
 // 하위가 뜨고, 그 실패는 화면의 탭 이름에서야 드러난다.
 func sessionCommandValueAfter(args []string, optionIndex int) (string, error) {
-	valueIndex := optionIndex + 1
-	if valueIndex >= len(args) || strings.HasPrefix(args[valueIndex], "-") {
+	value, given := optionalSessionCommandValueAfter(args, optionIndex)
+	if !given {
 		return "", fmt.Errorf("%s 뒤에는 값이 와야 합니다\n\n%s", args[optionIndex], sessionCommandUsageText)
 	}
-	return args[valueIndex], nil
+	return value, nil
+}
+
+// optionalSessionCommandValueAfter 는 값을 생략할 수 있는 옵션(--child) 뒤의 값을 읽는다.
+//
+// 값이 없다는 기준(끝이거나 다음 옵션이 왔다)을 sessionCommandValueAfter 와 한 곳에서 나눈다 —
+// 그래서 "--json" 이 id 가 되는 일은 여기서도 없다.
+func optionalSessionCommandValueAfter(args []string, optionIndex int) (string, bool) {
+	valueIndex := optionIndex + 1
+	if valueIndex >= len(args) || strings.HasPrefix(args[valueIndex], "-") {
+		return "", false
+	}
+	return args[valueIndex], true
 }
 
 // wantsPermissionBridge 는 이 세션에 승인 브리지를 붙일지다.
@@ -188,7 +204,14 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 			request.appSocketPath = socketPath
 			argIndex++
 
-		case arg == childSessionOptionName || arg == childCwdOptionName || arg == childTitleOptionName ||
+		case arg == childSessionOptionName:
+			request.childSessionRequested = true
+			if childID, given := optionalSessionCommandValueAfter(args, argIndex); given {
+				request.childID = childID
+				argIndex++
+			}
+
+		case arg == childCwdOptionName || arg == childTitleOptionName ||
 			arg == liveChildCwdOptionName || arg == approveFingerprintOptionName:
 			value, err := sessionCommandValueAfter(args, argIndex)
 			if err != nil {

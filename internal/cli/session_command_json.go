@@ -98,6 +98,9 @@ type sessionCommandJSONDocument struct {
 
 // childSessionJSON 은 하위 세션 답의 childSession 이다.
 type childSessionJSON struct {
+	// ID 는 기록에 적힌 하위의 id 다. 앱이 --child 에 id 를 주었으면 그것이고, 생략했으면 엔진이 지은
+	// child-N 이다. 판은 그대로다 — 필드는 같고, 앱이 준 값의 메아리였던 것이 엔진의 답이 될 수 있게 된
+	// 것뿐이라, id 를 늘 명시하는 앱에게는 전과 같은 값이다. 앱은 spawn 의 답과 하위 표시에 이 값을 쓴다.
 	ID string `json:"id"`
 
 	// Cwd 는 링크를 따라간 자리의 워크디렉토리 기준 / 경로다. 앱이 살아 있는 하위의 자리를 셀 때

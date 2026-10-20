@@ -190,6 +190,54 @@ func TestAChildSessionIsRecordedUnderTheMainLabelWithTheConversationItWasGiven(t
 	}
 }
 
+func TestAChildAskedWithoutAnIdIsNamedByTheEngine(t *testing.T) {
+	// --child 뒤에 값이 없으면 엔진이 기록을 보고 다음 id 를 짓는다. 앱이 기록 파일을 읽어 번호를 세면
+	// 파일 형식과 판 규약을 두 곳이 알게 된다(원칙 11). 지은 id 는 답 문서·규약 문구·기록에 같이 실린다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "proj-a")
+	t.Chdir(workDirPath)
+
+	named := runChildSessionCommandForTest(t, childArgsForTest("child-3", childCwdOptionName, "proj-a")...)
+	unnamed := runChildSessionCommandForTest(t, chatModeOptionName, appSocketOptionName, childSocketPathForTest,
+		childSessionOptionName, childCwdOptionName, "proj-a")
+	unnamedAtTheEnd := runChildSessionCommandForTest(t, chatModeOptionName, appSocketOptionName, childSocketPathForTest,
+		childCwdOptionName, "proj-a", childSessionOptionName)
+
+	if named.ChildSession == nil || named.ChildSession.ID != "child-3" {
+		t.Fatalf("childSession = %+v, 명시한 child-3 을 그대로 기대", named.ChildSession)
+	}
+	if unnamed.ChildSession == nil || unnamed.ChildSession.ID != "child-4" {
+		t.Fatalf("childSession = %+v, 엔진이 지은 child-4 를 기대", unnamed.ChildSession)
+	}
+	if unnamedAtTheEnd.ChildSession == nil || unnamedAtTheEnd.ChildSession.ID != "child-5" {
+		t.Fatalf("childSession = %+v, 엔진이 지은 child-5 를 기대", unnamedAtTheEnd.ChildSession)
+	}
+
+	conventionText, _ := splitAppendSystemPromptForTest(t, unnamed.Command)
+	if !strings.Contains(conventionText, "하위 세션 child-4 ") {
+		t.Errorf("규약 문구 = %q, 지은 id child-4 를 담기를 기대", conventionText)
+	}
+	recorded := readChildSessionsForTest(t, workDirPath)
+	if recorded["main"]["child-4"].ConversationID != unnamed.ChildSession.ConversationID {
+		t.Errorf("childSessions[main][child-4] = %+v, 답한 대화가 지은 id 아래 적히기를 기대", recorded["main"]["child-4"])
+	}
+}
+
+func TestAnExplicitChildIdAlreadyRecordedIsStillRefused(t *testing.T) {
+	// 엔진이 짓는 길이 생겨도 명시한 id 는 지금처럼 받고, 겹치면 거절한다 — 조용히 다른 이름을 주면
+	// 앱이 믿는 id 와 기록의 id 가 갈라진다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "proj-a")
+	t.Chdir(workDirPath)
+
+	runChildSessionCommandForTest(t, childArgsForTest("child-1", childCwdOptionName, "proj-a")...)
+	err := AnswerSessionCommand(&bytes.Buffer{}, &bytes.Buffer{},
+		append(childArgsForTest("child-1", childCwdOptionName, "proj-a"), machineJSONOptionName))
+	if err == nil || !strings.Contains(err.Error(), "child-1") {
+		t.Errorf("오류 = %v, 이미 적힌 child-1 거절을 기대", err)
+	}
+}
+
 func TestAChildCwdRefusalIsAnErrorAndRecordsNothing(t *testing.T) {
 	// cwd 규칙에 걸린 요청은 답할 것이 없는 물음이다 — 종료 코드 1 과 stderr 가 그 구분을 한다.
 	// 앱은 그 문구를 spawn 의 {"error"} 로 상위에게 옮긴다.
@@ -315,7 +363,6 @@ func TestChildSessionOptionsAreCheckedTogether(t *testing.T) {
 		"소켓 없이":                  {chatModeOptionName, childSessionOptionName, "child-1"},
 		"레포 세션의 하위":              append(childArgsForTest("child-1"), "proj-a"),
 		"하위는 언제나 새 대화":           append(childArgsForTest("child-1"), forgetConversationOptionName),
-		"id 없이":                  {chatModeOptionName, appSocketOptionName, childSocketPathForTest, childSessionOptionName},
 		"--child 없이 --cwd":       {chatModeOptionName, appSocketOptionName, childSocketPathForTest, childCwdOptionName, "proj-a"},
 		"--child 없이 승인 지문":       {chatModeOptionName, appSocketOptionName, childSocketPathForTest, approveFingerprintOptionName, "sha256:x"},
 		"메인 전용 --repo-claude-md": append(childArgsForTest("child-1"), repoClaudeMdOptionName),
