@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +36,10 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChatScreenState
+import com.kyuchestration.desktop.terminal.chat.ChildLifecycle
+import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
+import com.kyuchestration.desktop.terminal.chat.SessionTree
 import com.kyuchestration.desktop.theme.KyuTheme
 
 /**
@@ -65,6 +69,12 @@ internal fun ChatConversationPane(
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
+    /**
+     * 메인 아래 하위 세션들. 메인 챗 위의 승인 띠와 하위 챗의 머리말이 이것을 본다(session-tree 6.12).
+     */
+    sessionTree: SessionTree,
+    /** 하위 하나의 챗을 가운데에 세운다 — spawn 카드의 "열기" 와 승인 띠의 "열기" 가 이 자리로 온다. */
+    onOpenChildSessionRequested: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (chatScreenState) {
@@ -91,6 +101,8 @@ internal fun ChatConversationPane(
                 onPermissionChoiceMade = onPermissionChoiceMade,
                 onEndSessionRequested = onEndSessionRequested,
                 onStartNewConversationRequested = onStartNewConversationRequested,
+                sessionTree = sessionTree,
+                onOpenChildSessionRequested = onOpenChildSessionRequested,
                 modifier = modifier,
             )
     }
@@ -104,16 +116,29 @@ private fun OpenedChat(
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
+    sessionTree: SessionTree,
+    onOpenChildSessionRequested: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val conversationTarget = conversation.target
     Column(modifier = modifier.fillMaxSize()) {
         ChatHeader(
             conversation = conversation,
+            childTitle = (conversationTarget as? SessionTarget.Child)?.let { sessionTree.child(it.childId)?.title },
             onEndSessionRequested = onEndSessionRequested,
             onStartNewConversationRequested = onStartNewConversationRequested,
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ChatTranscript(conversation, onPermissionChoiceMade, modifier = Modifier.weight(1f))
+
+        // 하위의 승인 카드는 그 하위의 챗 안에 선다. 사람이 메인을 보고 있으면 그 카드가 안 보이므로 띠 한 줄이
+        // 그 사실을 말한다 — 카드를 여기 복제하지 않는다(한쪽에서 답한 뒤 다른 쪽이 낡는다, 6.12).
+        if (conversationTarget == SessionTarget.Main) {
+            sessionTree.children
+                .filter { it.lifecycle == ChildLifecycle.Running && it.waitingFor == ChildWaitingFor.Approval }
+                .forEach { child -> ChildApprovalBand(child.childId) { onOpenChildSessionRequested(child.childId) } }
+        }
+
+        ChatTranscript(conversation, onPermissionChoiceMade, onOpenChildSessionRequested, modifier = Modifier.weight(1f))
         ChatComposer(conversation, onSendUserMessageRequested, onInterruptTurnRequested)
     }
 }
@@ -129,6 +154,8 @@ private fun OpenedChat(
 @Composable
 private fun ChatHeader(
     conversation: ChatConversation,
+    /** 하위 챗이면 그 하위의 탭 이름. 이름(`child-1`)만으로는 무슨 일을 맡은 하위인지 알 수 없다. */
+    childTitle: String?,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
 ) {
@@ -141,6 +168,11 @@ private fun ChatHeader(
             style = MaterialTheme.typography.titleSmall,
             fontFamily = FontFamily.Monospace,
         )
+
+        childTitle?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(text = it, style = MaterialTheme.typography.titleSmall)
+        }
 
         conversation.modelName?.let { modelName ->
             Spacer(Modifier.width(10.dp))
@@ -190,6 +222,7 @@ private fun ChatHeader(
 private fun ChatTranscript(
     conversation: ChatConversation,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    onOpenChildSessionRequested: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -209,7 +242,7 @@ private fun ChatTranscript(
         }
 
         items(conversation.entries) { entry ->
-            ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade)
+            ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
         }
 
         // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
@@ -235,6 +268,30 @@ private fun ChatTranscript(
         }
     }
 }
+
+/**
+ * 메인 챗 위의 띠 한 줄 — 하위 하나가 사람의 승인을 기다린다(6.12).
+ */
+@Composable
+private fun ChildApprovalBand(childId: String, onOpenRequested: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(KyuTheme.statusColors.caution.copy(alpha = APPROVAL_BAND_TINT_ALPHA))
+            .padding(start = 20.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "$childId 이 승인을 기다립니다",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onOpenRequested) { Text("열기") }
+    }
+}
+
+/** 띠의 바탕. 경고색을 옅게 깔아 대화를 누르지 않으면서 눈에 걸리게 한다. */
+private const val APPROVAL_BAND_TINT_ALPHA = 0.16f
 
 /**
  * 마지막 항목의 끝까지 내리기 위해 주는 값.
@@ -274,6 +331,9 @@ private fun SessionEndedNotice(conversation: ChatConversation) {
         text = if (conversation.resumeFailureSuspected) {
             "이어가던 대화를 열지 못한 것 같습니다$exitCodeLabel — 위의 마지막 줄에 이유가 있습니다. " +
                 "새 대화로 시작할 수 있습니다."
+        } else if (conversation.target is SessionTarget.Child) {
+            // 하위는 이어가지 않는다(6.15). 다시 띄우는 것은 상위의 몫이다.
+            "하위 세션이 끝났습니다$exitCodeLabel — 다시 필요하면 메인에게 새로 띄워 달라고 하세요."
         } else {
             "세션이 끝났습니다$exitCodeLabel — 왼쪽에서 다시 고르면 그 대화를 이어서 새로 엽니다."
         },

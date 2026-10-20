@@ -168,6 +168,8 @@ private fun runDesktopApplication(
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
     // 하나로 합치면 카드를 오갈 때마다 목록 전체가 다시 그려진다.
     val heldChatSessions by chatSessionStateHolder.heldSessions.collectAsState()
+    val sessionTree by chatSessionStateHolder.sessionTree.collectAsState()
+    val childSessionGateQuestions by chatSessionStateHolder.gateQuestions.collectAsState()
     // 받아 둘 자리는 앱이 도는 동안 바뀌지 않는다. 그릴 때마다 홈 디렉토리와 os.name 을 다시
     // 읽을 이유가 없다.
     val engineDirectoryLabel = remember { managedEngineDirectory().toString() }
@@ -275,6 +277,10 @@ private fun runDesktopApplication(
             onEndChatSessionRequested = {
                 applicationCoroutineScope.launch { chatSessionStateHolder.endOnScreenSession() }
             },
+            sessionTree = sessionTree,
+            childSessionGateQuestions = childSessionGateQuestions,
+            onChildSessionChosen = chatSessionStateHolder::showChildSession,
+            onChildSessionGateAnswered = chatSessionStateHolder::answerGateQuestion,
         )
     }
 }

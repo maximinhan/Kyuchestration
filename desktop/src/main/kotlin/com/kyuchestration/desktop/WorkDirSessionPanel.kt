@@ -40,6 +40,10 @@ import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.chat.ChildLifecycle
+import com.kyuchestration.desktop.terminal.chat.ChildSessionNode
+import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
+import com.kyuchestration.desktop.terminal.chat.SessionTree
 import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.workdir.RepoSnapshot
 import com.kyuchestration.desktop.workdir.RepoState
@@ -78,6 +82,10 @@ internal fun WorkDirSessionPanel(
      * 줄의 새 대화 버튼은 새로 시작.
      */
     onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    /** 메인 아래 하위 세션들(session-tree 6.12). 조율 블록 바로 아래에 들여쓰여 선다. */
+    sessionTree: SessionTree,
+    /** 하위 줄을 눌러 그 하위의 챗을 가운데에 세운다. 하위는 상위가 띄우는 것이라 여기서 새로 띄우는 길은 없다. */
+    onChildSessionChosen: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxHeight()) {
@@ -135,6 +143,14 @@ internal fun WorkDirSessionPanel(
                         onStartNewConversationRequested = {
                             onEnterSessionRequested(SessionTarget.Main, SessionConversationChoice.StartNewConversation)
                         },
+                    )
+                }
+
+                items(sessionTree.children, key = { "child:${it.childId}" }) { child ->
+                    ChildSessionRow(
+                        child = child,
+                        onScreen = onScreenTarget == child.target,
+                        onChosen = { onChildSessionChosen(child.childId) },
                     )
                 }
 
@@ -366,6 +382,70 @@ private fun RepoSessionRow(
         }
     }
 }
+
+/**
+ * 메인이 띄운 하위 하나(6.12 의 레일 · 탭). 조율 블록에 딸린 것이라 레포 행처럼 가이드 선으로 들여쓴다.
+ *
+ * 무엇을 그리는가는 트리에 온 것뿐이다(원칙 15) — 턴이 도는가, 승인을 기다리는가, 끝났는가.
+ */
+@Composable
+private fun ChildSessionRow(child: ChildSessionNode, onScreen: Boolean, onChosen: () -> Unit) {
+    val ended = child.lifecycle is ChildLifecycle.Ended
+    val statusColor = when {
+        ended -> MaterialTheme.colorScheme.onSurfaceVariant
+        child.waitingFor == ChildWaitingFor.Approval -> KyuTheme.statusColors.caution
+        child.waitingFor == ChildWaitingFor.Model -> KyuTheme.statusColors.session
+        else -> KyuTheme.statusColors.neutral
+    }
+
+    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = CHILD_ROW_INDENT)) {
+        Box(
+            modifier = Modifier
+                .width(GUIDE_LINE_WIDTH)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = ORCHESTRATION_BORDER_ALPHA)),
+        )
+        Spacer(Modifier.width(10.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clip(MaterialTheme.shapes.small)
+                .background(if (onScreen) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .clickable(onClick = onChosen)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("●", color = statusColor, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = child.childId,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = child.title,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "${child.relativeCwd} · ${childSessionStatusLabel(child)}",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = if (ended) MaterialTheme.colorScheme.onSurfaceVariant else statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** 하위 줄이 조율 블록 아래로 들어가는 폭. 레포 행보다 한 단 깊어 "메인이 띄운 것" 이 위치로 읽힌다. */
+private val CHILD_ROW_INDENT = 14.dp
 
 @Composable
 private fun EmptyRepoNotice() {

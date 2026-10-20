@@ -32,6 +32,8 @@ import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
+import com.kyuchestration.desktop.terminal.chat.SessionTree
 import com.kyuchestration.desktop.terminal.chat.ChatScreenState
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
@@ -111,6 +113,12 @@ fun KyuchestrationDesktopScreen(
     onInterruptTurnRequested: () -> Unit,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndChatSessionRequested: () -> Unit,
+    /** 메인 아래 하위 세션들(session-tree 6.11). 패널의 하위 줄과 메인 챗의 승인 띠가 이것을 그린다. */
+    sessionTree: SessionTree,
+    /** 사람에게 물을 관문들(6.9). 맨 앞의 것이 대화 상자로 선다. */
+    childSessionGateQuestions: List<ChildSessionGateQuestion>,
+    onChildSessionChosen: (String) -> Unit,
+    onChildSessionGateAnswered: (childId: String, approved: Boolean) -> Unit,
 ) {
     KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -169,7 +177,16 @@ fun KyuchestrationDesktopScreen(
                             onEndChatSessionRequested = onEndChatSessionRequested,
                             themePreference = themePreference,
                             onThemePreferenceChosen = onThemePreferenceChosen,
+                            sessionTree = sessionTree,
+                            onChildSessionChosen = onChildSessionChosen,
                         )
+
+                        // 한 번에 하나씩 묻는다. 답하면 다음 물음이 맨 앞으로 온다.
+                        childSessionGateQuestions.firstOrNull()?.let { question ->
+                            ChildSessionGateDialog(question) { approved ->
+                                onChildSessionGateAnswered(question.childId, approved)
+                            }
+                        }
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
                         RepositoryCloneDialog(
@@ -218,6 +235,8 @@ private fun OrchestrationShell(
     onEndChatSessionRequested: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceChosen: (ThemePreference) -> Unit,
+    sessionTree: SessionTree,
+    onChildSessionChosen: (String) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
         SessionNavigationRail(
@@ -237,6 +256,8 @@ private fun OrchestrationShell(
             initializationState = initializationState,
             onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
             onEnterSessionRequested = onEnterSessionRequested,
+            sessionTree = sessionTree,
+            onChildSessionChosen = onChildSessionChosen,
             modifier = Modifier.width(SESSION_PANEL_WIDTH),
         )
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -253,6 +274,8 @@ private fun OrchestrationShell(
             onStartNewConversationRequested = { target ->
                 onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
             },
+            sessionTree = sessionTree,
+            onOpenChildSessionRequested = onChildSessionChosen,
             modifier = Modifier.weight(1f),
         )
     }

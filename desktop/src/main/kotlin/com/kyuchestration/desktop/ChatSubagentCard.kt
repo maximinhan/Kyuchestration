@@ -40,6 +40,8 @@ internal fun SubagentCard(
     run: SubagentRun,
     sessionWorkingDirectory: Path?,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    /** 서브에이전트도 메인의 도구를 물려받아 하위를 띄울 수 있다 — 안쪽 spawn 카드의 "열기" 자리. */
+    onOpenChildSessionRequested: (String) -> Unit,
 ) {
     CollapsibleBlock(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -76,7 +78,7 @@ internal fun SubagentCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     entry.nestedEntries.forEach {
-                        ChatEntryView(it, sessionWorkingDirectory, onPermissionChoiceMade)
+                        ChatEntryView(it, sessionWorkingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
                     }
                 }
             } else {
