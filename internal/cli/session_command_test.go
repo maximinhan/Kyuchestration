@@ -116,6 +116,7 @@ type mcpConfigForTest struct {
 		Type    string   `json:"type"`
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
+		Timeout *int64   `json:"timeout"`
 	} `json:"mcpServers"`
 }
 
@@ -148,6 +149,29 @@ func TestTheMainSessionCommandRegistersTheOrchestrationServerAsAConfigString(t *
 	// 등록을 떼어낸 나머지는 전과 같아야 한다.
 	_, _, restAfterConversation := splitConversationFlagsForTest(t, rest)
 	assertRestOfCommand(t, restAfterConversation, []string{"--add-dir", filepath.Join(workDirPath, "alpha-commons")})
+}
+
+func TestTheOrchestrationServerCarriesItsOwnToolTimeout(t *testing.T) {
+	// 사용자가 다른 MCP 서버 때문에 MCP_TOOL_TIMEOUT 을 짧게 잡아두면, 등록에 값이 없는 kyu 의
+	// 도구는 그 값에서 조용히 끊긴다. 서버별 timeout 이 환경변수를 이기는 것을 쟀으므로
+	// (session-tree-design.md 3.4) 환경에 기대지 않고 우리가 정한다 — 1 시간(6.7).
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	for _, args := range [][]string{
+		nil,
+		{chatModeOptionName, appSocketOptionName, "/run/user/1000/kyu/t1.sock"},
+		{chatModeOptionName, bypassPermissionsOptionName, appSocketOptionName, "/run/user/1000/kyu/t2.sock"},
+	} {
+		run := runSessionCommandForTest(t, args...)
+
+		registration, _ := mcpServerRegistrationForTest(t, run.document.Command)
+		server := registration.McpServers["kyu"]
+		if server.Timeout == nil || *server.Timeout != 3_600_000 {
+			t.Errorf("인자 %q: kyu timeout = %v, want 3600000", args, server.Timeout)
+		}
+	}
 }
 
 func TestARepoSessionIsNotGivenTheOrchestrationServer(t *testing.T) {

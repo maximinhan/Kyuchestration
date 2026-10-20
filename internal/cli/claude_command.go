@@ -196,11 +196,30 @@ func mainSessionMcpSetup(workDirAbsolutePath string, request sessionCommandReque
 		serveArgs = append(serveArgs, appSocketOptionName, request.appSocketPath)
 	}
 
+	orchestrationServer := engineMcpServer(engineExecutablePath, mcpServeSubcommandName, serveArgs...)
+	orchestrationServer["timeout"] = orchestrationToolTimeoutMilliseconds
+
 	servers := map[string]any{
-		orchestrationServerName: engineMcpServer(engineExecutablePath, mcpServeSubcommandName, serveArgs...),
+		orchestrationServerName: orchestrationServer,
 	}
 	return mcpSetupFor(servers, engineExecutablePath, request)
 }
+
+// orchestrationToolTimeoutMilliseconds 는 kyu 서버의 도구 호출 하나가 걸릴 수 있는 시간 상한이다
+// (session-tree-design.md 6.7).
+//
+// **환경에 기대지 않고 우리가 정한다.** 등록에 값이 없으면 claude 는 MCP_TOOL_TIMEOUT 을, 그것도
+// 없으면 바이너리의 기본값(≈ 27.8 시간)을 쓴다. 사용자가 다른 서버 때문에 그 환경변수를 짧게
+// 잡아두면 kyu 의 기다리는 도구가 그 값에서 조용히 끊긴다. 서버별 값이 환경변수를 이기는 것을
+// 쟀다(3.4) — 그래서 이 자리에 적는다.
+//
+// **1 시간인 이유.** 세션 트리의 await_session 은 최대 3,000 초를 기다리고 답하는데(6.7), 그
+// 값이 이 상한보다 짧아야 claude 가 먼저 끊지 않는다. 대가로 run_in_repo 의 위임도 1 시간에서
+// 끊긴다 — 1 시간을 넘긴 위임 기록은 이 머신에 없었고, run_in_repo 는 6 단계에서 은퇴한다.
+//
+// 승인 서버(kyu-ask)에는 두지 않는다. 승인을 기다리는 시간은 사람이 고민하는 시간이라 상한을
+// 우리가 정하지 않는다(chat-ui-design.md 5.4.1).
+const orchestrationToolTimeoutMilliseconds = 3_600_000
 
 // repoSessionMcpSetup 은 레포 세션에 붙일 서버를 등록으로 옮긴다 — 있다면 승인 서버 하나뿐이다.
 //
