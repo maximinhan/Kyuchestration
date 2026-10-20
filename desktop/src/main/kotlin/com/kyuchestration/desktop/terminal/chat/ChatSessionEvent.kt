@@ -126,6 +126,16 @@ sealed interface ChatSessionEvent {
     ) : ChatSessionEvent
 
     /**
+     * 앱이 `uuid` 를 실어 보낸 말 하나의 생애가 한 걸음 옮겨 갔다(`command_lifecycle` — session-tree 3.5 (다)).
+     *
+     * **`uuid` 를 실어 보낸 말에만 온다.** 실측에서 `uuid` 없이 보낸 말에는 이 줄이 없었다.
+     *
+     * @param commandUuid 앱이 보낸 줄의 `uuid` 그대로(`command_uuid`). 이 줄 자신의 `uuid` 는 따로
+     *   있지만 아무것과도 이어지지 않으므로 싣지 않는다.
+     */
+    data class UserCommandLifecycleChanged(val commandUuid: String, val state: UserCommandState) : ChatSessionEvent
+
+    /**
      * 관문이 열렸다 — 이 도구 호출을 해도 되는지 사람에게 묻는다(3.5 · 5.4).
      *
      * **이 갈래만 스트림에서 오지 않는다.** `claude` 는 승인이 필요한 호출마다 MCP 도구를 부르고,
@@ -236,6 +246,28 @@ sealed interface ChatSessionEvent {
 
 /** `system/init` 이 보고한 MCP 서버 하나 — 이름과 상태(실측: `{"name":"kyu","status":"connected"}`). */
 data class McpServerStatus(val name: String, val status: String)
+
+/**
+ * 앱이 보낸 말이 `claude` 안에서 어디까지 왔는가(`command_lifecycle.state`).
+ *
+ * 실측으로 본 넷만 둔다(2026-10-20, 2.1.304). **[Cancelled] 는 설계 3.5 가 재지 않은 것이다** — 도구
+ * 대기 중에 끊은 말이 `completed` 대신 이것으로 끝났다. 그 밖의 값은 갈래를 짓지 않고 원문째
+ * [ChatSessionEvent.Unrecognized] 로 들고 나간다.
+ */
+enum class UserCommandState {
+
+    /** 큐에 들었다. `system/init` 보다도 먼저 온다. */
+    Queued,
+
+    /** 그 말의 턴이 시작됐다. */
+    Started,
+
+    /** 그 말의 턴이 끝났다. `result` 뒤에 온다. */
+    Completed,
+
+    /** 그 말의 턴이 끊겼다. 끊긴 턴의 `result` 뒤에 온다. */
+    Cancelled,
+}
 
 /**
  * 턴이 어떻게 끝났는가.

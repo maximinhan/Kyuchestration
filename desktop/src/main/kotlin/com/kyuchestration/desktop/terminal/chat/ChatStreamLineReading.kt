@@ -45,6 +45,7 @@ internal fun chatSessionEventsFrom(streamLine: String): List<ChatSessionEvent> {
         "result" -> listOf(turnFinishedIn(line))
         "rate_limit_event" -> listOf(usageWindowsIn(line))
         "tool_progress" -> toolProgressEventsIn(line, streamLine)
+        "command_lifecycle" -> userCommandLifecycleEventsIn(line, streamLine)
 
         // 앱이 보낸 제어 요청의 답이다(3.8). 중단이 받아들여졌다는 사실은 뒤이어 오는
         // result(Interrupted)가 말하므로, 이 줄이 화면에 더할 것은 없다.
@@ -237,6 +238,24 @@ private fun toolProgressEventsIn(line: JsonObject, streamLine: String): List<Cha
             toolUseId = line.stringOrNull("parent_tool_use_id").orEmpty(),
             toolName = line.stringOrNull("tool_name").orEmpty(),
             elapsedSeconds = line.longOrNull("elapsed_time_seconds") ?: 0,
+        ),
+    )
+}
+
+/** 앱이 `uuid` 를 실어 보낸 말의 생애(session-tree 3.5 (다)). 재지 못한 상태는 원문째로 나간다. */
+private fun userCommandLifecycleEventsIn(line: JsonObject, streamLine: String): List<ChatSessionEvent> {
+    val state = when (line.stringOrNull("state")) {
+        "queued" -> UserCommandState.Queued
+        "started" -> UserCommandState.Started
+        "completed" -> UserCommandState.Completed
+        "cancelled" -> UserCommandState.Cancelled
+        else -> return listOf(ChatSessionEvent.Unrecognized(streamLine))
+    }
+
+    return listOf(
+        ChatSessionEvent.UserCommandLifecycleChanged(
+            commandUuid = line.stringOrNull("command_uuid").orEmpty(),
+            state = state,
         ),
     )
 }

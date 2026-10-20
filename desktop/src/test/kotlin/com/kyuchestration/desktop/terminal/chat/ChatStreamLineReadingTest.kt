@@ -292,6 +292,34 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `앱이 uuid 를 실어 보낸 말의 생애가 그 uuid 로 온다`() {
+        // command_uuid 가 앱이 보낸 uuid 그대로다(session-tree 3.5 (다)). 줄 자신의 uuid 는 따로 있다.
+        val lifecycle = listOf(
+            RecordedChatStreamLines.COMMAND_QUEUED,
+            RecordedChatStreamLines.COMMAND_STARTED,
+            RecordedChatStreamLines.COMMAND_CANCELLED,
+            RecordedChatStreamLines.COMMAND_COMPLETED,
+        ).map { assertIs<ChatSessionEvent.UserCommandLifecycleChanged>(onlyEventIn(it)) }
+
+        assertEquals(
+            listOf(
+                "11111111-2222-4333-8444-000000000001" to UserCommandState.Queued,
+                "11111111-2222-4333-8444-000000000001" to UserCommandState.Started,
+                "11111111-2222-4333-8444-000000000001" to UserCommandState.Cancelled,
+                "11111111-2222-4333-8444-000000000002" to UserCommandState.Completed,
+            ),
+            lifecycle.map { it.commandUuid to it.state },
+        )
+    }
+
+    @Test
+    fun `재지 못한 생애 상태는 모르는 줄이다`() {
+        val unknownState = """{"type":"command_lifecycle","command_uuid":"c","state":"merged","uuid":"u"}"""
+
+        assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(unknownState))
+    }
+
+    @Test
     fun `이어갈 대화를 찾지 못한 턴은 실패로 온다`() {
         // 없는 대화를 resume 하면 result 가 error_during_execution 으로 한 줄 오고 종료 코드가 1 이다(3.9).
         val line = """{"type":"result","subtype":"error_during_execution","result":null,""" +

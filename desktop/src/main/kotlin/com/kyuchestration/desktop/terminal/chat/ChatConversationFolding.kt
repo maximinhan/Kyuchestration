@@ -93,6 +93,10 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
     // 신호가 더할 사실이 없다 — 하트비트의 경과 초를 카드에 따로 들면 같은 값을 두 시계가 들게 된다.
     is ChatSessionEvent.ToolCallHeartbeat -> this
 
+    // 화면이 아직 큐의 모습을 그리지 않는다(session-tree 8 절 6 번). 기다리는 말을 놓는 근거는
+    // 되돌아온 uuid 하나다.
+    is ChatSessionEvent.UserCommandLifecycleChanged -> this
+
     // 관문이 열렸다(3.5). 카드는 대화의 맨 아래에 선다 — 물음의 맥락이 바로 위에 있어야
     // 사용자가 판단할 수 있고(6.4), 그 맥락은 방금 지나간 도구 호출과 모델의 말이다.
     is ChatSessionEvent.PermissionRequested -> copy(
