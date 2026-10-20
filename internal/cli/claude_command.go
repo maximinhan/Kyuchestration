@@ -181,15 +181,23 @@ type sessionMcpSetup struct {
 	permissionPromptTool string
 }
 
-// mainSessionMcpSetup 은 메인 세션에 붙일 서버들을 등록으로 옮긴다 — 오케스트레이션과, 있다면 승인.
+// mainSessionMcpSetup 은 메인 세션에 붙일 서버들을 등록으로 옮긴다 — 앱 소켓을 아는 오케스트레이션과, 있다면 승인.
 func mainSessionMcpSetup(workDirAbsolutePath string, request sessionCommandRequest) (sessionMcpSetup, error) {
 	engineExecutablePath, err := os.Executable()
 	if err != nil {
 		return sessionMcpSetup{}, fmt.Errorf("이 엔진의 실행 경로를 알아내지 못해 MCP 서버를 등록할 수 없습니다: %w", err)
 	}
 
+	// 소켓의 자리는 bypass 와 무관하게 싣는다(session-tree-design.md 6.4). 세션 트리 도구가 하위를
+	// 띄워 달라고 앱에게 묻는 길이 이 소켓이고, 그 필요는 권한 확인을 건너뛰었다고 사라지지 않는다.
+	// bypass 가 정하는 것은 같은 소켓에 승인 서버를 붙일지뿐이다(mcpSetupFor).
+	serveArgs := []string{workDirAbsolutePath}
+	if request.appSocketPath != "" {
+		serveArgs = append(serveArgs, appSocketOptionName, request.appSocketPath)
+	}
+
 	servers := map[string]any{
-		orchestrationServerName: engineMcpServer(engineExecutablePath, mcpServeSubcommandName, workDirAbsolutePath),
+		orchestrationServerName: engineMcpServer(engineExecutablePath, mcpServeSubcommandName, serveArgs...),
 	}
 	return mcpSetupFor(servers, engineExecutablePath, request)
 }

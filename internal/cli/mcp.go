@@ -19,7 +19,8 @@ import (
 
 const mcpUsageText = `사용법: kyu mcp <serve|approve|ask> [인자]
 
-  kyu mcp serve <워크디렉토리>   메인 세션에 붙는 오케스트레이션 MCP 서버를 stdio 로 연다 — 기계용
+  kyu mcp serve <워크디렉토리> [--app-socket <경로>]
+                                메인 세션에 붙는 오케스트레이션 MCP 서버를 stdio 로 연다 — 기계용
   kyu mcp approve <repo>        그 레포의 실행 유발 설정을 눈으로 확인하고 위임을 승인한다
   kyu mcp ask --app-socket <경로>  승인 물음을 그 소켓 너머의 앱에게 중계한다 — 기계용
 
@@ -65,10 +66,11 @@ func ManageOrchestrationTools(in io.Reader, out, errOut io.Writer, args []string
 // 정한 것이 아니어서다 — claude 가 자식으로 띄우므로 그 cwd 는 메인 세션의 것이고, 지금은 그것이
 // 워크디렉토리와 같지만 그 사실에 기대면 claude 가 자식의 cwd 를 바꾸는 날 조용히 어긋난다.
 func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
-	workDirPath, err := parseServeArgs(args)
+	request, err := parseServeArgs(args)
 	if err != nil {
 		return err
 	}
+	workDirPath := request.workDirPath
 
 	// 절대경로로 굳힌다. 이 값은 도구가 답하는 문서에 그대로 실리고 위임의 cwd 가 되므로,
 	// 상대경로가 한 번이라도 섞이면 어느 디렉토리에서 이 서버가 떴는지에 따라 답이 달라진다.
@@ -106,25 +108,46 @@ func mainSessionOpenedWithBypass() bool {
 	return os.Getenv(bypassPermissionsEnvName) == bypassPermissionsEnvValue
 }
 
-func parseServeArgs(args []string) (string, error) {
-	var workDirPath string
+// serveRequest 는 파싱이 끝난 kyu mcp serve 요청이다.
+type serveRequest struct {
+	workDirPath string
 
-	for _, arg := range args {
+	// appSocketPath 는 이 세션을 연 앱의 소켓 자리다. 비어 있으면 앱 없이(터미널 세션에서) 뜬 서버다.
+	//
+	// 이 단계에서는 받아 두기만 한다. 세션 트리 도구(session-tree-design.md 7 절 3·4 단계)가 이 자리로
+	// 앱에게 묻는데, 등록이 먼저 바뀌어야 그 단계들이 엔진과 앱을 한꺼번에 바꾸지 않아도 된다.
+	appSocketPath string
+}
+
+func parseServeArgs(args []string) (serveRequest, error) {
+	var request serveRequest
+
+	for argIndex := 0; argIndex < len(args); argIndex++ {
+		arg := args[argIndex]
+
 		switch {
+		case arg == appSocketOptionName:
+			socketPath, err := appSocketPathAfter(args, argIndex, mcpUsageText)
+			if err != nil {
+				return serveRequest{}, err
+			}
+			request.appSocketPath = socketPath
+			argIndex++
+
 		// 모르는 옵션을 경로로 흘려보내면 "워크디렉토리 읽기 실패 (--typo)" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
-			return "", fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, mcpUsageText)
+			return serveRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, mcpUsageText)
 
-		case workDirPath != "":
-			return "", fmt.Errorf("mcp serve 는 워크디렉토리 하나만 받습니다 (인자 %d 개를 받음)\n\n%s", len(args), mcpUsageText)
+		case request.workDirPath != "":
+			return serveRequest{}, fmt.Errorf("mcp serve 는 워크디렉토리 하나만 받습니다 (인자 %d 개를 받음)\n\n%s", len(args), mcpUsageText)
 
 		default:
-			workDirPath = arg
+			request.workDirPath = arg
 		}
 	}
 
-	if workDirPath == "" {
-		return "", fmt.Errorf("mcp serve 는 어느 워크디렉토리의 도구를 열지 알아야 합니다\n\n%s", mcpUsageText)
+	if request.workDirPath == "" {
+		return serveRequest{}, fmt.Errorf("mcp serve 는 어느 워크디렉토리의 도구를 열지 알아야 합니다\n\n%s", mcpUsageText)
 	}
-	return workDirPath, nil
+	return request, nil
 }

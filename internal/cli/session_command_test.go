@@ -696,6 +696,43 @@ func assertAskServerRegistration(t *testing.T, registration mcpConfigForTest, so
 	}
 }
 
+// assertOrchestrationServerKnowsTheAppSocket 은 등록된 kyu 서버가 그 워크디렉토리의 도구를 열면서
+// 앱 소켓의 자리도 아는지 본다(session-tree-design.md 6.4).
+func assertOrchestrationServerKnowsTheAppSocket(t *testing.T, registration mcpConfigForTest, workDirPath, socketPath string) {
+	t.Helper()
+
+	server, registered := registration.McpServers["kyu"]
+	if !registered {
+		t.Fatalf("등록한 서버 = %v, 오케스트레이션 서버(kyu)를 기대", registration.McpServers)
+	}
+	wantArgs := []string{"mcp", "serve", workDirPath, "--app-socket", socketPath}
+	if !slices.Equal(server.Args, wantArgs) {
+		t.Errorf("kyu args = %q, want %q", server.Args, wantArgs)
+	}
+}
+
+func TestABypassMainChatStillTellsTheOrchestrationServerWhereTheAppSocketIs(t *testing.T) {
+	// 세션 트리 도구는 bypass 와 무관하게 앱에게 물어야 한다(session-tree-design.md 6.4). 소켓을
+	// 승인 브리지에만 실으면 bypass 로 연 메인 세션은 하위 세션을 하나도 띄우지 못한다 —
+	// bypass 가 정하는 것은 그 소켓에 승인 서버를 붙일지뿐이다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "alpha-commons")
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t,
+		chatModeOptionName, bypassPermissionsOptionName, appSocketOptionName, "/run/user/1000/kyu/b1.sock")
+
+	registration, _ := mcpServerRegistrationForTest(t, run.document.Command)
+	assertOrchestrationServerKnowsTheAppSocket(t, registration, workDirPath, "/run/user/1000/kyu/b1.sock")
+
+	if _, registered := registration.McpServers["kyu-ask"]; registered {
+		t.Errorf("등록한 서버 = %v, bypass 세션에는 승인 서버가 없기를 기대", registration.McpServers)
+	}
+	if slices.Contains(run.document.Command, "--permission-prompt-tool") {
+		t.Errorf("명령 = %q, bypass 세션에는 승인 플래그가 없기를 기대", run.document.Command)
+	}
+}
+
 func TestTheMainChatRegistersTheAskServerBesideTheOrchestrationServer(t *testing.T) {
 	// 두 서버가 한 --mcp-config 에 함께 실린다(설계 5.2). 승인 서버가 오케스트레이션 서버를
 	// 밀어내면 메인 세션이 위임 도구를 잃고, 그 반대면 승인 카드가 영영 뜨지 않는다.
@@ -706,9 +743,7 @@ func TestTheMainChatRegistersTheAskServerBesideTheOrchestrationServer(t *testing
 	run := runSessionCommandForTest(t, chatModeOptionName, appSocketOptionName, "/run/user/1000/kyu/a1.sock")
 
 	registration, commandWithoutRegistration := mcpServerRegistrationForTest(t, run.document.Command)
-	if _, registered := registration.McpServers["kyu"]; !registered {
-		t.Errorf("등록한 서버 = %v, 오케스트레이션 서버(kyu)도 함께이기를 기대", registration.McpServers)
-	}
+	assertOrchestrationServerKnowsTheAppSocket(t, registration, workDirPath, "/run/user/1000/kyu/a1.sock")
 	assertAskServerRegistration(t, registration, "/run/user/1000/kyu/a1.sock")
 
 	commandWithoutPermissionFlag := splitPermissionPromptToolForTest(t, commandWithoutRegistration)
