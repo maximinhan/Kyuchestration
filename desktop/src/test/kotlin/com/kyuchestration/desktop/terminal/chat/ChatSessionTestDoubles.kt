@@ -11,6 +11,7 @@ import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
+import com.kyuchestration.desktop.terminal.SessionTarget
 import java.io.IOException
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.serialization.json.JsonObject
 
 /*
@@ -278,4 +280,45 @@ internal class RecordingChildSessionCommandSource : ChildSessionCommandSource {
             )
         }
     }
+}
+
+/** 상위가 하위 하나를 띄우는 요청. 시킨 일은 시험의 관심 밖이다. */
+internal fun spawnRequest(cwd: String, prompt: String = "일해") =
+    SessionTreeRequest.SpawnSession(prompt = prompt, requestedCwd = cwd, createDirectory = false, title = null)
+
+/**
+ * 메인 하나와 그 아래 하위 [childCount] 개를 띄워 둔다. 화면은 메인에 있다. 하위의 cwd 는 `proj-0` 부터다.
+ *
+ * 수명 시험이 쓰던 것을 말이 가는 길 시험(ChildSessionDialogueStateHolderTest)이 두 번째로 쓰면서 여기로 꺼냈다.
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal fun TestScope.mainWithChildrenTestBed(childCount: Int): MainWithChildrenTestBed {
+    val opener = RecordingChatSessionOpener()
+    val childSource = RecordingChildSessionCommandSource()
+    val channels = mutableListOf<FakeAppSocketChannel>()
+    val holder = stateHolder(opener = opener, permissionChannels = channels, childSessionCommandSource = childSource)
+    holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+    runCurrent()
+    repeat(childCount) { index ->
+        channels.first().askSessionTree(spawnRequest("proj-$index"))
+        runCurrent()
+    }
+    return MainWithChildrenTestBed(holder, opener, childSource, channels)
+}
+
+internal class MainWithChildrenTestBed(
+    val holder: ChatSessionStateHolder,
+    val opener: RecordingChatSessionOpener,
+    val childSource: RecordingChildSessionCommandSource,
+    /** 연 차례대로 — 맨 앞이 메인의 소켓이고, n 번째가 n 번째 하위의 것이다. */
+    val channels: List<FakeAppSocketChannel>,
+) {
+    val main: FakeChatSession get() = opener.openedSessions.first()
+    val mainChannel: FakeAppSocketChannel get() = channels.first()
+
+    /** n 번째로 띄운 하위의 세션(1 부터). */
+    fun child(ordinal: Int): FakeChatSession = opener.openedSessions[ordinal]
+
+    /** n 번째로 띄운 하위의 소켓(1 부터) — 하위의 kyu mcp serve 가 묻는 자리다. */
+    fun childChannel(ordinal: Int): FakeAppSocketChannel = channels[ordinal]
 }

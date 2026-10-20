@@ -12,8 +12,31 @@ import java.util.UUID
  *
  * 보내기 전부터 쓰인다. 상태 홀더는 쓰기가 끝나기 전에 이 말을 "대기 중" 으로 세워 두고
  * ([ChatConversation.pendingUserMessages]), 되돌아온 `uuid` 로 그것을 놓는다.
+ *
+ * @param sender 이 말을 누가 했는가. 되돌아온 말풍선을 누구의 것으로 그릴지가 이 값이다(session-tree 6.12) —
+ *   `uuid` 가 이 말과 되돌아온 줄을 잇고, 이 값이 그 줄의 주인을 말한다.
  */
 data class OutgoingUserMessage(
     val text: String,
+    val sender: UserMessageSender = UserMessageSender.Human,
     val uuid: String = UUID.randomUUID().toString(),
 )
+
+/**
+ * 사용자 메시지 자리로 들어간 말의 주인(session-tree-design.md 6.5).
+ *
+ * `claude` 에게는 모두 사용자 메시지다. 앱만 이 셋을 가른다 — 모델이 출처를 읽는 재료는 접두이고(3.5 (가)),
+ * 화면이 출처를 읽는 재료는 이 값이다. **접두로 가르지 않는다.** 사람이 `[상위 세션]` 을 직접 쳐도 그것은
+ * 사람의 말이다(3.5 (다)).
+ */
+sealed interface UserMessageSender {
+
+    /** 사람이 입력창에 친 말. */
+    data object Human : UserMessageSender
+
+    /** 상위 세션이 이 하위에게 한 말 — 첫 프롬프트와 `send_to_session`. */
+    data object ParentSession : UserMessageSender
+
+    /** 하위 세션이 상위에게 한 말 — 쉬는 상위에게 앱이 대신 옮긴 사건. */
+    data class ChildSession(val childId: String) : UserMessageSender
+}

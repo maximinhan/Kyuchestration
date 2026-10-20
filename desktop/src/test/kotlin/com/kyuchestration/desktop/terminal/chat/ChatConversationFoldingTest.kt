@@ -67,6 +67,28 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `앱이 상위의 말로 넣은 것은 되돌아오면 상위가 보낸 말풍선이 된다`() {
+        // 접두가 아니라 uuid 로 가른다(session-tree 3.5 (다) · 6.12). 사람이 '[상위 세션]' 을 직접 쳐도 사람의 말이다.
+        val injected = OutgoingUserMessage(
+            text = "[상위 세션] 포트는 5433 이다",
+            sender = UserMessageSender.ParentSession,
+            uuid = "11111111-2222-4333-8444-000000000001",
+        )
+        val waiting = ChatConversation(target = SessionTarget.Child("child-1"), pendingUserMessages = listOf(injected))
+
+        val conversation = waiting.after(RecordedChatStreamLines.USER_MESSAGE_REPLAYED_WITH_APP_UUID)
+
+        assertEquals(UserMessageSender.ParentSession, assertIs<ChatEntry.UserSaid>(conversation.entries.single()).sender)
+    }
+
+    @Test
+    fun `앱이 기다리지 않던 말은 사람의 말풍선이다`() {
+        val conversation = conversationAfter(RecordedChatStreamLines.USER_MESSAGE_REPLAYED)
+
+        assertEquals(UserMessageSender.Human, assertIs<ChatEntry.UserSaid>(conversation.entries.single()).sender)
+    }
+
+    @Test
     fun `되돌아온 말이 그 턴의 시작이다`() {
         // 큐에 든 말은 그 턴이 시작할 때에야 되돌아온다(3.11). 그래서 되돌아옴이 "도는 턴이
         // 생겼다" 를 아는 유일한 자리다 — 앱이 보낸 순간이 아니다.

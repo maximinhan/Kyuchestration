@@ -7,7 +7,6 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
@@ -22,7 +21,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `사람이 메인을 끝내면 살아 있는 하위가 먼저 끝나고 트리가 빈다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 2)
+        val bed = mainWithChildrenTestBed(childCount = 2)
 
         bed.holder.endOnScreenSession()
         runCurrent()
@@ -36,7 +35,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `메인이 스스로 끝나면 하위가 상위가 끝나서 끝났다고 남는다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 2)
+        val bed = mainWithChildrenTestBed(childCount = 2)
 
         bed.main.emit(ChatSessionEvent.SessionEnded(exitCode = 1))
         runCurrent()
@@ -52,7 +51,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `앱이 닫히면 하위를 먼저 끝내고 메인과 다른 세션을 나중에 끝낸다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 2)
+        val bed = mainWithChildrenTestBed(childCount = 2)
 
         bed.holder.endAllSessions()
         runCurrent()
@@ -64,7 +63,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `하위가 끝나도 메인은 그대로다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 1)
+        val bed = mainWithChildrenTestBed(childCount = 1)
 
         bed.child(1).emit(ChatSessionEvent.SessionEnded(exitCode = 0))
         runCurrent()
@@ -75,7 +74,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `사람이 하위 화면에서 끝내면 그 하위만 끝나고 화면은 메인으로 돌아간다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 2)
+        val bed = mainWithChildrenTestBed(childCount = 2)
         bed.child(1).emit(ChatSessionEvent.AssistantTextArrived("하위의 답", parentToolUseId = null))
         runCurrent()
         bed.holder.showChildSession("child-1")
@@ -100,7 +99,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `하위를 고르면 그 하위의 대화가 화면에 선다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 1)
+        val bed = mainWithChildrenTestBed(childCount = 1)
 
         bed.holder.showChildSession("child-1")
 
@@ -109,11 +108,11 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `관문을 기다리는 중에 메인이 끝나면 물음을 거두고 spawn 은 거절된다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 0)
+        val bed = mainWithChildrenTestBed(childCount = 0)
         bed.childSource.respondWith {
             ChildSessionCommandAnswer.ApprovalRequired(ChildSessionGate("proj-x", "sha256:x", emptyList()))
         }
-        val asked = bed.mainChannel.askSessionTree(spawn("proj-x"))
+        val asked = bed.mainChannel.askSessionTree(spawnRequest("proj-x"))
         runCurrent()
 
         bed.holder.endOnScreenSession()
@@ -125,7 +124,7 @@ class ChildSessionLifecycleStateHolderTest {
 
     @Test
     fun `메인을 새로 열면 앞 메인의 하위들은 트리에서 사라진다`() = runTest {
-        val bed = lifecycleTestBed(childCount = 1)
+        val bed = mainWithChildrenTestBed(childCount = 1)
         bed.main.emit(ChatSessionEvent.SessionEnded(exitCode = 1))
         runCurrent()
 
@@ -133,35 +132,5 @@ class ChildSessionLifecycleStateHolderTest {
         runCurrent()
 
         assertEquals(emptyList(), bed.holder.sessionTree.value.children)
-    }
-
-    private fun spawn(cwd: String) =
-        SessionTreeRequest.SpawnSession(prompt = "일해", requestedCwd = cwd, createDirectory = false, title = null)
-
-    /** 메인 하나와 그 아래 하위 [childCount] 개를 띄워 둔다. 화면은 메인에 있다. */
-    private fun TestScope.lifecycleTestBed(childCount: Int): LifecycleTestBed {
-        val opener = RecordingChatSessionOpener()
-        val childSource = RecordingChildSessionCommandSource()
-        val channels = mutableListOf<FakeAppSocketChannel>()
-        val holder = stateHolder(opener = opener, permissionChannels = channels, childSessionCommandSource = childSource)
-        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        runCurrent()
-        repeat(childCount) { index ->
-            channels.first().askSessionTree(spawn("proj-$index"))
-            runCurrent()
-        }
-        return LifecycleTestBed(holder, opener, childSource, channels)
-    }
-
-    private class LifecycleTestBed(
-        val holder: ChatSessionStateHolder,
-        val opener: RecordingChatSessionOpener,
-        val childSource: RecordingChildSessionCommandSource,
-        val channels: List<FakeAppSocketChannel>,
-    ) {
-        val main: FakeChatSession get() = opener.openedSessions.first()
-        val mainChannel: FakeAppSocketChannel get() = channels.first()
-
-        fun child(ordinal: Int): FakeChatSession = opener.openedSessions[ordinal]
     }
 }

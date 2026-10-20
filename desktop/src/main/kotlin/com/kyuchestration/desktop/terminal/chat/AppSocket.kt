@@ -34,7 +34,7 @@ import kotlinx.serialization.json.put
  * 세션 하나의 앱 소켓(chat-ui-design.md 5.4 · session-tree-design.md 6.4).
  *
  * 승인 물음을 받으려고 열었던 소켓이고, 세션 트리 요청이 두 번째 사용처로 더해지면서 이름을 바꿨다.
- * 줄마다 `kind` 가 붙는다 — `permission` 은 승인 카드로, `spawn` · `end` · `list` 는 세션 트리로 간다.
+ * 줄마다 `kind` 가 붙는다 — `permission` 은 승인 카드로, 나머지(`spawn` · `send` · `end` · `list`)는 세션 트리로 간다.
  *
  * **왜 소켓인가.** 승인 도구를 여는 `kyu mcp ask` 는 `claude` 의 자식이고, 결정을 내리는 사람은
  * 앱 앞에 있다. 자식에서 부모로 물어볼 통로가 있어야 하는데, TCP 루프백은 같은 머신의 다른
@@ -260,7 +260,7 @@ internal sealed interface AppSocketRequest {
      */
     data object Unreadable : AppSocketRequest
 
-    /** 세션 트리 요청(spawn · end · list). 상태 홀더가 트리 연산으로 옮긴다. */
+    /** 세션 트리 요청. 상태 홀더가 트리 연산으로 옮긴다. */
     data class SessionTree(val request: SessionTreeRequest) : AppSocketRequest
 
     /** 받는 세션 트리 kind 인데 필드가 모자란 줄. */

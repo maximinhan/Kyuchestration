@@ -14,11 +14,8 @@ import kotlinx.serialization.json.putJsonArray
 /**
  * 상위의 `kyu mcp serve` 가 앱 소켓으로 보낸 세션 트리 요청(session-tree-design.md 6.4).
  *
- * 4a 가 받는 셋이다. `send` · `await` · `ask_parent` 는 말이 가는 길(6.5)과 함께 4b 가 더하고, 그때까지
- * 그 줄들은 모르는 kind 로 거절된다(AppSocket).
- *
- * **모양의 출처는 엔진의 요청 타입이다**(mcp_session_tree.go 의 spawnSessionRequest · endSessionRequest ·
- * listSessionsRequest). 모델이 무엇을 더 붙여 보내든 앱이 받는 모양은 그쪽에서 정해진다.
+ * **모양의 출처는 엔진의 요청 타입이다**(mcp_session_tree.go 의 spawnSessionRequest · sendToSessionRequest ·
+ * endSessionRequest · listSessionsRequest). 모델이 무엇을 더 붙여 보내든 앱이 받는 모양은 그쪽에서 정해진다.
  */
 sealed interface SessionTreeRequest {
 
@@ -32,6 +29,9 @@ sealed interface SessionTreeRequest {
         val createDirectory: Boolean,
         val title: String?,
     ) : SessionTreeRequest
+
+    /** 상위가 하위에게 말한다(6.2 의 `send_to_session`). */
+    data class SendToSession(val childId: String, val message: String) : SessionTreeRequest
 
     data class EndSession(val childId: String) : SessionTreeRequest
 
@@ -54,6 +54,12 @@ sealed interface SessionTreeAnswer {
         val conversationId: String,
         val notice: String?,
     ) : SessionTreeAnswer
+
+    /**
+     * 상위의 말을 하위의 stdin 에 사용자 메시지로 넣었다(6.5). 하위의 **새 턴**을 연다 — 하위가 일하는 중이면
+     * 그 턴의 도구 경계에서 끼어든다(3.1). 상위가 그 차이를 알아야 해서 통로를 답에 싣는다(6.2).
+     */
+    data object DeliveredAsMessage : SessionTreeAnswer
 
     data class Ended(val childId: String) : SessionTreeAnswer
 
@@ -91,6 +97,8 @@ internal fun answerLineFor(answer: SessionTreeAnswer): String = when (answer) {
         put("state", RUNNING_STATE)
         answer.notice?.let { put("notice", it) }
     }
+
+    is SessionTreeAnswer.DeliveredAsMessage -> buildJsonObject { put("delivered", DELIVERED_AS_MESSAGE) }
 
     is SessionTreeAnswer.Ended -> buildJsonObject {
         put("id", answer.childId)
@@ -147,6 +155,10 @@ internal fun sessionTreeRequestFrom(kind: String, requestObject: JsonObject): Se
             )
         }
 
+        SEND_REQUEST_KIND -> requestObject.nonEmptyStringOrNull("id")?.let { childId ->
+            requestObject.nonEmptyStringOrNull("message")?.let { message -> SessionTreeRequest.SendToSession(childId, message) }
+        }
+
         END_REQUEST_KIND -> requestObject.nonEmptyStringOrNull("id")?.let(SessionTreeRequest::EndSession)
 
         LIST_REQUEST_KIND -> SessionTreeRequest.ListSessions
@@ -169,8 +181,12 @@ private fun JsonObject.nonEmptyStringOrNull(key: String): String? = stringOrNull
 
 /** 이 앱이 받는 세션 트리 kind 들(mcp_session_tree.go 의 *RequestKind). */
 private const val SPAWN_REQUEST_KIND = "spawn"
+private const val SEND_REQUEST_KIND = "send"
 private const val END_REQUEST_KIND = "end"
 private const val LIST_REQUEST_KIND = "list"
 
 private const val RUNNING_STATE = "running"
 private const val ENDED_STATE = "ended"
+
+/** `send_to_session` 의 `delivered` 낱말(6.2). */
+private const val DELIVERED_AS_MESSAGE = "as_message"

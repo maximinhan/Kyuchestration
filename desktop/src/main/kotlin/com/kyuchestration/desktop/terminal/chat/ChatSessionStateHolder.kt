@@ -245,16 +245,20 @@ class ChatSessionStateHolder(
      */
     fun sendUserMessage(text: String) {
         val target = mutableState.value.target ?: return
-        sendUserMessageTo(target, text)
+        sendUserMessageTo(target, text, UserMessageSender.Human)
     }
 
-    /** 그 세션에 말 한 줄을 보낸다. 사람의 입력창과 상위가 하위에게 넣는 첫 프롬프트가 함께 쓴다. */
-    private fun sendUserMessageTo(target: SessionTarget, text: String) {
+    /**
+     * 그 세션에 말 한 줄을 보낸다. 사람의 입력창과, 상위가 하위에게 하는 말(첫 프롬프트 · `send_to_session`)이 함께 쓴다.
+     *
+     * @param sender 그 말의 주인. 되돌아온 말풍선을 누구의 것으로 그릴지를 uuid 와 함께 적어 둔다(session-tree 6.12).
+     */
+    private fun sendUserMessageTo(target: SessionTarget, text: String, sender: UserMessageSender) {
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
 
         // uuid 를 보내기 전에 정한다. 쓰기는 다른 스레드에서 나중에 일어나는데, 되돌아온 말을 알아볼
         // 열쇠는 대기 목록에 지금 서야 한다(session-tree 3.5 (다)).
-        val message = OutgoingUserMessage(text)
+        val message = OutgoingUserMessage(text, sender)
 
         // 턴 갈래를 여기서 옮기지 않는다. 보낸 것은 아직 시작한 턴이 아니고, 시작은 이 말이
         // 되돌아올 때다(3.11) — 그때까지 이 말은 "기다리는 말" 이다.
@@ -551,6 +555,8 @@ class ChatSessionStateHolder(
             is SessionTreeRequest.SpawnSession ->
                 coroutineScope.launch { asked.answerWith(spawnChildSession(requester, request)) }
 
+            is SessionTreeRequest.SendToSession -> asked.answerWith(sendToChildSession(request.childId, request.message))
+
             is SessionTreeRequest.EndSession ->
                 coroutineScope.launch { asked.answerWith(endChildSessionForParent(request.childId)) }
 
@@ -641,7 +647,7 @@ class ChatSessionStateHolder(
                 conversationId = assigned.conversationId,
             ),
         )
-        sendUserMessageTo(childTarget, PARENT_MESSAGE_PREFIX + request.prompt)
+        sendUserMessageTo(childTarget, PARENT_MESSAGE_PREFIX + request.prompt, UserMessageSender.ParentSession)
 
         SessionTreeAnswer.Spawned(
             childId = assigned.childId,
@@ -733,6 +739,24 @@ class ChatSessionStateHolder(
                 it.target is SessionTarget.Repo && it.workingDirectory.normalize() == childWorkingDirectory.normalize()
             }
             ?.target?.label
+
+    /**
+     * 상위가 하위에게 말한다(6.5 의 둘째 줄). 하위의 stdin 에 사용자 메시지로 넣는다 — 접두가 모델에게, 보낸 이가
+     * 화면에게 출처를 말한다.
+     *
+     * 끝난 하위에게는 쓰지 않는다. stdin 이 이미 닫혀 쓰기가 실패하고, 상위는 말이 갔다고 믿은 채 답을 기다린다(6.15).
+     */
+    private fun sendToChildSession(childId: String, message: String): SessionTreeAnswer {
+        val node = mutableSessionTree.value.child(childId)
+            ?: return SessionTreeAnswer.Refused("그런 하위 세션이 없습니다: $childId — list_sessions 로 확인하세요")
+
+        if (node.lifecycle != ChildLifecycle.Running) {
+            return SessionTreeAnswer.Refused("$childId 은 끝났습니다 — list_sessions 로 살아 있는 세션을 확인하세요")
+        }
+
+        sendUserMessageTo(node.target, PARENT_MESSAGE_PREFIX + message, UserMessageSender.ParentSession)
+        return SessionTreeAnswer.DeliveredAsMessage
+    }
 
     /** 상위가 `end_session` 으로 하위를 끝낸다(6.13). 이미 끝난 하위면 그대로 끝났다고 답한다. */
     private suspend fun endChildSessionForParent(childId: String): SessionTreeAnswer {

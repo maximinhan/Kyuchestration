@@ -286,6 +286,23 @@ class AppSocketTest {
     }
 
     @Test
+    fun `send 요청도 세션 트리 요청으로 올라간다`(): Unit = runBlocking {
+        // 엔진의 sendToSessionRequest 모양 그대로다(mcp_session_tree.go).
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            assertEquals(SessionTreeRequest.SendToSession(childId = "child-1", message = "5433 을 써"), asked.request)
+            asked.answerWith(SessionTreeAnswer.DeliveredAsMessage)
+        }
+
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"send","id":"child-1","message":"5433 을 써"}""")
+        answering.await()
+
+        assertEquals(mapOf("delivered" to "as_message"), answer)
+    }
+
+    @Test
     fun `필드가 빠진 세션 트리 요청에는 승인 거부가 아니라 error 로 답한다`(): Unit = runBlocking {
         // 이 줄은 승인 물음이 아니다 — deny 로 답하면 엔진은 그것을 앱의 답으로 읽지 못하고 판이 어긋났다고 말한다.
         val socket = openSocket()

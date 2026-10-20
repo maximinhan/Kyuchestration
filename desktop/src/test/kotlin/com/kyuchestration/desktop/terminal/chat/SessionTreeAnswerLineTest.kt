@@ -65,6 +65,11 @@ class SessionTreeAnswerLineTest {
     }
 
     @Test
+    fun `하위의 stdin 에 넣은 말은 as_message 로 답한다`() {
+        assertEquals("""{"delivered":"as_message"}""", answerLineFor(SessionTreeAnswer.DeliveredAsMessage))
+    }
+
+    @Test
     fun `거절은 error 한 모양이다`() {
         val answer = Json.parseToJsonElement(answerLineFor(SessionTreeAnswer.Refused("그런 하위 세션이 없습니다"))) as JsonObject
 
