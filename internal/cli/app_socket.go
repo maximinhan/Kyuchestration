@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,12 +65,22 @@ const appConnectTimeout = 5 * time.Second
 // 요청마다 새로 연다. 연결 하나를 계속 쥐고 있으면 두 요청이 겹칠 때 어느 답이 어느 요청의
 // 것인지를 이 프로토콜 안에 새로 만들어야 하는데(요청 ID 와 그것을 맞추는 자리), 요청마다
 // 연결을 여는 한 그 짝은 연결 자체가 진다.
-func exchangeLineWithApp(socketPath string, request any) (json.RawMessage, error) {
-	connection, err := net.DialTimeout("unix", socketPath, appConnectTimeout)
+//
+// **ctx 가 끝나면 연결을 닫고 곧바로 돌아온다.** 모델이 도구 대기 중에 중단되면 claude 가 그 호출을
+// 거두고(session-tree-design.md 3.2), 앱은 연결이 닫히는 것으로 그 기다림이 접힌 것을 안다(6.4).
+// 연결을 쥔 채로 남으면 앱은 아무도 받지 않을 답을 최대 3,000 초 동안 들고 있다.
+func exchangeLineWithApp(ctx context.Context, socketPath string, request any) (json.RawMessage, error) {
+	dialer := net.Dialer{Timeout: appConnectTimeout}
+	connection, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err != nil {
 		return nil, err
 	}
 	defer connection.Close()
+
+	// 읽기에 시한이 없으므로(아래) 기다림을 깨는 길은 연결을 닫는 것뿐이다. 닫히면 막힌 읽기가
+	// 오류로 풀린다.
+	stopClosingOnCancel := context.AfterFunc(ctx, func() { connection.Close() })
+	defer stopClosingOnCancel()
 
 	requestLine, err := json.Marshal(request)
 	if err != nil {
@@ -82,6 +93,9 @@ func exchangeLineWithApp(socketPath string, request any) (json.RawMessage, error
 	// 시한을 두지 않는다(appConnectTimeout 의 주석). 앱이 죽으면 소켓이 닫히면서 이 읽기가
 	// EOF 로 끝나므로, 사람이 사라진 경우와 앱이 사라진 경우는 여기서 갈린다.
 	answerLine, err := bufio.NewReader(io.LimitReader(connection, appAnswerReadLimit)).ReadBytes('\n')
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("답을 기다리던 중 호출이 거둬져 연결을 닫았습니다: %w", context.Cause(ctx))
+	}
 	if err != nil && len(answerLine) == 0 {
 		return nil, fmt.Errorf("앱이 답하지 않고 연결을 닫았습니다: %w", err)
 	}

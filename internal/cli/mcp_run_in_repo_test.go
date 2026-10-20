@@ -278,7 +278,7 @@ echo "{\"subtype\":\"success\",\"result\":\"했습니다\",\"session_id\":\"$con
 
 	firstFinished := make(chan mcpserver.ToolResult, 1)
 	go func() {
-		result, err := tool.Call(json.RawMessage(`{"repo":"alpha-commons","prompt":"하나"}`))
+		result, err := tool.Call(t.Context(), json.RawMessage(`{"repo":"alpha-commons","prompt":"하나"}`))
 		if err != nil {
 			panic(err)
 		}

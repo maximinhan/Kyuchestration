@@ -156,7 +156,7 @@ func newRunInRepoTool(workDirPath string, bypassPermissions bool) mcpserver.Tool
 	}
 }
 
-func (dispatcher *delegationDispatcher) delegate(rawArguments json.RawMessage) (mcpserver.ToolResult, error) {
+func (dispatcher *delegationDispatcher) delegate(ctx context.Context, rawArguments json.RawMessage) (mcpserver.ToolResult, error) {
 	var arguments runInRepoArguments
 	if err := json.Unmarshal(rawArguments, &arguments); err != nil {
 		return refuseDelegation(fmt.Sprintf("run_in_repo 의 인자를 읽지 못했습니다: %v", err)), nil
@@ -195,7 +195,7 @@ func (dispatcher *delegationDispatcher) delegate(rawArguments json.RawMessage) (
 	}
 	defer dispatcher.releaseRepo(repo.Name)
 
-	return dispatcher.runAndAnswer(repo, arguments.Prompt, assignment)
+	return dispatcher.runAndAnswer(ctx, repo, arguments.Prompt, assignment)
 }
 
 // claimRepoAndConversation 은 이 레포를 잡고 이번 위임이 쓸 대화를 정한다.
@@ -245,6 +245,7 @@ func (dispatcher *delegationDispatcher) releaseRepo(repoName string) {
 
 // runAndAnswer 는 위임을 실행하고, 이어갈 수 없게 된 대화는 한 번 다시 연다.
 func (dispatcher *delegationDispatcher) runAndAnswer(
+	ctx context.Context,
 	repo workdir.Repo,
 	prompt string,
 	assignment workdir.ConversationAssignment,

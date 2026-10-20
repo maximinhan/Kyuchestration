@@ -32,7 +32,7 @@ type listReposAnswerForTest struct {
 func callToolForTest(t *testing.T, tool mcpserver.Tool, arguments string) mcpserver.ToolResult {
 	t.Helper()
 
-	result, err := tool.Call(json.RawMessage(arguments))
+	result, err := tool.Call(t.Context(), json.RawMessage(arguments))
 	if err != nil {
 		t.Fatalf("%s 호출 실패: %v", tool.Name, err)
 	}
