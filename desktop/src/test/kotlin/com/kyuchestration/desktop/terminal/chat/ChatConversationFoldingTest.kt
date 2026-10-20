@@ -482,6 +482,43 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `도구 대기 중에 끊긴 턴 뒤에도 다음 말이 정상으로 답해진다`() {
+        // session-tree 7 절 1 단계의 완료 확인을 녹화로 본다. 앱이 보낸 두 말이 uuid 로 대기 중에서
+        // 빠지고, 첫 턴은 중단 배지로, 둘째 턴은 답과 함께 끝난다.
+        val first = OutgoingUserMessage(
+            text = "Call the mcp__probe__slow tool once with label \"M\" and seconds 90. " +
+                "After it returns, reply with exactly: TURN1-DONE",
+            uuid = "11111111-2222-4333-8444-000000000001",
+        )
+        val second = OutgoingUserMessage(
+            text = "Did the slow tool finish? Reply with exactly: NOT-FINISHED or FINISHED",
+            uuid = "11111111-2222-4333-8444-000000000002",
+        )
+        val waiting = ChatConversation(target = SessionTarget.Main, pendingUserMessages = listOf(first, second))
+
+        val conversation = RecordedChatStreamLines.TOOL_WAIT_INTERRUPTED_RUN.fold(waiting) { folded, line ->
+            folded.after(line)
+        }
+
+        assertEquals(emptyList(), conversation.pendingUserMessages)
+        assertEquals(TurnState.Idle, conversation.turnState)
+        assertEquals(
+            listOf(TurnOutcome.InterruptedDuringToolWait, TurnOutcome.Completed),
+            conversation.entries.filterIsInstance<ChatEntry.TurnEnded>().map { it.outcome },
+        )
+        val slowCall = conversation.entries.filterIsInstance<ChatEntry.ToolCall>()
+            .single { it.toolName == "mcp__probe__slow" }
+        assertEquals(true, slowCall.answer?.failed, "끊긴 도구 호출은 거절된 결과로 닫힌다")
+        assertEquals(
+            "NOT-FINISHED",
+            conversation.entries.dropWhile { it !is ChatEntry.TurnEnded }
+                .filterIsInstance<ChatEntry.AssistantSaid>()
+                .single()
+                .text,
+        )
+    }
+
+    @Test
     fun `하트비트는 대화를 바꾸지 않는다`() {
         // 살아 있다는 신호일 뿐 서버가 무엇을 하는지 담지 않는다(session-tree 3.4). 도는 카드의
         // 경과 시간은 이미 호출 시각으로 그리고 있으므로, 이 줄이 할 일은 그 카드를 흔들지 않는 것이다.

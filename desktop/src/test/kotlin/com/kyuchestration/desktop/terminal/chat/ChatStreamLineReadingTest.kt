@@ -393,6 +393,64 @@ class ChatStreamLineReadingTest {
     }
 
     @Test
+    fun `도구 대기 중 중단과 하트비트와 uuid 왕복이 섞인 실측 원출력을 모르는 줄 없이 읽는다`() {
+        // session-tree 7 절 1 단계의 완료 확인. 따로 잰 줄이 아니라 한 실행이 낸 21 줄을 온 순서
+        // 그대로 넣는다 — 세 이벤트가 서로의 사이에 끼어 와도 갈래가 흐트러지지 않아야 한다.
+        val events = RecordedChatStreamLines.TOOL_WAIT_INTERRUPTED_RUN.flatMap(::chatSessionEventsFrom)
+
+        assertEquals(emptyList(), events.filterIsInstance<ChatSessionEvent.Unrecognized>())
+
+        val firstMessage = "11111111-2222-4333-8444-000000000001"
+        val secondMessage = "11111111-2222-4333-8444-000000000002"
+        val milestones = events.mapNotNull { event ->
+            when (event) {
+                is ChatSessionEvent.UserCommandLifecycleChanged -> "${event.commandUuid.takeLast(1)}:${event.state}"
+                is ChatSessionEvent.UserMessageEchoed -> "echo:${event.messageUuid?.takeLast(1)}"
+                is ChatSessionEvent.ToolCallHeartbeat -> "heartbeat:${event.toolName}:${event.elapsedSeconds}"
+                is ChatSessionEvent.ToolCallAnswered -> "answered:failed=${event.failed}"
+                is ChatSessionEvent.TurnFinished -> "turn:${event.outcome}"
+                else -> null
+            }
+        }
+        assertEquals(
+            listOf(
+                "1:Queued",
+                "1:Started",
+                "echo:1",
+                "answered:failed=false",
+                "heartbeat:mcp__probe__slow:28",
+                "answered:failed=true",
+                "echo:5",
+                "turn:InterruptedDuringToolWait",
+                "1:Cancelled",
+                "2:Queued",
+                "2:Started",
+                "echo:2",
+                "turn:Completed",
+                "2:Completed",
+            ),
+            milestones,
+        )
+        assertEquals(
+            listOf(firstMessage, secondMessage),
+            events.filterIsInstance<ChatSessionEvent.UserMessageEchoed>()
+                .mapNotNull { it.messageUuid }
+                .filter { it.startsWith("11111111-") },
+        )
+    }
+
+    @Test
+    fun `모르는 system subtype 도 원문째로 들고 나간다`() {
+        // 아는 subtype 들(status · hook_started …)은 조용히 지나가고, 모르는 것만 원문으로 나간다.
+        // 둘을 섞으면 턴마다 오는 줄이 "판이 바뀌었다" 는 신호를 덮는다.
+        val newSubtype = """{"type":"system","subtype":"coordinator_mode_changed","enabled":true}"""
+
+        val unrecognized = assertIs<ChatSessionEvent.Unrecognized>(onlyEventIn(newSubtype))
+
+        assertEquals(newSubtype, unrecognized.rawLine)
+    }
+
+    @Test
     fun `읽을 수 없는 줄에서도 던지지 않는다`() {
         // 이 함수를 부르는 것은 파이프를 읽는 코루틴 하나뿐이다. 여기서 예외가 나면 그 세션의
         // 나머지 출력이 통째로 끊긴다 — 화면은 멎고, 이유는 어디에도 남지 않는다.

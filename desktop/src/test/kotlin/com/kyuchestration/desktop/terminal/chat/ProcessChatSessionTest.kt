@@ -72,6 +72,37 @@ class ProcessChatSessionTest {
     }
 
     @Test
+    fun `모르는 type 과 subtype 을 받아도 멈추지 않고 뒤의 줄을 낸다`(): Unit = runBlocking {
+        // 파이프를 읽는 코루틴은 하나뿐이다. 모르는 줄에서 멈추거나 던지면 그 세션의 나머지 출력이
+        // 통째로 끊긴다 — claude 의 판이 오를 때마다 새 type 이 생긴다는 것을 세션 트리 실측이
+        // 다시 보였다(tool_progress · command_lifecycle 이 2.1.259 에는 없었다).
+        val unknownLines = listOf(
+            """{"type":"context_compacted","removed_messages":12}""",
+            """{"type":"system","subtype":"coordinator_mode_changed","enabled":true}""",
+            """{"type":"command_lifecycle","command_uuid":"c","state":"merged","uuid":"u"}""",
+            """{"type":"tool_progress","tool_use_id":"toolu_1","tool_name":"Bash","elapsed_time_seconds":3}""",
+            """{"type":"result",""",
+        )
+        val session = openSession(
+            emitLinesCommand(
+                stdoutLinesFile = linesFile(
+                    temporaryDirectory.resolve("stdout.jsonl"),
+                    unknownLines + RecordedChatStreamLines.TOOL_WAIT_INTERRUPTED_RUN,
+                ),
+            ),
+        )
+
+        val events = session.eventsUntilItEnds()
+
+        assertEquals(unknownLines, events.filterIsInstance<ChatSessionEvent.Unrecognized>().map { it.rawLine })
+        assertEquals(
+            listOf(TurnOutcome.InterruptedDuringToolWait, TurnOutcome.Completed),
+            events.filterIsInstance<ChatSessionEvent.TurnFinished>().map { it.outcome },
+        )
+        assertEquals(ChatSessionEvent.SessionEnded(exitCode = 0), events.last())
+    }
+
+    @Test
     fun `stderr 는 따로 비워져 진단으로 온다`(): Unit = runBlocking {
         // 한 코루틴이 두 파이프를 순서대로 읽으면, 안 읽는 쪽 버퍼가 차는 순간 양쪽이 함께 멎는다.
         // 없는 대화를 이어가려 한 실패가 이 통로로 온다(3.9).
