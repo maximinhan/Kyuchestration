@@ -296,6 +296,43 @@ class ChatConversationFoldingTest {
     }
 
     @Test
+    fun `2_1_304 핸드백 판에서도 서브에이전트의 보고가 그 카드 안의 말로 접힌다`() {
+        // 사용자 설정이 실린 2.1.304 — 서브에이전트의 마지막 말이 SubagentHandback 호출로 온다.
+        // 그 보고가 카드 안의 말풍선이 되고, 핸드백 호출 자체가 도구 카드로 서지 않아야 한다.
+        val conversation = conversationAfter(*RecordedChatStreamLines.SUBAGENT_HANDBACK_RUN_2_1_304.toTypedArray())
+
+        // 바깥 결과 뒤의 `<agent-message>` 합성 줄이 사용자 말풍선으로 서면 여기서 갈린다.
+        val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
+        assertEquals(
+            listOf(
+                ChatEntry.UserSaid::class,
+                ChatEntry.ToolCall::class,
+                ChatEntry.AssistantSaid::class,
+            ),
+            card.nestedEntries.map { it::class },
+        )
+        val report = assertIs<ChatEntry.AssistantSaid>(card.nestedEntries.last())
+        assertTrue("DELEGATE-2026" in report.text, report.text)
+        assertEquals(TurnState.Idle, conversation.turnState, "합성 줄을 이 턴의 시작으로 읽었다")
+    }
+
+    @Test
+    fun `2_1_304 텍스트 판에서도 서브에이전트의 말이 그 카드 안에 접힌다`() {
+        val conversation = conversationAfter(*RecordedChatStreamLines.SUBAGENT_TEXT_RUN_2_1_304.toTypedArray())
+
+        val card = assertIs<ChatEntry.ToolCall>(conversation.entries.single())
+        assertEquals(
+            listOf(
+                ChatEntry.UserSaid::class,
+                ChatEntry.ToolCall::class,
+                ChatEntry.AssistantSaid::class,
+            ),
+            card.nestedEntries.map { it::class },
+        )
+        assertNotNull(card.answer)
+    }
+
+    @Test
     fun `턴이 끝나면 배지가 붙고 비용이 쌓인다`() {
         val conversation = conversationAfter(
             RecordedChatStreamLines.RESULT_SUCCESS,
