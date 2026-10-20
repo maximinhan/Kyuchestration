@@ -33,12 +33,12 @@ func emptyRepoForTest(t *testing.T, workDirPath, repoName string) Repo {
 	return Repo{Name: repoName, AbsolutePath: repoPath}
 }
 
-func inspectForTest(t *testing.T, workDirPath string, repo Repo) RepoDelegationApproval {
+func inspectForTest(t *testing.T, workDirPath string, repo Repo) DelegationApproval {
 	t.Helper()
 
-	approval, err := InspectRepoDelegationApproval(workDirPath, repo)
+	approval, err := InspectDelegationApproval(workDirPath, repo.Name)
 	if err != nil {
-		t.Fatalf("InspectRepoDelegationApproval() 실패: %v", err)
+		t.Fatalf("InspectDelegationApproval() 실패: %v", err)
 	}
 	return approval
 }
@@ -47,8 +47,8 @@ func approveForTest(t *testing.T, workDirPath string, repo Repo) {
 	t.Helper()
 
 	approval := inspectForTest(t, workDirPath, repo)
-	if err := ApproveRepoDelegation(workDirPath, repo.Name, approval.Fingerprint); err != nil {
-		t.Fatalf("ApproveRepoDelegation() 실패: %v", err)
+	if err := ApproveDelegation(workDirPath, repo.Name, approval.Fingerprint); err != nil {
+		t.Fatalf("ApproveDelegation() 실패: %v", err)
 	}
 }
 
@@ -298,12 +298,12 @@ func TestAnExecutionConfigThatCannotBeReadIsAnError(t *testing.T) {
 		t.Skip("이 환경에서는 권한 0000 파일도 읽힙니다 (root 로 도는 중)")
 	}
 
-	if _, err := InspectRepoDelegationApproval(workDirPath, repo); err == nil {
-		t.Error("InspectRepoDelegationApproval() 이 읽지 못한 설정 파일을 없는 것으로 넘겼습니다")
+	if _, err := InspectDelegationApproval(workDirPath, repo.Name); err == nil {
+		t.Error("InspectDelegationApproval() 이 읽지 못한 설정 파일을 없는 것으로 넘겼습니다")
 	}
 }
 
-func findConfigForTest(t *testing.T, approval RepoDelegationApproval, relativePath string) RepoExecutionConfig {
+func findConfigForTest(t *testing.T, approval DelegationApproval, relativePath string) ExecutionConfig {
 	t.Helper()
 
 	for _, config := range approval.ExecutionConfigs {
@@ -312,5 +312,87 @@ func findConfigForTest(t *testing.T, approval RepoDelegationApproval, relativePa
 		}
 	}
 	t.Fatalf("ExecutionConfigs 에 %s 가 없습니다: %v", relativePath, approval.ExecutionConfigs)
-	return RepoExecutionConfig{}
+	return ExecutionConfig{}
+}
+
+// approveDirectoryForTest 는 워크디렉토리 기준 자리 하나를 지금 내용 그대로 승인한다.
+func approveDirectoryForTest(t *testing.T, workDirPath, cwdRelativePath string) {
+	t.Helper()
+
+	approval, err := InspectDelegationApproval(workDirPath, cwdRelativePath)
+	if err != nil {
+		t.Fatalf("InspectDelegationApproval(%q) 실패: %v", cwdRelativePath, err)
+	}
+	if err := ApproveDelegation(workDirPath, cwdRelativePath, approval.Fingerprint); err != nil {
+		t.Fatalf("ApproveDelegation(%q) 실패: %v", cwdRelativePath, err)
+	}
+}
+
+func inspectDirectoryForTest(t *testing.T, workDirPath, cwdRelativePath string) DelegationApproval {
+	t.Helper()
+
+	approval, err := InspectDelegationApproval(workDirPath, cwdRelativePath)
+	if err != nil {
+		t.Fatalf("InspectDelegationApproval(%q) 실패: %v", cwdRelativePath, err)
+	}
+	return approval
+}
+
+func TestAFolderInsideARepoIsInspectedAndApprovedOnItsOwn(t *testing.T) {
+	// 하위 세션은 레포가 아닌 자리에도 뜬다(session-tree-design.md 6.9). 그 자리의 설정은 그 자리에서
+	// claude 가 읽으므로, 승인도 그 자리 단위여야 한다 — 레포를 승인한 것이 그 안 폴더의 다른
+	// .mcp.json 까지 승인한 것이 되면 사람이 본 적 없는 command 가 돈다.
+	workDirPath := t.TempDir()
+	writeRepoFileForTest(t, workDirPath, "proj-a", ".mcp.json", `{"mcpServers":{"top":{"command":"top"}}}`)
+	writeRepoFileForTest(t, workDirPath, "proj-a", "tools/.mcp.json", `{"mcpServers":{"inner":{"command":"inner"}}}`)
+
+	approveDirectoryForTest(t, workDirPath, "proj-a")
+
+	inner := inspectDirectoryForTest(t, workDirPath, "proj-a/tools")
+	if inner.DelegationIsAllowed() {
+		t.Error("proj-a/tools 가 허용되었습니다 — proj-a 의 승인이 안쪽 폴더의 다른 설정까지 승인하면 안 됩니다")
+	}
+	if !strings.Contains(findConfigForTest(t, inner, ".mcp.json").Content, "inner") {
+		t.Errorf("proj-a/tools 의 .mcp.json 을 읽기를 기대")
+	}
+
+	approveDirectoryForTest(t, workDirPath, "proj-a/tools")
+	if !inspectDirectoryForTest(t, workDirPath, "proj-a/tools").DelegationIsAllowed() {
+		t.Error("승인한 proj-a/tools 가 여전히 막혀 있습니다")
+	}
+}
+
+func TestApprovingARepoByNameIsTheSameAsApprovingItsFolder(t *testing.T) {
+	// kyu mcp approve 는 레포 이름으로 적고, 앱의 관문 대화 상자는 하위 세션의 cwd 로 적는다
+	// (session-tree-design.md 6.9 — "같은 파일 같은 지문"). 둘이 같은 키가 아니면 터미널에서
+	// 승인한 레포를 앱이 또 묻는다. 적는 모양이 달라도(끝의 / · 앞의 ./) 같은 자리여야 한다.
+	workDirPath := t.TempDir()
+	writeRepoFileForTest(t, workDirPath, "proj-a", ".mcp.json", `{"mcpServers":{}}`)
+
+	approveDirectoryForTest(t, workDirPath, "proj-a/")
+
+	if !inspectDirectoryForTest(t, workDirPath, "./proj-a").DelegationIsAllowed() {
+		t.Error("proj-a/ 로 승인한 것이 ./proj-a 로 물을 때 보이지 않습니다")
+	}
+}
+
+func TestTheWorkDirRootIsAFolderLikeAnyOther(t *testing.T) {
+	// cwd 를 생략한 하위 세션은 워크디렉토리 루트에서 뜬다(6.8). 그 자리의 설정도 관문을 탄다 —
+	// 상위가 루트에 .claude/settings.json 을 써 두고 하위를 띄우는 것도 같은 자리다(6.9).
+	workDirPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDirPath, ".claude"), 0o755); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDirPath, ".claude", "settings.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	if inspectDirectoryForTest(t, workDirPath, ".").DelegationIsAllowed() {
+		t.Error("루트의 settings.json 이 승인 없이 허용되었습니다")
+	}
+
+	approveDirectoryForTest(t, workDirPath, ".")
+	if !inspectDirectoryForTest(t, workDirPath, ".").DelegationIsAllowed() {
+		t.Error("승인한 루트가 여전히 막혀 있습니다")
+	}
 }

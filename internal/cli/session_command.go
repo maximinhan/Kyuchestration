@@ -56,6 +56,14 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
   --chat                 파이프로 부릴 스트림 모드로 답한다 — 앱의 챗 화면이 쓴다
   --app-socket <경로>    앱이 이 세션을 위해 연 소켓의 자리 — --chat 과 함께만 쓴다
 
+하위 세션 (메인이 spawn_session 으로 띄우는 것 — --chat · --app-socket 과 함께만):
+  --child <id>               메인 아래 그 id 의 하위 세션이 실행할 것으로 답한다
+  --cwd <상대경로>            하위가 뜰 자리 (워크디렉토리 기준, 생략하면 루트)
+  --create-directory         그 자리를 새로 만든다 — 이미 있으면 거절한다
+  --title <이름>              화면의 탭 이름 (생략하면 cwd 의 마지막 이름)
+  --live-child-cwd <상대경로>  지금 살아 있는 하위의 자리 — 하위마다 한 번씩, 겹치면 거절한다
+  --approve-fingerprint <지문> 사람이 승인한 설정 지문 — approvalRequired 답을 받은 뒤 다시 물을 때
+
 이 명령은 --json 으로만 답한다 — 답이 사람이 읽고 무엇을 할 것이 아니라 앱이 실행할 것이다.
 세션을 실제로 여는 것은 이 답을 받은 데스크톱 앱이다.`
 
@@ -84,6 +92,9 @@ func AnswerSessionCommand(out, errOut io.Writer, args []string) error {
 		return err
 	}
 
+	if request.childID != "" {
+		return answerForChildSession(out, location, request)
+	}
 	if request.repoName == "" {
 		return answerForMainSession(out, errOut, location, repos, request)
 	}
@@ -113,6 +124,37 @@ type sessionCommandRequest struct {
 	// appSocketPath 는 앱이 이 세션을 위해 열어 둔 소켓의 자리다(app_socket.go). 비어 있으면
 	// 이 세션의 자식들에게는 앱에게 물을 길이 없다.
 	appSocketPath string
+
+	// childID 가 비어 있지 않으면 메인 아래 하위 세션 요청이다(session-tree-design.md 7 절 3 단계).
+	// 나머지 child 필드는 그때만 뜻이 있다.
+	childID string
+
+	// childCwd 는 상위가 고른 자리다 — 워크디렉토리 기준 상대경로, 비어 있으면 루트.
+	childCwd string
+
+	// createChildDirectory 는 그 자리를 새로 만들지다.
+	createChildDirectory bool
+
+	// childTitle 은 화면의 탭 이름이다. 비어 있으면 cwd 의 마지막 이름이다.
+	childTitle string
+
+	// liveChildCwds 는 앱이 아는 살아 있는 하위들의 자리다(원칙 16 — 누가 살아 있는지는 앱만 안다).
+	liveChildCwds []string
+
+	// approvedFingerprint 는 사람이 앱의 관문 대화 상자에서 승인한 설정 지문이다(6.9).
+	approvedFingerprint string
+}
+
+// sessionCommandValueAfter 는 args[optionIndex] 옵션 뒤에 온 값을 읽는다.
+//
+// 뒤에 아무것도 없거나 다음 옵션이 온 것을 값으로 읽지 않는다. 읽어버리면 "--json" 이라는 이름의
+// 하위가 뜨고, 그 실패는 화면의 탭 이름에서야 드러난다.
+func sessionCommandValueAfter(args []string, optionIndex int) (string, error) {
+	valueIndex := optionIndex + 1
+	if valueIndex >= len(args) || strings.HasPrefix(args[valueIndex], "-") {
+		return "", fmt.Errorf("%s 뒤에는 값이 와야 합니다\n\n%s", args[optionIndex], sessionCommandUsageText)
+	}
+	return args[valueIndex], nil
 }
 
 // wantsPermissionBridge 는 이 세션에 승인 브리지를 붙일지다.
@@ -145,6 +187,18 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 			}
 			request.appSocketPath = socketPath
 			argIndex++
+
+		case arg == childSessionOptionName || arg == childCwdOptionName || arg == childTitleOptionName ||
+			arg == liveChildCwdOptionName || arg == approveFingerprintOptionName:
+			value, err := sessionCommandValueAfter(args, argIndex)
+			if err != nil {
+				return sessionCommandRequest{}, err
+			}
+			request.takeChildSessionValue(arg, value)
+			argIndex++
+
+		case arg == createDirectoryOptionName:
+			request.createChildDirectory = true
 
 		case arg == repoClaudeMdOptionName:
 			request.loadRepoClaudeMd = true
@@ -185,6 +239,10 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 			appSocketOptionName, chatModeOptionName)
 	}
 
+	if err := validateChildSessionRequest(request); err != nil {
+		return sessionCommandRequest{}, err
+	}
+
 	if !asJSON {
 		return sessionCommandRequest{}, fmt.Errorf("session-command 는 기계용 문서로만 답합니다 (%s 옵션이 필요합니다) — 이 답을 실행하는 것은 데스크톱 앱입니다\n\n%s",
 			machineJSONOptionName, sessionCommandUsageText)
@@ -211,7 +269,7 @@ func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos
 		mainSessionCommand(repos, request, conversation.flags, mcpSetup),
 		location.absolutePath,
 		sessionEnvironment(request),
-		conversation)
+		conversation, nil, nil)
 }
 
 // answerForRepoSession 은 레포 디렉토리에서 열 작업용 세션을 답한다.
@@ -238,7 +296,7 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 		claudeCommand(request, conversation.flags, mcpSetup),
 		repo.AbsolutePath,
 		sessionEnvironment(request),
-		conversation)
+		conversation, nil, nil)
 }
 
 // repoNamed 는 스캔 결과에서 이름으로 레포 하나를 찾는다.

@@ -21,6 +21,8 @@ const mcpUsageText = `사용법: kyu mcp <serve|approve|ask> [인자]
 
   kyu mcp serve <워크디렉토리> [--app-socket <경로>]
                                 메인 세션에 붙는 오케스트레이션 MCP 서버를 stdio 로 연다 — 기계용
+  kyu mcp serve --child --app-socket <경로>
+                                하위 세션에 붙는 서버를 연다 — 도구는 ask_parent 하나 — 기계용
   kyu mcp approve <repo>        그 레포의 실행 유발 설정을 눈으로 확인하고 위임을 승인한다
   kyu mcp ask --app-socket <경로>  승인 물음을 그 소켓 너머의 앱에게 중계한다 — 기계용
 
@@ -70,6 +72,14 @@ func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	buildInfo, _ := debug.ReadBuildInfo()
+
+	if request.childRole {
+		return mcpserver.Serve(in, out, orchestrationServerName, versionName(buildInfo),
+			childSessionTools(request.appSocketPath))
+	}
+
 	workDirPath := request.workDirPath
 
 	// 절대경로로 굳힌다. 이 값은 도구가 답하는 문서에 그대로 실리고 위임의 cwd 가 되므로,
@@ -79,10 +89,8 @@ func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
 		return fmt.Errorf("워크디렉토리 절대경로 변환 실패 (%s): %w", workDirPath, err)
 	}
 
-	buildInfo, _ := debug.ReadBuildInfo()
-
 	return mcpserver.Serve(in, out, orchestrationServerName, versionName(buildInfo),
-		orchestrationTools(absoluteWorkDirPath, mainSessionOpenedWithBypass()))
+		orchestrationTools(absoluteWorkDirPath, request.appSocketPath, mainSessionOpenedWithBypass()))
 }
 
 // orchestrationTools 는 메인 세션에 보일 도구 전부다(설계 문서 5.3).
@@ -90,11 +98,18 @@ func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
 // plan 읽기·쓰기 도구를 두지 않는다. 메인 세션의 cwd 가 워크디렉토리라 .coord/plan.md 는 내장
 // Read·Edit 도구로 이미 닿고, 같은 파일에 이르는 길이 둘이 되면 둘이 다르게 굴 자리가 생긴다
 // (설계 문서 5.3.1).
-func orchestrationTools(workDirPath string, bypassPermissions bool) []mcpserver.Tool {
-	return []mcpserver.Tool{
+//
+// 세션 트리 도구(session-tree-design.md 6.2)는 앱 소켓이 있을 때만 더한다. 그 도구들은 앱에게 묻는
+// 통로가 전부라, 소켓 없이 뜬 서버(터미널 세션)에 보이면 모델은 부를 때마다 실패하는 도구를 고른다.
+func orchestrationTools(workDirPath, appSocketPath string, bypassPermissions bool) []mcpserver.Tool {
+	tools := []mcpserver.Tool{
 		newListReposTool(workDirPath),
 		newRunInRepoTool(workDirPath, bypassPermissions),
 	}
+	if appSocketPath != "" {
+		tools = append(tools, sessionTreeTools(appSocketPath)...)
+	}
+	return tools
 }
 
 // mainSessionOpenedWithBypass 는 이 서버를 띄운 메인 세션이 bypass 로 열렸는지다.
@@ -113,10 +128,11 @@ type serveRequest struct {
 	workDirPath string
 
 	// appSocketPath 는 이 세션을 연 앱의 소켓 자리다. 비어 있으면 앱 없이(터미널 세션에서) 뜬 서버다.
-	//
-	// 이 단계에서는 받아 두기만 한다. 세션 트리 도구(session-tree-design.md 7 절 3·4 단계)가 이 자리로
-	// 앱에게 묻는데, 등록이 먼저 바뀌어야 그 단계들이 엔진과 앱을 한꺼번에 바꾸지 않아도 된다.
+	// 세션 트리 도구가 이 자리로 앱에게 묻는다(session-tree-design.md 6.4).
 	appSocketPath string
+
+	// childRole 은 이 서버가 하위 세션에 붙는지다(6.3). 하위 역할의 도구는 ask_parent 하나뿐이다.
+	childRole bool
 }
 
 func parseServeArgs(args []string) (serveRequest, error) {
@@ -134,6 +150,9 @@ func parseServeArgs(args []string) (serveRequest, error) {
 			request.appSocketPath = socketPath
 			argIndex++
 
+		case arg == childRoleOptionName:
+			request.childRole = true
+
 		// 모르는 옵션을 경로로 흘려보내면 "워크디렉토리 읽기 실패 (--typo)" 라는 엉뚱한 안내가 나온다.
 		case strings.HasPrefix(arg, "-"):
 			return serveRequest{}, fmt.Errorf("알 수 없는 옵션: %s\n\n%s", arg, mcpUsageText)
@@ -146,8 +165,34 @@ func parseServeArgs(args []string) (serveRequest, error) {
 		}
 	}
 
+	if request.childRole {
+		return request, validateChildRoleServeRequest(request)
+	}
+
 	if request.workDirPath == "" {
 		return serveRequest{}, fmt.Errorf("mcp serve 는 어느 워크디렉토리의 도구를 열지 알아야 합니다\n\n%s", mcpUsageText)
 	}
 	return request, nil
+}
+
+// childRoleOptionName 은 kyu mcp serve 를 하위 역할로 여는 옵션이다(session-tree-design.md 6.3).
+//
+// kyu session-command --child 가 하위 세션의 등록에 싣는다. 사람이 칠 옵션이 아니다.
+const childRoleOptionName = "--child"
+
+// validateChildRoleServeRequest 는 하위 역할의 인자가 맞는지 본다.
+//
+// 소켓이 없으면 거절한다 — ask_parent 는 앱에게 묻는 것이 전부라, 소켓 없이 뜬 하위 서버는 모든
+// 물음이 실패하는 서버다. 워크디렉토리를 받지 않는다 — 하위의 도구는 그것을 쓰지 않고, 쓰이지 않는
+// 값이 등록에 실리면 읽는 사람이 그것이 무엇에 쓰이는지 찾아 헤맨다.
+func validateChildRoleServeRequest(request serveRequest) error {
+	if request.appSocketPath == "" {
+		return fmt.Errorf("mcp serve %s 는 상위에게 물을 앱 소켓이 필요합니다 (%s <경로>)\n\n%s",
+			childRoleOptionName, appSocketOptionName, mcpUsageText)
+	}
+	if request.workDirPath != "" {
+		return fmt.Errorf("mcp serve %s 는 워크디렉토리를 받지 않습니다 (받은 값: %s)\n\n%s",
+			childRoleOptionName, request.workDirPath, mcpUsageText)
+	}
+	return nil
 }

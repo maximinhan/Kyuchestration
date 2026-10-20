@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // 이 파일은 워크디렉토리의 대화 기록이다 — .coord/conversations.json (설계 문서 5.5.2).
@@ -29,6 +30,12 @@ import (
 //	  },
 //	  "delegations": {
 //	    "proj-a": "8f2c1a05-2f10-4f0e-9a3b-0c1d2e3f4a5b"
+//	  },
+//	  "childSessions": {
+//	    "main": {
+//	      "child-1": { "conversationId": "5e0c…", "cwd": "proj-a", "title": "proj-a 포트 수정",
+//	                   "startedAt": "2026-10-20T10:01:12Z", "endedAt": null }
+//	    }
 //	  }
 //	}
 //
@@ -42,6 +49,10 @@ import (
 //
 // 지도가 하나 더 생겼지만 판은 오르지 않는다. 필드를 더하는 변경으로는 올리지 않으므로,
 // delegations 가 없는 기록 파일을 만나는 일이 실제로 있고 그때 세션 대화는 그대로 이어진다.
+//
+// childSessions 가 세 번째 키 공간이다(session-tree-design.md 6.14). 다른 둘과 달리 라벨 하나에
+// ID 하나가 아니라 상위 라벨 아래 하위 id 별 기록이다 — 트리를 그대로 적는다. 같은 이유로 판은
+// 오르지 않는다.
 
 // conversationsFileName 은 대화 기록 파일의 이름이다. 자리는 계획 파일과 같은 .coord 다.
 const conversationsFileName = "conversations.json"
@@ -159,8 +170,60 @@ func recordNewConversation(
 	newID := newConversationID()
 	records.mapFor(kind)[label] = newID
 
-	// 읽어온 두 지도를 함께 적는다. 고친 지도만 적으면 위임 대화 하나를 배정하는 것으로
+	// 읽어온 지도를 모두 함께 적는다. 고친 지도만 적으면 위임 대화 하나를 배정하는 것으로
 	// 그 워크디렉토리의 세션 대화가 통째로 사라진다.
+	if err := writeConversations(workDirPath, records); err != nil {
+		return ConversationAssignment{}, err
+	}
+	return ConversationAssignment{ConversationID: newID, IsNewConversation: true, Warnings: warnings}, nil
+}
+
+// ChildSessionStart 는 하위 세션을 띄우는 순간 기록에 함께 적을 사실이다.
+type ChildSessionStart struct {
+	// Cwd 는 워크디렉토리 기준 / 경로다(ChildSessionCwd.RelativePath). 워크디렉토리를 옮겨도 맞다.
+	Cwd string
+
+	// Title 은 화면의 탭 이름이다.
+	Title string
+
+	// StartedAt 은 띄운 시각이다. 부르는 쪽이 정한다 — 이 함수 안에서 시계를 읽으면 기록을 시험할 때
+	// 시각을 고정할 길이 없다.
+	StartedAt time.Time
+}
+
+// StartChildSessionConversation 은 이 상위 아래 이 id 의 하위 세션에 새 대화를 배정하고 적는다.
+//
+// 언제나 새 대화다. 하위는 v1 에서 이어가지 않는다(6.15) — 상위가 끝나면 하위도 끝나고(원칙 17),
+// 앱 재시작은 상위가 끝난 것이다.
+//
+// 이미 적힌 id 는 거절한다. 같은 id 로 덮으면 앞 하위의 대화 ID 가 사라지고, 상위의 전사에 남은
+// 그 id 가 가리킬 기록이 없어진다. id 는 앱이 정하므로(6.2) 겹친 것은 앱의 실수이고, 그 실수는
+// 조용히 덮기보다 그 자리에서 드러나는 편이 낫다.
+func StartChildSessionConversation(workDirPath, parentLabel, childID string, start ChildSessionStart) (ConversationAssignment, error) {
+	records, warnings, err := readConversations(workDirPath)
+	if err != nil {
+		return ConversationAssignment{}, err
+	}
+
+	childrenOfParent := records.childSessions[parentLabel]
+	if _, recorded := childrenOfParent[childID]; recorded {
+		return ConversationAssignment{}, fmt.Errorf(
+			"%s 아래에 하위 세션 %s 가 이미 적혀 있습니다 (%s) — 하위 세션 id 는 상위 하나 안에서 다시 쓰지 않습니다",
+			parentLabel, childID, conversationsFilePath(workDirPath))
+	}
+	if childrenOfParent == nil {
+		childrenOfParent = map[string]childSessionRecord{}
+		records.childSessions[parentLabel] = childrenOfParent
+	}
+
+	newID := newConversationID()
+	childrenOfParent[childID] = childSessionRecord{
+		ConversationID: newID,
+		Cwd:            start.Cwd,
+		Title:          start.Title,
+		StartedAt:      start.StartedAt.UTC().Format(time.RFC3339),
+	}
+
 	if err := writeConversations(workDirPath, records); err != nil {
 		return ConversationAssignment{}, err
 	}
@@ -222,6 +285,20 @@ type conversationsFile struct {
 
 	// Delegations 는 같은 라벨에서 위임 대화 ID 로 가는 표다(설계 문서 5.5.1).
 	Delegations map[string]string `json:"delegations"`
+
+	// ChildSessions 는 상위 라벨 → 하위 id → 하위 세션 기록이다(session-tree-design.md 6.14).
+	ChildSessions map[string]map[string]childSessionRecord `json:"childSessions"`
+}
+
+// childSessionRecord 는 하위 세션 하나의 기록이다.
+type childSessionRecord struct {
+	ConversationID string `json:"conversationId"`
+	Cwd            string `json:"cwd"`
+	Title          string `json:"title"`
+	StartedAt      string `json:"startedAt"`
+
+	// EndedAt 은 끝난 시각이다. 끝을 아는 것은 앱이라(원칙 16) 엔진이 띄울 때 적는 값은 늘 null 이다.
+	EndedAt *string `json:"endedAt"`
 }
 
 // conversationRecords 는 읽어온 두 지도를 함께 든 것이다.
@@ -229,8 +306,9 @@ type conversationsFile struct {
 // 지도 하나만 들고 다니면 쓰는 쪽이 나머지 하나를 잃는다 — 그 손실은 "위임을 걸었더니 앱 세션의
 // 대화가 새로 열렸다" 로만 보이고, 원인은 파일이 이미 덮인 뒤에야 드러난다.
 type conversationRecords struct {
-	sessions    map[string]string
-	delegations map[string]string
+	sessions      map[string]string
+	delegations   map[string]string
+	childSessions map[string]map[string]childSessionRecord
 }
 
 // mapFor 는 이 종류의 대화가 사는 지도를 고른다.
@@ -244,7 +322,11 @@ func (records conversationRecords) mapFor(kind ConversationKind) map[string]stri
 // newConversationRecords 는 빈 두 지도를 만든다. 읽을 것이 없던 경우에도 쓰는 쪽이 곧바로
 // 항목을 더할 수 있어야 한다.
 func newConversationRecords() conversationRecords {
-	return conversationRecords{sessions: map[string]string{}, delegations: map[string]string{}}
+	return conversationRecords{
+		sessions:      map[string]string{},
+		delegations:   map[string]string{},
+		childSessions: map[string]map[string]childSessionRecord{},
+	}
 }
 
 // readConversations 는 적혀 있는 대화 표를 읽는다. 읽지 못한 기록은 버리고 그 이유를 경고로 남긴다.
@@ -292,6 +374,9 @@ func readConversations(workDirPath string) (conversationRecords, []string, error
 	if record.Delegations != nil {
 		records.delegations = record.Delegations
 	}
+	if record.ChildSessions != nil {
+		records.childSessions = record.ChildSessions
+	}
 	return records, nil, nil
 }
 
@@ -319,6 +404,7 @@ func writeConversations(workDirPath string, records conversationRecords) error {
 		SchemaVersion: conversationsFileSchemaVersion,
 		Conversations: records.sessions,
 		Delegations:   records.delegations,
+		ChildSessions: records.childSessions,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("대화 기록 조립 실패: %w", err)

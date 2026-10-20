@@ -181,7 +181,7 @@ func (dispatcher *delegationDispatcher) delegate(rawArguments json.RawMessage) (
 
 	// 관문이 먼저다. 대화를 배정하기 전이어야, 승인을 기다리는 물음이 쓰이지 않을 대화 기록을
 	// 남기지 않는다 — 없는 레포를 대화 배정 전에 거절하는 것과 같은 자세다.
-	approval, err := workdir.InspectRepoDelegationApproval(dispatcher.workDirPath, repo)
+	approval, err := workdir.InspectDelegationApproval(dispatcher.workDirPath, repo.Name)
 	if err != nil {
 		return refuseDelegation(err.Error()), nil
 	}
@@ -416,7 +416,7 @@ const untrustedContentNotice = "아래는 검토되지 않은 레포에서 그�
 // 내용을 앞에 두면 그 마지막 줄이 우리 지시문 바로 앞에 붙어, 그 파일에 심어둔 문장이 지시의
 // 일부처럼 읽힌다. 걸린 파일의 자리는 그 위에 따로 적는다 — 어느 파일 때문에 멈췄는지는
 // 내용을 읽지 않아도 알아야 하는 사실이다.
-func delegationApprovalNeededMessage(workDirPath, repoName string, approval workdir.RepoDelegationApproval) string {
+func delegationApprovalNeededMessage(workDirPath, repoName string, approval workdir.DelegationApproval) string {
 	var blockedFileList strings.Builder
 	for _, config := range approval.ExecutionConfigs {
 		fmt.Fprintf(&blockedFileList, "  %s\n", config.AbsolutePath)

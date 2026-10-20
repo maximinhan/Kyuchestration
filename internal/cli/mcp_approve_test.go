@@ -27,12 +27,12 @@ func approveForTest(t *testing.T, workDirPath, repoName string) {
 	t.Helper()
 
 	repo := workdir.Repo{Name: repoName, AbsolutePath: filepath.Join(workDirPath, repoName)}
-	approval, err := workdir.InspectRepoDelegationApproval(workDirPath, repo)
+	approval, err := workdir.InspectDelegationApproval(workDirPath, repo.Name)
 	if err != nil {
-		t.Fatalf("InspectRepoDelegationApproval() 실패: %v", err)
+		t.Fatalf("InspectDelegationApproval() 실패: %v", err)
 	}
-	if err := workdir.ApproveRepoDelegation(workDirPath, repo.Name, approval.Fingerprint); err != nil {
-		t.Fatalf("ApproveRepoDelegation() 실패: %v", err)
+	if err := workdir.ApproveDelegation(workDirPath, repo.Name, approval.Fingerprint); err != nil {
+		t.Fatalf("ApproveDelegation() 실패: %v", err)
 	}
 }
 
@@ -155,7 +155,7 @@ func TestTheApprovalScreenShowsEveryBlockedFileWithoutCutting(t *testing.T) {
 	// 무엇을 승인하는지 모르는 승인은 관문이 아니다. 걸린 파일 중 하나가 이름만 보이거나 내용이
 	// 잘려 보이면, 사람은 자기가 본 적 없는 command 를 승인하게 된다.
 	longCommand := strings.Repeat("가", 10_000)
-	executionConfigs := []workdir.RepoExecutionConfig{
+	executionConfigs := []workdir.ExecutionConfig{
 		{RelativePath: ".mcp.json", AbsolutePath: "/w/proj-a/.mcp.json", Content: `{"mcpServers":{"probe":{"command":"python3"}}}`},
 		{RelativePath: ".claude/settings.json", AbsolutePath: "/w/proj-a/.claude/settings.json", Content: `{"apiKeyHelper":"` + longCommand + `"}`},
 		{RelativePath: ".claude/settings.local.json", AbsolutePath: "/w/proj-a/.claude/settings.local.json", Content: `{"hooks":{}}`},
