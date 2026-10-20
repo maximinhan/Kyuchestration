@@ -33,6 +33,10 @@ import kotlinx.serialization.json.put
 /**
  * 세션 하나의 승인 물음을 받는 소켓(chat-ui-design.md 5.4).
  *
+ * **이 소켓이 곧 그 세션의 앱 소켓이다**(session-tree-design.md 6.4). 줄마다 `kind` 가 붙고, 지금
+ * 받는 kind 는 승인 하나다. 세션 트리 요청이 두 번째 사용처로 더해질 때 — 3·4 단계 — 이 클래스의
+ * 이름과 자리를 그 모양에 맞춰 다시 정한다.
+ *
  * **왜 소켓인가.** 승인 도구를 여는 `kyu mcp ask` 는 `claude` 의 자식이고, 결정을 내리는 사람은
  * 앱 앞에 있다. 자식에서 부모로 물어볼 통로가 있어야 하는데, TCP 루프백은 같은 머신의 다른
  * 프로세스도 붙을 수 있어 비밀 토큰이 필요하고 그 토큰은 `--mcp-config` 를 타고 `ps` 에 보인다.
@@ -116,7 +120,10 @@ class PermissionRequestSocket private constructor(
     }
 
     /**
-     * 붙은 연결 하나를 끝까지 다룬다 — 물음 한 줄을 읽고, 답 한 줄을 쓰고, 끊는다.
+     * 붙은 연결 하나를 끝까지 다룬다 — 요청 한 줄을 읽고, 답 한 줄을 쓰고, 끊는다.
+     *
+     * **줄의 kind 로 가른다**(session-tree-design.md 6.4). 지금 받는 것은 승인 물음 하나이고,
+     * 세션 트리 요청은 3·4 단계가 더한다. 모르는 kind 에도 답한다 — 거절을 말하는 한 줄로.
      *
      * **읽을 수 없는 줄에도 답한다.** 답하지 않으면 그 자식은 영영 기다리고, 그 자식을 기다리는
      * 것은 사용자의 턴이다. 다만 화면에는 세우지 않는다 — 무엇을 승인하는지 말할 수 없는 카드는
@@ -124,24 +131,29 @@ class PermissionRequestSocket private constructor(
      */
     private suspend fun answerOnce(connection: SocketChannel) {
         connection.use {
-            val questionLine = runInterruptible {
+            val requestLine = runInterruptible {
                 Channels.newInputStream(connection).bufferedReader(Charsets.UTF_8).readLine()
             } ?: return
 
-            val request = permissionRequestFrom(questionLine)
-            val decision = if (request == null) {
-                PermissionDecision.Deny(
-                    reason = "앱이 이 승인 물음을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
+            val answerLine = when (val received = appSocketRequestFrom(requestLine)) {
+                is AppSocketRequest.Permission -> {
+                    val asked = AskedPermission(received.request)
+                    incoming.send(asked)
+                    answerLineFor(asked.awaitDecision())
+                }
+
+                is AppSocketRequest.Unreadable -> answerLineFor(
+                    PermissionDecision.Deny(
+                        reason = "앱이 이 승인 물음을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
+                    ),
                 )
-            } else {
-                val asked = AskedPermission(request)
-                incoming.send(asked)
-                asked.awaitDecision()
+
+                is AppSocketRequest.UnknownKind -> unknownKindAnswerLine(received.kind)
             }
 
             runInterruptible {
                 Channels.newOutputStream(connection).bufferedWriter(Charsets.UTF_8).apply {
-                    write(answerLineFor(decision))
+                    write(answerLine)
                     newLine()
                     flush()
                 }
@@ -215,30 +227,82 @@ class PermissionRequestSocket private constructor(
     }
 }
 
+/** 앱 소켓으로 들어온 줄 하나가 무엇이었는지. */
+internal sealed interface AppSocketRequest {
+
+    /** 승인 물음. 카드가 된다. */
+    data class Permission(val request: PermissionRequest) : AppSocketRequest
+
+    /**
+     * 읽을 수 없는 줄. JSON 이 아니거나, 승인 물음인데 필요한 필드가 없다.
+     *
+     * 승인 거부로 답한다. 지금 이 소켓에 붙는 것은 `kyu mcp ask` 하나라 그 줄이 승인 물음이었을
+     * 가능성이 가장 크고, 그렇다면 거부가 안전한 쪽이다.
+     */
+    data object Unreadable : AppSocketRequest
+
+    /** 이 앱이 아직 다루지 않는 kind. */
+    data class UnknownKind(val kind: String) : AppSocketRequest
+}
+
 /**
- * 엔진이 보내온 물음 한 줄을 읽는다. 읽지 못하면 null.
+ * 엔진이 보내온 줄 하나를 kind 로 가른다.
  *
- * 필드 이름은 엔진과 맺은 계약이다(mcp_ask.go 의 permissionQuestion). `claude` 가 쓰는
- * snake_case 가 아니라 우리 표기인 것을 짚어둔다 — 옮기는 자리는 엔진이고, 이 줄은 우리 둘 사이의 것이다.
+ * **kind 가 없는 줄은 승인 물음이다.** 앞 판의 `kyu mcp ask` 는 kind 를 달지 않았다. 엔진과 앱은
+ * 함께 올라가 섞이지는 않지만, 섞여도 승인이 깨지지 않는 쪽으로 둔다(session-tree-design.md 6.4).
  */
-internal fun permissionRequestFrom(questionLine: String): PermissionRequest? {
-    val question = try {
-        permissionSocketJson.parseToJsonElement(questionLine) as? JsonObject
+internal fun appSocketRequestFrom(requestLine: String): AppSocketRequest {
+    val requestObject = try {
+        permissionSocketJson.parseToJsonElement(requestLine) as? JsonObject
     } catch (failure: SerializationException) {
         null
     } catch (failure: IllegalArgumentException) {
         null
-    } ?: return null
+    } ?: return AppSocketRequest.Unreadable
 
-    val toolName = (question["toolName"] as? JsonPrimitive)?.contentOrNull ?: return null
-    val input = question["input"] as? JsonObject ?: return null
+    val kindElement = requestObject["kind"] ?: return permissionRequestFrom(requestObject)
+    val kind = (kindElement as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?: return AppSocketRequest.UnknownKind(kindElement.toString())
 
-    return PermissionRequest(
-        toolName = toolName,
-        input = input,
-        toolUseId = (question["toolUseId"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+    return when (kind) {
+        PERMISSION_REQUEST_KIND -> permissionRequestFrom(requestObject)
+        else -> AppSocketRequest.UnknownKind(kind)
+    }
+}
+
+/**
+ * 승인 물음 하나를 읽는다.
+ *
+ * 필드 이름은 엔진과 맺은 계약이다(mcp_ask.go 의 permissionQuestion). `claude` 가 쓰는
+ * snake_case 가 아니라 우리 표기인 것을 짚어둔다 — 옮기는 자리는 엔진이고, 이 줄은 우리 둘 사이의 것이다.
+ */
+private fun permissionRequestFrom(question: JsonObject): AppSocketRequest {
+
+    val toolName = (question["toolName"] as? JsonPrimitive)?.contentOrNull ?: return AppSocketRequest.Unreadable
+    val input = question["input"] as? JsonObject ?: return AppSocketRequest.Unreadable
+
+    return AppSocketRequest.Permission(
+        PermissionRequest(
+            toolName = toolName,
+            input = input,
+            toolUseId = (question["toolUseId"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+        ),
     )
 }
+
+/** 승인 물음 줄의 kind(mcp_ask.go 의 permissionQuestionKind). */
+private const val PERMISSION_REQUEST_KIND = "permission"
+
+/**
+ * 모르는 kind 의 요청에 답하는 한 줄.
+ *
+ * `{"error": …}` 모양은 세션 트리 요청이 실패를 답하는 모양과 같다(session-tree-design.md 6.4).
+ * 그 요청을 보내는 쪽이 이 앱보다 먼저 올라간 엔진이라면, 그 엔진은 이 줄을 "앱이 아직 모른다" 로
+ * 읽어 모델에게 그대로 전할 수 있다.
+ */
+private fun unknownKindAnswerLine(kind: String): String = buildJsonObject {
+    put("error", "이 앱은 '$kind' 요청을 아직 받지 않습니다 — 앱과 kyu 의 판이 어긋났습니다")
+}.toString()
 
 /** 사람의 답을 엔진이 읽을 한 줄로 옮긴다(설계 5.4.1). */
 internal fun answerLineFor(decision: PermissionDecision): String = when (decision) {

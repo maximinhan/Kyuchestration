@@ -137,6 +137,47 @@ class PermissionRequestSocketTest {
     }
 
     @Test
+    fun `kind 가 permission 인 줄은 승인 물음으로 올라간다`(): Unit = runBlocking {
+        // 엔진이 kind 를 달기 시작한 판의 줄이다(mcp_ask.go 의 permissionQuestionKind).
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.requests.first() }
+            assertEquals("toolu_kind", asked.request.toolUseId)
+            asked.answerWith(PermissionDecision.Deny(reason = "kind 를 보고 받았다"))
+        }
+
+        val answer = askOverTheSocket(
+            socket.socketPath,
+            """{"kind":"permission","toolName":"Bash","input":{"command":"ls"},"toolUseId":"toolu_kind"}""",
+        )
+        answering.await()
+
+        assertEquals("deny", answer.getValue("decision"))
+        assertEquals("kind 를 보고 받았다", answer.getValue("reason"))
+    }
+
+    @Test
+    fun `모르는 kind 의 요청은 error 로 거절하고 화면에는 올리지 않는다`(): Unit = runBlocking {
+        // 세션 트리 요청(spawn · await · ask_parent)은 3·4 단계가 채운다(session-tree-design.md 6.4).
+        // 그 전에 그런 줄이 오면 승인 카드로 오해하지 않고, 답하지 않아 상대를 영영 세워 두지도 않는다 —
+        // 이 앱이 그 요청을 모른다는 것을 그 줄의 답으로 말한다.
+        val socket = openSocket()
+
+        val answer = askOverTheSocket(
+            socket.socketPath,
+            """{"kind":"spawn","prompt":"proj-a 테스트를 고쳐 줘","cwd":"proj-a"}""",
+        )
+
+        assertTrue(answer.getValue("error").contains("spawn"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
+        assertFalse("decision" in answer, "모르는 요청에 승인 결정으로 답했습니다: $answer")
+        assertNull(
+            withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.requests.first() },
+            "모르는 kind 의 줄이 승인 카드가 되었습니다",
+        )
+    }
+
+    @Test
     fun `소켓을 닫으면 아직 답하지 않은 물음의 연결이 끊긴다`(): Unit = runBlocking {
         // 세션이 끝나면 그 물음에 답할 사람도 사라진다. 연결이 끊기면 kyu mcp ask 가 EOF 를 받아
         // 거절로 끝내므로(mcp_ask.go), 답을 받지 못한 도구가 실행되는 자리가 없다.
