@@ -34,4 +34,7 @@ data class HeldChatSession(
 
     /** 이 세션을 연 워크디렉토리. 메인이 하위를 띄울 때 엔진에게 묻는 자리이자 기록이 있는 자리다. */
     val workDirPath: Path,
+
+    /** 엔진이 이 세션을 열며 남긴 경고(SessionCommandAnswer.engineWarnings). 보유하는 순간 그 챗 맨 앞에 선다. */
+    val engineWarnings: List<String>,
 )

@@ -63,6 +63,31 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
+    fun `엔진이 세션을 열며 남긴 경고가 그 세션의 챗 맨 앞에 선다`() = runTest {
+        // 버려진 대화 기록 같은 말이다. 엔진은 세션을 열어 주되 그 사실을 stderr 로 남긴다 — 버리면 사람은 앞 대화가
+        // 왜 이어지지 않았는지 모른다.
+        for (target in listOf(SessionTarget.Main, SessionTarget.Repo("proj-a"))) {
+            val opener = RecordingChatSessionOpener()
+            val commandSource = RecordingSessionCommandSource()
+            commandSource.engineWarnings = listOf("대화 기록을 읽지 못해 버렸습니다", "새 대화로 엽니다")
+            val holder = stateHolder(opener, commandSource)
+
+            holder.enterSessionContinuingConversation(target)
+            runCurrent()
+
+            val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+            assertEquals(
+                listOf<ChatEntry>(
+                    ChatEntry.EngineNotice("대화 기록을 읽지 못해 버렸습니다"),
+                    ChatEntry.EngineNotice("새 대화로 엽니다"),
+                ),
+                conversation.entries,
+                "$target",
+            )
+        }
+    }
+
+    @Test
     fun `받은 이벤트가 화면의 대화로 쌓인다`() = runTest {
         val opener = RecordingChatSessionOpener()
         val holder = stateHolder(opener)

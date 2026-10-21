@@ -8,6 +8,7 @@ import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.readText
+import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -88,6 +89,20 @@ class KyuCliSessionCommandSourceIntegrationTest {
         // 기록은 워크디렉토리 안에 사람이 읽을 수 있는 모양으로 남는다.
         val conversationsJson = workDirPath.resolve(".coord/conversations.json").readText()
         assertContains(conversationsJson, newConversationId)
+    }
+
+    @Test
+    fun `깨진 대화 기록을 버리면 그 경고가 답에 실린다`() {
+        // 엔진은 세션을 열어 주되 버린 사실을 stderr 로 남긴다(conversations.go 의 readConversations). 앱이 그것을
+        // 받지 못하면 사람은 앞 대화가 왜 이어지지 않았는지 모른다.
+        val source = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip())
+        val workDirPath = workDirWithRepos("proj-a")
+        workDirPath.resolve(".coord").createDirectories().resolve("conversations.json").writeText("{ 깨진 기록")
+
+        val answer = source.sessionCommandFor(workDirPath, SessionTarget.Main, CONTINUE, appSocketPath = null)
+
+        assertEquals(1, answer.engineWarnings.size, "${answer.engineWarnings}")
+        assertContains(answer.engineWarnings.single(), "conversations.json")
     }
 
     @Test

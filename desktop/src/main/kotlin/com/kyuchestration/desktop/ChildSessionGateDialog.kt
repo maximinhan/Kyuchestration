@@ -35,7 +35,7 @@ internal fun ChildSessionGateDialog(
     AlertDialog(
         onDismissRequest = {},
         modifier = Modifier.width(760.dp),
-        title = { Text("${question.childId} 을 ${question.gate.relativeCwd} 에서 띄우기 전에 확인이 필요합니다") },
+        title = { Text("새 하위 세션을 ${question.gate.relativeCwd} 에서 띄우기 전에 확인이 필요합니다") },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),

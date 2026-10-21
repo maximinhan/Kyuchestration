@@ -30,7 +30,6 @@ class ChildSessionGateStateHolderTest {
         runCurrent()
 
         val question = bed.holder.gateQuestions.value.single()
-        assertEquals("child-1", question.childId)
         assertEquals("proj-a 테스트를 고쳐 줘", question.prompt)
         assertEquals(GATE, question.gate)
         assertNull(asked.answerSoFar(), "사람이 답하기 전에 spawn 이 답했습니다")
@@ -44,7 +43,7 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion("child-1", approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
         runCurrent()
 
         assertEquals(listOf(null, "sha256:first"), bed.childSource.askedRequests.map { it.approvedFingerprint })
@@ -58,7 +57,7 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion("child-1", approved = false)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = false)
         runCurrent()
 
         assertEquals(
@@ -97,7 +96,7 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion("child-1", approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
         asked.closeConnection()
         runCurrent()
 
@@ -118,13 +117,13 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion("child-1", approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
         runCurrent()
 
         assertEquals(changedGate, bed.holder.gateQuestions.value.single().gate)
         assertNull(asked.answerSoFar())
 
-        bed.holder.answerGateQuestion("child-1", approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
         runCurrent()
 
         assertEquals(listOf(null, "sha256:first", "sha256:second"), bed.childSource.askedRequests.map { it.approvedFingerprint })
@@ -136,13 +135,34 @@ class ChildSessionGateStateHolderTest {
         val bed = gateTestBed(gates = listOf(GATE))
         bed.mainChannel.askSessionTree(spawn())
         runCurrent()
-        bed.holder.answerGateQuestion("child-1", approved = false)
+        val question = bed.holder.gateQuestions.value.single()
+        bed.holder.answerGateQuestion(question, approved = false)
         runCurrent()
 
-        bed.holder.answerGateQuestion("child-1", approved = true)
+        bed.holder.answerGateQuestion(question, approved = true)
         runCurrent()
 
         assertEquals(1, bed.childSource.askedRequests.size)
+    }
+
+    @Test
+    fun `같은 자리 같은 일을 다시 물어도 앞서 답한 물음의 답이 되지 않는다`() = runTest {
+        // 관문 물음에는 아직 하위의 이름이 없다(이름은 엔진이 띄울 수 있다고 답할 때 짓는다). 물음 하나하나가 열쇠다 —
+        // 내용이 같다고 같은 물음으로 읽으면 앞 물음에 늦게 누른 버튼이 다음 물음의 답이 된다.
+        val bed = gateTestBed(gates = listOf(GATE, GATE))
+        bed.mainChannel.askSessionTree(spawn())
+        runCurrent()
+        val firstQuestion = bed.holder.gateQuestions.value.single()
+        bed.holder.answerGateQuestion(firstQuestion, approved = false)
+        runCurrent()
+        val asked = bed.mainChannel.askSessionTree(spawn())
+        runCurrent()
+
+        bed.holder.answerGateQuestion(firstQuestion, approved = true)
+        runCurrent()
+
+        assertNull(asked.answerSoFar())
+        assertEquals(1, bed.holder.gateQuestions.value.size)
     }
 
     private fun spawn() = SessionTreeRequest.SpawnSession(
@@ -159,7 +179,7 @@ class ChildSessionGateStateHolderTest {
         val remainingGates = ArrayDeque(gates)
         childSource.respondWith { request ->
             remainingGates.removeFirstOrNull()?.let(ChildSessionCommandAnswer::ApprovalRequired)
-                ?: RecordingChildSessionCommandSource.readyAnswerFor(request)
+                ?: childSource.readyAnswerFor(request)
         }
         val channels = mutableListOf<FakeAppSocketChannel>()
         val holder = stateHolder(opener = opener, permissionChannels = channels, childSessionCommandSource = childSource)

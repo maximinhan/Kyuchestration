@@ -9,7 +9,6 @@ import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.ChildSessionGate
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
-import com.kyuchestration.desktop.terminal.RecordedChildSessionIds
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -64,10 +63,8 @@ import kotlinx.coroutines.withContext
 class ChatSessionStateHolder(
     private val sessionCommandSource: SessionCommandSource,
     private val chatSessionOpener: ChatSessionOpener,
-    /** 하위 세션이 무엇을 띄울지 답하는 자리(`--child`). 관문의 물음도 여기서 온다(6.9). */
+    /** 하위 세션이 무엇을 띄울지 답하는 자리(`--child`). 하위의 이름과 관문의 물음도 여기서 온다(6.2 · 6.9). */
     private val childSessionCommandSource: ChildSessionCommandSource,
-    /** 기록에 이미 적힌 하위 이름들. 다음 이름을 그 뒤에서 센다(nextChildSessionId). */
-    private val recordedChildSessionIds: RecordedChildSessionIds,
     private val claudeAuthToken: () -> String?,
     private val coroutineScope: CoroutineScope,
     private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
@@ -167,9 +164,6 @@ class ChatSessionStateHolder(
      */
     val sessionTree: StateFlow<SessionTree> = mutableSessionTree.asStateFlow()
 
-    /** 이번 실행에서 하위에게 준 이름의 수. 기록과 함께 다음 이름을 정한다(nextChildSessionId). */
-    private var lastAssignedChildOrdinal = 0
-
     /**
      * spawn 을 한 번에 하나씩 돌린다.
      *
@@ -189,8 +183,12 @@ class ChatSessionStateHolder(
      */
     val gateQuestions: StateFlow<List<ChildSessionGateQuestion>> = mutableGateQuestions.asStateFlow()
 
-    /** 아직 답하지 않은 관문 물음의 답 자리. 하위 이름이 열쇠다 — spawn 하나에 물음은 한 번에 하나다. */
-    private val gateDecisions = mutableMapOf<String, CompletableDeferred<GateAnswer>>()
+    /**
+     * 아직 답하지 않은 관문 물음의 답 자리. 물음 그 자체가 열쇠다 — 관문에 걸린 하위에게는 아직 이름이 없다(이름은
+     * 엔진이 띄울 수 있다고 답할 때 짓는다). [ChildSessionGateQuestion] 은 같음을 정체로 가르는 클래스라, 내용이 같은
+     * 다음 물음이 앞 물음의 늦은 답을 받지 않는다.
+     */
+    private val gateDecisions = mutableMapOf<ChildSessionGateQuestion, CompletableDeferred<GateAnswer>>()
 
     /**
      * 상위가 `await_session` 으로 기다리는 중이면 그 기다림(6.11 의 `pendingAwait`). **원칙 18 의 갈림길이 이 값 하나다** —
@@ -530,6 +528,7 @@ class ChatSessionStateHolder(
                 workingDirectory = plan.workingDirectory,
                 appSocketChannel = appSocketChannel,
                 workDirPath = workDirPath,
+                engineWarnings = answer.engineWarnings,
             )
         } catch (failure: Throwable) {
             // 세션이 서지 못했으면 그 소켓에 물어올 자식도 없다. 닫지 않으면 아무도 붙지 않는
@@ -555,6 +554,7 @@ class ChatSessionStateHolder(
             target = held.target,
             workingDirectory = held.workingDirectory,
             resumedConversationId = held.resumedConversationId,
+            entries = held.engineWarnings.map(ChatEntry::EngineNotice),
         )
         mutableHeldSessions.value = mutableHeldSessions.value + held
 
@@ -688,30 +688,16 @@ class ChatSessionStateHolder(
     /**
      * 상위의 부탁대로 하위 하나를 띄우고, 첫 프롬프트를 넣은 뒤 답한다(6.2 — 하위의 턴을 기다리지 않는다).
      *
-     * 순서가 판단이다: 이름 → 소켓 → 엔진 → 프로세스 → 트리 → 첫 프롬프트. 소켓이 엔진보다 먼저인 이유는
-     * 사람이 연 세션과 같다 — 엔진이 그 자리를 하위의 `--mcp-config` 에 싣는다.
+     * 순서가 판단이다: 소켓 → 엔진 → 프로세스 → 트리 → 첫 프롬프트. 소켓이 엔진보다 먼저인 이유는
+     * 사람이 연 세션과 같다 — 엔진이 그 자리를 하위의 `--mcp-config` 에 싣는다. 이름은 엔진이 띄울 수 있다고
+     * 답하며 지어 준다(6.2) — 앱은 그 이름을 받아 쓰기만 한다.
      */
     private suspend fun spawnChildSession(
         parent: HeldChatSession,
         request: SessionTreeRequest.SpawnSession,
         asked: AskedSessionTreeRequest,
     ): SessionTreeAnswer = childSpawning.withLock {
-        val recordedChildIds = try {
-            withContext(sessionEntryDispatcher) {
-                recordedChildSessionIds.childSessionIdsRecordedUnderMain(parent.workDirPath)
-            }
-        } catch (failure: IOException) {
-            return SessionTreeAnswer.Refused("대화 기록을 읽지 못해 하위의 이름을 정하지 못했습니다 (${failure.message})")
-        }
-
-        // 이름을 쓴 것으로 먼저 센다. 엔진이 거절했어도 그 이름이 기록에 적혔을 수 있다 — 같은 실행에서 다시
-        // 고르면 엔진이 "이미 적혀 있다" 로 또 거절한다.
-        val assignment = nextChildSessionId(recordedChildIds, lastAssignedChildOrdinal)
-        lastAssignedChildOrdinal = assignment.ordinal
-        val childTarget = SessionTarget.Child(assignment.childId)
-
         val commandRequest = ChildSessionCommandRequest(
-            childId = assignment.childId,
             requestedCwd = request.requestedCwd,
             createDirectory = request.createDirectory,
             title = request.title,
@@ -726,7 +712,7 @@ class ChatSessionStateHolder(
         while (true) {
             val attempt = commandRequest.copy(approvedFingerprint = approvedFingerprint)
             val opening = try {
-                withContext(sessionEntryDispatcher) { openChildSession(parent.workDirPath, childTarget, attempt) }
+                withContext(sessionEntryDispatcher) { openChildSession(parent.workDirPath, attempt) }
             } catch (failure: TerminalSessionFailure) {
                 return SessionTreeAnswer.Refused(refusalReasonFor(failure))
             }
@@ -738,7 +724,7 @@ class ChatSessionStateHolder(
                 }
 
                 is ChildSessionOpening.GateRequired -> {
-                    val question = ChildSessionGateQuestion(assignment.childId, request.prompt, opening.gate)
+                    val question = ChildSessionGateQuestion(request.prompt, opening.gate)
                     val gateAnswer = askPersonAboutGate(question, asked)
                     if (parent !in mutableHeldSessions.value) {
                         return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
@@ -772,6 +758,19 @@ class ChatSessionStateHolder(
         }
 
         val assigned = opened.assignedChildSession
+
+        // 한 메인 아래 이름은 이번 실행 안에서 하나의 하위만 가리킨다. 엔진은 기록을 보고 짓는데, 기록이 깨져 버려지면
+        // (conversations.go 의 readConversations) 이미 쓴 이름을 다시 짓는다. 그대로 세우면 그 이름의 노드와 대화가 덮이고
+        // 같은 대상의 보유 세션이 둘이 된다 — 끝난 하위의 이름이라도 상위에게는 그 하위라, 다른 하위를 그 이름으로 세우지 않는다.
+        if (mutableSessionTree.value.child(assigned.childId) != null) {
+            endSessionProcess(opened.held)
+            return SessionTreeAnswer.Refused(
+                "엔진이 이번 실행에서 이미 쓴 이름(${assigned.childId})을 다시 지어 띄운 하위를 끝냈습니다 — " +
+                    "대화 기록(.coord/conversations.json)이 버려졌을 수 있습니다. 사람에게 알리세요",
+            )
+        }
+
+        val childTarget = SessionTarget.Child(assigned.childId)
         hold(opened.held)
         mutableSessionTree.value = mutableSessionTree.value.withChild(
             ChildSessionNode(
@@ -806,21 +805,21 @@ class ChatSessionStateHolder(
      */
     private suspend fun askPersonAboutGate(question: ChildSessionGateQuestion, asked: AskedSessionTreeRequest): GateAnswer {
         val decision = CompletableDeferred<GateAnswer>()
-        gateDecisions[question.childId] = decision
+        gateDecisions[question] = decision
         mutableGateQuestions.value = mutableGateQuestions.value + question
 
         val watchingConnection = coroutineScope.launch {
             if (asked.awaitConnectionClosedBeforeAnswer()) {
-                withdrawGateQuestion(question.childId)
+                withdrawGateQuestion(question)
             }
         }
         return decision.await().also { watchingConnection.cancel() }
     }
 
-    /** 그 하위의 관문 물음 하나를 거두고 대화 상자를 내린다. 이미 답한 물음이면 아무 일도 하지 않는다. */
-    private fun withdrawGateQuestion(childId: String) {
-        val decision = gateDecisions.remove(childId) ?: return
-        mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.childId == childId }
+    /** 관문 물음 하나를 거두고 대화 상자를 내린다. 이미 답한 물음이면 아무 일도 하지 않는다. */
+    private fun withdrawGateQuestion(question: ChildSessionGateQuestion) {
+        val decision = gateDecisions.remove(question) ?: return
+        mutableGateQuestions.value = mutableGateQuestions.value - question
         decision.complete(GateAnswer.Withdrawn)
     }
 
@@ -829,16 +828,19 @@ class ChatSessionStateHolder(
      *
      * 이미 답한 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
      */
-    fun answerGateQuestion(childId: String, approved: Boolean) {
-        val decision = gateDecisions.remove(childId) ?: return
-        mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.childId == childId }
+    fun answerGateQuestion(question: ChildSessionGateQuestion, approved: Boolean) {
+        val decision = gateDecisions.remove(question) ?: return
+        mutableGateQuestions.value = mutableGateQuestions.value - question
         decision.complete(if (approved) GateAnswer.Approved else GateAnswer.Declined)
     }
 
-    /** 하위 하나를 엔진에게 묻고 띄운다. 띄우지 못하면 그 하위의 소켓을 닫고 실패를 그대로 던진다. */
+    /**
+     * 하위 하나를 엔진에게 묻고 띄운다. 띄우지 못하면 그 하위의 소켓을 닫고 실패를 그대로 던진다.
+     *
+     * 세션의 대상(`Child(id)`)은 엔진의 답에서 만든다 — 묻기 전에는 이름이 없다.
+     */
     private suspend fun openChildSession(
         workDirPath: Path,
-        childTarget: SessionTarget.Child,
         commandRequest: ChildSessionCommandRequest,
     ): ChildSessionOpening {
         val appSocketChannel = appSocketChannelOpener.openAppSocketChannel()
@@ -859,6 +861,7 @@ class ChatSessionStateHolder(
                 }
             }
 
+            val childTarget = SessionTarget.Child(ready.assignedChildSession.childId)
             val plan = planSessionEntry(
                 sessionCommandAnswer = ready.sessionCommandAnswer,
                 baseEnvironment = baseEnvironment,
@@ -874,6 +877,7 @@ class ChatSessionStateHolder(
                 workingDirectory = plan.workingDirectory,
                 appSocketChannel = appSocketChannel,
                 workDirPath = workDirPath,
+                engineWarnings = ready.sessionCommandAnswer.engineWarnings,
             )
             return ChildSessionOpening.Opened(held, ready.assignedChildSession)
         } catch (failure: Throwable) {
@@ -1384,12 +1388,16 @@ class ChatSessionStateHolder(
 }
 
 /**
- * 사람에게 보일 관문 하나(6.9) — 어느 하위를, 무엇을 시키려고, 어떤 설정 때문에 묻는가.
+ * 사람에게 보일 관문 하나(6.9) — 무엇을 시키려고, 어떤 설정 때문에 묻는가.
+ *
+ * 하위의 이름은 없다. 엔진은 띄울 수 있다고 답할 때 이름을 지어 기록에 적고, 관문에 걸린 하위는 아직 그 앞이다.
+ *
+ * **data class 가 아니다.** 같음이 곧 정체다 — 답 자리(`gateDecisions`)의 열쇠가 이 물음이라, 내용으로 같음을 가르면
+ * 같은 자리 같은 일을 다시 물은 다음 물음이 앞 물음에 늦게 누른 답을 받는다.
  *
  * @param prompt 상위가 그 하위에게 시키려던 일. 사람이 "이 설정으로 무엇이 돌게 되는가" 를 판단할 재료다.
  */
-data class ChildSessionGateQuestion(
-    val childId: String,
+class ChildSessionGateQuestion(
     val prompt: String,
     val gate: ChildSessionGate,
 )

@@ -4,7 +4,6 @@ import com.kyuchestration.desktop.kyu.realKyuCommandRunnerOrSkip
 import com.kyuchestration.desktop.terminal.APP_SESSION_MARKER_ENV_NAME
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
-import com.kyuchestration.desktop.terminal.coordrecord.CoordConversationRecordChildSessionIds
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import java.nio.file.Files
@@ -46,6 +45,8 @@ import org.junit.jupiter.api.Assumptions.abort
  * | ③ 기다리는 상위에게 사람이 말한다 | 메인의 두 번째 `await_session`(900 초)이 도는 중에 사람이 메인에게 말하면 그 기다림이 `user_spoke` 로 곧바로 끝난다 |
  * | ④ 메인을 닫으면 하위가 사라진다 | 메인을 끝낸 뒤 `KYU_APP_SESSION` 표식이 이 워크디렉토리인 프로세스가 `/proc` 에 하나도 없다 — `ps` 와 같은 자리를 본다 |
  * | ⑤ 걸리는 설정이 있는 폴더 | 메인이 `.mcp.json` 이 있는 폴더에 띄우려 하면 관문 물음이 서고, 거절하면 하위가 서지 않는다 |
+ * | 엔진의 경고가 챗에 선다 | 깨진 `.coord/conversations.json` 으로 메인을 열면 메인 챗에, 메인이 뜬 뒤 다시 깨진 기록으로 하위를 띄우면 그 하위 챗에 엔진이 버린 기록의 경고가 `EngineNotice` 로 선다. 하위 쪽은 하위 경고를 stderr 로 내는 엔진(PR #72 이후)이 있어야 한다 |
+ * | 하위의 이름은 엔진이 짓는다 | 기록에 앞 실행의 하위(child-1 · child-2)가 있으면 엔진이 child-3 을 짓고, 앱의 트리 · 하위 챗 · 프로세스 표식 · 메인이 받은 답이 모두 그 이름이다 |
  *
  * "곧바로" 는 스트림이 준 시각으로 잰다 — 기다림 도구 카드의 호출·결과 시각(ChatEntry.ToolCall · ToolCallAnswer)이다.
  * 기다림의 시간 상한(600 · 900 초)보다 훨씬 짧으면 사건이 깨운 것이다.
@@ -122,6 +123,86 @@ class RealClaudeSessionTreeIntegrationTest {
     }
 
     @Test
+    fun `기록에 앞 하위가 있으면 엔진이 그 뒤 이름을 짓고 트리와 화면이 그 이름을 쓴다`(): Unit = runBlocking {
+        // 앱은 이름을 묻지 않는다(--child 에 id 없음). 앱이 따로 셌다면 메모리의 수가 0 이라 child-1 을 골랐을 자리다.
+        val holder = stateHolderOrSkip()
+        workDirPath.resolve(".coord").createDirectories().resolve("conversations.json").writeText(
+            """
+            {
+              "schemaVersion": 1,
+              "conversations": {},
+              "delegations": {},
+              "childSessions": {
+                "main": {
+                  "child-1": {"conversationId": "11111111-1111-4111-8111-111111111111", "cwd": "proj-old", "title": "proj-old",
+                              "startedAt": "2026-10-20T10:01:12Z", "endedAt": "2026-10-20T10:20:03Z"},
+                  "child-2": {"conversationId": "22222222-2222-4222-8222-222222222222", "cwd": "proj-old", "title": "proj-old",
+                              "startedAt": "2026-10-20T10:01:14Z", "endedAt": "2026-10-20T10:20:03Z"}
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+        openMain(holder)
+
+        onHolder {
+            holder.sendUserMessage(
+                "mcp__kyu__spawn_session 도구를 한 번 불러 cwd 'proj-new', createDirectory true, prompt '숫자 1 만 답해' 로 " +
+                    "하위 세션을 띄워라. 띄운 뒤에는 기다리지 말고 그 도구 결과의 id 값만 한 줄로 답해.",
+            )
+        }
+
+        waitUntil("하위가 트리에 서기를", holder) { holder.sessionTree.value.children.isNotEmpty() }
+        assertEquals(listOf("child-3"), holder.sessionTree.value.children.map { it.childId })
+        assertEquals(SessionTarget.Child("child-3"), conversationOn(holder, SessionTarget.Child("child-3")).target)
+        assertTrue(directChildProcessMarked(sessionMarker("child-3"))?.isAlive == true, "child-3 표식을 단 claude 가 없습니다")
+
+        waitUntil("메인의 턴이 끝나기를", holder) {
+            onScreenConversation(holder).entries.any { it is ChatEntry.TurnEnded }
+        }
+        val spawnAnswer = conversationOn(holder, SessionTarget.Main).entries.toolCallsNamed(SPAWN_SESSION_TOOL_NAME).single()
+            .answer?.modelVisibleText.orEmpty()
+        println("spawn_session 의 답: $spawnAnswer")
+        assertTrue("child-3" in spawnAnswer, "메인이 받은 spawn 답에 엔진이 지은 이름이 없습니다: $spawnAnswer")
+        onHolder { holder.endOnScreenSession() }
+    }
+
+    @Test
+    fun `깨진 대화 기록으로 메인을 열면 엔진이 버린 경고가 메인 챗에 선다`(): Unit = runBlocking {
+        val holder = stateHolderOrSkip()
+        breakConversationRecord()
+
+        openMain(holder)
+
+        val notices = conversationOn(holder, SessionTarget.Main).entries.filterIsInstance<ChatEntry.EngineNotice>()
+        println("메인 챗의 엔진 알림: ${notices.map { it.line }}")
+        assertTrue(notices.any { "conversations.json" in it.line }, "메인 챗에 엔진의 경고가 없습니다: $notices")
+        onHolder { holder.endOnScreenSession() }
+    }
+
+    @Test
+    fun `메인이 뜬 뒤 대화 기록이 깨진 채로 하위를 띄우면 엔진이 버린 경고가 그 하위 챗에 선다`(): Unit = runBlocking {
+        // 메인을 여는 순간 엔진이 기록을 새로 적으므로, 하위가 경고를 받으려면 메인이 뜬 뒤에 깨져야 한다.
+        val holder = stateHolderOrSkip()
+        openMain(holder)
+        breakConversationRecord()
+
+        onHolder {
+            holder.sendUserMessage(
+                "mcp__kyu__spawn_session 도구를 한 번 불러 cwd 'proj-warn', createDirectory true, prompt '숫자 1 만 답해' 로 " +
+                    "하위 세션을 띄워라. 띄운 뒤에는 기다리지 말고 '띄웠다' 라고만 답해.",
+            )
+        }
+
+        waitUntil("하위가 트리에 서기를", holder) { holder.sessionTree.value.children.isNotEmpty() }
+        val childId = holder.sessionTree.value.children.single().childId
+        val notices = conversationOn(holder, SessionTarget.Child(childId)).entries.filterIsInstance<ChatEntry.EngineNotice>()
+        println("$childId 챗의 엔진 알림: ${notices.map { it.line }}")
+        assertTrue(notices.any { "conversations.json" in it.line }, "하위 챗에 엔진의 경고가 없습니다: $notices")
+        onHolder { holder.endOnScreenSession() }
+    }
+
+    @Test
     fun `걸리는 설정이 있는 폴더에 띄우려 하면 관문 물음이 서고 거절하면 하위가 서지 않는다`(): Unit = runBlocking {
         val holder = stateHolderOrSkip()
         workDirPath.resolve("gated").createDirectories().resolve(".mcp.json").writeText("""{"mcpServers":{}}""")
@@ -139,7 +220,7 @@ class RealClaudeSessionTreeIntegrationTest {
         assertEquals("gated", question.gate.relativeCwd)
         assertEquals(listOf(".mcp.json"), question.gate.executionConfigs.map { it.relativePath })
 
-        onHolder { holder.answerGateQuestion(question.childId, approved = false) }
+        onHolder { holder.answerGateQuestion(question, approved = false) }
 
         waitUntil("메인의 턴이 끝나기를", holder) {
             onScreenConversation(holder).entries.any { it is ChatEntry.TurnEnded }
@@ -277,6 +358,11 @@ class RealClaudeSessionTreeIntegrationTest {
         onHolder { holder.endOnScreenSession() }
     }
 
+    /** 엔진이 읽지 못해 버리는 대화 기록을 둔다(conversations.go 의 readConversations — 경고 뒤 빈 기록). */
+    private fun breakConversationRecord() {
+        workDirPath.resolve(".coord").createDirectories().resolve("conversations.json").writeText("{ 깨진 기록")
+    }
+
     private suspend fun openMain(holder: ChatSessionStateHolder) {
         onHolder {
             holder.enterSession(workDirPath, SessionTarget.Main, SessionConversationChoice.StartNewConversation)
@@ -396,7 +482,6 @@ class RealClaudeSessionTreeIntegrationTest {
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
             chatSessionOpener = ProcessChatSessionOpener(),
             childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),
-            recordedChildSessionIds = CoordConversationRecordChildSessionIds(),
             claudeAuthToken = { null },
             coroutineScope = holderScope,
         )
@@ -422,6 +507,7 @@ class RealClaudeSessionTreeIntegrationTest {
          */
         val WOKEN_PROMPTLY: Duration = Duration.ofSeconds(30)
 
+        const val SPAWN_SESSION_TOOL_NAME = "mcp__kyu__spawn_session"
         const val AWAIT_SESSION_TOOL_NAME = "mcp__kyu__await_session"
         const val SEND_TO_SESSION_TOOL_NAME = "mcp__kyu__send_to_session"
         const val ASK_PARENT_TOOL_NAME = "mcp__kyu__ask_parent"

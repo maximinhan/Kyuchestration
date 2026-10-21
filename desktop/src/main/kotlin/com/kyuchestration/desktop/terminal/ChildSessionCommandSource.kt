@@ -14,7 +14,7 @@ fun interface ChildSessionCommandSource {
     /**
      * @param appSocketPath 앱이 이 하위를 위해 연 소켓. 하위의 `ask_parent` 와 승인이 이 자리로 온다 —
      *   엔진은 소켓 없는 하위 요청을 거절한다(하위는 상위에게 물을 길 없이 뜰 수 없다).
-     * @throws TerminalSessionFailure 묻지 못했거나, kyu 가 거절했거나(cwd 규칙 · 같은 id), 답을 읽지 못했을 때.
+     * @throws TerminalSessionFailure 묻지 못했거나, kyu 가 거절했거나(cwd 규칙), 답을 읽지 못했을 때.
      */
     fun childSessionCommandFor(
         workDirPath: Path,
@@ -26,12 +26,13 @@ fun interface ChildSessionCommandSource {
 /**
  * 상위가 부탁한 하위 하나와, 앱만 아는 사실들.
  *
+ * 이름은 묻지 않는다. 엔진이 기록을 보고 지어 [AssignedChildSession.childId] 로 답한다.
+ *
  * @param requestedCwd 상위가 고른 자리 그대로. null 이면 워크디렉토리 루트 — 풀이는 엔진이 한다(6.8).
  * @param liveChildRelativeCwds 지금 살아 있는 하위들의 자리. 누가 살아 있는지는 앱만 안다(원칙 16).
  * @param approvedFingerprint 사람이 관문 대화 상자에서 승인한 지문. 처음 물을 때는 null.
  */
 data class ChildSessionCommandRequest(
-    val childId: String,
     val requestedCwd: String?,
     val createDirectory: Boolean,
     val title: String?,
@@ -55,6 +56,7 @@ sealed interface ChildSessionCommandAnswer {
 /**
  * 엔진이 배정한 하위의 사실(`childSession`).
  *
+ * @param childId 엔진이 지은 이름. 앱은 이 값을 트리 · 화면 · 상위의 답에 그대로 쓴다.
  * @param relativeCwd 링크를 따라간 자리의 워크디렉토리 기준 `/` 경로. 다음 spawn 의 `--live-child-cwd` 로 그대로 넘긴다.
  */
 data class AssignedChildSession(

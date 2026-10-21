@@ -37,20 +37,38 @@ class KyuCliChildSessionCommandSourceIntegrationTest {
         val gatedFolder = workDirPath.resolve("proj-a").createDirectories()
         gatedFolder.resolve(".mcp.json").writeText("""{"mcpServers":{}}""")
 
-        val firstAnswer = source.childSessionCommandFor(workDirPath, request("child-1", "proj-a", null), SOCKET_PATH)
+        val firstAnswer = source.childSessionCommandFor(workDirPath, request("proj-a", null), SOCKET_PATH)
 
         val gate = assertIs<ChildSessionCommandAnswer.ApprovalRequired>(firstAnswer).gate
         assertEquals("proj-a", gate.relativeCwd)
         assertEquals(listOf(".mcp.json"), gate.executionConfigs.map { it.relativePath })
         assertEquals("""{"mcpServers":{}}""", gate.executionConfigs.single().content)
 
-        val secondAnswer = source.childSessionCommandFor(workDirPath, request("child-1", "proj-a", gate.fingerprint), SOCKET_PATH)
+        val secondAnswer = source.childSessionCommandFor(workDirPath, request("proj-a", gate.fingerprint), SOCKET_PATH)
 
         val ready = assertIs<ChildSessionCommandAnswer.Ready>(secondAnswer)
         assertEquals("child-1", ready.assignedChildSession.childId)
         assertEquals("proj-a", ready.assignedChildSession.relativeCwd)
         assertEquals(gatedFolder.toRealPath(), ready.sessionCommandAnswer.workingDirectory.toRealPath())
         assertTrue(ready.sessionCommandAnswer.command.isNotEmpty())
+    }
+
+    @Test
+    fun `이름 없이 물으면 엔진이 기록 뒤의 이름을 지어 답한다`() {
+        val source = KyuCliChildSessionCommandSource(realKyuCommandRunnerOrSkip())
+        val workDirPath = temporaryDirectory.resolve("WorkDir-naming").createDirectories()
+        workDirPath.resolve("proj-a").createDirectories()
+        workDirPath.resolve("proj-b").createDirectories()
+
+        val first = source.childSessionCommandFor(workDirPath, request("proj-a", null), SOCKET_PATH)
+        val second = source.childSessionCommandFor(
+            workDirPath,
+            request("proj-b", null).copy(liveChildRelativeCwds = listOf("proj-a")),
+            SOCKET_PATH,
+        )
+
+        assertEquals("child-1", assertIs<ChildSessionCommandAnswer.Ready>(first).assignedChildSession.childId)
+        assertEquals("child-2", assertIs<ChildSessionCommandAnswer.Ready>(second).assignedChildSession.childId)
     }
 
     @Test
@@ -62,7 +80,7 @@ class KyuCliChildSessionCommandSourceIntegrationTest {
         val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
             source.childSessionCommandFor(
                 workDirPath,
-                request("child-2", "proj-a", null).copy(liveChildRelativeCwds = listOf("proj-a")),
+                request("proj-a", null).copy(liveChildRelativeCwds = listOf("proj-a")),
                 SOCKET_PATH,
             )
         }
@@ -71,8 +89,7 @@ class KyuCliChildSessionCommandSourceIntegrationTest {
         assertTrue(failure.guidance.isNotBlank())
     }
 
-    private fun request(childId: String, cwd: String, approvedFingerprint: String?) = ChildSessionCommandRequest(
-        childId = childId,
+    private fun request(cwd: String, approvedFingerprint: String?) = ChildSessionCommandRequest(
         requestedCwd = cwd,
         createDirectory = false,
         title = null,

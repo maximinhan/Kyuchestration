@@ -30,8 +30,8 @@ private const val SUPPORTED_SCHEMA_VERSION = 1
  * 그대로 실행할 것이다. 필드를 잘못 읽으면 화면이 어긋나는 것이 아니라 엉뚱한 디렉토리에서
  * 세션이 열린다.
  */
-internal fun parseKyuSessionCommandOutput(rawJson: String): SessionCommandAnswer =
-    readSessionCommandDocument(rawJson).asSessionCommandAnswer()
+internal fun parseKyuSessionCommandOutput(rawJson: String, engineWarnings: List<String>): SessionCommandAnswer =
+    readSessionCommandDocument(rawJson).asSessionCommandAnswer(engineWarnings)
 
 /**
  * `kyu session-command --chat --child … --json` 의 stdout 을 하위 세션의 답으로 옮긴다.
@@ -39,7 +39,7 @@ internal fun parseKyuSessionCommandOutput(rawJson: String): SessionCommandAnswer
  * 같은 문서에 두 필드가 더해진 모양이다(session_command_json.go). 둘 중 하나는 반드시 있다 — 둘 다 없으면
  * 이 필드를 모르는 엔진이 사람 세션의 답을 한 것이라, 그 명령을 하위 자리에 띄우지 않고 읽지 못한 답으로 올린다.
  */
-internal fun parseKyuChildSessionCommandOutput(rawJson: String): ChildSessionCommandAnswer {
+internal fun parseKyuChildSessionCommandOutput(rawJson: String, engineWarnings: List<String>): ChildSessionCommandAnswer {
     val document = readSessionCommandDocument(rawJson)
 
     document.approvalRequired?.let { gate ->
@@ -60,7 +60,7 @@ internal fun parseKyuChildSessionCommandOutput(rawJson: String): ChildSessionCom
         )
 
     return ChildSessionCommandAnswer.Ready(
-        sessionCommandAnswer = document.asSessionCommandAnswer(),
+        sessionCommandAnswer = document.asSessionCommandAnswer(engineWarnings),
         assignedChildSession = AssignedChildSession(
             childId = childSession.id,
             relativeCwd = childSession.cwd,
@@ -85,11 +85,12 @@ private fun readSessionCommandDocument(rawJson: String): KyuSessionCommandDocume
     }
 }
 
-private fun KyuSessionCommandDocument.asSessionCommandAnswer() = SessionCommandAnswer(
+private fun KyuSessionCommandDocument.asSessionCommandAnswer(engineWarnings: List<String>) = SessionCommandAnswer(
     command = command,
     workingDirectory = Path.of(cwd),
     environmentToAdd = env,
     resumedConversationId = resumedConversationId,
+    engineWarnings = engineWarnings,
 )
 
 @Serializable

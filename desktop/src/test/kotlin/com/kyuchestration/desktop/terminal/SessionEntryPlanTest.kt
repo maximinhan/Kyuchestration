@@ -127,7 +127,7 @@ class SessionEntryPlanTest {
         command: List<String> = listOf("claude"),
         workingDirectory: Path = WORK_DIR_PATH,
         environmentToAdd: Map<String, String> = emptyMap(),
-    ) = SessionCommandAnswer(command, workingDirectory, environmentToAdd, resumedConversationId = null)
+    ) = SessionCommandAnswer(command, workingDirectory, environmentToAdd, resumedConversationId = null, engineWarnings = emptyList())
 
     private fun planFor(
         answer: SessionCommandAnswer = answerWith(),
