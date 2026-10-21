@@ -638,6 +638,24 @@ class ChildSessionDialogueStateHolderTest {
         assertEquals(TEST_CLOCK.instant(), second.endedAt)
     }
 
+    @Test
+    fun `상위의 턴이 끝나면 끊김이 아직 안 닿은 기다림을 닫고 그 뒤의 사건은 stdin 으로 간다`() = runTest {
+        // 도구 호출은 턴을 넘기지 못한다. 턴이 끝났는데 기다림이 열려 있다면 그 연결은 이미 죽었고 EOF 만 아직 안 닿았다 —
+        // 그 기다림에 사건을 담으면 아무도 읽지 않는 연결로 가서 영영 잃는다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val interrupted = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+
+        bed.main.emit(turnFinishedWith(null, TurnOutcome.InterruptedDuringToolWait))
+        runCurrent()
+        bed.child(1).finishTurnOnLastSentMessage(result = "끝난 뒤의 일")
+        runCurrent()
+
+        assertNull(interrupted.answerSoFar(), "턴이 끝난 기다림에 사건을 담았습니다")
+        assertEquals("[하위 세션 child-1 · 턴 끝] 끝난 뒤의 일", bed.main.sentMessages.last().text)
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }

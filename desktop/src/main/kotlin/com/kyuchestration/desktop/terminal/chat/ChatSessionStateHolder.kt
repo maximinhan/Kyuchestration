@@ -931,8 +931,7 @@ class ChatSessionStateHolder(
         // 이 기다림이 가져가지 못한 사건은 쌓인 채 다음 기다림이나 상위의 턴 끝을 기다린다.
         coroutineScope.launch {
             if (asked.awaitConnectionClosedBeforeAnswer() && pendingAwait?.asked === asked) {
-                pendingAwait?.expiry?.cancel()
-                pendingAwait = null
+                forgetPendingAwait()
             }
         }
 
@@ -1013,9 +1012,14 @@ class ChatSessionStateHolder(
      * 기다림에 답하지 않는다. 상위의 소켓이 닫히면서 그 연결이 끊기고, 답을 받을 도구 호출도 그 프로세스와 함께 사라졌다.
      */
     private fun forgetParentDialogue() {
+        forgetPendingAwait()
+        undeliveredParentEvents.clear()
+    }
+
+    /** 열린 기다림을 답하지 않고 놓는다 — 그 연결은 이미 죽었거나 곧 닫힌다. 쌓인 사건은 그대로 남는다. */
+    private fun forgetPendingAwait() {
         pendingAwait?.expiry?.cancel()
         pendingAwait = null
-        undeliveredParentEvents.clear()
     }
 
     /** 상위가 `end_session` 으로 하위를 끝낸다(6.13). 이미 끝난 하위면 그대로 끝났다고 답한다. */
@@ -1153,7 +1157,11 @@ class ChatSessionStateHolder(
             tellParentChildTurnFinished(target.childId, event, turnTriggerOf(entriesBefore))
         }
         // 상위의 턴이 끝났다 — 그 턴 동안 쌓인 사건을 이제 사용자 메시지로 보낼 수 있다.
+        //
+        // 기다림을 먼저 닫는다. 도구 호출은 턴을 넘기지 못하므로 아직 열린 기다림은 중단으로 이미 끊긴 연결이고, EOF 만
+        // 아직 닿지 않았다. 남겨 두면 다음 사건이 그 기다림의 답으로 아무도 읽지 않는 연결에 가서 영영 사라진다.
         if (target == SessionTarget.Main && event is ChatSessionEvent.TurnFinished) {
+            forgetPendingAwait()
             deliverParentEvents()
         }
 
