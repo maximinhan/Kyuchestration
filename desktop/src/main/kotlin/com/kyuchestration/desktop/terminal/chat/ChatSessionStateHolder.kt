@@ -758,6 +758,18 @@ class ChatSessionStateHolder(
         }
 
         val assigned = opened.assignedChildSession
+
+        // 한 메인 아래 이름은 이번 실행 안에서 하나의 하위만 가리킨다. 엔진은 기록을 보고 짓는데, 기록이 깨져 버려지면
+        // (conversations.go 의 readConversations) 이미 쓴 이름을 다시 짓는다. 그대로 세우면 그 이름의 노드와 대화가 덮이고
+        // 같은 대상의 보유 세션이 둘이 된다 — 끝난 하위의 이름이라도 상위에게는 그 하위라, 다른 하위를 그 이름으로 세우지 않는다.
+        if (mutableSessionTree.value.child(assigned.childId) != null) {
+            endSessionProcess(opened.held)
+            return SessionTreeAnswer.Refused(
+                "엔진이 이번 실행에서 이미 쓴 이름(${assigned.childId})을 다시 지어 띄운 하위를 끝냈습니다 — " +
+                    "대화 기록(.coord/conversations.json)이 버려졌을 수 있습니다. 사람에게 알리세요",
+            )
+        }
+
         val childTarget = SessionTarget.Child(assigned.childId)
         hold(opened.held)
         mutableSessionTree.value = mutableSessionTree.value.withChild(

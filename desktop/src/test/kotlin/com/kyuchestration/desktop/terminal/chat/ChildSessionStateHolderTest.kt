@@ -86,6 +86,44 @@ class ChildSessionStateHolderTest {
     }
 
     @Test
+    fun `엔진이 이번 실행에서 이미 쓴 이름을 다시 지으면 띄운 하위를 끝내고 거절한다`() = runTest {
+        // 대화 기록이 깨져 엔진이 버리면(conversations.go 의 readConversations) 기록이 비어 엔진은 child-1 을 다시 짓는다.
+        // 그대로 세우면 살아 있는 child-1 의 노드와 대화가 덮이고, 같은 대상의 보유 세션이 둘이 된다.
+        val tree = sessionTreeTestBed()
+        tree.mainChannel().askSessionTree(spawn("하나", cwd = "proj-a"))
+        runCurrent()
+        tree.childSource.respondWith { tree.childSource.readyAnswerFor(it, childId = "child-1") }
+
+        val asked = tree.mainChannel().askSessionTree(spawn("둘", cwd = "proj-b"))
+        runCurrent()
+
+        val refused = assertIs<SessionTreeAnswer.Refused>(asked.answerSoFar())
+        assertTrue("child-1" in refused.reason, refused.reason)
+        assertEquals(1, tree.childSession(2).endSessionCount, "엔진이 겹친 이름으로 띄운 하위를 끝내야 합니다")
+        assertEquals(listOf("proj-a"), tree.holder.sessionTree.value.children.map { it.relativeCwd })
+        assertEquals(listOf<SessionTarget>(SessionTarget.Main, SessionTarget.Child("child-1")), tree.holder.heldSessions.value.map { it.target })
+        assertEquals(listOf("[상위 세션] 하나"), tree.childSession(1).sentMessages.map { it.text })
+    }
+
+    @Test
+    fun `끝난 하위의 이름이라도 엔진이 다시 지으면 거절한다`() = runTest {
+        // 상위에게 child-1 은 이미 그 끝난 하위다. 같은 이름이 다른 하위를 가리키면 상위의 send · await 가 엉뚱한 쪽으로 간다.
+        val tree = sessionTreeTestBed()
+        tree.mainChannel().askSessionTree(spawn("하나", cwd = "proj-a"))
+        runCurrent()
+        tree.childSession(1).emit(ChatSessionEvent.SessionEnded(exitCode = 0))
+        runCurrent()
+        tree.childSource.respondWith { tree.childSource.readyAnswerFor(it, childId = "child-1") }
+
+        val asked = tree.mainChannel().askSessionTree(spawn("둘", cwd = "proj-b"))
+        runCurrent()
+
+        assertIs<SessionTreeAnswer.Refused>(asked.answerSoFar())
+        assertEquals(ChildLifecycle.Ended(ChildEndReason.Exited, 0), tree.holder.sessionTree.value.child("child-1")?.lifecycle)
+        assertEquals(1, tree.childSession(2).endSessionCount)
+    }
+
+    @Test
     fun `엔진이 하위를 열며 남긴 경고가 그 하위의 챗에 선다`() = runTest {
         val tree = sessionTreeTestBed()
         tree.childSource.engineWarnings = listOf("하위 기록 하나를 버렸습니다")
