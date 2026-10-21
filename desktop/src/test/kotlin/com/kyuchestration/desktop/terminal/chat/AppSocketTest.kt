@@ -7,6 +7,8 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
 import kotlin.io.path.getPosixFilePermissions
@@ -256,6 +258,53 @@ class AppSocketTest {
     }
 
     @Test
+    fun `답을 기다리는 요청이 IO 풀보다 많아도 새 요청을 읽고 답하며 끊김도 알아챈다`(): Unit = runBlocking {
+        // 기다림(최대 3000 초) · 승인 · ask_parent 는 오래 열려 있다. 연결마다 스레드 하나를 막고 끊김을 지켜보면, 열린
+        // 요청이 IO 풀(64)을 다 쓰는 순간 새 요청은 읽히지도 않는다 — 그 풀은 stdin 쓰기 · 스트림 읽기와 함께 쓴다.
+        val socket = openSocket()
+        val waitingConnections = (1..WAITING_REQUEST_COUNT).map {
+            SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).also { connection ->
+                connection.writer().apply {
+                    write("""{"kind":"await","ids":null,"waitSeconds":3000}""")
+                    newLine()
+                    flush()
+                }
+            }
+        }
+
+        try {
+            val waitingRequests = withTimeout(MANY_REQUESTS_TIMEOUT_MILLIS) {
+                socket.sessionTreeRequests.take(WAITING_REQUEST_COUNT).toList()
+            }
+
+            // 시험 쪽 클라이언트는 IO 풀을 쓰지 않는다. 같은 풀을 쓰면 앱이 굶는 것과 시험이 굶는 것이 섞인다.
+            val listClient = Executors.newSingleThreadExecutor()
+            try {
+                val listAnswer = listClient.submit<String?> {
+                    SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).use { connection ->
+                        connection.writer().apply {
+                            write("""{"kind":"list"}""")
+                            newLine()
+                            flush()
+                        }
+                        connection.reader().readLine()
+                    }
+                }
+                val listRequest = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+                listRequest.answerWith(SessionTreeAnswer.Listed(emptyList()))
+                assertEquals("""{"sessions":[]}""", listAnswer.get(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            } finally {
+                listClient.shutdownNow()
+            }
+
+            waitingConnections.first().close()
+            assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { waitingRequests.first().awaitConnectionClosedBeforeAnswer() })
+        } finally {
+            waitingConnections.forEach { it.close() }
+        }
+    }
+
+    @Test
     fun `소켓 파일은 이 사용자만 읽고 쓴다`(): Unit = runBlocking {
         // 같은 머신의 다른 사용자가 이 소켓에 붙으면 남의 세션의 승인에 답할 수 있다(설계 5.4).
         val socket = openSocket()
@@ -458,6 +507,11 @@ class AppSocketTest {
 
     private companion object {
         const val TEST_TIMEOUT_MILLIS = 5_000L
+
+        /** Dispatchers.IO 의 기본 상한(64)보다 넉넉히 많다. */
+        const val WAITING_REQUEST_COUNT = 100
+
+        const val MANY_REQUESTS_TIMEOUT_MILLIS = 15_000L
 
         /** "아무것도 오지 않았다" 를 확인하는 데 기다리는 시간. 왔다면 이 안에 온다. */
         const val NOTHING_ARRIVED_MILLIS = 500L
