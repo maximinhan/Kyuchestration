@@ -56,10 +56,21 @@ const (
 // 시스템 프롬프트가 본자리인 이유: 견줄 상대인 Agent 는 claude 의 내장 도구라 그 설명을 우리가 고칠 수
 // 없다. 두 도구를 한자리에서 견주는 글은 어느 한 도구의 설명이 아니라 둘 다 보이는 자리에 있어야 하고,
 // 규약을 시스템 프롬프트로 주었을 때 모델이 따른 것을 쟀다(3.5 나).
-const subagentOrChildSessionCriterionText = "일을 맡길 때는 하위 세션(spawn_session)과 서브에이전트(Agent 도구) 중 하나를 고른다. " +
-	"하위 세션은 다른 폴더(레포)에서 그 폴더의 설정으로 해야 하는 일, 오래 걸리는 일, 사람이 지켜보거나 끼어들어야 하는 일, " +
-	"이어서 여러 번 시킬 일에 쓴다 — 하위 세션은 앱에 탭으로 보이고 승인 카드가 사람에게 간다. " +
-	"이 턴 안에서 끝나는 짧은 조사·읽기·요약에는 하위 세션을 띄우지 않는다 — 서브에이전트를 쓰거나 직접 한다."
+//
+// **일의 길이는 기준이 아니다.** 4.4 가 하위 세션에 준 것은 서브에이전트가 못 하는 셋(다른 cwd 의 설정 ·
+// 사람이 끼어듦 · 이어서 시킴)이다. 이 폴더 안에서 한 번에 끝나는 일은 길어도 서브에이전트의 몫이다.
+const subagentOrChildSessionCriterionText = "일을 맡길 때는 하위 세션(" + qualifiedSpawnSessionToolName + ")과 서브에이전트(Agent 도구) 중 하나를 고른다. " +
+	"하위 세션은 다른 폴더(레포)에서 그 폴더의 설정(CLAUDE.md · .mcp.json · 훅)으로 해야 하는 일, " +
+	"사람이 탭에서 지켜보거나 끼어들어야 하는 일, 승인 카드가 사람에게 가야 하는 일, 이어서 여러 번 주고받을 일에 쓴다. " +
+	"이 폴더 안에서 한 번에 끝나는 일에는 하위 세션을 띄우지 않는다 — 서브에이전트를 쓰거나 직접 한다."
+
+// 모델에게 보이는 kyu 도구의 이름이다 — mcp__<서버>__<도구>. 시스템 프롬프트처럼 도구 목록 밖에서 도구를
+// 가리키는 글은 이 이름을 쓴다. 짧은 이름을 섞으면 모델은 그 이름의 도구를 찾으러 간다(5 단계 실측에서
+// 매 회차 ToolSearch 로 이름부터 찾았다).
+const (
+	qualifiedSpawnSessionToolName  = "mcp__" + orchestrationServerName + "__" + spawnSessionToolName
+	qualifiedSendToSessionToolName = "mcp__" + orchestrationServerName + "__" + sendToSessionToolName
+)
 
 const spawnSessionToolDescription = `하위 세션 하나를 띄운다. 하위는 자기 cwd 에서 도는 별도의 claude 이고, 사람이 그 탭에서 직접 볼 수 있다.
 
