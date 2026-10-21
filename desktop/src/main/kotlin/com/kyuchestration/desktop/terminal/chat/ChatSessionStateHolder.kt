@@ -982,9 +982,25 @@ class ChatSessionStateHolder(
      */
     private fun wakeParentAwaitBecauseHumanSpoke() {
         val await = pendingAwait ?: return
-        val deliverable = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
-        undeliveredParentEvents.removeAll(deliverable)
-        answerPendingAwait(deliverable + SessionTreeEvent.UserSpoke)
+        answerPendingAwaitWithWatchedEvents(await, wakingEvent = SessionTreeEvent.UserSpoke)
+    }
+
+    /**
+     * 열린 기다림이 고른 하위의 쌓인 사건을 꺼내, [wakingEvent] 와 함께 그 기다림의 답으로 보낸다. 담을 것이 하나도
+     * 없으면 답하지 않는다 — 기다림은 전할 일이 생길 때까지 열려 있다(6.6).
+     *
+     * 고르지 않은 하위의 사건은 남는다. 다음 기다림이나 상위의 턴 끝이 가져간다.
+     *
+     * @param wakingEvent 쌓이지 않고 이 순간에만 사건인 것 — 사람이 기다리는 상위에게 한 말([SessionTreeEvent.UserSpoke]).
+     */
+    private fun answerPendingAwaitWithWatchedEvents(await: PendingAwait, wakingEvent: SessionTreeEvent? = null) {
+        val watchedEvents = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
+        val events = watchedEvents + listOfNotNull(wakingEvent)
+        if (events.isEmpty()) {
+            return
+        }
+        undeliveredParentEvents.removeAll(watchedEvents)
+        answerPendingAwait(events)
     }
 
     /** 상위에게 전할 일이 생겼다. 원칙 18 의 길로 보낸다([deliverParentEvents]). */
@@ -1008,11 +1024,7 @@ class ChatSessionStateHolder(
     private fun deliverParentEvents() {
         val await = pendingAwait
         if (await != null) {
-            val deliverable = undeliveredParentEvents.filter { it.childId in await.watchedChildIds }
-            if (deliverable.isNotEmpty()) {
-                undeliveredParentEvents.removeAll(deliverable)
-                answerPendingAwait(deliverable)
-            }
+            answerPendingAwaitWithWatchedEvents(await)
             return
         }
 
