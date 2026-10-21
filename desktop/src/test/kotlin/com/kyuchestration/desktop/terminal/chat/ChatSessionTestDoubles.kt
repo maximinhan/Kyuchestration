@@ -143,7 +143,7 @@ internal class FakeAppSocketChannel(
     /** 그 도구 호출에 대한 승인을 물어 온다. 되돌아온 결정을 들여다볼 수 있는 자리를 돌려준다. */
     fun ask(toolName: String, toolUseId: String, input: JsonObject): AskedForTest {
         val asked = AskedPermission(PermissionRequest(toolName = toolName, input = input, toolUseId = toolUseId))
-        val answering = answeringScope.async { asked.awaitDecision() }
+        val answering = answeringScope.async { asked.decision.answered.await() }
         incoming.trySend(asked)
         return AskedForTest(asked, answering)
     }
@@ -151,7 +151,7 @@ internal class FakeAppSocketChannel(
     /** 이 세션의 kyu mcp serve 노릇 — 세션 트리 요청 하나를 보내고, 앱이 되돌린 답을 들여다볼 자리를 돌려준다. */
     fun askSessionTree(request: SessionTreeRequest): AskedSessionTreeForTest {
         val asked = AskedSessionTreeRequest(request)
-        val answering = answeringScope.async { asked.awaitAnswer() }
+        val answering = answeringScope.async { asked.answer.answered.await() }
         incomingSessionTreeRequests.trySend(asked)
         return AskedSessionTreeForTest(asked, answering)
     }
@@ -172,7 +172,7 @@ internal class AskedForTest(private val asked: AskedPermission, private val answ
     fun decisionSoFar(): PermissionDecision? = if (answering.isCompleted) answering.getCompleted() else null
 
     /** 물어 온 쪽이 답을 받기 전에 연결을 닫는다 — 그 도구 호출이 중단된 자리다(PR 68). */
-    fun closeConnection() = asked.markConnectionClosed()
+    fun closeConnection() = asked.decision.markConnectionClosed()
 }
 
 internal class RecordingChatSessionOpener : ChatSessionOpener {
@@ -251,7 +251,7 @@ internal class AskedSessionTreeForTest(
      * 엔진이 답을 받기 전에 연결을 닫는다 — 상위의 도구 호출이 중단되어 `kyu mcp serve` 가 취소를 받은 자리다
      * (session-tree 3.2 · PR 68).
      */
-    fun closeConnection() = asked.markConnectionClosed()
+    fun closeConnection() = asked.answer.markConnectionClosed()
 }
 
 /**

@@ -65,11 +65,6 @@ class AskedPermission internal constructor(val request: PermissionRequest) {
         this.decision.complete(decision)
     }
 
-    internal suspend fun awaitDecision(): PermissionDecision = decision.answered.await()
-
-    /** 그 도구 호출이 중단되어 `kyu mcp ask` 가 연결을 닫았다. */
-    internal fun markConnectionClosed() = decision.markConnectionClosed()
-
     /** 답하기 전에 연결이 끊겼으면 참 — 그 카드는 거둬야 한다. */
     suspend fun awaitConnectionClosedBeforeAnswer(): Boolean = decision.awaitConnectionClosedBeforeAnswer()
 }

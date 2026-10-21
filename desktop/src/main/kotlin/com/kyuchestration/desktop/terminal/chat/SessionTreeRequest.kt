@@ -129,11 +129,6 @@ class AskedSessionTreeRequest(val request: SessionTreeRequest) {
         this.answer.complete(answer)
     }
 
-    internal suspend fun awaitAnswer(): SessionTreeAnswer = answer.answered.await()
-
-    /** 그 도구 호출이 중단되어 `kyu mcp serve` 가 연결을 닫았다(3.2 · PR 68). */
-    internal fun markConnectionClosed() = answer.markConnectionClosed()
-
     /**
      * 답하기 전에 연결이 끊겼으면 참. 상위의 기다림 · 관문 물음 · 하위의 물음이 이것으로 거둬진다 — 하위는 그대로다(6.6).
      */
