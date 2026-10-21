@@ -32,7 +32,7 @@ sealed interface SessionTarget {
      * (`--child`). 그래서 [PersonOpenedSessionTarget] 에 들지 않는다 — 들면 "레포 이름 자리에 무엇을
      * 넣는가" 를 묻는 자리마다 답할 수 없는 갈래가 하나 생긴다.
      *
-     * @param childId 앱이 정한 이름(`child-1` …). 상위 하나 안에서 다시 쓰지 않는다(6.2).
+     * @param childId 엔진이 지은 이름(`child-1` …). 엔진이 기록을 보고 상위 하나 안에서 다시 쓰지 않게 짓는다(6.2).
      */
     data class Child(val childId: String) : SessionTarget {
         override val label: String get() = childId

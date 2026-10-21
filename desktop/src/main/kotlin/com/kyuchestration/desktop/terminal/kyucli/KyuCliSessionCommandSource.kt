@@ -32,14 +32,14 @@ class KyuCliSessionCommandSource(
     ): SessionCommandAnswer {
         val arguments = sessionCommandArguments(target, conversationChoice, appSocketPath)
 
-        val standardOutput = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = target.label)
+        val output = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = target.label)
 
-        return parseKyuSessionCommandOutput(standardOutput)
+        return parseKyuSessionCommandOutput(output.standardOutput, output.engineWarnings)
     }
 }
 
 /**
- * `kyu session-command` 를 워크디렉토리에서 부르고, 답한 stdout 을 돌려준다.
+ * `kyu session-command` 를 워크디렉토리에서 부르고, 답한 문서와 엔진의 경고를 돌려준다.
  *
  * 사람이 연 세션과 하위 세션이 함께 쓴다. 둘 다 "부르지 못했다 · 거절했다" 를 세션에 들어가려던 쪽에게 할
  * 말로 옮기는 일이 같다 — 다른 것은 묻는 옵션과 답을 읽는 모양뿐이다.
@@ -51,7 +51,7 @@ internal fun runSessionCommand(
     arguments: List<String>,
     workDirPath: Path,
     targetLabel: String,
-): String {
+): SessionCommandOutput {
     val result = try {
         // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
         // 실행된 디렉토리를 워크디렉토리로 읽는다(session_command.go 의 currentWorkDir).
@@ -75,8 +75,15 @@ internal fun runSessionCommand(
         )
     }
 
-    return result.standardOutput
+    // 성공한 실행의 stderr 는 엔진이 사람에게 하는 말이다. 빈 줄은 말이 아니다.
+    return SessionCommandOutput(
+        standardOutput = result.standardOutput,
+        engineWarnings = result.standardError.lines().map(String::trim).filter(String::isNotEmpty),
+    )
 }
+
+/** 성공한 `kyu session-command` 가 남긴 것 — 앱이 읽을 문서와, 사람에게 보일 엔진의 경고. */
+internal data class SessionCommandOutput(val standardOutput: String, val engineWarnings: List<String>)
 
 /**
  * `kyu session-command [repo] --json`.

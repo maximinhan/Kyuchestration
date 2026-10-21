@@ -118,7 +118,7 @@ fun KyuchestrationDesktopScreen(
     /** 사람에게 물을 관문들(6.9). 맨 앞의 것이 대화 상자로 선다. */
     childSessionGateQuestions: List<ChildSessionGateQuestion>,
     onChildSessionChosen: (String) -> Unit,
-    onChildSessionGateAnswered: (childId: String, approved: Boolean) -> Unit,
+    onChildSessionGateAnswered: (question: ChildSessionGateQuestion, approved: Boolean) -> Unit,
 ) {
     KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -184,7 +184,7 @@ fun KyuchestrationDesktopScreen(
                         // 한 번에 하나씩 묻는다. 답하면 다음 물음이 맨 앞으로 온다.
                         childSessionGateQuestions.firstOrNull()?.let { question ->
                             ChildSessionGateDialog(question) { approved ->
-                                onChildSessionGateAnswered(question.childId, approved)
+                                onChildSessionGateAnswered(question, approved)
                             }
                         }
 

@@ -6,7 +6,6 @@ import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
 import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
-import com.kyuchestration.desktop.terminal.RecordedChildSessionIds
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -53,11 +52,9 @@ internal fun TestScope.stateHolder(
     diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
     permissionChannels: MutableList<FakeAppSocketChannel> = mutableListOf(),
     childSessionCommandSource: ChildSessionCommandSource = RecordingChildSessionCommandSource(),
-    recordedChildSessionIds: RecordedChildSessionIds = RecordedChildSessionIds { emptySet() },
 ) = ChatSessionStateHolder(
     sessionCommandSource = sessionCommandSource,
     childSessionCommandSource = childSessionCommandSource,
-    recordedChildSessionIds = recordedChildSessionIds,
     chatSessionOpener = opener,
     // 이 시험의 관심 밖이다. 자격 증명이 실리는지는 SessionEntryPlanTest 가 본다.
     claudeAuthToken = { null },
@@ -88,12 +85,16 @@ internal class RecordingSessionCommandSource : SessionCommandSource {
     /** 다음에 열 세션이 이어갈 대화. 진짜 어댑터에서는 엔진의 답이 이 값을 정한다. */
     var resumedConversationId: String? = null
 
+    /** 다음에 열 세션에 엔진이 stderr 로 남길 경고들(버려진 대화 기록 같은 것). */
+    var engineWarnings: List<String> = emptyList()
+
     private var respond: () -> SessionCommandAnswer = {
         SessionCommandAnswer(
             command = TEST_ENGINE_ANSWERED_COMMAND,
             workingDirectory = TEST_WORK_DIR_PATH,
             environmentToAdd = emptyMap(),
             resumedConversationId = resumedConversationId,
+            engineWarnings = engineWarnings,
         )
     }
 
@@ -257,12 +258,20 @@ internal class AskedSessionTreeForTest(
 /**
  * 엔진의 `--child` 자리. 기본은 상위가 고른 자리 그대로 띄울 수 있다고 답한다.
  *
+ * **이름은 엔진처럼 여기서 짓는다** — 띄울 수 있다고 답할 때마다 `child-<n>` 을 하나씩 늘린다(conversations.go 의
+ * nextChildSessionID). 앱은 이름을 묻지 않고 답에서 받는다.
+ *
  * 관문 · 거절 같은 다른 답은 시험이 [respondWith] 로 정한다.
  */
 internal class RecordingChildSessionCommandSource : ChildSessionCommandSource {
 
     val askedRequests = mutableListOf<ChildSessionCommandRequest>()
     val askedAppSocketPaths = mutableListOf<Path>()
+
+    /** 다음에 띄울 하위에 엔진이 stderr 로 남길 경고들. */
+    var engineWarnings: List<String> = emptyList()
+
+    private var assignedChildCount = 0
 
     private var respond: (ChildSessionCommandRequest) -> ChildSessionCommandAnswer = ::readyAnswerFor
 
@@ -280,26 +289,30 @@ internal class RecordingChildSessionCommandSource : ChildSessionCommandSource {
         return respond(request)
     }
 
-    companion object {
+    /** 엔진이 그 자리를 받아들이고 다음 이름으로 대화를 배정한 답. */
+    fun readyAnswerFor(request: ChildSessionCommandRequest): ChildSessionCommandAnswer.Ready {
+        assignedChildCount++
+        return readyAnswerFor(request, childId = "child-$assignedChildCount")
+    }
 
-        /** 엔진이 그 자리를 받아들이고 대화를 배정한 답. */
-        fun readyAnswerFor(request: ChildSessionCommandRequest): ChildSessionCommandAnswer.Ready {
-            val relativeCwd = request.requestedCwd ?: "."
-            return ChildSessionCommandAnswer.Ready(
-                sessionCommandAnswer = SessionCommandAnswer(
-                    command = TEST_ENGINE_ANSWERED_COMMAND,
-                    workingDirectory = TEST_WORK_DIR_PATH.resolve(relativeCwd).normalize(),
-                    environmentToAdd = emptyMap(),
-                    resumedConversationId = null,
-                ),
-                assignedChildSession = AssignedChildSession(
-                    childId = request.childId,
-                    relativeCwd = relativeCwd,
-                    title = request.title ?: relativeCwd,
-                    conversationId = "conversation-${request.childId}",
-                ),
-            )
-        }
+    /** 엔진이 [childId] 라는 이름으로 대화를 배정한 답. */
+    fun readyAnswerFor(request: ChildSessionCommandRequest, childId: String): ChildSessionCommandAnswer.Ready {
+        val relativeCwd = request.requestedCwd ?: "."
+        return ChildSessionCommandAnswer.Ready(
+            sessionCommandAnswer = SessionCommandAnswer(
+                command = TEST_ENGINE_ANSWERED_COMMAND,
+                workingDirectory = TEST_WORK_DIR_PATH.resolve(relativeCwd).normalize(),
+                environmentToAdd = emptyMap(),
+                resumedConversationId = null,
+                engineWarnings = engineWarnings,
+            ),
+            assignedChildSession = AssignedChildSession(
+                childId = childId,
+                relativeCwd = relativeCwd,
+                title = request.title ?: relativeCwd,
+                conversationId = "conversation-$childId",
+            ),
+        )
     }
 }
 

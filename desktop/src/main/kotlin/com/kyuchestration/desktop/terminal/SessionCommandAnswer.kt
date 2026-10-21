@@ -26,10 +26,16 @@ import java.nio.file.Path
  *
  *   명령 안에도 같은 값이 있지만 argv 를 되읽지 않는다. 그러면 앱이 `--resume` 뒤의 자리를
  *   아는 셈이 되고, 그 앎은 엔진에만 있어야 한다(설계 원칙 11).
+ * @param engineWarnings 엔진이 이 세션을 열며 사람에게 남긴 말 — 버린 대화 기록 같은 것. 한 줄이 하나다.
+ *
+ *   엔진은 답한 뒤에도 0 으로 끝나므로 이 말은 실패가 아니다. 문서(stdout)에 섞지 않고 stderr 로 내는 것이
+ *   엔진의 관례라(session_command.go 의 conversationForLabel) 앱이 받아 그 세션의 챗에 세운다 — 받지 않으면
+ *   사람은 앞 대화가 왜 이어지지 않았는지 모른다.
  */
 data class SessionCommandAnswer(
     val command: List<String>,
     val workingDirectory: Path,
     val environmentToAdd: Map<String, String>,
     val resumedConversationId: String?,
+    val engineWarnings: List<String>,
 )

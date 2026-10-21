@@ -111,29 +111,6 @@ enum class ChildEndReason(val wireName: String) {
     ParentEnded("parent_ended"),
 }
 
-/** 다음 하위의 이름과, 이번 실행에서 그 이름까지 썼다는 수. */
-data class ChildSessionIdAssignment(val childId: String, val ordinal: Int)
-
-/**
- * 다음 하위의 이름을 정한다 — `child-<n>`, 기록과 이번 실행에서 쓴 수 모두의 뒤.
- *
- * **기록을 함께 보는 이유**: 엔진은 같은 상위 아래 같은 id 를 다시 받지 않는다(conversations.go 의
- * StartChildSessionConversation). 앱을 다시 켜면 메모리의 수는 0 이지만 기록에는 앞 실행의 하위가
- * 남아 있고, 이어간 상위의 전사에도 그 이름이 있다(6.15). 같은 이름을 다시 쓰면 엔진이 거절하고,
- * 거절하지 않더라도 상위는 다른 두 하위를 한 이름으로 읽는다.
- *
- * **이번 실행의 수를 함께 보는 이유**: 이름은 엔진에게 묻기 전에 정하므로 아직 기록에 없다.
- *
- * @param recordedChildIds 기록에서 메인 아래 적혀 있는 하위 id 들. 우리 모양(`child-<n>`)이 아닌 것은 세지 않는다.
- */
-fun nextChildSessionId(recordedChildIds: Set<String>, lastAssignedOrdinal: Int): ChildSessionIdAssignment {
-    val highestRecordedOrdinal = recordedChildIds
-        .mapNotNull { CHILD_SESSION_ID_PATTERN.matchEntire(it)?.groupValues?.get(1)?.toIntOrNull() }
-        .maxOrNull() ?: 0
-    val ordinal = maxOf(highestRecordedOrdinal, lastAssignedOrdinal) + 1
-    return ChildSessionIdAssignment(childId = "$CHILD_SESSION_ID_PREFIX$ordinal", ordinal = ordinal)
-}
-
 /**
  * 하위의 대화에서 지금 기다리는 것을 읽는다.
  *
@@ -154,7 +131,3 @@ fun childWaitingFor(
     conversation.turnState != TurnState.Idle || conversation.pendingUserMessages.isNotEmpty() -> ChildWaitingFor.Model
     else -> ChildWaitingFor.Nothing
 }
-
-private const val CHILD_SESSION_ID_PREFIX = "child-"
-
-private val CHILD_SESSION_ID_PATTERN = Regex("""child-(\d+)""")

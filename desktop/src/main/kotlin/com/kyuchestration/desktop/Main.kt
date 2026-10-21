@@ -37,7 +37,6 @@ import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.chat.ChatSessionStateHolder
 import com.kyuchestration.desktop.terminal.chat.ProcessChatSessionOpener
-import com.kyuchestration.desktop.terminal.coordrecord.CoordConversationRecordChildSessionIds
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.theme.ThemePreference
@@ -152,7 +151,6 @@ private fun runDesktopApplication(
             chatSessionOpener = ProcessChatSessionOpener(),
             // 하위 세션도 엔진이 조립한다(원칙 11) — 앱이 넘기는 것은 상위가 고른 것과 누가 살아 있는가뿐이다.
             childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),
-            recordedChildSessionIds = CoordConversationRecordChildSessionIds(),
             // 세션을 띄우는 순간의 값을 묻는다. 조립 시점에는 아직 인증 화면을 지나기 전이라
             // 값이 없고, 지나고 나면 이 자리가 그것을 답한다.
             claudeAuthToken = { claudeAuthenticationStateHolder.tokenForSessions.value },

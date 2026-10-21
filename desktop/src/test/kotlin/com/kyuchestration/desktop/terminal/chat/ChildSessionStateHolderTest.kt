@@ -8,7 +8,6 @@ import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -71,13 +70,32 @@ class ChildSessionStateHolderTest {
     }
 
     @Test
-    fun `기록에 남은 하위 뒤에서 이름을 센다`() = runTest {
-        val tree = sessionTreeTestBed(recordedChildIds = setOf("child-1", "child-2"))
+    fun `하위의 이름은 엔진이 지어 답한 것을 그대로 쓴다`() = runTest {
+        // 이름을 짓는 길이 둘이면 어긋날 수 있다. 엔진은 기록을 보고 짓고(conversations.go 의 nextChildSessionID),
+        // 앱은 그 답을 트리 · 화면 · 상위의 답에 그대로 싣는다.
+        val tree = sessionTreeTestBed()
+        tree.childSource.respondWith { tree.childSource.readyAnswerFor(it, childId = "child-7") }
 
         val asked = tree.mainChannel().askSessionTree(spawn("일해", cwd = "proj-a"))
         runCurrent()
 
-        assertEquals("child-3", assertIs<SessionTreeAnswer.Spawned>(asked.answerSoFar()).childId)
+        assertEquals("child-7", assertIs<SessionTreeAnswer.Spawned>(asked.answerSoFar()).childId)
+        assertEquals(listOf("child-7"), tree.holder.sessionTree.value.children.map { it.childId })
+        assertEquals(listOf<SessionTarget>(SessionTarget.Main, SessionTarget.Child("child-7")), tree.holder.heldSessions.value.map { it.target })
+        assertEquals(listOf("[상위 세션] 일해"), tree.childSession(1).sentMessages.map { it.text })
+    }
+
+    @Test
+    fun `엔진이 하위를 열며 남긴 경고가 그 하위의 챗에 선다`() = runTest {
+        val tree = sessionTreeTestBed()
+        tree.childSource.engineWarnings = listOf("하위 기록 하나를 버렸습니다")
+
+        tree.mainChannel().askSessionTree(spawn("일해", cwd = "proj-a"))
+        runCurrent()
+        tree.holder.showChildSession("child-1")
+
+        val conversation = assertIs<ChatScreenState.ChatOnScreen>(tree.holder.state.value).conversation
+        assertEquals(listOf<ChatEntry>(ChatEntry.EngineNotice("하위 기록 하나를 버렸습니다")), conversation.entries)
     }
 
     @Test
@@ -123,7 +141,7 @@ class ChildSessionStateHolderTest {
         val tree = sessionTreeTestBed()
         tree.childSource.respondWith {
             throw TerminalSessionFailure.SessionCommandRefused(
-                targetLabel = it.childId,
+                targetLabel = "새 하위",
                 exitCode = 1,
                 arguments = emptyList(),
                 standardError = "워크디렉토리 밖입니다: ../elsewhere",
@@ -149,6 +167,7 @@ class ChildSessionStateHolderTest {
                 workingDirectory = TEST_WORK_DIR_PATH.resolve("proj-a"),
                 environmentToAdd = emptyMap(),
                 resumedConversationId = null,
+                engineWarnings = emptyList(),
             )
         }
         tree.holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Repo("proj-a"), SessionConversationChoice.ContinueRecordedConversation)
@@ -245,29 +264,12 @@ class ChildSessionStateHolderTest {
         assertEquals(ChildWaitingFor.Approval, tree.holder.sessionTree.value.child("child-1")?.waitingFor)
     }
 
-    @Test
-    fun `띄우지 못한 하위의 이름은 다시 쓰지 않는다`() = runTest {
-        // 엔진이 거절한 이름이라도 기록에 적혔을 수 있다 — 같은 실행에서 다시 고르지 않는다.
-        val tree = sessionTreeTestBed()
-        tree.childSource.respondWith { throw TerminalSessionFailure.ChatProcessFailedToStart(IllegalStateException("없음")) }
-        tree.mainChannel().askSessionTree(spawn("하나", cwd = "proj-a"))
-        runCurrent()
-        tree.childSource.respondWith(RecordingChildSessionCommandSource::readyAnswerFor)
-
-        val asked = tree.mainChannel().askSessionTree(spawn("둘", cwd = "proj-a"))
-        runCurrent()
-
-        assertEquals("child-2", assertIs<SessionTreeAnswer.Spawned>(asked.answerSoFar()).childId)
-        assertNull(tree.holder.sessionTree.value.child("child-1"))
-    }
-
     private fun spawn(prompt: String, cwd: String?) =
         SessionTreeRequest.SpawnSession(prompt = prompt, requestedCwd = cwd, createDirectory = false, title = null)
 
     /** 메인(또는 고른 세션) 하나를 띄워 둔 홀더와 그 대역들. */
     private fun TestScope.sessionTreeTestBed(
         firstSession: PersonOpenedSessionTarget = SessionTarget.Main,
-        recordedChildIds: Set<String> = emptySet(),
     ): SessionTreeTestBed {
         val opener = RecordingChatSessionOpener()
         val commandSource = RecordingSessionCommandSource()
@@ -278,7 +280,6 @@ class ChildSessionStateHolderTest {
             sessionCommandSource = commandSource,
             permissionChannels = channels,
             childSessionCommandSource = childSource,
-            recordedChildSessionIds = { recordedChildIds },
         )
         holder.enterSession(TEST_WORK_DIR_PATH, firstSession, SessionConversationChoice.ContinueRecordedConversation)
         runCurrent()

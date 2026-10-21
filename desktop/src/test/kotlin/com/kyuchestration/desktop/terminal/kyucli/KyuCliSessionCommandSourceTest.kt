@@ -49,6 +49,32 @@ class KyuCliSessionCommandSourceTest {
     }
 
     @Test
+    fun `성공한 답의 stderr 줄들은 엔진이 사람에게 하는 경고다`() {
+        // 엔진은 대화 기록을 버려도 세션은 연다 — 그 사실은 stdout 의 문서가 아니라 stderr 로 온다(session_command.go).
+        val runner = RecordingKyuCommandRunner {
+            KyuCommandResult(
+                exitCode = 0,
+                standardOutput = REPO_SESSION_DOCUMENT,
+                standardError = "대화 기록을 읽지 못해 버렸습니다\n\n이어갈 대화 없이 새로 엽니다\n",
+            )
+        }
+
+        val answer = KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
+
+        // 빈 줄은 말이 아니다.
+        assertEquals(listOf("대화 기록을 읽지 못해 버렸습니다", "이어갈 대화 없이 새로 엽니다"), answer.engineWarnings)
+    }
+
+    @Test
+    fun `stderr 가 비면 경고도 없다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
+
+        val answer = KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
+
+        assertEquals(emptyList(), answer.engineWarnings)
+    }
+
+    @Test
     fun `kyu 가 거절하면 그 이유를 그대로 올린다`() {
         val runner = RecordingKyuCommandRunner {
             KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "없는 레포입니다: proj-z\n")

@@ -22,14 +22,19 @@ class KyuCliChildSessionCommandSource(
         appSocketPath: Path,
     ): ChildSessionCommandAnswer {
         val arguments = childSessionCommandArguments(request, appSocketPath)
-        val standardOutput = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = request.childId)
-        return parseKyuChildSessionCommandOutput(standardOutput)
+        // 거절된 하위에게는 아직 이름이 없다 — 이름은 엔진이 기록에 적을 때 짓는다.
+        val output = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = UNNAMED_CHILD_SESSION_LABEL)
+        return parseKyuChildSessionCommandOutput(output.standardOutput, output.engineWarnings)
     }
 }
 
 /**
- * `kyu session-command --chat --child <id> [--cwd …] [--create-directory] [--title …] [--live-child-cwd …]…
+ * `kyu session-command --chat --child [--cwd …] [--create-directory] [--title …] [--live-child-cwd …]…
  * [--approve-fingerprint …] --app-socket <p> --json`.
+ *
+ * **`--child` 에 id 를 붙이지 않는다.** 엔진이 기록을 보고 `child-<n>` 을 지어 답의 `childSession.id` 로 돌려준다
+ * (conversations.go 의 nextChildSessionID). 앱이 따로 지으면 이름을 짓는 길이 둘이 되어 어긋날 수 있다 — 앱의 수는
+ * 앱을 켤 때마다 비지만 기록은 남는다.
  *
  * 상위가 생략한 것은 옵션도 생략한다. 생략의 풀이(루트 · cwd 의 마지막 이름)는 엔진의 몫이라, 앱이 빈 값을
  * 붙이면 그 풀이를 앱이 대신 정한 셈이 된다.
@@ -42,7 +47,6 @@ private fun childSessionCommandArguments(request: ChildSessionCommandRequest, ap
         add("session-command")
         add(CHAT_MODE_OPTION)
         add(CHILD_SESSION_OPTION)
-        add(request.childId)
         request.requestedCwd?.let { addAll(listOf(CHILD_CWD_OPTION, it)) }
         if (request.createDirectory) {
             add(CREATE_DIRECTORY_OPTION)
@@ -61,3 +65,5 @@ private const val CREATE_DIRECTORY_OPTION = "--create-directory"
 private const val CHILD_TITLE_OPTION = "--title"
 private const val LIVE_CHILD_CWD_OPTION = "--live-child-cwd"
 private const val APPROVE_FINGERPRINT_OPTION = "--approve-fingerprint"
+
+private const val UNNAMED_CHILD_SESSION_LABEL = "새 하위"

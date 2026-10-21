@@ -11,7 +11,7 @@ class KyuSessionCommandOutputTest {
 
     @Test
     fun `앱이 실행할 argv 를 순서 그대로 읽는다`() {
-        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         // 순서가 곧 계약이다. 정렬하거나 중복을 걷어내면 --add-dir 이 자기 값과 갈라진다.
         assertEquals(
@@ -27,7 +27,7 @@ class KyuSessionCommandOutputTest {
 
     @Test
     fun `cwd 를 그 세션의 작업 디렉토리로 읽는다`() {
-        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         // 레포 세션에서 이 한 줄이 그 레포의 .mcp.json 과 CLAUDE.md 를 살린다.
         assertEquals(Path.of("/home/me/work/WorkDir-featureX/proj-a"), answer.workingDirectory)
@@ -35,14 +35,14 @@ class KyuSessionCommandOutputTest {
 
     @Test
     fun `더할 환경을 그대로 읽는다`() {
-        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         assertEquals(mapOf("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" to "1"), answer.environmentToAdd)
     }
 
     @Test
     fun `더할 것이 없으면 빈 환경이다`() {
-        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         assertEquals(emptyMap(), answer.environmentToAdd)
     }
@@ -61,6 +61,7 @@ class KyuSessionCommandOutputTest {
               "answeredAt": "2026-08-31T00:00:00Z"
             }
             """.trimIndent(),
+            NO_ENGINE_WARNINGS,
         )
 
         assertEquals(listOf("claude"), answer.command)
@@ -68,7 +69,7 @@ class KyuSessionCommandOutputTest {
 
     @Test
     fun `이어간 대화의 ID 를 그대로 읽는다`() {
-        val answer = parseKyuSessionCommandOutput(RESUMED_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(RESUMED_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         // 앱이 이 값을 만들거나 해석하지 않는다. 들고 있다가 세션이 끝났을 때 "이어가기로 연
         // 세션이었다" 를 말하는 데만 쓴다(설계 문서 5.5.4).
@@ -77,7 +78,7 @@ class KyuSessionCommandOutputTest {
 
     @Test
     fun `새 대화면 이어간 대화가 없다`() {
-        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         assertNull(answer.resumedConversationId)
     }
@@ -86,7 +87,7 @@ class KyuSessionCommandOutputTest {
     fun `그 필드를 내지 않는 엔진과 만나도 세션은 열린다`() {
         // 엔진과 앱은 따로 배포된다. 여기서 멈추면 뒤처진 kyu 를 쓰는 사람은 카드를 눌러도
         // 세션이 아예 열리지 않는다 — 잃어도 되는 것은 실패를 가려내는 눈 하나뿐이다.
-        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT)
+        val answer = parseKyuSessionCommandOutput(REPO_SESSION_DOCUMENT, NO_ENGINE_WARNINGS)
 
         assertNull(answer.resumedConversationId)
         assertEquals(listOf("claude", "--resume", "211f6974-88a8-4453-9248-a02b0d6febae"), answer.command)
@@ -97,6 +98,7 @@ class KyuSessionCommandOutputTest {
         val failure = assertFailsWith<TerminalSessionFailure.UnsupportedSchemaVersion> {
             parseKyuSessionCommandOutput(
                 """{"schemaVersion": 2, "command": ["claude"], "cwd": "/tmp", "env": {}}""",
+                NO_ENGINE_WARNINGS,
             )
         }
 
@@ -107,11 +109,20 @@ class KyuSessionCommandOutputTest {
     @Test
     fun `문서가 아닌 것을 받으면 읽지 못했다고 답한다`() {
         assertFailsWith<TerminalSessionFailure.UnreadableKyuOutput> {
-            parseKyuSessionCommandOutput("이건 JSON 이 아닙니다")
+            parseKyuSessionCommandOutput("이건 JSON 이 아닙니다", NO_ENGINE_WARNINGS)
         }
     }
 
+    @Test
+    fun `엔진의 경고를 답에 그대로 싣는다`() {
+        val answer = parseKyuSessionCommandOutput(MAIN_SESSION_DOCUMENT, listOf("대화 기록을 버렸습니다"))
+
+        assertEquals(listOf("대화 기록을 버렸습니다"), answer.engineWarnings)
+    }
+
     private companion object {
+        val NO_ENGINE_WARNINGS = emptyList<String>()
+
         val MAIN_SESSION_DOCUMENT = """
             {
               "schemaVersion": 1,
