@@ -229,8 +229,22 @@ func TestWithTheSessionTreeRunInRepoSaysItIsRetiringAndPointsToSpawnSession(t *t
 	if !strings.Contains(descriptions["spawn_session"], "run_in_repo") {
 		t.Errorf("spawn_session 의 설명 = %q, run_in_repo 의 자리를 가리키기를 기대", descriptions["spawn_session"])
 	}
-	if !strings.Contains(descriptions["list_repos"], "spawn_session") {
-		t.Errorf("list_repos 의 설명 = %q, 레포 이름을 spawn_session 의 cwd 로 쓰는 길을 기대", descriptions["list_repos"])
+
+	// 모델이 이 도구의 쓰임을 정하는 것은 첫 문단이다. 첫 문단이 "run_in_repo 의 repo 인자" 를 말하면
+	// 끝에 붙은 spawn_session 안내보다 먼저 읽혀 레포 목록을 본 모델을 run_in_repo 로 보낸다.
+	firstParagraph, _, _ := strings.Cut(descriptions["list_repos"], "\n\n")
+	if !strings.Contains(firstParagraph, "spawn_session") || strings.Contains(firstParagraph, "run_in_repo") {
+		t.Errorf("list_repos 의 첫 문단 = %q, run_in_repo 가 아니라 spawn_session 의 cwd 를 말하기를 기대", firstParagraph)
+	}
+}
+
+func TestWithoutTheSessionTreeListReposStillLeadsToRunInRepo(t *testing.T) {
+	// 소켓이 없으면 레포에 일을 시키는 길은 run_in_repo 하나다. 첫 문단이 그대로 그 길을 말한다.
+	descriptions := listedToolDescriptionsForTest(t, []string{makeWorkDir(t)})
+
+	firstParagraph, _, _ := strings.Cut(descriptions["list_repos"], "\n\n")
+	if !strings.Contains(firstParagraph, "run_in_repo") {
+		t.Errorf("소켓 없는 list_repos 의 첫 문단 = %q, run_in_repo 의 repo 인자를 말하기를 기대", firstParagraph)
 	}
 }
 

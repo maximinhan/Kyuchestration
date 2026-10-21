@@ -22,21 +22,28 @@ import (
 // listReposToolName 은 모델이 이 도구를 부르는 이름이다.
 const listReposToolName = "list_repos"
 
+// list_repos 설명은 첫 문단(무엇을 답하고 그 이름을 어디에 쓰는가)과 필드 풀이로 나뉜다. 첫 문단이 모델을
+// 다음 도구로 보내는 자리라, 세션 트리가 있으면 그 문단을 통째로 갈아 끼운다(orchestrationTools, 6.16).
 const listReposToolDescription = `이 워크디렉토리에 클론되어 있는 레포 목록과 각 레포의 상태를 답한다.
-
 run_in_repo 의 repo 인자로 넣을 수 있는 이름이 여기에 있는 것뿐이다. 레포는 도중에 클론될 수
 있으므로, 위임하기 전에 이 도구로 확인한다.
 
-state 는 git 을 관찰한 결과다 — DIRTY(커밋되지 않은 변경) · AHEAD(푸시가 남음) · IDLE(넘길 것 없음).
+` + listReposFieldsDescription
+
+// listReposSessionTreeToolDescription 은 세션 트리 도구가 함께 보일 때의 설명이다.
+//
+// 레포는 워크디렉토리 바로 아래 폴더라(workdir.ScanRepos) 그 이름이 곧 spawn_session 의 cwd 다. 첫 문단이
+// run_in_repo 의 repo 인자를 말하면 레포 목록을 본 모델은 은퇴 예정인 그쪽으로 간다.
+const listReposSessionTreeToolDescription = `이 워크디렉토리에 클론되어 있는 레포 목록과 각 레포의 상태를 답한다.
+레포 이름은 워크디렉토리 바로 아래 폴더 이름이라 spawn_session 의 cwd 로 그대로 준다. 레포는 도중에
+클론될 수 있으므로, 레포에 하위 세션을 띄우기 전에 이 도구로 확인한다.
+
+` + listReposFieldsDescription
+
+const listReposFieldsDescription = `state 는 git 을 관찰한 결과다 — DIRTY(커밋되지 않은 변경) · AHEAD(푸시가 남음) · IDLE(넘길 것 없음).
 task 는 .coord/plan.md 에서 이 레포를 가리키는 작업이다. 없으면 null 이다.
 recentDelegation 은 이 레포에서 마지막으로 끝난 위임이다 — 위임한 적이 없으면 null 이고,
 지금 도는 중인 위임은 여기 나오지 않는다.`
-
-// listReposSpawnSessionNote 는 세션 트리 도구가 함께 보일 때 list_repos 설명에 더하는 한 줄이다(6.16).
-//
-// 레포는 워크디렉토리 바로 아래 폴더라(workdir.ScanRepos) 그 이름이 곧 spawn_session 의 cwd 다. 이 줄이
-// 없으면 설명이 run_in_repo 의 repo 인자만 말하므로, 레포 목록을 본 모델은 run_in_repo 로 간다.
-const listReposSpawnSessionNote = "레포 이름은 워크디렉토리 바로 아래 폴더 이름이라 spawn_session 의 cwd 로 그대로 준다."
 
 // listReposAnswer 는 list_repos 가 모델에게 답하는 문서다.
 //

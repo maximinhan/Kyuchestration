@@ -111,7 +111,7 @@ func orchestrationTools(workDirPath, appSocketPath string, bypassPermissions boo
 		return []mcpserver.Tool{listReposTool, runInRepoTool}
 	}
 
-	listReposTool.Description += "\n\n" + listReposSpawnSessionNote
+	listReposTool.Description = listReposSessionTreeToolDescription
 	runInRepoTool.Description = runInRepoRetiringNotice + "\n\n" + runInRepoTool.Description
 	return append([]mcpserver.Tool{listReposTool, runInRepoTool}, sessionTreeTools(appSocketPath)...)
 }
