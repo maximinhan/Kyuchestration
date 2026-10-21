@@ -270,8 +270,7 @@ func TestSessionTreeToolDescriptionsNameTheContractTheModelReadsBack(t *testing.
 		"send_to_session": {"as_answer", "as_message", "순간 답한다"},
 		"await_session": {"turn_completed", "asked_parent", "session_ended", "user_spoke",
 			"events 가 빈", "턴을 끝내", "하위는 그대로"},
-		"list_sessions": {"waitingFor", "ended"},
-		"end_session":   {"session_ended", "await_session"},
+		"end_session": {"session_ended", "await_session"},
 	}
 	for toolName, words := range wantedWords {
 		for _, word := range words {
@@ -284,6 +283,29 @@ func TestSessionTreeToolDescriptionsNameTheContractTheModelReadsBack(t *testing.
 		if !strings.Contains(childDescriptions["ask_parent"], word) {
 			t.Errorf("ask_parent 의 설명 = %q, %q 를 담기를 기대", childDescriptions["ask_parent"], word)
 		}
+	}
+}
+
+func TestListSessionsDescriptionNamesTheEndedStateAndEveryWaitingForValue(t *testing.T) {
+	// 6.2 의 list_sessions 계약 — 끝난 하위도 state: ended 로 보이고, waitingFor 는 넷 중 하나다. 부분
+	// 문자열("ended")로 보면 "ended_by_human" 같은 다른 낱말에도 맞아 계약이 빠져도 통과한다.
+	description := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))["list_sessions"]
+
+	if !strings.Contains(description, "state: ended") {
+		t.Errorf("list_sessions 의 설명 = %q, 정확한 토큰 'state: ended' 를 기대", description)
+	}
+
+	_, afterWaitingFor, found := strings.Cut(description, "waitingFor: ")
+	waitingForList, _, closed := strings.Cut(afterWaitingFor, ")")
+	if !found || !closed {
+		t.Fatalf("list_sessions 의 설명 = %q, 'waitingFor: … )' 목록을 기대", description)
+	}
+	var waitingForValues []string
+	for _, value := range strings.Split(waitingForList, "·") {
+		waitingForValues = append(waitingForValues, strings.TrimSpace(value))
+	}
+	if want := []string{"nothing", "model", "parent", "approval"}; !slices.Equal(waitingForValues, want) {
+		t.Errorf("list_sessions 설명의 waitingFor 값 = %q, want %q", waitingForValues, want)
 	}
 }
 
