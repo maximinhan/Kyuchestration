@@ -79,6 +79,16 @@ class ConnectionAnswer<T> {
 
     private val closedBeforeAnswer = CompletableDeferred<Boolean>()
 
+    /**
+     * 답하기 전에 상대가 연결을 닫았는가 — 기다리지 않고 지금 묻는다.
+     *
+     * 답을 만드는 데 시간이 걸리는 자리(하위 프로세스를 띄우는 spawn)가 답하기 직전에 묻는다. 그 사이 연결이 죽었으면
+     * 만든 것을 거둬야 한다 — 답이 갈 곳이 없으면 상위는 그것이 생긴 줄 모른다.
+     */
+    @Volatile
+    var connectionClosedBeforeAnswer: Boolean = false
+        private set
+
     /** 답한다. 두 번 불러도 첫 답만 간다. */
     fun complete(value: T) {
         answer.complete(value)
@@ -88,6 +98,7 @@ class ConnectionAnswer<T> {
     /** 상대가 연결을 닫았다. 이미 답했으면 정상의 끝이라 아무 일도 하지 않는다. */
     internal fun markConnectionClosed() {
         if (!answer.isCompleted) {
+            connectionClosedBeforeAnswer = true
             closedBeforeAnswer.complete(true)
         }
     }

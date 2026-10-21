@@ -763,6 +763,14 @@ class ChatSessionStateHolder(
             return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
         }
 
+        // 띄우는 사이 spawn_session 호출이 거둬졌다(상위의 턴이 중단되어 kyu mcp serve 가 연결을 닫았다). 답이 갈 곳이
+        // 없으니 띄운 하위도 거둔다 — 남기면 상위가 모르는 하위가 트리에 서서 혼자 돈다. 관문 대화 상자의 감시는 사람이
+        // 답한 순간 끝나므로, 승인 뒤 프로세스를 띄우는 동안의 끊김은 여기서만 잡힌다.
+        if (asked.answer.connectionClosedBeforeAnswer) {
+            endSessionProcess(opened.held)
+            return SessionTreeAnswer.Refused("하위를 띄우는 사이 spawn_session 호출이 거둬져 띄운 하위를 끝냈습니다")
+        }
+
         val assigned = opened.assignedChildSession
         hold(opened.held)
         mutableSessionTree.value = mutableSessionTree.value.withChild(
