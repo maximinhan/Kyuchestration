@@ -7,6 +7,8 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
 import kotlin.io.path.getPosixFilePermissions
@@ -20,6 +22,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -27,6 +30,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -159,17 +163,13 @@ class AppSocketTest {
 
     @Test
     fun `모르는 kind 의 요청은 error 로 거절하고 화면에는 올리지 않는다`(): Unit = runBlocking {
-        // await · send · ask_parent 는 4b 가 채운다(session-tree-design.md 7 절). 그 전에 그런 줄이 오면 승인
-        // 카드로 오해하지 않고, 답하지 않아 상대를 영영 세워 두지도 않는다 — 이 앱이 그 요청을 모른다는 것을
-        // 그 줄의 답으로 말한다.
+        // 이 앱보다 먼저 올라간 엔진이 새 kind 를 보내는 자리다. 승인 카드로 오해하지 않고, 답하지 않아 상대를 영영
+        // 세워 두지도 않는다 — 이 앱이 그 요청을 모른다는 것을 그 줄의 답으로 말한다.
         val socket = openSocket()
 
-        val answer = askOverTheSocket(
-            socket.socketPath,
-            """{"kind":"await","ids":null,"waitSeconds":1800}""",
-        )
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"run_in_repo","repo":"proj-a"}""")
 
-        assertTrue(answer.getValue("error").contains("await"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
+        assertTrue(answer.getValue("error").contains("run_in_repo"), "거절 문구에 모르는 kind 가 보이기를 기대: $answer")
         assertFalse("decision" in answer, "모르는 요청에 승인 결정으로 답했습니다: $answer")
         assertNull(
             withTimeoutOrNull(NOTHING_ARRIVED_MILLIS) { socket.permissionRequests.first() },
@@ -193,12 +193,117 @@ class AppSocketTest {
                 connection.reader().readLine()
             }
         }
-        withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
 
         socket.close()
 
         assertNull(withTimeout(TEST_TIMEOUT_MILLIS) { asking.await() }, "소켓을 닫았는데 답이 돌아왔습니다")
+        // 그 물음을 지켜보던 쪽도 풀린다 — 오지 않을 답을 앱이 꺼질 때까지 기다리지 않는다.
+        assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { asked.awaitConnectionClosedBeforeAnswer() })
         assertFalse(socket.socketPath.exists(), "소켓 파일이 남았습니다 — 그 자리가 다음 세션의 발에 걸린다")
+    }
+
+    @Test
+    fun `답을 받기 전에 상대가 연결을 닫으면 그 요청이 끊겼다고 알린다`(): Unit = runBlocking {
+        // 상위의 await_session 이 중단되면 kyu mcp serve 가 연결을 닫는다(PR 68 · 6.4). 앱은 그것으로 그 기다림만 지운다.
+        val socket = openSocket()
+
+        val asking = async(Dispatchers.IO) {
+            SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).use { connection ->
+                connection.writer().apply {
+                    write("""{"kind":"await","ids":null,"waitSeconds":1800}""")
+                    newLine()
+                    flush()
+                }
+            }
+        }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+        asking.await()
+
+        assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { asked.awaitConnectionClosedBeforeAnswer() })
+    }
+
+    @Test
+    fun `답을 기다리던 승인 물음의 연결이 끊겨도 그 물음이 끊겼다고 알린다`(): Unit = runBlocking {
+        val socket = openSocket()
+
+        val asking = async(Dispatchers.IO) {
+            SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).use { connection ->
+                connection.writer().apply {
+                    write(question("toolu_cancelled"))
+                    newLine()
+                    flush()
+                }
+            }
+        }
+        val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.permissionRequests.first() }
+        asking.await()
+
+        assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { asked.awaitConnectionClosedBeforeAnswer() })
+    }
+
+    @Test
+    fun `답한 요청은 끊긴 것으로 알리지 않는다`(): Unit = runBlocking {
+        // 답을 쓴 뒤 앱이 연결을 닫는 것은 정상의 끝이다. 그것을 상대가 닫은 것으로 읽으면 이미 답한 기다림을 또 지운다.
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            asked.answerWith(SessionTreeAnswer.Awaited(emptyList(), emptyList()))
+            asked
+        }
+        askOverTheSocket(socket.socketPath, """{"kind":"await","ids":null,"waitSeconds":1800}""")
+
+        assertFalse(withTimeout(TEST_TIMEOUT_MILLIS) { answering.await().awaitConnectionClosedBeforeAnswer() })
+    }
+
+    @Test
+    fun `답을 기다리는 요청이 IO 풀보다 많아도 새 요청을 읽고 답하며 끊김도 알아챈다`(): Unit = runBlocking {
+        // 기다림(최대 3000 초) · 승인 · ask_parent 는 오래 열려 있다. 연결마다 스레드 하나를 막고 끊김을 지켜보면, 열린
+        // 요청이 IO 풀(64)을 다 쓰는 순간 새 요청은 읽히지도 않는다 — 그 풀은 stdin 쓰기 · 스트림 읽기와 함께 쓴다.
+        val socket = openSocket()
+        // 하나씩 열고 그 요청이 올라온 것을 받은 뒤 다음을 연다. 한꺼번에 열면 accept 전 대기열(backlog)이 넘쳐 맥에서는
+        // 연결이 거절되고, 요청이 올라오는 순서가 연 순서와 달라 어느 연결이 어느 요청인지 짝지을 수 없다.
+        val waitingConnections = mutableListOf<SocketChannel>()
+        val waitingRequests = mutableListOf<AskedSessionTreeRequest>()
+
+        try {
+            repeat(WAITING_REQUEST_COUNT) {
+                waitingConnections += SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).also { connection ->
+                    connection.writer().apply {
+                        write("""{"kind":"await","ids":null,"waitSeconds":3000}""")
+                        newLine()
+                        flush()
+                    }
+                }
+                waitingRequests += withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            }
+
+            // 시험 쪽 클라이언트는 IO 풀을 쓰지 않는다. 같은 풀을 쓰면 앱이 굶는 것과 시험이 굶는 것이 섞인다.
+            val listClient = Executors.newSingleThreadExecutor()
+            try {
+                val listAnswer = listClient.submit<String?> {
+                    SocketChannel.open(UnixDomainSocketAddress.of(socket.socketPath)).use { connection ->
+                        connection.writer().apply {
+                            write("""{"kind":"list"}""")
+                            newLine()
+                            flush()
+                        }
+                        connection.reader().readLine()
+                    }
+                }
+                val listRequest = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+                listRequest.answerWith(SessionTreeAnswer.Listed(emptyList()))
+                assertEquals("""{"sessions":[]}""", listAnswer.get(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            } finally {
+                listClient.shutdownNow()
+            }
+
+            waitingConnections.first().close()
+            assertTrue(withTimeout(TEST_TIMEOUT_MILLIS) { waitingRequests.first().awaitConnectionClosedBeforeAnswer() })
+        } finally {
+            waitingConnections.forEach { it.close() }
+        }
     }
 
     @Test
@@ -286,6 +391,69 @@ class AppSocketTest {
     }
 
     @Test
+    fun `send 요청도 세션 트리 요청으로 올라간다`(): Unit = runBlocking {
+        // 엔진의 sendToSessionRequest 모양 그대로다(mcp_session_tree.go).
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            assertEquals(SessionTreeRequest.SendToSession(childId = "child-1", message = "5433 을 써"), asked.request)
+            asked.answerWith(SessionTreeAnswer.DeliveredAsMessage)
+        }
+
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"send","id":"child-1","message":"5433 을 써"}""")
+        answering.await()
+
+        assertEquals(mapOf("delivered" to "as_message"), answer)
+    }
+
+    @Test
+    fun `await 요청은 기다릴 하위와 시간을 들고 올라간다`(): Unit = runBlocking {
+        // 엔진의 awaitSessionRequest 모양 그대로다(mcp_session_tree.go) — ids 를 생략하면 null 로 오고 waitSeconds 는 늘 실린다.
+        val socket = openSocket()
+
+        // 요청 하나가 연결 하나이고 답을 받아야 끝나므로, 하나씩 받아 그때그때 답한다.
+        val answering = async {
+            socket.sessionTreeRequests.take(2)
+                .onEach { it.answerWith(SessionTreeAnswer.Awaited(emptyList(), emptyList())) }
+                .toList()
+        }
+
+        withTimeout(TEST_TIMEOUT_MILLIS) {
+            askOverTheSocket(socket.socketPath, """{"kind":"await","ids":["child-1","child-2"],"waitSeconds":60}""")
+        }
+        withTimeout(TEST_TIMEOUT_MILLIS) {
+            askOverTheSocket(socket.socketPath, """{"kind":"await","ids":null,"waitSeconds":1800}""")
+        }
+        val requests = withTimeout(TEST_TIMEOUT_MILLIS) { answering.await() }
+
+        assertEquals(
+            listOf(
+                SessionTreeRequest.AwaitSessions(childIds = listOf("child-1", "child-2"), waitSeconds = 60),
+                SessionTreeRequest.AwaitSessions(childIds = null, waitSeconds = 1800),
+            ),
+            requests.map { it.request },
+        )
+    }
+
+    @Test
+    fun `ask_parent 요청은 그 물음을 들고 올라가고 상위의 답을 그대로 되돌린다`(): Unit = runBlocking {
+        // 하위의 kyu mcp serve --child 가 보낸다(mcp_session_tree.go 의 askParentRequest). 어느 하위인지는 이 소켓이 말한다.
+        val socket = openSocket()
+
+        val answering = async {
+            val asked = withTimeout(TEST_TIMEOUT_MILLIS) { socket.sessionTreeRequests.first() }
+            assertEquals(SessionTreeRequest.AskParent(message = "포트는?"), asked.request)
+            asked.answerWith(SessionTreeAnswer.ParentAnswered("5433"))
+        }
+
+        val answer = askOverTheSocket(socket.socketPath, """{"kind":"ask_parent","message":"포트는?"}""")
+        answering.await()
+
+        assertEquals(mapOf("answer" to "5433"), answer)
+    }
+
+    @Test
     fun `필드가 빠진 세션 트리 요청에는 승인 거부가 아니라 error 로 답한다`(): Unit = runBlocking {
         // 이 줄은 승인 물음이 아니다 — deny 로 답하면 엔진은 그것을 앱의 답으로 읽지 못하고 판이 어긋났다고 말한다.
         val socket = openSocket()
@@ -309,7 +477,7 @@ class AppSocketTest {
     /**
      * `kyu mcp ask` 노릇 — 물음 한 줄을 보내고 답 한 줄을 되읽는다.
      *
-     * 답의 필드를 문자열 맵으로 되돌린다. 객체 필드(updatedInput)는 원문 그대로 담으므로, 앱이
+     * 답의 필드를 문자열 맵으로 되돌린다. 객체·배열 필드(updatedInput · events)는 원문 그대로 담으므로, 앱이
      * 보낸 인자가 이 자리에서 한 번 더 손질되지 않는 것도 함께 확인된다.
      */
     private suspend fun askOverTheSocket(socketPath: Path, questionLine: String): Map<String, String> {
@@ -329,7 +497,7 @@ class AppSocketTest {
         assertTrue(answerLine != null, "앱이 답하지 않았습니다")
         val answer = assertIs<JsonObject>(Json.parseToJsonElement(answerLine))
         return answer.mapValues { (_, value) ->
-            if (value is JsonObject) value.toString() else value.jsonPrimitive.content
+            if (value is JsonObject || value is JsonArray) value.toString() else value.jsonPrimitive.content
         }
     }
 
@@ -341,6 +509,9 @@ class AppSocketTest {
 
     private companion object {
         const val TEST_TIMEOUT_MILLIS = 5_000L
+
+        /** Dispatchers.IO 의 기본 상한(64)보다 넉넉히 많다. */
+        const val WAITING_REQUEST_COUNT = 100
 
         /** "아무것도 오지 않았다" 를 확인하는 데 기다리는 시간. 왔다면 이 안에 온다. */
         const val NOTHING_ARRIVED_MILLIS = 500L

@@ -123,6 +123,7 @@ internal fun childSessionStatusLabel(node: ChildSessionNode): String = when (val
     is ChildLifecycle.Running -> when (node.waitingFor) {
         ChildWaitingFor.Nothing -> "쉬는 중"
         ChildWaitingFor.Model -> "도는 중"
+        ChildWaitingFor.Parent -> "상위에게 묻는 중"
         ChildWaitingFor.Approval -> "승인 대기"
     }
 

@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
+import java.time.Instant
 
 /**
  * 메인 아래 하위 세션들(session-tree-design.md 6.11).
@@ -44,6 +45,10 @@ data class SessionTree(val children: List<ChildSessionNode> = emptyList()) {
  *   `--live-child-cwd` 로 다시 넘길 때 앱이 손대지 않는다.
  * @param workingDirectory 그 `claude` 가 도는 절대 자리. 사람이 연 레포 세션과 같은 자리인지 견주는 근거다.
  * @param conversationId 엔진이 배정한 대화 ID. 기록(`childSessions`)과 이 하위를 잇는다.
+ * @param startedAt 앱이 이 하위를 띄운 시각. 앱의 시계다 — 띄운 것이 앱의 일이라 그 시각도 앱이 안다.
+ * @param lastTurnResult 하위의 마지막 턴이 남긴 결과. 아직 끝난 턴이 없으면 null. 상위가 `list_sessions` 로 하위의
+ *   침묵을 해석하는 재료이고, 앱 재시작 뒤 맥락을 되찾는 재료다(6.15).
+ * @param endedAt 하위가 끝난 시각. 살아 있으면 null.
  */
 data class ChildSessionNode(
     val childId: String,
@@ -51,8 +56,11 @@ data class ChildSessionNode(
     val relativeCwd: String,
     val workingDirectory: Path,
     val conversationId: String,
+    val startedAt: Instant,
     val waitingFor: ChildWaitingFor = ChildWaitingFor.Nothing,
     val lifecycle: ChildLifecycle = ChildLifecycle.Running,
+    val lastTurnResult: ChildTurnResult? = null,
+    val endedAt: Instant? = null,
 ) {
 
     val target: SessionTarget.Child get() = SessionTarget.Child(childId)
@@ -61,16 +69,23 @@ data class ChildSessionNode(
 /**
  * 하위가 지금 무엇을 기다리는가(6.2 의 `waitingFor`). 상위가 하위의 침묵을 해석할 재료다.
  *
- * 설계의 넷 중 `parent`(`ask_parent` 대기)는 그 도구가 서는 4b 에서 더한다 — 지금은 그 상태에 들
- * 길이 없다.
- *
  * @param wireName 앱 소켓의 답에 실리는 낱말.
  */
 enum class ChildWaitingFor(val wireName: String) {
     Nothing("nothing"),
     Model("model"),
+
+    /** `ask_parent` 로 상위의 답을 기다린다. 상위가 `send_to_session` 으로 답할 때까지 하위의 턴이 멈춰 있다. */
+    Parent("parent"),
     Approval("approval"),
 }
+
+/**
+ * 하위의 턴 하나가 남긴 결과(6.2 의 `lastTurnResult`).
+ *
+ * @param result 그 턴의 마지막 답 텍스트(`result.result`). 실패한 턴에서는 비어 있을 수 있다.
+ */
+data class ChildTurnResult(val result: String, val isError: Boolean)
 
 /** 하위의 수명(6.13). 살아 있거나, 어떤 이유로 끝났다. */
 sealed interface ChildLifecycle {
@@ -123,13 +138,19 @@ fun nextChildSessionId(recordedChildIds: Set<String>, lastAssignedOrdinal: Int):
  * 하위의 대화에서 지금 기다리는 것을 읽는다.
  *
  * **승인이 먼저다.** 승인 물음이 걸린 턴은 사람의 답 없이 나아가지 못하므로, 턴이 도는 중이라고 답하면
- * 상위는 기다리면 될 일로 읽는다.
+ * 상위는 기다리면 될 일로 읽는다. 상위에게 묻는 중인 것도 같은 까닭으로 모델보다 앞선다 — 그 턴은 상위의 답 없이
+ * 나아가지 못한다. 하위의 도구 호출은 차례로 돌아(3.3) 둘이 함께 걸리지는 않는다.
  *
  * **보낸 말이 남아 있으면 모델을 기다린다.** 첫 프롬프트를 쓴 직후에는 그 말이 아직 되돌아오지 않아
  * 턴이 시작되지 않은 것처럼 보이지만, 하위는 이미 일을 받았다.
  */
-fun childWaitingFor(conversation: ChatConversation, approvalPending: Boolean): ChildWaitingFor = when {
+fun childWaitingFor(
+    conversation: ChatConversation,
+    approvalPending: Boolean,
+    parentQuestionPending: Boolean,
+): ChildWaitingFor = when {
     approvalPending -> ChildWaitingFor.Approval
+    parentQuestionPending -> ChildWaitingFor.Parent
     conversation.turnState != TurnState.Idle || conversation.pendingUserMessages.isNotEmpty() -> ChildWaitingFor.Model
     else -> ChildWaitingFor.Nothing
 }

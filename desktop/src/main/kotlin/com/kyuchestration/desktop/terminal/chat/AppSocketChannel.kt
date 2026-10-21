@@ -2,6 +2,8 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -59,4 +61,51 @@ fun interface AppSocketChannelOpener {
      * @throws TerminalSessionFailure.ApprovalSocketPathTooLong 자리가 107 바이트를 넘을 때.
      */
     fun openAppSocketChannel(): AppSocketChannel
+}
+
+/**
+ * 연결 하나가 기다리는 답 — 앱이 답하거나, 그 전에 상대가 연결을 닫는다(session-tree-design.md 6.4).
+ *
+ * 승인 물음([AskedPermission])과 세션 트리 요청([AskedSessionTreeRequest])이 함께 쓴다. 둘 다 연결 하나가 답 하나를
+ * 기다리고, 둘 다 그 도구 호출이 중단되면 상대(`kyu mcp ask` · `kyu mcp serve`)가 연결을 닫는다(PR 68 · 3.2).
+ *
+ * **끊김을 알리는 것이 이 자리의 일이다.** 끊긴 줄을 모르면 앱은 답을 받을 쪽이 사라진 물음을 계속 들고 있다 —
+ * 승인 카드는 누를 수 있는 척하고, 관문 대화 상자는 상위가 모르는 하위를 띄우고, 상위의 기다림은 다음 사건을
+ * 아무도 읽지 않는 연결로 보낸다.
+ */
+class ConnectionAnswer<T> {
+
+    private val answer = CompletableDeferred<T>()
+
+    private val closedBeforeAnswer = CompletableDeferred<Boolean>()
+
+    /**
+     * 답하기 전에 상대가 연결을 닫았는가 — 기다리지 않고 지금 묻는다.
+     *
+     * 답을 만드는 데 시간이 걸리는 자리(하위 프로세스를 띄우는 spawn)가 답하기 직전에 묻는다. 그 사이 연결이 죽었으면
+     * 만든 것을 거둬야 한다 — 답이 갈 곳이 없으면 상위는 그것이 생긴 줄 모른다.
+     */
+    @Volatile
+    var connectionClosedBeforeAnswer: Boolean = false
+        private set
+
+    /** 답한다. 두 번 불러도 첫 답만 간다. */
+    fun complete(value: T) {
+        answer.complete(value)
+        closedBeforeAnswer.complete(false)
+    }
+
+    /** 상대가 연결을 닫았다. 이미 답했으면 정상의 끝이라 아무 일도 하지 않는다. */
+    internal fun markConnectionClosed() {
+        if (!answer.isCompleted) {
+            connectionClosedBeforeAnswer = true
+            closedBeforeAnswer.complete(true)
+        }
+    }
+
+    /** 소켓이 답을 기다리는 자리. 끊김과 함께 고를 수 있도록 Deferred 그대로 내준다. */
+    internal val answered: Deferred<T> get() = answer
+
+    /** 답하기 전에 상대가 연결을 닫았으면 참, 먼저 답했으면 거짓. 둘 중 하나가 일어날 때까지 기다린다. */
+    suspend fun awaitConnectionClosedBeforeAnswer(): Boolean = closedBeforeAnswer.await()
 }

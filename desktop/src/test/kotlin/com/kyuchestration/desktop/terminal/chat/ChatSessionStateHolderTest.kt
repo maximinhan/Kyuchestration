@@ -703,6 +703,7 @@ class ChatSessionStateHolderTest {
         usage = TurnUsage(inputTokens = 3, outputTokens = 41, cacheReadInputTokens = 0, cacheCreationInputTokens = 0),
         permissionDenials = emptyList(),
         durationMillis = 1_200,
+        resultText = "끝",
     )
 
     private companion object {

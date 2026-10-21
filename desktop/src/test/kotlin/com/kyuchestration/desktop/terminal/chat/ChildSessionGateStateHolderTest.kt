@@ -73,6 +73,41 @@ class ChildSessionGateStateHolderTest {
     }
 
     @Test
+    fun `관문을 묻는 중에 spawn 의 연결이 끊기면 물음을 거두고 아무것도 띄우지 않는다`() = runTest {
+        // 상위의 spawn_session 호출이 중단됐다(PR 68). 답을 받을 쪽이 사라졌는데 대화 상자가 남으면, 사람이 승인한 뒤에
+        // 상위가 모르는 하위가 뜬다.
+        val bed = gateTestBed(gates = listOf(GATE))
+        val asked = bed.mainChannel.askSessionTree(spawn())
+        runCurrent()
+
+        asked.closeConnection()
+        runCurrent()
+
+        assertEquals(emptyList(), bed.holder.gateQuestions.value)
+        assertEquals(1, bed.childSource.askedRequests.size)
+        assertEquals(1, bed.opener.openedSessions.size)
+        assertEquals(emptyList(), bed.holder.sessionTree.value.children)
+    }
+
+    @Test
+    fun `승인한 뒤 하위를 띄우는 사이 spawn 의 연결이 끊기면 띄운 하위를 끝내고 트리에 세우지 않는다`() = runTest {
+        // 사람이 승인한 순간 대화 상자의 감시는 끝나지만, 하위 프로세스가 뜨는 데는 시간이 걸린다. 그 사이 상위의 턴이
+        // 중단되면 Spawned 답은 죽은 소켓으로 가고, 상위가 모르는 하위가 남는다.
+        val bed = gateTestBed(gates = listOf(GATE))
+        val asked = bed.mainChannel.askSessionTree(spawn())
+        runCurrent()
+
+        bed.holder.answerGateQuestion("child-1", approved = true)
+        asked.closeConnection()
+        runCurrent()
+
+        assertEquals(2, bed.opener.openedSessions.size, "승인한 지문으로 하위를 띄우기는 했어야 합니다")
+        assertEquals(1, bed.opener.openedSessions[1].endSessionCount)
+        assertEquals(emptyList(), bed.holder.sessionTree.value.children)
+        assertEquals(listOf<SessionTarget>(SessionTarget.Main), bed.holder.heldSessions.value.map { it.target })
+    }
+
+    @Test
     fun `사람이 본 뒤 설정이 바뀌었으면 지금 내용으로 다시 묻는다`() = runTest {
         // 엔진은 지문이 지금 내용의 것일 때만 승인을 적는다(childSessionApprovalNeeded) — 바뀐 것은 새 물음이다.
         val changedGate = GATE.copy(

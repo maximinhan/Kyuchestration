@@ -322,6 +322,7 @@ private fun turnFinishedIn(line: JsonObject): ChatSessionEvent.TurnFinished {
             }
             .orEmpty(),
         durationMillis = line.longOrNull("duration_ms") ?: 0,
+        resultText = line.stringOrNull("result"),
     )
 }
 

@@ -386,7 +386,7 @@ private fun RepoSessionRow(
 /**
  * 메인이 띄운 하위 하나(6.12 의 레일 · 탭). 조율 블록에 딸린 것이라 레포 행처럼 가이드 선으로 들여쓴다.
  *
- * 무엇을 그리는가는 트리에 온 것뿐이다(원칙 15) — 턴이 도는가, 승인을 기다리는가, 끝났는가.
+ * 무엇을 그리는가는 트리에 온 것뿐이다(원칙 15) — 턴이 도는가, 승인이나 상위의 답을 기다리는가, 끝났는가.
  */
 @Composable
 private fun ChildSessionRow(child: ChildSessionNode, onScreen: Boolean, onChosen: () -> Unit) {
@@ -394,6 +394,8 @@ private fun ChildSessionRow(child: ChildSessionNode, onScreen: Boolean, onChosen
     val statusColor = when {
         ended -> MaterialTheme.colorScheme.onSurfaceVariant
         child.waitingFor == ChildWaitingFor.Approval -> KyuTheme.statusColors.caution
+        // 상위의 답 없이 나아가지 못하는 것은 승인과 같다. 답하는 쪽이 사람이 아니라 상위의 모델일 뿐이다.
+        child.waitingFor == ChildWaitingFor.Parent -> KyuTheme.statusColors.caution
         child.waitingFor == ChildWaitingFor.Model -> KyuTheme.statusColors.session
         else -> KyuTheme.statusColors.neutral
     }

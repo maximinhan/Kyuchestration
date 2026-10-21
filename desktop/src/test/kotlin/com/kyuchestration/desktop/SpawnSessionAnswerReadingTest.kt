@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.terminal.chat.ChildLifecycle
 import com.kyuchestration.desktop.terminal.chat.ChildSessionNode
 import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
 import java.nio.file.Path
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -52,6 +53,7 @@ class SpawnSessionAnswerReadingTest {
         assertEquals("도는 중", childSessionStatusLabel(node().copy(waitingFor = ChildWaitingFor.Model)))
         assertEquals("쉬는 중", childSessionStatusLabel(node()))
         assertEquals("승인 대기", childSessionStatusLabel(node().copy(waitingFor = ChildWaitingFor.Approval)))
+        assertEquals("상위에게 묻는 중", childSessionStatusLabel(node().copy(waitingFor = ChildWaitingFor.Parent)))
         assertEquals(
             "끝남 · 상위가 끝냄",
             childSessionStatusLabel(node().copy(lifecycle = ChildLifecycle.Ended(ChildEndReason.EndedByParent, 0))),
@@ -68,5 +70,6 @@ class SpawnSessionAnswerReadingTest {
         relativeCwd = "proj-a",
         workingDirectory = Path.of("/w/proj-a"),
         conversationId = "5e0c",
+        startedAt = Instant.parse("2026-10-20T10:01:12Z"),
     )
 }

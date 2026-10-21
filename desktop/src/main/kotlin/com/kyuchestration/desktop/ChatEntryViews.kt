@@ -3,7 +3,6 @@ package com.kyuchestration.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -72,7 +71,7 @@ internal fun ChatEntryView(
         // 중단 안내가 사용자 메시지와 같은 모양으로 온다(3.8). 가르는 자리가 여기다 —
         // 왜 어댑터가 아닌지는 isTurnInterruptionEcho 에 적혀 있다.
         is ChatEntry.UserSaid ->
-            if (isTurnInterruptionEcho(entry.text)) TurnInterruptedNotice() else UserMessageBubble(entry.text)
+            if (isTurnInterruptionEcho(entry.text)) TurnInterruptedNotice() else UserMessageBubble(entry)
         is ChatEntry.AssistantSaid -> AssistantMessageBlock(entry.text)
         is ChatEntry.AssistantThought -> ThinkingBlock(entry.text)
         // 서브에이전트 카드로 갈리는 근거는 도구 이름이 아니라 스트림이 말해 준 사실이다
@@ -88,6 +87,9 @@ internal fun ChatEntryView(
             // 하위 세션 띄우기도 우리 엔진이 정한 이름이다(mcp_session_tree.go).
             entry.toolName == SPAWN_SESSION_TOOL_NAME -> SpawnSessionCard(entry, onOpenChildSessionRequested)
 
+            // 하위가 상위에게 묻는 것도 그렇다. 하위의 챗에만 선다 — 하위의 서버만 이 도구를 갖는다(6.3).
+            entry.toolName == ASK_PARENT_TOOL_NAME -> AskParentCard(entry)
+
             else -> ToolCallCard(entry, sessionWorkingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
         }
 
@@ -99,24 +101,39 @@ internal fun ChatEntryView(
 }
 
 /**
- * 사용자가 한 말. 오른쪽에 붙는 말풍선이다.
+ * 사용자 메시지 자리로 들어온 말. 오른쪽에 붙는 말풍선이다.
  *
  * 폭을 다 쓰지 않는다. 모델의 말은 폭 전체를 흐르고 사용자의 말은 그러지 않는 것이, 둘을
  * 이름표 없이 가르는 가장 조용한 방법이다.
+ *
+ * **세션이 보낸 말은 이름표와 다른 바탕으로 그린다**(session-tree 6.12). 상위가 하위에게 한 말 · 하위가 쉬는 상위에게
+ * 한 말도 이 자리로 오는데, 사람의 말풍선과 같으면 사람은 자기가 하지 않은 말을 자기 것으로 읽는다. 누가 보냈는지는
+ * 접두가 아니라 앱이 정한 uuid 로 가른 것이다(ChatEntry.UserSaid.sender).
  */
 @Composable
-private fun UserMessageBubble(text: String) {
+private fun UserMessageBubble(entry: ChatEntry.UserSaid) {
+    val senderLabel = userMessageSenderLabel(entry.sender)
+    val (containerColor, contentColor) = if (senderLabel == null) {
+        MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+    }
+
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth(USER_BUBBLE_WIDTH_FRACTION)
-                .background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.large)
+                .background(containerColor, MaterialTheme.shapes.large)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            senderLabel?.let {
+                Text(text = it, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = contentColor)
+            }
             Text(
-                text = text,
+                text = entry.text,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                color = contentColor,
             )
         }
     }
@@ -855,6 +872,9 @@ private fun PermissionAnswerLine(answer: PermissionAnswer, toolLabel: String) {
             "이 세션의 규칙이 허용했습니다 — 묻지 않았습니다" to KyuTheme.statusColors.caution
 
         is PermissionAnswer.Denied -> "거부했습니다 — ${answer.reason}" to KyuTheme.statusColors.failure
+
+        is PermissionAnswer.Withdrawn ->
+            "답하기 전에 이 물음이 거둬졌습니다 — 그 턴이 중단되었습니다" to KyuTheme.statusColors.caution
     }
 
     Text(text = text, style = MaterialTheme.typography.labelMedium, color = color)

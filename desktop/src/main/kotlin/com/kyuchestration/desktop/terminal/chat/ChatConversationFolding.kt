@@ -36,7 +36,11 @@ internal fun ChatConversation.after(event: ChatSessionEvent): ChatConversation =
         copy(entries = entries.withEntryAdded(ChatEntry.UserSaid(event.text), event.parentToolUseId))
     } else {
         copy(
-            entries = entries + ChatEntry.UserSaid(event.text),
+            entries = entries + ChatEntry.UserSaid(
+                text = event.text,
+                sender = pendingUserMessages.firstOrNull { it.uuid == event.messageUuid }?.sender
+                    ?: UserMessageSender.Human,
+            ),
             pendingUserMessages = pendingUserMessages.filterNot { it.uuid == event.messageUuid },
             // 끊어 달라고 말해 둔 턴의 중단 안내도 이 이벤트로 온다(3.8). 그것을 새 턴의 시작으로
             // 읽으면 끊는 중이던 화면이 한순간 되살아난다.

@@ -4,14 +4,18 @@ import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.io.IOException
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
+import java.nio.ByteBuffer
 import java.nio.channels.Channels
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -34,7 +39,7 @@ import kotlinx.serialization.json.put
  * 세션 하나의 앱 소켓(chat-ui-design.md 5.4 · session-tree-design.md 6.4).
  *
  * 승인 물음을 받으려고 열었던 소켓이고, 세션 트리 요청이 두 번째 사용처로 더해지면서 이름을 바꿨다.
- * 줄마다 `kind` 가 붙는다 — `permission` 은 승인 카드로, `spawn` · `end` · `list` 는 세션 트리로 간다.
+ * 줄마다 `kind` 가 붙는다 — `permission` 은 승인 카드로, 나머지(`spawn` · `send` · `end` · `list`)는 세션 트리로 간다.
  *
  * **왜 소켓인가.** 승인 도구를 여는 `kyu mcp ask` 는 `claude` 의 자식이고, 결정을 내리는 사람은
  * 앱 앞에 있다. 자식에서 부모로 물어볼 통로가 있어야 하는데, TCP 루프백은 같은 머신의 다른
@@ -86,6 +91,9 @@ class AppSocket private constructor(
      */
     private val listening = CoroutineScope(Dispatchers.IO + SupervisorJob() + CoroutineName("permission-socket"))
 
+    /** 답을 기다리는 연결들이 상대 쪽에서 닫히는지 지켜보는 자리. 이 소켓의 열린 요청 전부를 스레드 하나로 본다. */
+    private val peerClosingWatcher = AppSocketPeerClosingWatcher.start(socketPath.fileName.toString())
+
     init {
         listening.launch {
             while (isActive) {
@@ -113,6 +121,7 @@ class AppSocket private constructor(
         // 먼저 접는다. 답을 기다리던 코루틴들이 풀리면서 그 연결이 닫히고, 그것이 자식에게는
         // "물어볼 사람이 사라졌다" 는 뜻이 된다(mcp_ask.go 가 EOF 를 거절로 읽는다).
         listening.cancel()
+        peerClosingWatcher.close()
         incoming.close()
         incomingSessionTreeRequests.close()
 
@@ -133,51 +142,96 @@ class AppSocket private constructor(
      * **읽을 수 없는 줄에도 답한다.** 답하지 않으면 그 자식은 영영 기다리고, 그 자식을 기다리는
      * 것은 사용자의 턴이다. 다만 화면에는 세우지 않는다 — 무엇을 승인하는지 말할 수 없는 카드는
      * 사용자에게 물어볼 것이 없는 카드다.
+     *
+     * **답을 기다리는 동안 상대가 닫는 것도 지켜본다.** 도구 호출이 중단되면 상대가 연결을 닫는다(PR 68 · 3.2).
+     * 그때는 답을 쓰지 않고 그 요청이 끊겼다고 알린다 — 홀더가 그 기다림 · 카드 · 대화 상자를 거둔다.
      */
     private suspend fun answerOnce(connection: SocketChannel) {
-        connection.use {
-            val requestLine = runInterruptible {
-                Channels.newInputStream(connection).bufferedReader(Charsets.UTF_8).readLine()
-            } ?: return
+        try {
+            connection.use { answerRequestLine(connection) }
+        } finally {
+            // 지켜보던 연결을 닫았다. 셀렉터가 그 키를 거둬야 디스크립터가 실제로 닫힌다.
+            peerClosingWatcher.releaseClosedConnections()
+        }
+    }
 
-            val answerLine = when (val received = appSocketRequestFrom(requestLine)) {
-                is AppSocketRequest.Permission -> {
-                    val asked = AskedPermission(received.request)
-                    incoming.send(asked)
-                    answerLineFor(asked.awaitDecision())
-                }
+    private suspend fun answerRequestLine(connection: SocketChannel) {
+        // 요청 줄은 막힌 읽기로 받는다. 상대는 붙자마자 그 줄을 보내므로 이 읽기는 짧다 — 오래 열려 있는 것은 답을
+        // 기다리는 동안이고, 그동안은 셀렉터가 지켜본다(AppSocketPeerClosingWatcher).
+        val requestLine = runInterruptible {
+            Channels.newInputStream(connection).bufferedReader(Charsets.UTF_8).readLine()
+        } ?: return
 
-                is AppSocketRequest.Unreadable -> answerLineFor(
-                    PermissionDecision.Deny(
-                        reason = "앱이 이 승인 물음을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
-                    ),
-                )
-
-                is AppSocketRequest.SessionTree -> {
-                    val asked = AskedSessionTreeRequest(received.request)
-                    incomingSessionTreeRequests.send(asked)
-                    answerLineFor(asked.awaitAnswer())
-                }
-
-                // 승인 거부로 답하지 않는다. 이 줄을 보낸 것은 kyu mcp ask 가 아니라 세션 트리 도구라,
-                // decision 이 담긴 답은 그쪽에서 "앱의 답을 읽지 못했다" 가 된다.
-                is AppSocketRequest.UnreadableSessionTreeRequest -> answerLineFor(
-                    SessionTreeAnswer.Refused(
-                        "앱이 이 '${received.kind}' 요청을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
-                    ),
-                )
-
-                is AppSocketRequest.UnknownKind -> unknownKindAnswerLine(received.kind)
+        val answerLine = when (val received = appSocketRequestFrom(requestLine)) {
+            is AppSocketRequest.Permission -> {
+                val asked = AskedPermission(received.request)
+                val peerClosed = peerClosingWatcher.watch(connection)
+                incoming.send(asked)
+                asked.decision.answerUnlessPeerCloses(peerClosed)?.let(::answerLineFor)
             }
 
-            runInterruptible {
-                Channels.newOutputStream(connection).bufferedWriter(Charsets.UTF_8).apply {
-                    write(answerLine)
-                    newLine()
-                    flush()
-                }
+            is AppSocketRequest.Unreadable -> answerLineFor(
+                PermissionDecision.Deny(
+                    reason = "앱이 이 승인 물음을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
+                ),
+            )
+
+            is AppSocketRequest.SessionTree -> {
+                val asked = AskedSessionTreeRequest(received.request)
+                val peerClosed = peerClosingWatcher.watch(connection)
+                incomingSessionTreeRequests.send(asked)
+                asked.answer.answerUnlessPeerCloses(peerClosed)?.let(::answerLineFor)
+            }
+
+            // 승인 거부로 답하지 않는다. 이 줄을 보낸 것은 kyu mcp ask 가 아니라 세션 트리 도구라,
+            // decision 이 담긴 답은 그쪽에서 "앱의 답을 읽지 못했다" 가 된다.
+            is AppSocketRequest.UnreadableSessionTreeRequest -> answerLineFor(
+                SessionTreeAnswer.Refused(
+                    "앱이 이 '${received.kind}' 요청을 읽지 못했습니다 — 앱과 kyu 의 판이 어긋났습니다",
+                ),
+            )
+
+            is AppSocketRequest.UnknownKind -> unknownKindAnswerLine(received.kind)
+        } ?: return
+
+        writeAnswerLine(connection, answerLine)
+    }
+
+    /**
+     * 답 한 줄을 쓴다. 감시 중인 연결은 비차단이라 한 번에 다 안 써질 수 있다.
+     *
+     * 다 안 써졌으면(0 바이트) 잠깐 쉬었다 다시 쓴다. 답은 몇 KB 이고 상대는 그 답을 읽으려고 기다리는 중이라, 소켓 버퍼가
+     * 차서 0 이 나오는 일은 드물다 — 그 드문 경우에 스레드를 붙잡지 않으려고 막힌 쓰기 대신 쉬는 쪽을 고른다.
+     */
+    private suspend fun writeAnswerLine(connection: SocketChannel, answerLine: String) {
+        val bytes = ByteBuffer.wrap((answerLine + "\n").toByteArray(Charsets.UTF_8))
+        while (bytes.hasRemaining()) {
+            val writtenCount = runInterruptible { connection.write(bytes) }
+            if (writtenCount == 0) {
+                delay(ANSWER_WRITE_RETRY_MILLIS)
             }
         }
+    }
+
+    /**
+     * 답을 기다리되, 그 전에 상대가 닫으면 그 사실을 알리고 null 을 돌려준다.
+     *
+     * 둘이 함께 준비돼 있으면 답이 먼저다 — 답할 수 있었던 요청을 끊긴 것으로 적지 않는다.
+     *
+     * 앱이 이 소켓을 닫아 기다림이 거둬질 때([close])도 끊긴 것으로 알린다. 그 연결도 곧 닫히고, 알리지 않으면 끊김을
+     * 지켜보던 홀더 쪽 코루틴이 오지 않을 답을 앱이 꺼질 때까지 기다린다.
+     */
+    private suspend fun <T> ConnectionAnswer<T>.answerUnlessPeerCloses(peerClosed: Deferred<Unit>): T? = try {
+        select {
+            answered.onAwait { it }
+            peerClosed.onAwait {
+                markConnectionClosed()
+                null
+            }
+        }
+    } catch (socketClosing: CancellationException) {
+        markConnectionClosed()
+        throw socketClosing
     }
 
     companion object {
@@ -221,6 +275,9 @@ class AppSocket private constructor(
          */
         private const val UNIX_SOCKET_PATH_LIMIT_BYTES = 107
 
+        /** 비차단 쓰기가 0 바이트를 쓴 뒤 다시 쓰기까지 쉬는 시간. */
+        private const val ANSWER_WRITE_RETRY_MILLIS = 10L
+
         /**
          * 소켓을 담을 디렉토리를 이 사용자만 들어올 수 있게 만든다.
          *
@@ -260,7 +317,7 @@ internal sealed interface AppSocketRequest {
      */
     data object Unreadable : AppSocketRequest
 
-    /** 세션 트리 요청(spawn · end · list). 상태 홀더가 트리 연산으로 옮긴다. */
+    /** 세션 트리 요청. 상태 홀더가 트리 연산으로 옮긴다. */
     data class SessionTree(val request: SessionTreeRequest) : AppSocketRequest
 
     /** 받는 세션 트리 kind 인데 필드가 모자란 줄. */
