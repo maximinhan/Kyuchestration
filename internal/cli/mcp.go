@@ -101,15 +101,19 @@ func serveOrchestrationTools(in io.Reader, out io.Writer, args []string) error {
 //
 // 세션 트리 도구(session-tree-design.md 6.2)는 앱 소켓이 있을 때만 더한다. 그 도구들은 앱에게 묻는
 // 통로가 전부라, 소켓 없이 뜬 서버(터미널 세션)에 보이면 모델은 부를 때마다 실패하는 도구를 고른다.
+//
+// 세션 트리가 있으면 run_in_repo 와 list_repos 의 설명도 spawn_session 쪽을 가리킨다(6.16 의 순서).
+// 소켓이 없으면 그대로 둔다 — 그 세션에서 spawn_session 을 가리키면 모델은 없는 도구를 찾는다.
 func orchestrationTools(workDirPath, appSocketPath string, bypassPermissions bool) []mcpserver.Tool {
-	tools := []mcpserver.Tool{
-		newListReposTool(workDirPath),
-		newRunInRepoTool(workDirPath, bypassPermissions),
+	listReposTool := newListReposTool(workDirPath)
+	runInRepoTool := newRunInRepoTool(workDirPath, bypassPermissions)
+	if appSocketPath == "" {
+		return []mcpserver.Tool{listReposTool, runInRepoTool}
 	}
-	if appSocketPath != "" {
-		tools = append(tools, sessionTreeTools(appSocketPath)...)
-	}
-	return tools
+
+	listReposTool.Description = listReposSessionTreeToolDescription
+	runInRepoTool.Description = runInRepoRetiringNotice + "\n\n" + runInRepoTool.Description
+	return append([]mcpserver.Tool{listReposTool, runInRepoTool}, sessionTreeTools(appSocketPath)...)
 }
 
 // mainSessionOpenedWithBypass 는 이 서버를 띄운 메인 세션이 bypass 로 열렸는지다.

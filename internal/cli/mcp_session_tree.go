@@ -48,7 +48,35 @@ const (
 	maximumAwaitWaitSeconds = 3000
 )
 
+// subagentOrChildSessionCriterionText 는 서브에이전트와 하위 세션 중 무엇을 고르는지의 기준이다(4.4).
+//
+// 시스템 프롬프트(parentSessionConventionText)와 spawn_session 설명이 이 한 글을 같이 쓴다. 4.4 가 두
+// 자리 모두에 적으라고 했고, 두 자리의 글이 따로 고쳐져 갈라지면 모델은 어느 쪽을 따를지를 또 골라야 한다.
+//
+// 시스템 프롬프트가 본자리인 이유: 견줄 상대인 Agent 는 claude 의 내장 도구라 그 설명을 우리가 고칠 수
+// 없다. 두 도구를 한자리에서 견주는 글은 어느 한 도구의 설명이 아니라 둘 다 보이는 자리에 있어야 하고,
+// 규약을 시스템 프롬프트로 주었을 때 모델이 따른 것을 쟀다(3.5 나).
+//
+// **일의 길이는 기준이 아니다.** 4.4 가 하위 세션에 준 것은 서브에이전트가 못 하는 셋(다른 cwd 의 설정 ·
+// 사람이 끼어듦 · 이어서 시킴)이다. 이 폴더 안에서 한 번에 끝나는 일은 길어도 서브에이전트의 몫이다.
+const subagentOrChildSessionCriterionText = "일을 맡길 때는 하위 세션(" + qualifiedSpawnSessionToolName + ")과 서브에이전트(Agent 도구) 중 하나를 고른다. " +
+	"하위 세션은 다른 폴더(레포)에서 그 폴더의 설정(CLAUDE.md · .mcp.json · 훅)으로 해야 하는 일, " +
+	"사람이 탭에서 지켜보거나 끼어들어야 하는 일, 승인 카드가 사람에게 가야 하는 일, 이어서 여러 번 주고받을 일에 쓴다. " +
+	"이 폴더 안에서 한 번에 끝나는 일에는 하위 세션을 띄우지 않는다 — 서브에이전트를 쓰거나 직접 한다."
+
+// 모델에게 보이는 kyu 도구의 이름이다 — mcp__<서버>__<도구>. 시스템 프롬프트처럼 도구 목록 밖에서 도구를
+// 가리키는 글은 이 이름을 쓴다. 짧은 이름을 섞으면 모델은 그 이름의 도구를 찾으러 간다(5 단계 실측에서
+// 매 회차 ToolSearch 로 이름부터 찾았다).
+const (
+	qualifiedSpawnSessionToolName  = "mcp__" + orchestrationServerName + "__" + spawnSessionToolName
+	qualifiedSendToSessionToolName = "mcp__" + orchestrationServerName + "__" + sendToSessionToolName
+)
+
 const spawnSessionToolDescription = `하위 세션 하나를 띄운다. 하위는 자기 cwd 에서 도는 별도의 claude 이고, 사람이 그 탭에서 직접 볼 수 있다.
+
+` + subagentOrChildSessionCriterionText + `
+
+레포에서 일을 시킬 때도 이 도구를 쓴다 — cwd 에 레포 이름(list_repos 의 name)을 준다. run_in_repo 는 은퇴 예정이다.
 
 첫 프롬프트를 넣은 순간 답한다 — 하위의 턴이 끝나기를 기다리지 않는다. 결과는 await_session 으로 받거나,
 턴을 끝내고 쉬면 하위의 턴이 끝날 때 "[하위 세션 <id> · 턴 끝]" 메시지로 온다.
@@ -57,26 +85,39 @@ cwd 는 워크디렉토리 기준 상대경로다(생략하면 워크디렉토�
 없는 폴더에 띄우려면 createDirectory 를 참으로 준다 — 이미 있는 폴더에 createDirectory 를 주면 거절된다.
 살아 있는 하위 둘은 같은 cwd 를 쓸 수 없다.`
 
-const sendToSessionToolDescription = `하위 세션에게 말을 보낸다.
+const sendToSessionToolDescription = `하위 세션에게 말을 보낸다. 말을 넣은 순간 답한다 — 하위의 응답을 기다리지 않는다.
 
 하위가 ask_parent 로 묻고 기다리는 중이면 그 물음의 답이 되고(delivered: as_answer), 아니면 하위의
-새 사용자 메시지로 들어간다(delivered: as_message — 하위의 새 턴을 연다).`
+새 사용자 메시지로 들어간다(delivered: as_message — 하위의 새 턴을 연다. 하위가 일하는 중이면 그 턴의
+도구 호출 사이에 끼어든다). 하위의 응답은 await_session 이나 "[하위 세션 <id> · …]" 메시지로 온다.`
 
-const awaitSessionToolDescription = `하위 세션들에게 전할 일이 생길 때까지 기다린다 — 턴이 끝났다, 상위에게 물었다, 세션이 끝났다,
-사람이 상위에게 말했다(user_spoke) 중 하나라도 생기면 그때까지 쌓인 사건을 다 담아 답한다.
+// awaitSessionToolDescription 은 사건 종류의 이름을 그대로 적는다(6.6). 답의 events 에 실리는 것이
+// 그 이름이라, 설명에 우리말 풀이만 있으면 모델은 처음 보는 값을 짐작으로 짝짓는다.
+const awaitSessionToolDescription = `하위 세션들에게 전할 일이 생길 때까지 기다린다 — 끝날 때까지가 아니다. 아래 사건 중 하나라도
+생기면 그때까지 쌓인 사건을 다 담아 답한다.
+
+  turn_completed — 하위의 턴이 끝났다(result 에 그 턴의 답)
+  asked_parent   — 하위가 ask_parent 로 물었다. send_to_session 으로 답한다
+  session_ended  — 하위가 끝났다
+  user_spoke     — 사람이 이 세션에 말했다. 내용은 이 도구 결과 바로 뒤에 사람의 메시지로 붙어 온다
 
 ids 를 생략하면 살아 있는 하위 전부를 기다린다. waitSeconds 는 기본 1800, 최대 3000 이다.
-아무 일 없이 그 시간이 지나면 events 가 빈 채로 stillRunning 을 답한다.`
+아무 일 없이 그 시간이 지나면 events 가 빈 채로 stillRunning 을 답한다 — 하위는 아직 도는 중이다.
 
-const listSessionsToolDescription = `이 세션이 띄운 하위 세션 전부를 답한다 — 끝난 것까지. 각 하위의 cwd · 상태 ·
+이 턴 안에서 결과를 받아 이어가야 할 때만 부른다. 부르지 않고 턴을 끝내도 같은 사건이 "[하위 세션 <id> · …]"
+메시지로 온다. 사람이 기다림을 중단하면 기다림만 접히고 하위는 그대로 돈다.`
+
+const listSessionsToolDescription = `이 세션이 띄운 하위 세션 전부를 답한다 — 끝난 것까지(state: ended). 각 하위의 cwd · 상태 ·
 지금 무엇을 기다리는지(waitingFor: nothing · model · parent · approval)가 담긴다.`
 
-const endSessionToolDescription = `하위 세션 하나를 끝낸다. 하위가 ask_parent 로 기다리던 중이면 그 물음은 "상위가 세션을 끝냈습니다" 로 답해진다.`
+const endSessionToolDescription = `하위 세션 하나를 끝낸다. 하위가 ask_parent 로 기다리던 중이면 그 물음은 ended: session_ended 로
+답해진다. 하위의 진행 중인 턴이 곧 끝나지 않으면 끊긴다. 끝난 뒤 다음 await_session 이 session_ended 를 받는다.`
 
 const askParentToolDescription = `너를 띄운 상위 세션에게 묻고 답을 기다린다.
 
 답이 있어야 일을 이어갈 수 있을 때만 쓴다. 결과를 알리는 데는 쓰지 않는다 — 네 턴이 끝나면 그 결과는
-이미 상위에게 간다. 상위가 끝났거나 세션이 끝나면 answer 대신 ended 로 답한다.`
+이미 상위에게 간다. 답 대신 ended 가 오면 더 물을 상위가 없다 — parent_ended(상위가 끝났다) ·
+session_ended(상위나 사람이 이 세션을 끝냈다).`
 
 // sessionTreeTools 는 상위 역할의 서버에 더해질 다섯 도구다(6.2).
 func sessionTreeTools(appSocketPath string) []mcpserver.Tool {

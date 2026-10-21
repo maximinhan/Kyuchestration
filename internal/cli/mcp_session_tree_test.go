@@ -186,6 +186,129 @@ func TestTheMainRoleWithoutAnAppSocketHasNoSessionTreeTools(t *testing.T) {
 	}
 }
 
+// listedToolDescriptionsForTest 는 tools/list 가 답한 도구마다의 설명이다 — 모델이 읽는 그 글이다.
+func listedToolDescriptionsForTest(t *testing.T, serveArgs []string) map[string]string {
+	t.Helper()
+
+	answered := messageWithIDForTest(t, runServeForTest(t, serveArgs, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`), "2")
+	if answered.Result == nil {
+		t.Fatalf("tools/list 의 답이 없습니다: %+v", answered)
+	}
+
+	descriptions := map[string]string{}
+	for _, tool := range answered.Result.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	return descriptions
+}
+
+func TestSpawnSessionDescriptionCarriesTheSameChoiceCriterionAsTheSystemPrompt(t *testing.T) {
+	// 4.4 — 기준은 도구 설명과 시스템 프롬프트 둘 다에 적는다. 두 자리의 글이 갈라지면 모델은 어느 쪽을
+	// 따를지를 또 골라야 하므로 한 글을 같이 쓴다.
+	descriptions := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))
+
+	if !strings.Contains(descriptions["spawn_session"], subagentOrChildSessionCriterionText) {
+		t.Errorf("spawn_session 의 설명 = %q, 선택 기준을 담기를 기대", descriptions["spawn_session"])
+	}
+	if !strings.Contains(parentSessionConventionText(), subagentOrChildSessionCriterionText) {
+		t.Errorf("상위의 규약 문구 = %q, 같은 선택 기준을 담기를 기대", parentSessionConventionText())
+	}
+}
+
+func TestWithTheSessionTreeRunInRepoSaysItIsRetiringAndPointsToSpawnSession(t *testing.T) {
+	// 6.16 의 "순서" — 둘이 함께 있는 동안은 run_in_repo 설명에 은퇴 예정을 적고 spawn_session 이 그
+	// 자리를 가리킨다. "레포에서 일을 시킨다" 에 길이 둘이면 모델은 매번 하나를 고르고, run_in_repo 를
+	// 고르는 것이 곧 승인 카드를 피하는 길이 된다.
+	descriptions := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))
+
+	for _, wanted := range []string{"은퇴 예정", "spawn_session"} {
+		if !strings.Contains(descriptions["run_in_repo"], wanted) {
+			t.Errorf("run_in_repo 의 설명 = %q, %q 를 담기를 기대", descriptions["run_in_repo"], wanted)
+		}
+	}
+	if !strings.Contains(descriptions["spawn_session"], "run_in_repo") {
+		t.Errorf("spawn_session 의 설명 = %q, run_in_repo 의 자리를 가리키기를 기대", descriptions["spawn_session"])
+	}
+
+	// 모델이 이 도구의 쓰임을 정하는 것은 첫 문단이다. 첫 문단이 "run_in_repo 의 repo 인자" 를 말하면
+	// 끝에 붙은 spawn_session 안내보다 먼저 읽혀 레포 목록을 본 모델을 run_in_repo 로 보낸다.
+	firstParagraph, _, _ := strings.Cut(descriptions["list_repos"], "\n\n")
+	if !strings.Contains(firstParagraph, "spawn_session") || strings.Contains(firstParagraph, "run_in_repo") {
+		t.Errorf("list_repos 의 첫 문단 = %q, run_in_repo 가 아니라 spawn_session 의 cwd 를 말하기를 기대", firstParagraph)
+	}
+}
+
+func TestWithoutTheSessionTreeListReposStillLeadsToRunInRepo(t *testing.T) {
+	// 소켓이 없으면 레포에 일을 시키는 길은 run_in_repo 하나다. 첫 문단이 그대로 그 길을 말한다.
+	descriptions := listedToolDescriptionsForTest(t, []string{makeWorkDir(t)})
+
+	firstParagraph, _, _ := strings.Cut(descriptions["list_repos"], "\n\n")
+	if !strings.Contains(firstParagraph, "run_in_repo") {
+		t.Errorf("소켓 없는 list_repos 의 첫 문단 = %q, run_in_repo 의 repo 인자를 말하기를 기대", firstParagraph)
+	}
+}
+
+func TestWithoutTheSessionTreeRunInRepoDoesNotPointToAMissingTool(t *testing.T) {
+	// 소켓 없이 뜬 서버에는 spawn_session 이 없다. 거기서 그 도구를 가리키면 모델은 없는 도구를 찾는다.
+	descriptions := listedToolDescriptionsForTest(t, []string{makeWorkDir(t)})
+
+	for _, toolName := range []string{"run_in_repo", "list_repos"} {
+		if strings.Contains(descriptions[toolName], "spawn_session") {
+			t.Errorf("소켓 없는 상위의 %s 설명 = %q, 없는 spawn_session 을 가리키지 않기를 기대", toolName, descriptions[toolName])
+		}
+	}
+}
+
+func TestSessionTreeToolDescriptionsNameTheContractTheModelReadsBack(t *testing.T) {
+	// 모델은 설명에 적힌 낱말로 답을 읽는다. 답에 오는 값(as_answer · turn_completed · ended …)이 설명에
+	// 없으면 모델은 처음 보는 값을 짐작으로 읽는다 — 6.2 · 6.3 · 6.6 · 6.13 의 계약을 설명이 그대로 말한다.
+	mainDescriptions := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))
+	childDescriptions := listedToolDescriptionsForTest(t, childServeArgsForTest("/run/user/1000/kyu/c1.sock"))
+
+	wantedWords := map[string][]string{
+		"spawn_session":   {"순간 답한다", "await_session"},
+		"send_to_session": {"as_answer", "as_message", "순간 답한다"},
+		"await_session": {"turn_completed", "asked_parent", "session_ended", "user_spoke",
+			"events 가 빈", "턴을 끝내", "하위는 그대로"},
+		"end_session": {"session_ended", "await_session"},
+	}
+	for toolName, words := range wantedWords {
+		for _, word := range words {
+			if !strings.Contains(mainDescriptions[toolName], word) {
+				t.Errorf("%s 의 설명 = %q, %q 를 담기를 기대", toolName, mainDescriptions[toolName], word)
+			}
+		}
+	}
+	for _, word := range []string{"답이 있어야", "parent_ended", "session_ended", "턴이 끝나면"} {
+		if !strings.Contains(childDescriptions["ask_parent"], word) {
+			t.Errorf("ask_parent 의 설명 = %q, %q 를 담기를 기대", childDescriptions["ask_parent"], word)
+		}
+	}
+}
+
+func TestListSessionsDescriptionNamesTheEndedStateAndEveryWaitingForValue(t *testing.T) {
+	// 6.2 의 list_sessions 계약 — 끝난 하위도 state: ended 로 보이고, waitingFor 는 넷 중 하나다. 부분
+	// 문자열("ended")로 보면 "ended_by_human" 같은 다른 낱말에도 맞아 계약이 빠져도 통과한다.
+	description := listedToolDescriptionsForTest(t, mainServeArgsForTest(t, "/run/user/1000/kyu/m1.sock"))["list_sessions"]
+
+	if !strings.Contains(description, "state: ended") {
+		t.Errorf("list_sessions 의 설명 = %q, 정확한 토큰 'state: ended' 를 기대", description)
+	}
+
+	_, afterWaitingFor, found := strings.Cut(description, "waitingFor: ")
+	waitingForList, _, closed := strings.Cut(afterWaitingFor, ")")
+	if !found || !closed {
+		t.Fatalf("list_sessions 의 설명 = %q, 'waitingFor: … )' 목록을 기대", description)
+	}
+	var waitingForValues []string
+	for _, value := range strings.Split(waitingForList, "·") {
+		waitingForValues = append(waitingForValues, strings.TrimSpace(value))
+	}
+	if want := []string{"nothing", "model", "parent", "approval"}; !slices.Equal(waitingForValues, want) {
+		t.Errorf("list_sessions 설명의 waitingFor 값 = %q, want %q", waitingForValues, want)
+	}
+}
+
 func TestSpawnSessionCarriesTheRequestToTheAppAndItsAnswerBack(t *testing.T) {
 	// 엔진은 하위를 띄우지 않는다(원칙 16). 요청을 앱에게 옮기고 앱의 답을 옮길 뿐이다 — 줄의 모양이
 	// 6.4 의 계약이다. 주지 않은 선택 인자는 null 로 간다: 앱이 "생략" 과 "빈 값" 을 가르게 한다.

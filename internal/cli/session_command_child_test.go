@@ -238,6 +238,38 @@ func TestAnExplicitChildIdAlreadyRecordedIsStillRefused(t *testing.T) {
 	}
 }
 
+func TestAChildSessionTellsAboutADiscardedRecordOnStderr(t *testing.T) {
+	// 메인·레포 세션과 같은 규율이다(TestSessionCommandTellsAboutADiscardedRecordOnStderr). 기록이 깨져도
+	// 하위는 뜨고, 앞선 기록을 버렸다는 말은 stdout 이 아니라 stderr 로 간다 — stdout 은 앱이 파싱하는
+	// 문서 하나의 자리다. 이 말을 버리면 상위 아래 적혀 있던 하위들의 기록이 소리 없이 사라진다.
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "proj-a")
+	t.Chdir(workDirPath)
+
+	coordDirectoryPath := filepath.Join(workDirPath, ".coord")
+	if err := os.MkdirAll(coordDirectoryPath, 0o755); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(coordDirectoryPath, "conversations.json"), []byte("깨진 기록"), 0o644); err != nil {
+		t.Fatalf("준비 실패: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	if err := AnswerSessionCommand(&out, &errOut,
+		append(childArgsForTest("", childCwdOptionName, "proj-a"), machineJSONOptionName)); err != nil {
+		t.Fatalf("AnswerSessionCommand() 실패: %v", err)
+	}
+
+	var document childSessionCommandDocumentForTest
+	decodeMachineJSONForTest(t, out.String(), &document)
+	if document.ChildSession == nil || document.ChildSession.ID != "child-1" {
+		t.Errorf("childSession = %+v, 버린 기록 뒤에도 하위가 child-1 로 뜨기를 기대", document.ChildSession)
+	}
+	if !strings.Contains(errOut.String(), "conversations.json") {
+		t.Errorf("stderr = %q, 버린 기록의 경로를 알리기를 기대", errOut.String())
+	}
+}
+
 func TestAChildCwdRefusalIsAnErrorAndRecordsNothing(t *testing.T) {
 	// cwd 규칙에 걸린 요청은 답할 것이 없는 물음이다 — 종료 코드 1 과 stderr 가 그 구분을 한다.
 	// 앱은 그 문구를 spawn 의 {"error"} 로 상위에게 옮긴다.
@@ -388,6 +420,45 @@ func TestTheMainChatWithAnAppSocketIsToldWhereChildMessagesComeFrom(t *testing.T
 	for _, wanted := range []string{"[하위 세션", "send_to_session", "승인"} {
 		if !strings.Contains(conventionText, wanted) {
 			t.Errorf("상위의 규약 문구 = %q, %q 를 담기를 기대", conventionText, wanted)
+		}
+	}
+}
+
+func TestTheMainChatConventionSaysWhenToSpawnAChildSessionAndWhenToUseASubagent(t *testing.T) {
+	// 모델에게 둘 중 무엇을 고를지 알려야 한다(4.4). Agent 는 claude 의 내장 도구라 그 설명을 우리가
+	// 고칠 수 없으므로, 두 도구를 한자리에서 견주는 기준은 시스템 프롬프트에 있어야 한다(7 절 5 단계).
+	workDirPath := makeWorkDir(t)
+	t.Chdir(workDirPath)
+
+	run := runSessionCommandForTest(t, chatModeOptionName, appSocketOptionName, "/run/user/1000/kyu/m1.sock")
+
+	conventionText, _ := splitAppendSystemPromptForTest(t, run.document.Command)
+	for _, wanted := range []string{"Agent", "mcp__kyu__spawn_session", "다른 폴더", "탭", "끼어들", "승인 카드",
+		"여러 번", "이 폴더 안에서 한 번에 끝나는"} {
+		if !strings.Contains(conventionText, wanted) {
+			t.Errorf("상위의 규약 문구 = %q, 선택 기준의 %q 를 담기를 기대", conventionText, wanted)
+		}
+	}
+
+	// 4.4 에 "오래 걸린다" 는 기준이 없다. 이 폴더 안에서 한 번에 끝나는 긴 일은 서브에이전트의 몫인데,
+	// 길이를 기준으로 적으면 모델은 그 일을 하위 세션으로 보낸다.
+	if strings.Contains(conventionText, "오래") {
+		t.Errorf("상위의 규약 문구 = %q, 4.4 에 없는 '오래 걸리는 일' 기준을 담지 않기를 기대", conventionText)
+	}
+}
+
+func TestTheMainChatConventionNamesKyuToolsByTheirRegisteredNames(t *testing.T) {
+	// 모델에게 보이는 이름은 mcp__kyu__… 다. 짧은 이름과 섞어 쓰면 모델은 그 이름의 도구를 찾으러 간다 —
+	// 5 단계 실측에서 매 회차 ToolSearch 로 이름부터 찾았다.
+	conventionText := parentSessionConventionText()
+
+	for _, toolName := range []string{"spawn_session", "send_to_session"} {
+		qualifiedName := "mcp__kyu__" + toolName
+		if !strings.Contains(conventionText, qualifiedName) {
+			t.Errorf("상위의 규약 문구 = %q, %s 를 담기를 기대", conventionText, qualifiedName)
+		}
+		if strings.Contains(strings.ReplaceAll(conventionText, qualifiedName, ""), toolName) {
+			t.Errorf("상위의 규약 문구 = %q, %s 를 짧은 이름으로 쓴 자리가 없기를 기대", conventionText, toolName)
 		}
 	}
 }

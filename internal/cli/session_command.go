@@ -93,7 +93,7 @@ func AnswerSessionCommand(out, errOut io.Writer, args []string) error {
 	}
 
 	if request.childSessionRequested {
-		return answerForChildSession(out, location, request)
+		return answerForChildSession(out, errOut, location, request)
 	}
 	if request.repoName == "" {
 		return answerForMainSession(out, errOut, location, repos, request)
@@ -379,10 +379,8 @@ func conversationForLabel(
 		return sessionConversation{}, err
 	}
 
-	for _, warning := range assignment.Warnings {
-		if _, err := fmt.Fprintln(errOut, warning); err != nil {
-			return sessionConversation{}, fmt.Errorf("대화 기록 경고 출력 실패: %w", err)
-		}
+	if err := writeConversationWarnings(errOut, assignment.Warnings); err != nil {
+		return sessionConversation{}, err
 	}
 
 	if assignment.IsNewConversation {
@@ -392,6 +390,19 @@ func conversationForLabel(
 		flags:                 []string{resumeFlagName, assignment.ConversationID},
 		resumedConversationID: assignment.ConversationID,
 	}, nil
+}
+
+// writeConversationWarnings 는 대화 기록을 그대로 쓰지 못한 이유를 stderr 로 낸다.
+//
+// stdout 이 아니다 — 그 자리는 앱이 파싱하는 문서 하나가 통째로 쓴다. 메인·레포·하위 세션이 모두 이
+// 길로 내야 같은 기록 문제가 어느 세션을 열었느냐에 따라 다른 자리에 나타나지 않는다.
+func writeConversationWarnings(errOut io.Writer, warnings []string) error {
+	for _, warning := range warnings {
+		if _, err := fmt.Fprintln(errOut, warning); err != nil {
+			return fmt.Errorf("대화 기록 경고 출력 실패: %w", err)
+		}
+	}
+	return nil
 }
 
 // assignConversation 은 요청이 고른 길로 대화를 정한다 — 이어가기가 기본이고, 새로 시작이 선택이다.
