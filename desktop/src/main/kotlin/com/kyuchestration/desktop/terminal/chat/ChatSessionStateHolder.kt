@@ -646,6 +646,12 @@ class ChatSessionStateHolder(
             return
         }
 
+        // 하위의 도구 호출은 차례로 돈다(3.3). 앞 물음이 아직 걸려 있다면 그 호출은 중단됐고 EOF 만 아직 안 닿았다. 덮지 않고
+        // 먼저 닫는다 — 덮으면 그 연결은 영영 안 답해지고, 상위는 아직 안 간 앞 물음까지 받아 답할 수 없는 askId 를 든다.
+        forgetParentQuestion(childId)?.asked?.answerWith(
+            SessionTreeAnswer.Refused("같은 하위의 새 물음이 이 물음을 대신했습니다 — 이 호출은 이미 거둬진 것입니다"),
+        )
+
         lastAskOrdinal++
         val question = PendingParentQuestion(askId = "ask-$lastAskOrdinal", asked = asked)
         pendingParentQuestions[childId] = question

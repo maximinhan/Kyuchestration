@@ -673,6 +673,30 @@ class ChildSessionDialogueStateHolderTest {
         assertEquals("[하위 세션 child-1 · 턴 끝] 끝난 뒤의 일", bed.main.sentMessages.last().text)
     }
 
+    @Test
+    fun `답을 받기 전에 같은 하위가 다시 물으면 앞 물음을 거절로 닫고 새 물음만 상위에게 간다`() = runTest {
+        // 하위의 도구 호출은 차례로 돈다(3.3). 새 물음이 왔다면 앞 호출은 중단됐고 EOF 만 아직 안 닿았다. 앞 물음을 답 없이
+        // 덮으면 그 연결은 영영 안 답해지고, 상위는 askId 둘을 받아 하나만 푼다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val first = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("첫 물음"))
+        runCurrent()
+
+        val second = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("둘째 물음"))
+        runCurrent()
+
+        assertIs<SessionTreeAnswer.Refused>(first.answerSoFar())
+        val waiting = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        assertEquals(
+            listOf<SessionTreeEvent>(SessionTreeEvent.AskedParent("child-1", "둘째 물음", askId = "ask-2")),
+            assertIs<SessionTreeAnswer.Awaited>(waiting.answerSoFar()).events,
+        )
+        bed.mainChannel.askSessionTree(SessionTreeRequest.SendToSession("child-1", "답"))
+        runCurrent()
+        assertEquals(SessionTreeAnswer.ParentAnswered("답"), second.answerSoFar())
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }
