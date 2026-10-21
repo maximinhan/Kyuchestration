@@ -384,7 +384,7 @@ end_session(id: string)
 
 **`list_sessions` 의 `waitingFor`** 는 하위가 지금 무엇을 기다리는지다 — `nothing`(쉬는 중) · `model`(턴이 도는 중) · `parent`(`ask_parent` 대기) · `approval`(사람의 승인 카드 대기). 상위가 하위의 침묵을 해석할 재료다.
 
-**`end_session`** 은 하위의 stdin 을 닫고 프로세스가 끝나기를 기다린다. 정해진 시간 안에 안 끝나면 죽인다(6.13). 하위가 `ask_parent` 로 기다리던 중이면 그 물음은 *"상위가 세션을 끝냈습니다"* 로 답한다.
+**`end_session`** 은 하위의 stdin 을 닫고 프로세스가 끝나기를 기다린다. 정해진 시간 안에 안 끝나면 죽인다(6.13). 하위가 `ask_parent` 로 기다리던 중이면 그 물음은 답 대신 `{ "ended": "session_ended" }` 로 끝난다(6.3 의 `ended`, 6.13 의 순서 — 물음을 먼저 닫고 stdin 을 닫는다). 문장이 아니라 낱말로 답하는 이유는 하위의 모델과 앱의 카드(`ChatAskParentCard.kt`)가 둘 다 그 값을 읽어 갈래를 타기 때문이다. 상위 자신이 끝나서 함께 끝나는 하위는 `parent_ended` 다(앱 `ChatSessionStateHolder.kt` 가 `ChildEndReason.ParentEnded` 일 때만 `parent_ended`, 나머지는 `session_ended` 로 답한다).
 
 ### 6.3 도구 표면 — 하위에게 하나, 그리고 깊이 제한
 
