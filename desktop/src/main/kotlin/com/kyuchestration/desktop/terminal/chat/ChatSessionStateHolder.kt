@@ -1054,8 +1054,9 @@ class ChatSessionStateHolder(
                 endedAt = clock.instant(),
             )
         }
-        // 상위가 끝나서 함께 끝난 하위는 알릴 상위가 없다.
-        if (reason != ChildEndReason.ParentEnded) {
+        // 알릴 것은 상위가 모르는 끝뿐이다. 상위가 끝나서 함께 끝난 하위는 알릴 상위가 없고, 상위가 end_session 으로 끝낸
+        // 하위는 상위가 그 답으로 이미 안다 — 다시 알리면 쉬는 상위에게 할 일 없는 턴이 돈다.
+        if (reason == ChildEndReason.EndedByHuman) {
             tellParent(SessionTreeEvent.SessionEnded(node.childId, reason, exitCode = null))
         }
 

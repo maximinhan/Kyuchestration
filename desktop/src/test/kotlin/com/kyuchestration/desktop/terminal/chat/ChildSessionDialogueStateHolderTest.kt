@@ -191,22 +191,39 @@ class ChildSessionDialogueStateHolderTest {
     }
 
     @Test
-    fun `상위가 끝낸 하위도 다음 기다림이 session_ended 로 받는다`() = runTest {
-        // 6.13 — 상위의 다음 await_session 이 session_ended 를 받는다.
+    fun `상위가 end_session 으로 끝낸 하위는 상위에게 다시 알리지 않는다`() = runTest {
+        // 상위는 end_session 의 답으로 이미 안다. 다시 알리면 쉬는 상위에게 "[하위 세션 child-1 · 끝남]" 이 들어가
+        // 아무 할 일 없는 턴이 돈다. 설계 6.13 은 다음 기다림이 받는다고 적었지만, 같은 사실을 두 번 전하지 않는 쪽을 택한다.
         val bed = mainWithChildrenTestBed(childCount = 1)
         startMainTurn(bed)
         bed.mainChannel.askSessionTree(SessionTreeRequest.EndSession("child-1"))
         runCurrent()
+        val sentBefore = bed.main.sentMessages.size
 
+        bed.main.emit(turnFinishedWith("끝냈다"))
+        runCurrent()
         val asked = bed.mainChannel.askSessionTree(awaitRequest())
         runCurrent()
 
+        assertEquals(sentBefore, bed.main.sentMessages.size, "끝낸 하위의 끝남이 상위의 stdin 으로 갔습니다")
+        assertEquals(SessionTreeAnswer.Awaited(events = emptyList(), stillRunning = emptyList()), asked.answerSoFar())
+    }
+
+    @Test
+    fun `사람이 끝낸 하위는 기다리는 상위에게 ended_by_human 으로 알린다`() = runTest {
+        // 상위가 모르는 끝이다 — 상위는 그 하위의 결과를 기다리고 있을 수 있다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        bed.holder.showChildSession("child-1")
+
+        bed.holder.endOnScreenSession()
+        runCurrent()
+
         assertEquals(
-            SessionTreeAnswer.Awaited(
-                events = listOf(SessionTreeEvent.SessionEnded("child-1", ChildEndReason.EndedByParent, exitCode = null)),
-                stillRunning = emptyList(),
-            ),
-            asked.answerSoFar(),
+            listOf<SessionTreeEvent>(SessionTreeEvent.SessionEnded("child-1", ChildEndReason.EndedByHuman, exitCode = null)),
+            assertIs<SessionTreeAnswer.Awaited>(asked.answerSoFar()).events,
         )
     }
 
