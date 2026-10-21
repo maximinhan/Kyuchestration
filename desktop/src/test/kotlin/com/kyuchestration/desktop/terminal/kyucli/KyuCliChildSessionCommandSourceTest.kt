@@ -11,6 +11,7 @@ import com.kyuchestration.desktop.terminal.GatedExecutionConfig
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
@@ -183,6 +184,86 @@ class KyuCliChildSessionCommandSourceTest {
             listOf("대화 기록을 버렸습니다"),
             assertIs<ChildSessionCommandAnswer.Ready>(answer).sessionCommandAnswer.engineWarnings,
         )
+    }
+
+    @Test
+    fun `거절한 엔진이 최소 판보다 낮은 릴리스면 엔진 갱신이 필요하다고 올린다`() {
+        // PR #70 이전 kyu 는 --child 를 모르거나 id 를 요구해 모든 spawn 을 거절한다. 그 거절을 cwd 거절과 같은 모양으로
+        // 올리면 사람도 상위 모델도 엔진이 낡았다는 것을 알 길이 없다.
+        val runner = RecordingKyuCommandRunner { arguments ->
+            if (arguments == listOf("version")) {
+                succeedingKyuCommandResult("kyu v0.13.0 (3edd9cf05752)\n")
+            } else {
+                KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "알 수 없는 옵션: --child\n")
+            }
+        }
+
+        val failure = assertFailsWith<TerminalSessionFailure.EngineTooOld> {
+            KyuCliChildSessionCommandSource(runner).childSessionCommandFor(
+                WORK_DIR_PATH,
+                ChildSessionCommandRequest("proj-a", false, null, emptyList(), null),
+                SOCKET_PATH,
+            )
+        }
+
+        assertEquals("0.13.0", failure.actualVersion)
+        assertEquals("0.14.0", failure.minimumVersion)
+        assertContains(failure.message.orEmpty(), "엔진 갱신 필요(최소 0.14.0)")
+        assertContains(failure.guidance, "알 수 없는 옵션: --child")
+    }
+
+    @Test
+    fun `거절한 엔진이 최소 판 이상이면 엔진의 거절 그대로다`() {
+        val runner = RecordingKyuCommandRunner { arguments ->
+            if (arguments == listOf("version")) {
+                succeedingKyuCommandResult("kyu v0.14.0 (3edd9cf05752)\n")
+            } else {
+                KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "워크디렉토리 밖입니다: ../x\n")
+            }
+        }
+
+        val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
+            KyuCliChildSessionCommandSource(runner).childSessionCommandFor(
+                WORK_DIR_PATH,
+                ChildSessionCommandRequest("../x", false, null, emptyList(), null),
+                SOCKET_PATH,
+            )
+        }
+
+        assertEquals("워크디렉토리 밖입니다: ../x", failure.guidance)
+    }
+
+    @Test
+    fun `소스로 빌드한 엔진은 판으로 낡았는지 가를 수 없어 엔진의 거절 그대로다`() {
+        // v0.13.0 뒤의 커밋은 PR #70 앞이든 뒤든 모두 v0.13.1-0.<시각>-<커밋> 꼴이다. 이 수로 낡았다고 하면 새 엔진도 낡았다고 한다.
+        val runner = RecordingKyuCommandRunner { arguments ->
+            if (arguments == listOf("version")) {
+                succeedingKyuCommandResult("kyu v0.13.1-0.20261021075557-058baab94744+dirty\n")
+            } else {
+                KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "알 수 없는 옵션: --child\n")
+            }
+        }
+
+        assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
+            KyuCliChildSessionCommandSource(runner).childSessionCommandFor(
+                WORK_DIR_PATH,
+                ChildSessionCommandRequest("proj-a", false, null, emptyList(), null),
+                SOCKET_PATH,
+            )
+        }
+    }
+
+    @Test
+    fun `엔진이 답하면 판을 묻지 않는다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(READY_DOCUMENT) }
+
+        KyuCliChildSessionCommandSource(runner).childSessionCommandFor(
+            WORK_DIR_PATH,
+            ChildSessionCommandRequest("proj-a", false, null, emptyList(), null),
+            SOCKET_PATH,
+        )
+
+        assertEquals(1, runner.receivedArguments.size)
     }
 
     @Test

@@ -1,9 +1,11 @@
 package com.kyuchestration.desktop.terminal.kyucli
 
+import com.kyuchestration.desktop.kyu.KyuCommandFailure
 import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
 import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
+import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
 
 /**
@@ -23,10 +25,59 @@ class KyuCliChildSessionCommandSource(
     ): ChildSessionCommandAnswer {
         val arguments = childSessionCommandArguments(request, appSocketPath)
         // 거절된 하위에게는 아직 이름이 없다 — 이름은 엔진이 기록에 적을 때 짓는다.
-        val output = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = UNNAMED_CHILD_SESSION_LABEL)
+        val output = try {
+            runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = UNNAMED_CHILD_SESSION_LABEL)
+        } catch (refusal: TerminalSessionFailure.SessionCommandRefused) {
+            throw engineTooOldOrNull(refusal) ?: refusal
+        }
         return parseKyuChildSessionCommandOutput(output.standardOutput, output.engineWarnings)
     }
+
+    /**
+     * 거절한 kyu 가 [MINIMUM_ENGINE_VERSION] 보다 낮은 릴리스면 그 사실로 옮긴다. 가를 수 없으면 null.
+     *
+     * **거절된 뒤에만 묻는다.** 답한 엔진은 이미 이 옵션들을 아는 엔진이라 물을 까닭이 없고, spawn 마다 프로세스를
+     * 하나 더 띄울 까닭도 없다.
+     *
+     * **릴리스 판만 견준다.** 저장소에서 빌드한 kyu 는 `v0.13.1-0.<시각>-<커밋>` 꼴의 유사 판을 답하는데(version.go),
+     * v0.13.0 뒤의 커밋은 PR #70 앞이든 뒤든 모두 이 꼴이라 수로는 가를 수 없다. 그때는 엔진의 거절을 그대로 둔다.
+     */
+    private fun engineTooOldOrNull(refusal: TerminalSessionFailure.SessionCommandRefused): TerminalSessionFailure.EngineTooOld? {
+        val versionResult = try {
+            kyuCommandRunner.run(listOf(VERSION_COMMAND))
+        } catch (couldNotAsk: KyuCommandFailure) {
+            return null
+        }
+        if (versionResult.exitCode != 0) {
+            return null
+        }
+        val released = RELEASED_ENGINE_VERSION_PATTERN.find(versionResult.standardOutput)?.groupValues ?: return null
+        val actual = released.drop(1).map(String::toInt)
+        val minimum = MINIMUM_ENGINE_VERSION.split('.').map(String::toInt)
+        val olderThanMinimum = actual.zip(minimum).firstOrNull { (a, m) -> a != m }?.let { (a, m) -> a < m } ?: false
+        if (!olderThanMinimum) {
+            return null
+        }
+        return TerminalSessionFailure.EngineTooOld(
+            actualVersion = actual.joinToString("."),
+            minimumVersion = MINIMUM_ENGINE_VERSION,
+            refusal = refusal,
+        )
+    }
 }
+
+/**
+ * 이 앱이 하위 세션에 요구하는 엔진의 최소 릴리스.
+ *
+ * `--child` 의 id 생략(PR #70)이 처음 실리는 릴리스다. v0.13.0 이 그 앞의 마지막 릴리스이고, 1.0 전에는 마이너만
+ * 올리므로 다음 릴리스가 0.14.0 이다.
+ */
+private const val MINIMUM_ENGINE_VERSION = "0.14.0"
+
+private const val VERSION_COMMAND = "version"
+
+/** `kyu v0.13.0 (3edd9cf05752)` 꼴의 릴리스 판. `-` 이 붙은 유사 판(`v0.13.1-0.2026…`)은 맞지 않는다. */
+private val RELEASED_ENGINE_VERSION_PATTERN = Regex("""^kyu v(\d+)\.(\d+)\.(\d+)(?:\s|$)""")
 
 /**
  * `kyu session-command --chat --child [--cwd …] [--create-directory] [--title …] [--live-child-cwd …]…

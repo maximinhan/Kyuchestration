@@ -59,6 +59,24 @@ sealed class TerminalSessionFailure(
     )
 
     /**
+     * kyu 가 거절했는데, 그 kyu 가 이 앱이 요구하는 판보다 낮은 릴리스다.
+     *
+     * [SessionCommandRefused] 와 갈라 둔다. 낡은 엔진은 하위 세션 옵션을 몰라 모든 spawn 을 거절하는데, 그 거절이
+     * cwd 규칙의 거절과 같은 모양으로 올라가면 사람도 상위 모델도 "다른 자리로 다시" 를 시도할 뿐 엔진을 바꿀 생각을
+     * 하지 못한다. 엔진의 원래 문구는 [guidance] 에 함께 싣는다.
+     */
+    class EngineTooOld(
+        val actualVersion: String,
+        val minimumVersion: String,
+        refusal: SessionCommandRefused,
+    ) : TerminalSessionFailure(
+        message = "엔진 갱신 필요(최소 $minimumVersion) — 이 kyu 는 $actualVersion 이라 하위 세션을 띄우지 못합니다.",
+        guidance = "앱과 함께 온 엔진이나 최신 릴리스의 kyu 로 바꾸세요. PATH 의 kyu 가 먼저 잡혔다면 그것을 갱신하세요. " +
+            "엔진의 거절: ${refusal.guidance}",
+        cause = refusal,
+    )
+
+    /**
      * 답은 받았는데 이 앱이 읽을 줄 아는 판이 아니다.
      *
      * 관찰(WorkDirObservationFailure)과 갈라 둔다. 사실은 같지만 사용자가 있던 자리가 다르고,
