@@ -697,6 +697,33 @@ class ChildSessionDialogueStateHolderTest {
         assertEquals(SessionTreeAnswer.ParentAnswered("답"), second.answerSoFar())
     }
 
+    @Test
+    fun `하위의 stdin 에 쓰지 못하면 send 는 전달됐다고 답하지 않고 거절한다`() = runTest {
+        // 프로세스가 막 끝나 stdin 이 닫힌 틈이다. 전달됐다고 답하면 상위는 하위가 그 말을 받았다고 믿고 답을 기다린다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        bed.child(1).failWrites()
+
+        val sent = bed.mainChannel.askSessionTree(SessionTreeRequest.SendToSession("child-1", "포트는 5433"))
+        runCurrent()
+
+        assertTrue("쓰지 못했습니다" in assertIs<SessionTreeAnswer.Refused>(sent.answerSoFar()).reason)
+    }
+
+    @Test
+    fun `사람의 말을 상위의 stdin 에 쓰지 못하면 기다림을 깨우지 않는다`() = runTest {
+        // user_spoke 는 "사람의 말이 도구 결과 바로 뒤에 붙는다" 는 약속이다(6.6). 말이 가지 않았으면 깨워도 읽을 말이 없다.
+        val bed = mainWithChildrenTestBed(childCount = 1)
+        startMainTurn(bed)
+        val asked = bed.mainChannel.askSessionTree(awaitRequest())
+        runCurrent()
+        bed.main.failWrites()
+
+        bed.holder.sendUserMessage("이 말은 가지 못한다")
+        runCurrent()
+
+        assertNull(asked.answerSoFar(), "쓰지 못한 말로 기다림을 깨웠습니다")
+    }
+
     private fun awaitRequest(childIds: List<String>? = null, waitSeconds: Int = 1800) =
         SessionTreeRequest.AwaitSessions(childIds = childIds, waitSeconds = waitSeconds)
 }

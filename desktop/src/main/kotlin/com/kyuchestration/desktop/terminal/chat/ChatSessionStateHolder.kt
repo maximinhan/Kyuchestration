@@ -23,6 +23,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -281,11 +282,13 @@ class ChatSessionStateHolder(
         val written = sendUserMessageTo(target, text, UserMessageSender.Human) ?: return
 
         // 사람이 기다리는 상위에게 말했다(session-tree 6.5 의 셋째 줄). 기다림을 user_spoke 로 깨운다 — stdin 에 쓴
-        // 뒤에 깨우는 것이 순서다. 그래야 그 말이 도구 결과 바로 뒤에 같은 턴으로 붙는다(3.1).
+        // 뒤에 깨우는 것이 순서다. 그래야 그 말이 도구 결과 바로 뒤에 같은 턴으로 붙는다(3.1). 쓰지 못했으면 깨우지 않는다:
+        // user_spoke 는 "읽을 말이 도구 결과 뒤에 있다" 는 약속인데, 그 말이 없다.
         if (target == SessionTarget.Main && pendingAwait != null) {
             coroutineScope.launch {
-                written.join()
-                wakeParentAwaitBecauseHumanSpoke()
+                if (written.await()) {
+                    wakeParentAwaitBecauseHumanSpoke()
+                }
             }
         }
     }
@@ -294,9 +297,9 @@ class ChatSessionStateHolder(
      * 그 세션에 말 한 줄을 보낸다. 사람의 입력창과, 상위가 하위에게 하는 말(첫 프롬프트 · `send_to_session`)이 함께 쓴다.
      *
      * @param sender 그 말의 주인. 되돌아온 말풍선을 누구의 것으로 그릴지를 uuid 와 함께 적어 둔다(session-tree 6.12).
-     * @return stdin 에 쓰는 일. 그 세션을 보유하고 있지 않으면 null.
+     * @return stdin 에 썼는가(참이면 썼다). 그 세션을 보유하고 있지 않으면 null.
      */
-    private fun sendUserMessageTo(target: SessionTarget, text: String, sender: UserMessageSender): Job? {
+    private fun sendUserMessageTo(target: SessionTarget, text: String, sender: UserMessageSender): Deferred<Boolean>? {
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return null
 
         // uuid 를 보내기 전에 정한다. 쓰기는 다른 스레드에서 나중에 일어나는데, 되돌아온 말을 알아볼
@@ -339,16 +342,20 @@ class ChatSessionStateHolder(
      * 이유가 하나뿐이라 — 프로세스가 이미 끝나 stdin 이 닫혔다 — 되살아나는 길도 같다. 그 사실은
      * 곧 `SessionEnded` 로도 오지만, 잠긴 입력창을 그때까지 두면 사용자는 자기 말이 갔는지 모른
      * 채 기다린다.
+     *
+     * @return 썼으면 참. 실패를 화면에 적는 것으로 끝내지 않고 부르는 쪽에도 돌려준다 — 상위에게 "전달됐다" 고 답하거나
+     *   기다림을 깨우는 자리는 그 말이 실제로 갔는지를 알아야 한다.
      */
     private fun writeToSession(
         target: SessionTarget,
         held: HeldChatSession,
         failureNotice: String,
         write: suspend OpenedChatSession.() -> Unit,
-    ): Job =
-        coroutineScope.launch {
+    ): Deferred<Boolean> =
+        coroutineScope.async {
             try {
                 withContext(standardInputDispatcher) { held.session.write() }
+                true
             } catch (failure: IOException) {
                 updateConversation(target) {
                     it.copy(
@@ -361,6 +368,7 @@ class ChatSessionStateHolder(
                         ),
                     )
                 }
+                false
             }
         }
 
@@ -617,7 +625,8 @@ class ChatSessionStateHolder(
 
             is SessionTreeRequest.AwaitSessions -> awaitChildSessions(asked, request)
 
-            is SessionTreeRequest.SendToSession -> asked.answerWith(sendToChildSession(request.childId, request.message))
+            is SessionTreeRequest.SendToSession ->
+                coroutineScope.launch { asked.answerWith(sendToChildSession(request.childId, request.message)) }
 
             is SessionTreeRequest.EndSession ->
                 coroutineScope.launch { asked.answerWith(endChildSessionForParent(request.childId)) }
@@ -879,7 +888,7 @@ class ChatSessionStateHolder(
      *
      * 끝난 하위에게는 쓰지 않는다. stdin 이 이미 닫혀 쓰기가 실패하고, 상위는 말이 갔다고 믿은 채 답을 기다린다(6.15).
      */
-    private fun sendToChildSession(childId: String, message: String): SessionTreeAnswer {
+    private suspend fun sendToChildSession(childId: String, message: String): SessionTreeAnswer {
         val node = mutableSessionTree.value.child(childId)
             ?: return SessionTreeAnswer.Refused("그런 하위 세션이 없습니다: $childId — list_sessions 로 확인하세요")
 
@@ -895,7 +904,12 @@ class ChatSessionStateHolder(
             return SessionTreeAnswer.DeliveredAsAnswer(question.askId)
         }
 
-        sendUserMessageTo(node.target, PARENT_MESSAGE_PREFIX + message, UserMessageSender.ParentSession)
+        // 쓰기가 끝난 뒤에 답한다. 프로세스가 막 끝나 stdin 이 닫혔으면 전달됐다고 답하지 않는다 — 상위는 하위가 그 말을
+        // 받았다고 믿고 오지 않을 답을 기다린다.
+        val written = sendUserMessageTo(node.target, PARENT_MESSAGE_PREFIX + message, UserMessageSender.ParentSession)
+        if (written?.await() != true) {
+            return SessionTreeAnswer.Refused("$childId 의 stdin 에 쓰지 못했습니다 — 그 하위는 끝났습니다. list_sessions 로 확인하세요")
+        }
         return SessionTreeAnswer.DeliveredAsMessage
     }
 
