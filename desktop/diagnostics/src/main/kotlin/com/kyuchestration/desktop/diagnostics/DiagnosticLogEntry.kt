@@ -204,6 +204,36 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 코어가 화면으로 가는 줄(stdout)에 쓰지 못했다 — 화면이 사라졌다. 코어의 기록에 남는다.
+     *
+     * @param reason 쓰기가 실패한 까닭(예외 문구). 틀의 내용은 싣지 않는다 — 틀에는 대화가 실려 있다.
+     */
+    data class ScreenOutputBroken(val reason: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "화면으로 가는 줄이 끊김 — $reason"
+    }
+
+    /**
+     * 화면이 띄운 코어 프로세스가 끝났다. 화면의 기록에 남는다.
+     *
+     * @param exitCode 코어의 종료 코드.
+     * @param screenWasLeaving 화면이 떠나려고 코어의 stdin 을 닫은 뒤였는가. 아니면 코어가 뜻밖에 끝난 것이고, 그 까닭은 코어의 기록에
+     *   있다.
+     */
+    data class CoreProcessExited(val exitCode: Int, val screenWasLeaving: Boolean) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "코어 프로세스 끝남 — 종료 코드 $exitCode" + if (screenWasLeaving) "" else " · 화면이 떠나기 전에 끝남"
+    }
+
+    /**
+     * 화면이 떠나며 코어에게 세션을 끝내라고 했는데 시간 안에 끝나지 않아 강제로 끝냈다. 끝나지 못한 세션의 claude 가 남았을 수 있다.
+     */
+    data class CoreProcessKilledAfterTimeout(val timeoutSeconds: Long) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "코어가 ${timeoutSeconds}초 안에 끝나지 않아 강제로 끝냄"
+    }
+
+    /**
      * 아무도 받지 않은 예외가 스레드를 끝냈다.
      *
      * 이 갈래가 있어야 기록이 "앱이 예상한 실패" 를 넘어선다. 나머지 아홉은 이 앱이 이미 알고
