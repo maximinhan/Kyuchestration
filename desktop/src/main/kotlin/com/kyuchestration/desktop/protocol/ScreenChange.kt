@@ -7,6 +7,7 @@ import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.OutgoingUserMessage
@@ -162,3 +163,16 @@ data class ConversationHeader(
     val usageWindows: List<RateLimitWindow>,
     val endedExitCode: Int?,
 )
+
+val ChatConversation.header: ConversationHeader
+    get() = ConversationHeader(
+        workingDirectory = workingDirectory,
+        conversationId = conversationId,
+        modelName = modelName,
+        resumedConversationId = resumedConversationId,
+        pendingUserMessages = pendingUserMessages,
+        turnState = turnState,
+        totalCostUsd = totalCostUsd,
+        usageWindows = usageWindows,
+        endedExitCode = endedExitCode,
+    )

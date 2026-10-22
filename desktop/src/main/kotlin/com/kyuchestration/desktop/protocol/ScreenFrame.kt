@@ -2,6 +2,7 @@
 
 package com.kyuchestration.desktop.protocol
 
+import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -100,3 +101,7 @@ fun decodeFrameToCore(line: String): FrameToCore = screenProtocolJson.decodeFrom
 fun encodeFrameToScreen(frame: FrameToScreen): String = screenProtocolJson.encodeToString(FrameToScreen.serializer(), frame)
 
 fun decodeFrameToScreen(line: String): FrameToScreen = screenProtocolJson.decodeFromString(FrameToScreen.serializer(), line)
+
+/** 줄 하나가 틀 위에서 차지하는 바이트. 스냅샷을 1 MiB 안쪽 조각으로 나눌 때 잰다(6.6). */
+fun ChatEntry.encodedByteCount(): Int =
+    screenProtocolJson.encodeToString(ChatEntry.serializer(), this).toByteArray(Charsets.UTF_8).size
