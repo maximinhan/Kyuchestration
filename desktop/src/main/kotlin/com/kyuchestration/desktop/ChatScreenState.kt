@@ -53,6 +53,25 @@ fun viewedTargetAfterEnding(endedTarget: SessionTarget): SessionTarget? =
     if (endedTarget is SessionTarget.Child) SessionTarget.Main else null
 
 /**
+ * 화면이 [from] 에서 [to] 로 옮길 때 닫을 진입 실패. [from] 이 띄우지 못한 세션이면 그 세션이고, 아니면 null 이다.
+ *
+ * 실패는 사람이 그 자리를 보는 동안의 안내다. 떠나면 닫는다 — 남겨 두면 진입 상태 맵에 영영 남고, 다시 돌아온 사람은
+ * 이미 지난 실패를 본다(다시 띄우려면 그 줄을 누르면 되고, 그것이 새 진입이다). 같은 자리에 머무는 것은 다시 띄우기를
+ * 누른 것이라 닫지 않는다 — 새 진입이 그 자리를 덮는다.
+ */
+fun entryFailureLeftBehind(
+    from: SessionTarget?,
+    to: SessionTarget?,
+    sessionEntries: Map<PersonOpenedSessionTarget, SessionEntryState>,
+): PersonOpenedSessionTarget? {
+    val leftTarget = from as? PersonOpenedSessionTarget ?: return null
+    if (leftTarget == to || sessionEntries[leftTarget] !is SessionEntryState.Failed) {
+        return null
+    }
+    return leftTarget
+}
+
+/**
  * 보고 있는 세션 하나의 화면을 짓는다.
  *
  * 진입 상태가 대화보다 먼저다. 홀더는 진입이 끝날 때 대화를 먼저 세우고 진입 줄을 나중에 빼므로, 둘이 함께 있는

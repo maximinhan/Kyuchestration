@@ -87,6 +87,21 @@ class ChatScreenStateTest {
         assertEquals(null, viewedTargetAfterEnding(REPO))
     }
 
+    @Test
+    fun `보던 세션의 진입 실패는 다른 데로 옮길 때 닫는다`() {
+        val failed = mapOf(REPO to SessionEntryState.Failed(TerminalSessionFailure.KyuExecutableNotFound()))
+
+        assertEquals(REPO, entryFailureLeftBehind(from = REPO, to = MAIN, sessionEntries = failed))
+        assertEquals(REPO, entryFailureLeftBehind(from = REPO, to = null, sessionEntries = failed))
+        // 같은 자리에 머물면(다시 띄우기를 누른 것) 닫지 않는다 — 다시 띄우는 진입이 그 자리를 덮는다.
+        assertEquals(null, entryFailureLeftBehind(from = REPO, to = REPO, sessionEntries = failed))
+        assertEquals(null, entryFailureLeftBehind(from = MAIN, to = REPO, sessionEntries = failed))
+        assertEquals(
+            null,
+            entryFailureLeftBehind(from = REPO, to = MAIN, sessionEntries = mapOf(REPO to SessionEntryState.Running)),
+        )
+    }
+
     private companion object {
         val MAIN: PersonOpenedSessionTarget = SessionTarget.Main
         val REPO: PersonOpenedSessionTarget = SessionTarget.Repo("proj-a")

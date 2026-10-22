@@ -527,6 +527,24 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
+    fun `띄우지 못한 진입을 닫으면 그 실패만 빠진다`() = runTest {
+        // 실패는 그 세션의 진입 상태다(core-ui-split 6.8 (가)). 닫는 길이 없으면 사람이 다른 데로 간 뒤에도 영영 남는다.
+        val commandSource = RecordingSessionCommandSource().apply {
+            respondWith { throw TerminalSessionFailure.KyuExecutableNotFound() }
+        }
+        val holder = stateHolder(RecordingChatSessionOpener(), commandSource)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+
+        holder.dismissSessionEntryFailure(SessionTarget.Repo("proj-a"))
+        holder.dismissSessionEntryFailure(SessionTarget.Main)
+
+        // 띄우는 중인 진입은 실패가 아니라 닫히지 않는다 — 닫으면 뜬 세션이 보유되는 순간을 화면이 모른다.
+        assertEquals(mapOf<PersonOpenedSessionTarget, SessionEntryState>(SessionTarget.Main to SessionEntryState.Running), holder.sessionEntries.value)
+    }
+
+    @Test
     fun `세션이 스스로 끝나면 보유에서 빠지고 전사는 화면에 남는다`() = runTest {
         val opener = RecordingChatSessionOpener()
         val holder = stateHolder(opener)

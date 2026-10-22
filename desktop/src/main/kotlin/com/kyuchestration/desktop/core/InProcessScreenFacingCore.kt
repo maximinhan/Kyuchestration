@@ -125,6 +125,9 @@ class InProcessScreenFacingCore(
         }
     }
 
+    override fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget) =
+        chatSessions.dismissSessionEntryFailure(target)
+
     override fun sendUserMessage(target: SessionTarget, text: String) = chatSessions.sendUserMessage(target, text)
 
     override fun interruptTurn(target: SessionTarget) = chatSessions.interruptTurn(target)

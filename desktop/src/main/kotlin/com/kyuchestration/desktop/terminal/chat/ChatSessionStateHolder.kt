@@ -304,6 +304,18 @@ class ChatSessionStateHolder(
     }
 
     /**
+     * 띄우지 못한 진입의 실패를 닫는다. 띄우는 중이거나 실패가 아니면 아무것도 하지 않는다.
+     *
+     * 실패는 그 세션의 진입 상태라(core-ui-split 6.8 (가)) 다시 띄우거나 끝낼 때까지 남는다. 언제 그것을 더 볼 필요가
+     * 없는지는 이 자리가 모른다 — 사람이 어디를 보는지는 화면의 것이다. 그래서 화면이 그 세션을 떠날 때 닫는다.
+     */
+    fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget) {
+        if (mutableSessionEntries.value[target] is SessionEntryState.Failed) {
+            mutableSessionEntries.value -= target
+        }
+    }
+
+    /**
      * 그 세션에 사람의 말 한 줄을 보낸다. 이것이 한 턴의 시작이다.
      *
      * **보낸 말을 전사에 직접 넣지 않는다.** 스트림을 한 바퀴 돌아 `UserMessageEchoed` 로

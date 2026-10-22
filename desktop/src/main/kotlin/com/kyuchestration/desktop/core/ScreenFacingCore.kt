@@ -85,6 +85,9 @@ interface ScreenFacingCore {
 
     fun enterSession(target: PersonOpenedSessionTarget, conversationChoice: SessionConversationChoice)
 
+    /** 띄우지 못한 진입의 실패를 닫는다. 화면이 그 세션을 떠날 때 부른다 — 사람이 어디를 보는지는 화면만 안다. */
+    fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget)
+
     fun sendUserMessage(target: SessionTarget, text: String)
 
     fun interruptTurn(target: SessionTarget)

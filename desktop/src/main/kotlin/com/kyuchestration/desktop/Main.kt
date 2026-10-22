@@ -90,6 +90,14 @@ private fun runDesktopApplication(
     var viewedChatTarget by remember { mutableStateOf<SessionTarget?>(null) }
     val chatScreenState = chatScreenStateFor(viewedChatTarget, chatConversations, chatSessionEntries)
 
+    // 보는 세션을 옮기는 길은 이것 하나다. 떠나는 세션이 띄우지 못한 세션이면 그 실패를 닫는다 — 실패를 언제 더 볼
+    // 필요가 없는지는 사람이 어디를 보는지 아는 화면만 안다(entryFailureLeftBehind).
+    fun viewChatTarget(nextTarget: SessionTarget?) {
+        entryFailureLeftBehind(viewedChatTarget, nextTarget, screenFacingCore.chatSessionEntries.value)
+            ?.let(screenFacingCore::dismissSessionEntryFailure)
+        viewedChatTarget = nextTarget
+    }
+
     Window(
         onCloseRequest = {
             // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
@@ -140,12 +148,12 @@ private fun runDesktopApplication(
             onCloneRepositoriesRequested = screenFacingCore::openRepositoryClone,
             onRefreshRequested = screenFacingCore::refreshWorkDir,
             onCloseWorkDirRequested = {
-                viewedChatTarget = null
+                viewChatTarget(null)
                 screenFacingCore.closeWorkDir()
             },
             onEnterSessionRequested = { target, conversationChoice ->
                 // 이미 보유 중인 세션이면 코어는 아무것도 하지 않는다 — 화면만 옮긴다.
-                viewedChatTarget = target
+                viewChatTarget(target)
                 screenFacingCore.enterSession(target, conversationChoice)
             },
             onSendUserMessageRequested = { text ->
@@ -159,7 +167,7 @@ private fun runDesktopApplication(
             },
             onEndChatSessionRequested = {
                 viewedChatTarget?.let { target ->
-                    viewedChatTarget = viewedTargetAfterEnding(target)
+                    viewChatTarget(viewedTargetAfterEnding(target))
                     screenFacingCore.endSession(target)
                 }
             },
@@ -169,7 +177,7 @@ private fun runDesktopApplication(
                 // 끝난 하위도 전사가 남아 있으면 선다 — 왜 끝났는지 읽을 자리다.
                 val childTarget = SessionTarget.Child(childId)
                 if (childTarget in chatConversations) {
-                    viewedChatTarget = childTarget
+                    viewChatTarget(childTarget)
                 }
             },
             onChildSessionGateAnswered = screenFacingCore::answerGate,
