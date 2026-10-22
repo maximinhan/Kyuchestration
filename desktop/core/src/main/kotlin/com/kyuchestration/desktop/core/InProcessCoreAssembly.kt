@@ -37,7 +37,7 @@ import kotlinx.coroutines.CoroutineScope
  *
  * @param coroutineScope 코어의 단일 스레드 스코프(startCore). 홀더들이 이 스레드를 함께 쓴다.
  */
-fun assembleInProcessScreenFacingCore(coroutineScope: CoroutineScope, diagnosticLog: DiagnosticLog): ScreenFacingCore {
+fun assembleInProcessScreenFacingCore(coroutineScope: CoroutineScope, diagnosticLog: DiagnosticLog): ScreenServingCore {
     // 관찰과 초기화가 같은 실행기를 함께 쓴다. 실행기는 부를 때마다 kyu 를 새로 찾는 무상태라 둘로 나눌 이유가 없다.
     val kyuCommandRunner = ProcessKyuCommandRunner(diagnosticLog = diagnosticLog)
 

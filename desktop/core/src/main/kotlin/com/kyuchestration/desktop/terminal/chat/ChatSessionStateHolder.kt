@@ -887,11 +887,14 @@ class ChatSessionStateHolder(
      * 화면이 다른 프로세스가 되면 객체의 정체는 경계를 건너지 못한다.
      *
      * 이미 답한(또는 거둬진) 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
+     *
+     * @return 이 답이 열린 물음에 닿았는가. 닿지 않았으면 false — 화면은 그것을 거절로 받는다(core-ui-split 6.7).
      */
-    fun answerGateQuestion(gateQuestionId: String, approved: Boolean) {
-        val decision = gateDecisions.remove(gateQuestionId) ?: return
+    fun answerGateQuestion(gateQuestionId: String, approved: Boolean): Boolean {
+        val decision = gateDecisions.remove(gateQuestionId) ?: return false
         mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.gateQuestionId == gateQuestionId }
         decision.complete(if (approved) GateAnswer.Approved else GateAnswer.Declined)
+        return true
     }
 
     /**
@@ -1222,9 +1225,12 @@ class ChatSessionStateHolder(
      *
      * **이미 답한 물음에는 아무 일도 하지 않는다.** 버튼을 두 번 누르거나, 세션이 끝나 물음이
      * 닫힌 뒤에 누른 자리가 그렇다.
+     *
+     * @return 이 답이 기다리던 물음에 닿았는가. 닿지 않았으면(이미 답했거나 claude 가 거뒀거나 묻지 않았다) false — 화면은 그것을
+     *   거절로 받는다(core-ui-split-design.md 6.7). 물음이 열려 있는지를 아는 자리가 이 홀더 하나라 그 판단도 여기서만 한다.
      */
-    fun answerPermission(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice) {
-        val asked = askedPermissions.remove(AskedPermissionKey(target, toolUseId)) ?: return
+    fun answerPermission(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice): Boolean {
+        val asked = askedPermissions.remove(AskedPermissionKey(target, toolUseId)) ?: return false
 
         val decision = when (choice) {
             is PermissionCardChoice.AllowOnce -> PermissionDecision.Allow(choice.input)
@@ -1238,6 +1244,7 @@ class ChatSessionStateHolder(
         }
 
         updateConversation(target) { it.withPermissionAnswered(toolUseId, answerFor(choice, asked.request)) }
+        return true
     }
 
     /**

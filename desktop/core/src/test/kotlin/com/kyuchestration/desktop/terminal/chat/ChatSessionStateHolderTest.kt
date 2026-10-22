@@ -9,6 +9,7 @@ import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -199,12 +200,16 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
-        holder.answerPermission(SessionTarget.Repo("proj-a"), "toolu_01", PermissionCardChoice.Deny("다른 세션의 답"))
-        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowOnce(asked.request.input))
+        val otherSessionAnswered = holder.answerPermission(SessionTarget.Repo("proj-a"), "toolu_01", PermissionCardChoice.Deny("다른 세션의 답"))
+        val answered = holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowOnce(asked.request.input))
         runCurrent()
 
-        // 같은 toolUseId 라도 다른 세션의 답은 이 물음에 닿지 않는다.
+        // 같은 toolUseId 라도 다른 세션의 답은 이 물음에 닿지 않는다 — 닿지 않았다고 답한다(화면이 거절로 받는다).
+        assertFalse(otherSessionAnswered)
+        assertTrue(answered)
         assertEquals(PermissionDecision.Allow(asked.request.input), asked.decisionSoFar())
+        // 이미 답한 물음에 다시 온 답도 닿지 않는다.
+        assertFalse(holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.Deny("늦은 답")))
     }
 
     @Test

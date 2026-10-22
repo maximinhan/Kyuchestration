@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 class RecordingScreenFacingCore(
     override val engineDirectoryLabel: String = "/home/yawn/.local/share/kyuchestration/engine",
-) : ScreenFacingCore {
+) : ScreenServingCore {
 
     override val engineInstallationState = MutableStateFlow<EngineInstallationState>(EngineInstallationState.EngineReady)
     override val claudeAuthenticationState = MutableStateFlow<ClaudeAuthenticationState>(ClaudeAuthenticationState.CredentialsReady)
@@ -42,6 +42,9 @@ class RecordingScreenFacingCore(
 
     var endAllSessionsCount = 0
         private set
+
+    /** 물음에 대한 답이 열린 물음에 닿는가. false 면 답은 받되 닿지 않았다고 답한다 — 화면이 답을 보낸 사이 물음이 닫힌 자리다. */
+    var questionsStillOpen = true
 
     /** 이 명령을 받으면 던진다 — 홀더가 명령 도중 예외를 낸 자리를 흉내 낸다. */
     var commandThatFails: ScreenCommand? = null
@@ -78,12 +81,17 @@ class RecordingScreenFacingCore(
 
     override fun interruptTurn(target: SessionTarget) = record(ScreenCommand.InterruptTurn(target))
 
-    override fun answerPermission(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice) =
+    override fun answerPermissionIfStillAsked(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice): Boolean {
         record(ScreenCommand.AnswerPermission(target, toolUseId, choice))
+        return questionsStillOpen
+    }
 
     override fun endSession(target: SessionTarget) = record(ScreenCommand.EndSession(target))
 
-    override fun answerGate(gateQuestionId: String, approved: Boolean) = record(ScreenCommand.AnswerGate(gateQuestionId, approved))
+    override fun answerGateIfStillOpen(gateQuestionId: String, approved: Boolean): Boolean {
+        record(ScreenCommand.AnswerGate(gateQuestionId, approved))
+        return questionsStillOpen
+    }
 
     override fun openRepositoryClone() = record(ScreenCommand.OpenRepositoryClone)
 

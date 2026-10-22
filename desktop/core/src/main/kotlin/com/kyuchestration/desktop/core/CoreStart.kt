@@ -2,7 +2,6 @@ package com.kyuchestration.desktop.core
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
-import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
@@ -29,7 +28,7 @@ fun startCore(
     framesToScreen: ScreenFrameOutbox,
     coreIdentity: CoreIdentity,
     diagnosticLog: DiagnosticLog,
-    assembleCore: (CoroutineScope) -> ScreenFacingCore = { coreScope -> assembleInProcessScreenFacingCore(coreScope, diagnosticLog) },
+    assembleCore: (CoroutineScope) -> ScreenServingCore = { coreScope -> assembleInProcessScreenFacingCore(coreScope, diagnosticLog) },
 ): Job {
     // 데몬 스레드인 것은 코어가 끝난 뒤 이 스레드가 할 일 없이 남아 JVM 이 끝나는 것을 막지 않게다.
     val coreDispatcher = Executors.newSingleThreadExecutor { task ->

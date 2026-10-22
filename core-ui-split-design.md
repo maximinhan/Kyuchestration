@@ -512,7 +512,7 @@ app-owned 의 개정(*"GUI 세션은 앱과 생사를 같이한다"*)은 창과 
 | `seq` | 코어가 낸 변화마다 1 씩 는다. 스냅샷은 그것을 찍은 `seq` 를 단다. 화면은 `seq` 가 하나라도 건너뛰면 다시 붙어 스냅샷을 받는다 — 거울이 조용히 어긋나지 않게 |
 | `protocol` 은 정수 하나 | 6.14 |
 | **(2 단계 정정)** 지금 싣는 필드 | `hello { protocol, screenVersion }` · `welcome { protocol, coreVersion, coreDiagnosticLog, engineDirectory }` · `bye { reason: protocol_mismatch }`. `screenOs` · `coreOs` · `wslDistro` 는 쓰는 자리(3 단계의 경로 변환 · 진단 기록 경로)가 생길 때 더한다 — 필드를 더하는 변경은 판을 올리지 않는다. `bye` 의 나머지 까닭 둘은 5 단계의 것이다 |
-| **(2 단계 정정)** 낡은 답의 `rejected` 사유 | `question_already_answered`(승인 카드에 이미 답이 적힘 · 거둬짐, 또는 열린 관문 물음에 그 id 가 없음) · `question_not_found`(그 대상의 대화에 그 승인 카드가 없음). 코어가 명령을 부르기 전에 화면이 본 것과 같은 상태로 가린다 |
+| **(2 단계 정정)** 낡은 답의 `rejected` 사유 | `question_not_open` 하나 — 승인 · 관문 물음이 이미 닫혔다(답이 갔거나 claude 가 거뒀거나 세션이 끝났다). 물음이 열려 있는지는 챗 홀더가 답 함수의 결과로 알리고(`answerPermission` · `answerGateQuestion` 이 닿았는가를 돌려준다), serveScreen 은 그 결과로 거절을 쓴다. 어느 까닭으로 닫혔는지는 가르지 않는다 — 화면이 할 일은 같다 |
 
 ### 6.5 변화를 보내는 법 — `StateFlow` 를 그대로 두고, 코어 안의 게시자가 변화로 바꾼다
 
