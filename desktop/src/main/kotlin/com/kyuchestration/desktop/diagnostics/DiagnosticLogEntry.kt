@@ -193,6 +193,17 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 코어가 화면의 명령을 거절했다(core-ui-split-design.md 6.4 의 `rejected`).
+     *
+     * **명령의 갈래 이름만 받는다.** 명령에는 토큰을 싣는 것이 있다(use_claude_token · register_token_profile). 명령을 통째로
+     * 적으면 그 토큰이 이 파일에 남는다.
+     */
+    data class CoreRejectedScreenCommand(val commandKind: String, val reason: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "코어가 화면의 명령을 거절함 — $commandKind: $reason"
+    }
+
+    /**
      * 아무도 받지 않은 예외가 스레드를 끝냈다.
      *
      * 이 갈래가 있어야 기록이 "앱이 예상한 실패" 를 넘어선다. 나머지 아홉은 이 앱이 이미 알고
