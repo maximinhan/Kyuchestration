@@ -10,7 +10,6 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -64,7 +63,7 @@ class RealClaudeChatConversationIntegrationTest {
         val holder = stateHolderOrSkip()
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        waitUntilChatIsOnScreen(holder)
+        waitUntilMainChatIsHeld(holder)
 
         holder.sendUserMessage(SessionTarget.Main, "이 대화의 암호는 $CONVERSATION_PASSPHRASE 다. 알겠다고만 답해.")
         waitForFinishedTurns(holder, turnCount = 1)
@@ -72,7 +71,7 @@ class RealClaudeChatConversationIntegrationTest {
         holder.sendUserMessage(SessionTarget.Main, "이 대화의 암호가 뭐였지? 암호만 답해.")
         waitForFinishedTurns(holder, turnCount = 2)
 
-        val conversation = onScreenConversation(holder)
+        val conversation = mainConversation(holder)
         holder.endSession(SessionTarget.Main)
 
         // 사용자의 말 둘이 그대로 남아 있다. 턴마다 오는 system/init 이 전사를 비웠다면 여기서
@@ -117,7 +116,7 @@ class RealClaudeChatConversationIntegrationTest {
         val holder = stateHolderOrSkip()
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        waitUntilChatIsOnScreen(holder)
+        waitUntilMainChatIsHeld(holder)
 
         holder.sendUserMessage(SessionTarget.Main, "$INTERRUPTED_TOPIC 에 대해 아주 길게, 열 문단으로 설명해라.")
         // 글자가 흐르기 시작한 뒤에 끊는다. 그 전에 보내면 아직 시작하지 않은 턴에 대고 말하는
@@ -127,7 +126,7 @@ class RealClaudeChatConversationIntegrationTest {
         holder.interruptTurn(SessionTarget.Main)
         waitForFinishedTurns(holder, turnCount = 1)
 
-        val afterInterrupt = onScreenConversation(holder)
+        val afterInterrupt = mainConversation(holder)
         assertEquals(
             TurnOutcome.Interrupted,
             afterInterrupt.entries.filterIsInstance<ChatEntry.TurnEnded>().single().outcome,
@@ -140,7 +139,7 @@ class RealClaudeChatConversationIntegrationTest {
         holder.sendUserMessage(SessionTarget.Main, "방금 무슨 주제를 쓰고 있었지? 그 낱말만 답해.")
         waitForFinishedTurns(holder, turnCount = 2)
 
-        val conversation = onScreenConversation(holder)
+        val conversation = mainConversation(holder)
         holder.endSession(SessionTarget.Main)
 
         val answerAfterInterrupt = conversation.entries
@@ -180,9 +179,9 @@ class RealClaudeChatConversationIntegrationTest {
         }
     }
 
-    private suspend fun waitUntilChatIsOnScreen(holder: ChatSessionStateHolder) =
+    private suspend fun waitUntilMainChatIsHeld(holder: ChatSessionStateHolder) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
-            while (holder.state.value !is ChatScreenState.ChatOnScreen) {
+            while (SessionTarget.Main !in holder.conversations.value) {
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
@@ -190,7 +189,7 @@ class RealClaudeChatConversationIntegrationTest {
     /** 모델의 글자가 실제로 흐르기 시작할 때까지. 조각이든 완성본이든 하나라도 오면 그 턴은 살아 있다. */
     private suspend fun waitUntilTheAnswerIsFlowing(holder: ChatSessionStateHolder) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
-            while (onScreenConversation(holder).let { conversation ->
+            while (mainConversation(holder).let { conversation ->
                     conversation.streamingText == null &&
                         conversation.entries.none { it is ChatEntry.AssistantSaid }
                 }
@@ -201,13 +200,13 @@ class RealClaudeChatConversationIntegrationTest {
 
     private suspend fun waitForFinishedTurns(holder: ChatSessionStateHolder, turnCount: Int) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
-            while (onScreenConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
+            while (mainConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+    private fun mainConversation(holder: ChatSessionStateHolder): ChatConversation =
+        holder.conversations.value.getValue(SessionTarget.Main)
 
     private companion object {
 

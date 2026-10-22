@@ -12,7 +12,6 @@ import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -84,7 +83,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
         holder.interruptTurn(SessionTarget.Main)
         waitUntil(holder) { conversation -> conversation.finishedTurns().size == 1 }
 
-        val afterInterrupt = onScreenConversation(holder)
+        val afterInterrupt = mainConversation(holder)
         assertEquals(listOf(TurnOutcome.InterruptedDuringToolWait), afterInterrupt.finishedTurns())
         assertEquals(TurnState.Idle, afterInterrupt.turnState)
         assertTrue(afterInterrupt.alive, "중단이 프로세스를 죽였습니다")
@@ -97,7 +96,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
         holder.sendUserMessage(SessionTarget.Main, "Did the slow tool finish? Reply with exactly: NOT-FINISHED or FINISHED")
         waitUntil(holder) { conversation -> conversation.finishedTurns().size == 2 }
 
-        val conversation = onScreenConversation(holder)
+        val conversation = mainConversation(holder)
         holder.endSession(SessionTarget.Main)
 
         assertEquals(
@@ -148,16 +147,16 @@ class RealClaudeToolWaitInterruptIntegrationTest {
     private suspend fun waitUntil(holder: ChatSessionStateHolder, condition: (ChatConversation) -> Boolean) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
             while (true) {
-                val onScreen = holder.state.value
-                if (onScreen is ChatScreenState.ChatOnScreen && condition(onScreen.conversation)) {
+                val conversation = holder.conversations.value[SessionTarget.Main]
+                if (conversation != null && condition(conversation)) {
                     break
                 }
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+    private fun mainConversation(holder: ChatSessionStateHolder): ChatConversation =
+        holder.conversations.value.getValue(SessionTarget.Main)
 
     private fun ChatConversation.slowCallWaiting(): Boolean = turnState == TurnState.Running &&
         entries.any { it is ChatEntry.ToolCall && it.toolName == SLOW_TOOL && it.answer == null }

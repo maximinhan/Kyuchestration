@@ -73,11 +73,10 @@ class ChildSessionLifecycleStateHolderTest {
     }
 
     @Test
-    fun `사람이 하위 화면에서 끝내면 그 하위만 끝나고 화면은 메인으로 돌아간다`() = runTest {
+    fun `사람이 하위를 끝내면 그 하위만 끝나고 전사는 남는다`() = runTest {
         val bed = mainWithChildrenTestBed(childCount = 2)
         bed.child(1).emit(ChatSessionEvent.AssistantTextArrived("하위의 답", parentToolUseId = null))
         runCurrent()
-        bed.holder.showChildSession("child-1")
 
         bed.holder.endSession(SessionTarget.Child("child-1"))
         runCurrent()
@@ -89,21 +88,10 @@ class ChildSessionLifecycleStateHolderTest {
             ChildEndReason.EndedByHuman,
             assertIs<ChildLifecycle.Ended>(bed.holder.sessionTree.value.child("child-1")?.lifecycle).reason,
         )
-        assertEquals(SessionTarget.Main, bed.holder.state.value.target)
 
         // 끝난 하위의 전사는 남는다 — 하위는 패널의 줄을 눌러 다시 띄우는 길이 없어 그것이 유일한 기록이다.
-        bed.holder.showChildSession("child-1")
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(bed.holder.state.value).conversation
+        val conversation = bed.holder.conversations.value.getValue(SessionTarget.Child("child-1"))
         assertEquals(ChatEntry.AssistantSaid("하위의 답"), conversation.entries.last())
-    }
-
-    @Test
-    fun `하위를 고르면 그 하위의 대화가 화면에 선다`() = runTest {
-        val bed = mainWithChildrenTestBed(childCount = 1)
-
-        bed.holder.showChildSession("child-1")
-
-        assertEquals(SessionTarget.Child("child-1"), bed.holder.state.value.target)
     }
 
     @Test

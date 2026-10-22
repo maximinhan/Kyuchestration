@@ -75,13 +75,11 @@ class ChildSessionDialogueStateHolderTest {
     @Test
     fun `사람이 하위 화면에서 친 말은 사람의 말로 간다`() = runTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
-        bed.holder.showChildSession("child-1")
 
         bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "내가 직접 묻는다")
         runCurrent()
 
         assertEquals(UserMessageSender.Human, bed.child(1).sentMessages.last().sender)
-        assertEquals(SessionTarget.Child("child-1"), bed.holder.state.value.target)
     }
 
     @Test
@@ -216,7 +214,6 @@ class ChildSessionDialogueStateHolderTest {
         startMainTurn(bed)
         val asked = bed.mainChannel.askSessionTree(awaitRequest())
         runCurrent()
-        bed.holder.showChildSession("child-1")
 
         bed.holder.endSession(SessionTarget.Child("child-1"))
         runCurrent()
@@ -245,7 +242,6 @@ class ChildSessionDialogueStateHolderTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
         startMainTurn(bed)
         bed.child(1).finishTurnOnLastSentMessage(result = "첫 일")
-        bed.holder.showChildSession("child-1")
         bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "이것도 해 줘")
         runCurrent()
         bed.child(1).finishTurnOnLastSentMessage(result = "사람의 일", outcome = TurnOutcome.Failed)
@@ -338,7 +334,6 @@ class ChildSessionDialogueStateHolderTest {
     @Test
     fun `사람이 시킨 턴의 끝과 실패한 턴의 끝은 접두가 그 사실을 말한다`() = runTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
-        bed.holder.showChildSession("child-1")
         bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "이것도 해 줘")
         runCurrent()
 
@@ -411,7 +406,6 @@ class ChildSessionDialogueStateHolderTest {
         startMainTurn(bed)
         val asked = bed.mainChannel.askSessionTree(awaitRequest())
         runCurrent()
-        bed.holder.showChildSession("child-1")
 
         bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "하위에게 직접")
         runCurrent()
@@ -472,8 +466,7 @@ class ChildSessionDialogueStateHolderTest {
         asked.closeConnection()
         runCurrent()
 
-        bed.holder.showChildSession("child-1")
-        val card = (bed.holder.state.value as ChatScreenState.ChatOnScreen).conversation.entries
+        val card = bed.holder.conversations.value.getValue(SessionTarget.Child("child-1")).entries
             .filterIsInstance<ChatEntry.PermissionAsked>().single()
         assertEquals(PermissionAnswer.Withdrawn, card.answer)
         assertEquals(ChildWaitingFor.Model, bed.holder.sessionTree.value.child("child-1")?.waitingFor)
@@ -615,7 +608,6 @@ class ChildSessionDialogueStateHolderTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
         val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
         runCurrent()
-        bed.holder.showChildSession("child-1")
 
         bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "5433 이야")
         runCurrent()

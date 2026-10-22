@@ -35,6 +35,7 @@ import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
 import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
+import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatSessionStateHolder
 import com.kyuchestration.desktop.terminal.chat.ProcessChatSessionOpener
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
@@ -162,7 +163,8 @@ private fun runDesktopApplication(
     val claudeAuthenticationState by claudeAuthenticationStateHolder.state.collectAsState()
     val dashboardState by dashboardStateHolder.state.collectAsState()
     val initializationState by initializationStateHolder.state.collectAsState()
-    val chatScreenState by chatSessionStateHolder.state.collectAsState()
+    val chatConversations by chatSessionStateHolder.conversations.collectAsState()
+    val chatSessionEntries by chatSessionStateHolder.sessionEntries.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
     // 하나로 합치면 카드를 오갈 때마다 목록 전체가 다시 그려진다.
     val heldChatSessions by chatSessionStateHolder.heldSessions.collectAsState()
@@ -185,6 +187,11 @@ private fun runDesktopApplication(
     // 일이 있어 홀더가 필요하지만, 이것은 사용자가 고른 값 하나이고 옮길 갈래가 없다 —
     // 고른 것과 시스템이 답한 것을 합치는 판단만 순수 함수로 갈라 두었다(resolveDarkTheme).
     var themePreference by remember { mutableStateOf(ThemePreference.AlwaysDark) }
+
+    // 어느 세션을 보는가는 화면의 것이다(core-ui-split-design.md 6.8 (가) · 원칙 21). 홀더는 모든 대화를 세션마다
+    // 내놓고, 여기서 고른 하나를 그린다. 세션을 오갈 때 홀더에 묻지 않는다.
+    var viewedChatTarget by remember { mutableStateOf<SessionTarget?>(null) }
+    val chatScreenState = chatScreenStateFor(viewedChatTarget, chatConversations, chatSessionEntries)
 
     Window(
         onCloseRequest = {
@@ -256,6 +263,7 @@ private fun runDesktopApplication(
             onCloseWorkDirRequested = {
                 // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 끝내지 않으면 다른
                 // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 세션이 남는다.
+                viewedChatTarget = null
                 applicationCoroutineScope.launch { chatSessionStateHolder.endAllSessions() }
                 // 초기화 실패 문구도, 고르던 레포도 그 워크디렉토리의 것이다. 같은 이유로 여기서
                 // 함께 놓는다 — 다른 워크디렉토리를 연 채로 앞 워크디렉토리에 받을 레포를 고르고
@@ -266,26 +274,35 @@ private fun runDesktopApplication(
             },
             onEnterSessionRequested = { target, conversationChoice ->
                 dashboardState.workDirPath?.let { workDirPath ->
+                    // 이미 보유 중인 세션이면 홀더는 아무것도 하지 않는다 — 화면만 옮긴다.
+                    viewedChatTarget = target
                     chatSessionStateHolder.enterSession(workDirPath, target, conversationChoice)
                 }
             },
             onSendUserMessageRequested = { text ->
-                chatScreenState.target?.let { target -> chatSessionStateHolder.sendUserMessage(target, text) }
+                viewedChatTarget?.let { target -> chatSessionStateHolder.sendUserMessage(target, text) }
             },
             onInterruptTurnRequested = {
-                chatScreenState.target?.let(chatSessionStateHolder::interruptTurn)
+                viewedChatTarget?.let(chatSessionStateHolder::interruptTurn)
             },
             onPermissionChoiceMade = { toolUseId, choice ->
-                chatScreenState.target?.let { target -> chatSessionStateHolder.answerPermission(target, toolUseId, choice) }
+                viewedChatTarget?.let { target -> chatSessionStateHolder.answerPermission(target, toolUseId, choice) }
             },
             onEndChatSessionRequested = {
-                chatScreenState.target?.let { target ->
+                viewedChatTarget?.let { target ->
+                    viewedChatTarget = viewedTargetAfterEnding(target)
                     applicationCoroutineScope.launch { chatSessionStateHolder.endSession(target) }
                 }
             },
             sessionTree = sessionTree,
             childSessionGateQuestions = childSessionGateQuestions,
-            onChildSessionChosen = chatSessionStateHolder::showChildSession,
+            onChildSessionChosen = { childId ->
+                // 끝난 하위도 전사가 남아 있으면 선다 — 왜 끝났는지 읽을 자리다.
+                val childTarget = SessionTarget.Child(childId)
+                if (childTarget in chatConversations) {
+                    viewedChatTarget = childTarget
+                }
+            },
             onChildSessionGateAnswered = chatSessionStateHolder::answerGateQuestion,
         )
     }

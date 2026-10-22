@@ -17,7 +17,6 @@ import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
@@ -160,7 +159,7 @@ class RealClaudeSessionTreeIntegrationTest {
         assertTrue(directChildProcessMarked(sessionMarker("child-3"))?.isAlive == true, "child-3 표식을 단 claude 가 없습니다")
 
         waitUntil("메인의 턴이 끝나기를", holder) {
-            onScreenConversation(holder).entries.any { it is ChatEntry.TurnEnded }
+            conversationOn(holder, SessionTarget.Main).entries.any { it is ChatEntry.TurnEnded }
         }
         val spawnAnswer = conversationOn(holder, SessionTarget.Main).entries.toolCallsNamed(SPAWN_SESSION_TOOL_NAME).single()
             .answer?.modelVisibleText.orEmpty()
@@ -227,7 +226,7 @@ class RealClaudeSessionTreeIntegrationTest {
         onHolder { holder.answerGateQuestion(question, approved = false) }
 
         waitUntil("메인의 턴이 끝나기를", holder) {
-            onScreenConversation(holder).entries.any { it is ChatEntry.TurnEnded }
+            conversationOn(holder, SessionTarget.Main).entries.any { it is ChatEntry.TurnEnded }
         }
         assertEquals(emptyList(), holder.sessionTree.value.children)
         onHolder { holder.endSession(SessionTarget.Main) }
@@ -375,17 +374,14 @@ class RealClaudeSessionTreeIntegrationTest {
             holder.enterSession(workDirPath, SessionTarget.Main, SessionConversationChoice.StartNewConversation)
         }
         withTimeout(TURN_TIMEOUT_MILLIS) {
-            while (holder.state.value !is ChatScreenState.ChatOnScreen) {
+            while (SessionTarget.Main !in holder.conversations.value) {
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
     }
 
     /**
-     * 조건이 설 때까지 기다린다. 그 사이 걸린 승인 카드는 허용으로 답한다 — 사람이 앉아 있는 자리다. 하위의 카드도 답한다:
-     * 그 하위의 챗을 잠깐 세우고 답한 뒤 메인으로 돌아온다.
-     *
-     * 조건은 홀더의 스레드에서 읽는다. 화면을 잠깐 하위로 옮기는 동안 시험 스레드가 메인의 전사를 읽으면 엉뚱한 전사를 본다.
+     * 조건이 설 때까지 기다린다. 그 사이 걸린 승인 카드는 허용으로 답한다 — 사람이 앉아 있는 자리다. 하위의 카드도 답한다.
      */
     private suspend fun waitUntil(what: String, holder: ChatSessionStateHolder, condition: suspend () -> Boolean) {
         try {
@@ -408,33 +404,17 @@ class RealClaudeSessionTreeIntegrationTest {
             .filter { it.lifecycle == ChildLifecycle.Running && it.waitingFor == ChildWaitingFor.Approval }
             .map { it.target }
         (listOf(SessionTarget.Main) + childrenAwaitingApproval).forEach { target ->
-            showOnHolderThread(holder, target)
-            val pending = (holder.state.value as? ChatScreenState.ChatOnScreen)?.conversation?.entries
+            val pending = holder.conversations.value[target]?.entries
                 ?.filterIsInstance<ChatEntry.PermissionAsked>()
                 ?.filter { it.answer == null }
                 .orEmpty()
             pending.forEach { card -> holder.answerPermission(target, card.toolUseId, PermissionCardChoice.AllowOnce(card.input)) }
         }
-        showOnHolderThread(holder, SessionTarget.Main)
     }
 
-    /** 그 세션의 전사. 화면을 잠깐 그 세션으로 옮겨 읽고 메인으로 돌아온다 — 홀더가 전사를 내놓는 자리가 화면 하나다. */
-    private suspend fun conversationOn(holder: ChatSessionStateHolder, target: SessionTarget): ChatConversation =
-        withContext(holderScope.coroutineContext) {
-            showOnHolderThread(holder, target)
-            val conversation = onScreenConversation(holder)
-            showOnHolderThread(holder, SessionTarget.Main)
-            conversation
-        }
-
-    /** 홀더의 스레드에서만 부른다. 메인은 이미 보유 중이라 enterSession 이 다시 띄우지 않고 화면만 옮긴다. */
-    private fun showOnHolderThread(holder: ChatSessionStateHolder, target: SessionTarget) {
-        when (target) {
-            is SessionTarget.Child -> holder.showChildSession(target.childId)
-            SessionTarget.Main -> holder.enterSession(workDirPath, SessionTarget.Main, SessionConversationChoice.StartNewConversation)
-            else -> error("이 시험은 메인과 하위만 본다: $target")
-        }
-    }
+    /** 그 세션의 전사. 홀더가 세션마다 대화를 내놓으므로 화면을 옮기지 않고 곧바로 읽는다. */
+    private fun conversationOn(holder: ChatSessionStateHolder, target: SessionTarget): ChatConversation =
+        holder.conversations.value.getValue(target)
 
     /** 기다림의 결과(앱이 답한 줄을 엔진이 들여쓰기만 한 JSON)에서 turn_completed 사건의 하위 이름들을 읽는다. */
     private fun turnCompletedChildIds(awaitAnswerText: String): List<String> =
@@ -448,8 +428,6 @@ class RealClaudeSessionTreeIntegrationTest {
 
     private suspend fun onHolder(action: suspend () -> Unit) = withContext(holderScope.coroutineContext) { action() }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
 
     private fun sessionMarker(label: String) = "$APP_SESSION_MARKER_ENV_NAME=${workDirPath.fileName}-$label"
 

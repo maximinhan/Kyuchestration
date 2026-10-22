@@ -16,7 +16,6 @@ import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -71,7 +70,7 @@ class RealClaudeDelegationIntegrationTest {
         temporaryDirectory.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        waitUntilChatIsOnScreen(holder)
+        waitUntilMainChatIsHeld(holder)
 
         holder.sendUserMessage(
             SessionTarget.Main,
@@ -80,7 +79,7 @@ class RealClaudeDelegationIntegrationTest {
         )
         waitForFinishedTurns(holder, turnCount = 1)
 
-        val conversation = onScreenConversation(holder)
+        val conversation = mainConversation(holder)
         holder.endSession(SessionTarget.Main)
 
         val subagentCard = conversation.entries
@@ -120,7 +119,7 @@ class RealClaudeDelegationIntegrationTest {
         repositoryPath.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        waitUntilChatIsOnScreen(holder)
+        waitUntilMainChatIsHeld(holder)
 
         holder.sendUserMessage(
             SessionTarget.Main,
@@ -129,7 +128,7 @@ class RealClaudeDelegationIntegrationTest {
         )
         waitForFinishedTurns(holder, turnCount = 1, timeoutMillis = DELEGATION_TIMEOUT_MILLIS)
 
-        val conversation = onScreenConversation(holder)
+        val conversation = mainConversation(holder)
         holder.endSession(SessionTarget.Main)
 
         val delegationCard = conversation.entries
@@ -195,9 +194,9 @@ class RealClaudeDelegationIntegrationTest {
         }
     }
 
-    private suspend fun waitUntilChatIsOnScreen(holder: ChatSessionStateHolder) =
+    private suspend fun waitUntilMainChatIsHeld(holder: ChatSessionStateHolder) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
-            while (holder.state.value !is ChatScreenState.ChatOnScreen) {
+            while (SessionTarget.Main !in holder.conversations.value) {
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
@@ -213,21 +212,21 @@ class RealClaudeDelegationIntegrationTest {
         turnCount: Int,
         timeoutMillis: Long = TURN_TIMEOUT_MILLIS,
     ) = withTimeout(timeoutMillis) {
-        while (onScreenConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
+        while (mainConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
             allowAnyPendingPermission(holder)
             delay(POLL_INTERVAL_MILLIS)
         }
     }
 
     private fun allowAnyPendingPermission(holder: ChatSessionStateHolder) {
-        onScreenConversation(holder).entries
+        mainConversation(holder).entries
             .filterIsInstance<ChatEntry.PermissionAsked>()
             .filter { it.answer == null }
             .forEach { holder.answerPermission(SessionTarget.Main, it.toolUseId, PermissionCardChoice.AllowOnce(it.input)) }
     }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+    private fun mainConversation(holder: ChatSessionStateHolder): ChatConversation =
+        holder.conversations.value.getValue(SessionTarget.Main)
 
     private fun gitRepositoryIn(repositoryPath: Path): Path {
         repositoryPath.createDirectories()

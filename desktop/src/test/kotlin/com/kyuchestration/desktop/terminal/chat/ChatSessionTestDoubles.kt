@@ -321,7 +321,7 @@ internal fun spawnRequest(cwd: String, prompt: String = "일해") =
     SessionTreeRequest.SpawnSession(prompt = prompt, requestedCwd = cwd, createDirectory = false, title = null)
 
 /**
- * 메인 하나와 그 아래 하위 [childCount] 개를 띄워 둔다. 화면은 메인에 있다. 하위의 cwd 는 `proj-0` 부터다.
+ * 메인 하나와 그 아래 하위 [childCount] 개를 띄워 둔다. 하위의 cwd 는 `proj-0` 부터다.
  *
  * 수명 시험이 쓰던 것을 말이 가는 길 시험(ChildSessionDialogueStateHolderTest)이 두 번째로 쓰면서 여기로 꺼냈다.
  */
@@ -365,7 +365,6 @@ internal class MainWithChildrenTestBed(
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal fun TestScope.startMainTurn(bed: MainWithChildrenTestBed) {
-    check(bed.holder.state.value.target == SessionTarget.Main) { "화면이 메인에 있어야 사람이 메인에게 말한다" }
     bed.holder.sendUserMessage(SessionTarget.Main, "하위들에게 일을 시켜")
     runCurrent()
     bed.main.echoLastSentMessage()

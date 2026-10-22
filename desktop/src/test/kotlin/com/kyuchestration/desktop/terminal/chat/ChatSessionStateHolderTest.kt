@@ -10,6 +10,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -31,7 +32,8 @@ class ChatSessionStateHolderTest {
     fun `아무 챗도 열지 않은 채로 시작한다`() = runTest {
         val holder = stateHolder(RecordingChatSessionOpener())
 
-        assertEquals(ChatScreenState.NoChatOpen, holder.state.value)
+        assertEquals(emptyMap(), holder.conversations.value)
+        assertEquals(emptyMap(), holder.sessionEntries.value)
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
     }
 
@@ -41,8 +43,7 @@ class ChatSessionStateHolderTest {
 
         holder.enterSession(WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
 
-        val running = assertIs<ChatScreenState.ChatSessionEntryRunning>(holder.state.value)
-        assertEquals(SessionTarget.Main, running.target)
+        assertEquals(mapOf<PersonOpenedSessionTarget, SessionEntryState>(SessionTarget.Main to SessionEntryState.Running), holder.sessionEntries.value)
     }
 
     @Test
@@ -59,7 +60,9 @@ class ChatSessionStateHolderTest {
         assertEquals(listOf<SessionTarget>(SessionTarget.Repo("proj-a")), commandSource.askedTargets)
         assertEquals(ENGINE_ANSWERED_COMMAND, opener.openedPlans.single().command)
         assertEquals(listOf(SessionTarget.Repo("proj-a")), holder.heldSessions.value.map { it.target })
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value)
+        assertNotNull(holder.conversations.value[SessionTarget.Repo("proj-a")])
+        // 보유하면 진입 줄은 빠진다 — 대화가 그 자리를 잇는다.
+        assertEquals(emptyMap(), holder.sessionEntries.value)
     }
 
     @Test
@@ -75,7 +78,7 @@ class ChatSessionStateHolderTest {
             holder.enterSessionContinuingConversation(target)
             runCurrent()
 
-            val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+            val conversation = conversationOf(holder, target)
             assertEquals(
                 listOf<ChatEntry>(
                     ChatEntry.EngineNotice("대화 기록을 읽지 못해 버렸습니다"),
@@ -98,7 +101,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(ChatSessionEvent.AssistantTextArrived("2", parentToolUseId = null))
         runCurrent()
 
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(
             listOf<ChatEntry>(ChatEntry.UserSaid("1 더하기 1은?"), ChatEntry.AssistantSaid("2")),
             conversation.entries,
@@ -124,7 +127,7 @@ class ChatSessionStateHolderTest {
         // 않는다 — 다시 띄우면 그 자리에 새 프로세스가 서고 전사가 빈다.
         assertEquals(2, opener.openedPlans.size)
         assertEquals(0, mainSession.endSessionCount)
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(listOf<ChatEntry>(ChatEntry.UserSaid("메인에게 한 말")), conversation.entries)
     }
 
@@ -144,7 +147,7 @@ class ChatSessionStateHolderTest {
 
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(listOf<ChatEntry>(ChatEntry.AssistantSaid("보고 있지 않을 때 온 답")), conversation.entries)
     }
 
@@ -160,7 +163,7 @@ class ChatSessionStateHolderTest {
 
         assertEquals(listOf("README 를 읽어줘"), opener.lastSession.sentMessages.map { it.text })
         // 보낸 말을 앱이 전사에 직접 넣지 않는다 — 되돌아온 것으로만 그린다(3.14).
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(emptyList(), conversation.entries)
         assertEquals(opener.lastSession.sentMessages, conversation.pendingUserMessages)
         // 보낸 것은 아직 시작한 턴이 아니다. 시작은 이 말이 되돌아올 때다.
@@ -216,7 +219,7 @@ class ChatSessionStateHolderTest {
         holder.sendUserMessage(SessionTarget.Main, "이미 끝난 세션에 거는 말")
         runCurrent()
 
-        val conversation = onScreenConversation(holder)
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(emptyList(), conversation.pendingUserMessages)
         assertEquals(TurnState.Idle, conversation.turnState)
         assertIs<ChatEntry.EngineNotice>(conversation.entries.single())
@@ -237,7 +240,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(TurnState.Idle, conversation.turnState)
         assertEquals(0.25, conversation.totalCostUsd)
     }
@@ -256,8 +259,8 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(listOf("긴 답을 줘", "사과의 색은?"), opener.lastSession.sentMessages.map { it.text })
-        assertEquals(opener.lastSession.sentMessages, onScreenConversation(holder).pendingUserMessages)
-        assertEquals(emptyList(), onScreenConversation(holder).entries)
+        assertEquals(opener.lastSession.sentMessages, conversationOf(holder, SessionTarget.Main).pendingUserMessages)
+        assertEquals(emptyList(), conversationOf(holder, SessionTarget.Main).entries)
     }
 
     @Test
@@ -273,7 +276,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         runCurrent()
 
-        val conversation = onScreenConversation(holder)
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(listOf("사과의 색은?"), conversation.pendingUserMessages.map { it.text })
         assertEquals(listOf<ChatEntry>(ChatEntry.UserSaid("긴 답을 줘")), conversation.entries)
     }
@@ -294,7 +297,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("응", parentToolUseId = null, messageUuid = second.uuid))
         runCurrent()
 
-        assertEquals(listOf(first), onScreenConversation(holder).pendingUserMessages)
+        assertEquals(listOf(first), conversationOf(holder, SessionTarget.Main).pendingUserMessages)
     }
 
     @Test
@@ -317,7 +320,7 @@ class ChatSessionStateHolderTest {
         )
         runCurrent()
 
-        assertEquals(opener.lastSession.sentMessages, onScreenConversation(holder).pendingUserMessages)
+        assertEquals(opener.lastSession.sentMessages, conversationOf(holder, SessionTarget.Main).pendingUserMessages)
     }
 
     @Test
@@ -332,19 +335,19 @@ class ChatSessionStateHolderTest {
 
         opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         runCurrent()
-        assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
+        assertEquals(TurnState.Running, conversationOf(holder, SessionTarget.Main).turnState)
 
         // 첫 턴이 끝났다. 둘째 말은 아직 되돌아오지 않았으므로 그 턴은 시작하지 않았다 —
         // 기다리는 중이라는 사실은 대기 목록이 말하고, 도는 턴은 없다.
         opener.lastSession.emit(finishedTurn())
         runCurrent()
-        val betweenTurns = onScreenConversation(holder)
+        val betweenTurns = conversationOf(holder, SessionTarget.Main)
         assertEquals(TurnState.Idle, betweenTurns.turnState)
         assertEquals(listOf("사과의 색은?"), betweenTurns.pendingUserMessages.map { it.text })
 
         opener.lastSession.emit(echoOfPending(holder, "사과의 색은?"))
         runCurrent()
-        assertEquals(TurnState.Running, onScreenConversation(holder).turnState)
+        assertEquals(TurnState.Running, conversationOf(holder, SessionTarget.Main).turnState)
     }
 
     @Test
@@ -365,7 +368,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(0, opener.lastSession.interruptCount)
-        assertEquals(TurnState.Idle, onScreenConversation(holder).turnState)
+        assertEquals(TurnState.Idle, conversationOf(holder, SessionTarget.Main).turnState)
     }
 
     @Test
@@ -384,7 +387,7 @@ class ChatSessionStateHolderTest {
         assertEquals(1, opener.lastSession.interruptCount)
         // 아직 끊긴 것이 아니라 끊어 달라고 말한 것이다. 여기서 곧바로 Idle 로 두면 화면은 턴이
         // 끝났다고 말하는데 글자는 계속 흐른다 — 끝났다는 사실은 result 가 말한다(3.8).
-        assertEquals(TurnState.Interrupting, onScreenConversation(holder).turnState)
+        assertEquals(TurnState.Interrupting, conversationOf(holder, SessionTarget.Main).turnState)
     }
 
     @Test
@@ -402,7 +405,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(finishedTurn(outcome = TurnOutcome.Interrupted))
         runCurrent()
 
-        val conversation = onScreenConversation(holder)
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(TurnState.Idle, conversation.turnState)
         assertEquals(
             TurnOutcome.Interrupted,
@@ -422,7 +425,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(0, opener.lastSession.interruptCount)
-        assertEquals(TurnState.Idle, onScreenConversation(holder).turnState)
+        assertEquals(TurnState.Idle, conversationOf(holder, SessionTarget.Main).turnState)
     }
 
     @Test
@@ -454,10 +457,56 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
         runCurrent()
 
-        val failed = assertIs<ChatScreenState.ChatSessionEntryFailed>(holder.state.value)
+        val failed = assertIs<SessionEntryState.Failed>(holder.sessionEntries.value[SessionTarget.Repo("proj-a")])
         assertIs<TerminalSessionFailure.KyuExecutableNotFound>(failed.failure)
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
         assertIs<DiagnosticLogEntry.SessionEntryFailed>(diagnosticLog.recordedEntries.single())
+    }
+
+    @Test
+    fun `띄우는 사이 다른 세션을 열어도 앞 진입은 끝까지 가서 보유된다`() = runTest {
+        // 어느 세션을 보는지는 화면의 것이라(core-ui-split 6.8), 이 자리는 사람이 다른 데로 갔다는 것을 모른다.
+        // 띄운 세션은 버리지 않고 보유한다 — 사람이 그 줄을 다시 누르면 이미 떠 있다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        assertEquals(
+            setOf<SessionTarget>(SessionTarget.Main, SessionTarget.Repo("proj-a")),
+            holder.heldSessions.value.map { it.target }.toSet(),
+        )
+        assertEquals(0, opener.openedSessions.sumOf { it.endSessionCount })
+    }
+
+    @Test
+    fun `띄우는 중인 세션을 다시 열라고 해도 두 번 띄우지 않는다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+
+        assertEquals(1, opener.openedPlans.size)
+    }
+
+    @Test
+    fun `띄우는 중에 그 세션을 끝내면 뜨는 순간 끝낸다`() = runTest {
+        // 끝낸 세션의 claude 가 뒤늦게 떠서 아무도 읽지 않은 채 사는 것을 막는다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+
+        holder.endSession(SessionTarget.Main)
+        runCurrent()
+
+        assertEquals(1, opener.lastSession.endSessionCount)
+        assertEquals(emptyList(), holder.heldSessions.value)
+        assertEquals(emptyMap(), holder.sessionEntries.value)
+        assertEquals(emptyMap(), holder.conversations.value)
     }
 
     @Test
@@ -472,7 +521,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(listOf<ChatEntry>(ChatEntry.AssistantSaid("마지막 답")), conversation.entries)
         assertEquals(0, conversation.endedExitCode)
     }
@@ -491,7 +540,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(ChatSessionEvent.SessionEnded(exitCode = 1))
         runCurrent()
 
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertTrue(conversation.resumeFailureSuspected, "PTY 시절에는 사용자의 /exit 과 구분할 수 없던 자리다")
         assertIs<ChatEntry.EngineNotice>(conversation.entries.single())
         val recorded = diagnosticLog.recordedEntries.filterIsInstance<DiagnosticLogEntry.SessionEndedUnexpectedly>()
@@ -510,7 +559,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(1, opener.lastSession.endSessionCount)
-        assertEquals(ChatScreenState.NoChatOpen, holder.state.value)
+        assertEquals(emptyMap(), holder.conversations.value)
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
         // 사용자가 시킨 일이라 진단할 것이 없다. 이것까지 남기면 기록이 정상적인 사용으로 찬다.
         assertEquals(
@@ -534,7 +583,7 @@ class ChatSessionStateHolderTest {
 
         // 새 프로세스가 섰으므로 화면도 그 프로세스가 말한 것부터 보여야 한다. 앞 전사를 이어
         // 붙이면 이번 실행에서 온 적 없는 말이 새 대화 위에 얹힌다.
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+        val conversation = conversationOf(holder, SessionTarget.Main)
         assertEquals(emptyList(), conversation.entries)
         assertEquals(2, opener.openedPlans.size)
     }
@@ -555,7 +604,7 @@ class ChatSessionStateHolderTest {
         // 놓아 주면 앱 어디에도 보이지 않는 claude 가 남는다(설계 8 절 1 번).
         assertEquals(1, mainSession.endSessionCount)
         assertEquals(1, opener.lastSession.endSessionCount)
-        assertEquals(ChatScreenState.NoChatOpen, holder.state.value)
+        assertEquals(emptyMap(), holder.conversations.value)
     }
 
     @Test
@@ -587,7 +636,7 @@ class ChatSessionStateHolderTest {
         channels.single().ask("Write", "toolu_01", writeInput("/tmp/probe.txt"))
         runCurrent()
 
-        val card = assertIs<ChatEntry.PermissionAsked>(onScreenConversation(holder).entries.single())
+        val card = assertIs<ChatEntry.PermissionAsked>(conversationOf(holder, SessionTarget.Main).entries.single())
         assertEquals("Write", card.toolName)
         assertEquals("toolu_01", card.toolUseId)
         assertEquals(null, card.answer)
@@ -606,7 +655,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(PermissionDecision.Allow(asked.request.input), asked.decisionSoFar())
-        val card = assertIs<ChatEntry.PermissionAsked>(onScreenConversation(holder).entries.single())
+        val card = assertIs<ChatEntry.PermissionAsked>(conversationOf(holder, SessionTarget.Main).entries.single())
         // 고치지 않았으므로 고친 인자는 없다 — 원본과 같은 값을 담아 두면 화면이 둘을 가르지 못한다.
         assertEquals(PermissionAnswer.Allowed(editedInput = null), card.answer)
     }
@@ -626,7 +675,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(PermissionDecision.Allow(editedInput), asked.decisionSoFar())
-        val card = assertIs<ChatEntry.PermissionAsked>(onScreenConversation(holder).entries.single())
+        val card = assertIs<ChatEntry.PermissionAsked>(conversationOf(holder, SessionTarget.Main).entries.single())
         assertEquals(PermissionAnswer.Allowed(editedInput = editedInput), card.answer)
     }
 
@@ -643,7 +692,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(PermissionDecision.Deny("이 파일은 손대지 마세요"), asked.decisionSoFar())
-        val card = assertIs<ChatEntry.PermissionAsked>(onScreenConversation(holder).entries.single())
+        val card = assertIs<ChatEntry.PermissionAsked>(conversationOf(holder, SessionTarget.Main).entries.single())
         assertEquals(PermissionAnswer.Denied("이 파일은 손대지 마세요"), card.answer)
     }
 
@@ -664,7 +713,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         assertEquals(PermissionDecision.Allow(secondAsked.request.input), secondAsked.decisionSoFar())
-        val cards = onScreenConversation(holder).entries.filterIsInstance<ChatEntry.PermissionAsked>()
+        val cards = conversationOf(holder, SessionTarget.Main).entries.filterIsInstance<ChatEntry.PermissionAsked>()
         assertEquals(PermissionAnswer.AllowedForThisSession, cards.first().answer)
         // 사람이 누른 것과 규칙이 통과시킨 것을 가른다. 같은 모양으로 그리면 사용자는 자기가
         // 보지 않은 승인을 자기가 한 것으로 읽는다.
@@ -685,7 +734,7 @@ class ChatSessionStateHolderTest {
         channels.single().ask("Bash", "toolu_02", writeInput("/tmp/two.txt"))
         runCurrent()
 
-        val cards = onScreenConversation(holder).entries.filterIsInstance<ChatEntry.PermissionAsked>()
+        val cards = conversationOf(holder, SessionTarget.Main).entries.filterIsInstance<ChatEntry.PermissionAsked>()
         assertEquals(null, cards.last().answer, "Write 를 허용한 규칙이 Bash 까지 통과시켰습니다")
     }
 
@@ -711,7 +760,7 @@ class ChatSessionStateHolderTest {
         channels.last().ask("Write", "toolu_02", writeInput("/tmp/two.txt"))
         runCurrent()
 
-        val card = assertIs<ChatEntry.PermissionAsked>(onScreenConversation(holder).entries.single())
+        val card = assertIs<ChatEntry.PermissionAsked>(conversationOf(holder, SessionTarget.Main).entries.single())
         assertEquals(null, card.answer, "앞 세션의 규칙이 새 세션까지 살아남았습니다")
     }
 
@@ -730,7 +779,7 @@ class ChatSessionStateHolderTest {
         opener.lastSession.emit(ChatSessionEvent.SessionEnded(exitCode = 0))
         runCurrent()
 
-        val card = assertIs<ChatEntry.PermissionAsked>(onScreenConversation(holder).entries.single())
+        val card = assertIs<ChatEntry.PermissionAsked>(conversationOf(holder, SessionTarget.Main).entries.single())
         assertIs<PermissionAnswer.Denied>(card.answer)
     }
 
@@ -743,8 +792,8 @@ class ChatSessionStateHolderTest {
         put("content", "WRITTEN\n")
     }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+    private fun conversationOf(holder: ChatSessionStateHolder, target: SessionTarget): ChatConversation =
+        assertNotNull(holder.conversations.value[target], "$target 의 대화가 없습니다")
 
     /**
      * 기다리는 말 하나가 되돌아온 모습 — `claude` 가 앱이 정한 uuid 를 그대로 실어 돌려준다
@@ -753,7 +802,7 @@ class ChatSessionStateHolderTest {
     private fun echoOfPending(holder: ChatSessionStateHolder, text: String) = ChatSessionEvent.UserMessageEchoed(
         text = text,
         parentToolUseId = null,
-        messageUuid = onScreenConversation(holder).pendingUserMessages.first { it.text == text }.uuid,
+        messageUuid = conversationOf(holder, SessionTarget.Main).pendingUserMessages.first { it.text == text }.uuid,
     )
 
     private fun finishedTurn(

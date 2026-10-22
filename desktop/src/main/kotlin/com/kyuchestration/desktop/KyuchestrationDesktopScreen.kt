@@ -34,7 +34,6 @@ import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.SessionTree
-import com.kyuchestration.desktop.terminal.chat.ChatScreenState
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.theme.ThemePreference
