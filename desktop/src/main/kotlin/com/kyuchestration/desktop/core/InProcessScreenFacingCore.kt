@@ -21,10 +21,7 @@ import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import com.kyuchestration.desktop.terminal.chat.SessionTree
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -58,13 +55,7 @@ class InProcessScreenFacingCore(
     override val childSessionGateQuestions: StateFlow<List<ChildSessionGateQuestion>> = chatSessions.gateQuestions
     override val repositoryCloneState: StateFlow<RepositoryCloneState> = repositoryClone.state
 
-    override val heldChatSessionTargets: StateFlow<Set<SessionTarget>> = chatSessions.heldSessions
-        .map { heldSessions -> heldSessions.map { it.target }.toSet() }
-        .stateIn(
-            coroutineScope,
-            SharingStarted.Eagerly,
-            initialValue = chatSessions.heldSessions.value.map { it.target }.toSet(),
-        )
+    override val heldChatSessionTargets: StateFlow<Set<SessionTarget>> = chatSessions.heldSessionTargets
 
     init {
         // 엔진이 선 뒤에 묻는다. 온보딩 순서가 곧 이 순서다 — 토큰을 맡아 두는 자리가 kyu 라서, 엔진이 아직 없을 때

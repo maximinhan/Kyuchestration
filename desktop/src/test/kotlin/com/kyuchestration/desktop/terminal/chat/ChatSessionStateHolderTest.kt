@@ -464,6 +464,23 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
+    fun `보유 세션의 대상은 보유 목록이 바뀌는 그 자리에서 함께 바뀐다`() = runTest {
+        // 화면이 읽는 것은 대상뿐이다(core-ui-split 6.2 (가)). 따로 파생하면 한 바퀴 늦고, 그 사이 화면은 이미 끝난
+        // 세션을 보유 중으로 그린다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        assertEquals(setOf<SessionTarget>(SessionTarget.Main), holder.heldSessionTargets.value)
+
+        opener.lastSession.emit(ChatSessionEvent.SessionEnded(exitCode = 0))
+        runCurrent()
+
+        assertEquals(emptySet<SessionTarget>(), holder.heldSessionTargets.value)
+        assertEquals(holder.heldSessions.value.map { it.target }.toSet(), holder.heldSessionTargets.value)
+    }
+
+    @Test
     fun `띄우는 사이 다른 세션을 열어도 앞 진입은 끝까지 가서 보유된다`() = runTest {
         // 어느 세션을 보는지는 화면의 것이라(core-ui-split 6.8), 이 자리는 사람이 다른 데로 갔다는 것을 모른다.
         // 띄운 세션은 버리지 않고 보유한다 — 사람이 그 줄을 다시 누르면 이미 떠 있다.

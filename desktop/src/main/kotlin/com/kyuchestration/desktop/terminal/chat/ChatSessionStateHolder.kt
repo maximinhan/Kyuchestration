@@ -111,6 +111,16 @@ class ChatSessionStateHolder(
      */
     val heldSessions: StateFlow<List<HeldChatSession>> = mutableHeldSessions.asStateFlow()
 
+    private val mutableHeldSessionTargets = MutableStateFlow<Set<SessionTarget>>(emptySet())
+
+    /**
+     * 보유 중인 세션의 대상만. 화면이 읽는 것은 이것이다 — 세션 자체(프로세스 · 소켓)는 화면에 건너가지 못한다(core-ui-split 6.2 (가)).
+     *
+     * [heldSessions] 와 같은 자리([replaceHeldSessions])에서 함께 고친다. 흐름으로 파생하면 한 바퀴 늦어, 그 사이 화면이 이미
+     * 끝낸 세션을 보유 중으로 그린다.
+     */
+    val heldSessionTargets: StateFlow<Set<SessionTarget>> = mutableHeldSessionTargets.asStateFlow()
+
     private val mutableConversations = MutableStateFlow<Map<SessionTarget, ChatConversation>>(emptyMap())
 
     /**
@@ -414,7 +424,7 @@ class ChatSessionStateHolder(
 
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
         // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
-        mutableHeldSessions.value = mutableHeldSessions.value - held
+        replaceHeldSessions(mutableHeldSessions.value - held)
         endSessionProcess(held)
     }
 
@@ -480,7 +490,7 @@ class ChatSessionStateHolder(
         mutableConversations.value = emptyMap()
 
         val endingSessions = mutableHeldSessions.value
-        mutableHeldSessions.value = emptyList()
+        replaceHeldSessions(emptyList())
         coroutineScope {
             endingSessions.map { async { endSessionProcess(it) } }.awaitAll()
         }
@@ -553,7 +563,7 @@ class ChatSessionStateHolder(
             resumedConversationId = held.resumedConversationId,
             entries = held.engineWarnings.map(ChatEntry::EngineNotice),
         )
-        mutableHeldSessions.value = mutableHeldSessions.value + held
+        replaceHeldSessions(mutableHeldSessions.value + held)
 
         // 이어간 대화의 ID 자체는 남기지 않는다. 뒤에 오는 종료를 읽는 근거는 "이어갔는가" 이고,
         // ID 는 그 판단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다.
@@ -1105,8 +1115,13 @@ class ChatSessionStateHolder(
 
         val held = mutableHeldSessions.value.firstOrNull { it.target == node.target } ?: return
         // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
-        mutableHeldSessions.value = mutableHeldSessions.value - held
+        replaceHeldSessions(mutableHeldSessions.value - held)
         endSessionProcess(held)
+    }
+
+    private fun replaceHeldSessions(heldSessions: List<HeldChatSession>) {
+        mutableHeldSessions.value = heldSessions
+        mutableHeldSessionTargets.value = heldSessions.map { it.target }.toSet()
     }
 
     private fun updateChild(childId: String, change: (ChildSessionNode) -> ChildSessionNode) {
@@ -1283,7 +1298,7 @@ class ChatSessionStateHolder(
         val held = mutableHeldSessions.value.firstOrNull { it.target == target }
             // 우리가 끝낸 세션이다. 끝내는 자리에서 이미 목록에서 뺐다.
             ?: return
-        mutableHeldSessions.value = mutableHeldSessions.value - held
+        replaceHeldSessions(mutableHeldSessions.value - held)
 
         // 메인이 스스로 끝났다(크래시 · 대화 안에서 끝냄). 원칙 17 — 하위도 끝낸다. 트리는 남겨 무엇이
         // 끝났는지 사람이 읽게 한다.
