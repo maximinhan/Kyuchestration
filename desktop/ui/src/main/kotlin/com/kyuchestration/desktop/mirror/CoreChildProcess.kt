@@ -1,8 +1,12 @@
 package com.kyuchestration.desktop.mirror
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.time.Duration
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
@@ -18,6 +22,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * 줄을 나르는 것은 각자의 스레드다. stdout 을 읽고 stdin 에 쓰는 것은 막히는 일이고, 창을 닫는 자리가 화면 스레드를 붙잡고 코어가
  * 끝나기를 기다리므로 그 둘이 화면 스레드에 있으면 안 된다.
+ *
+ * 코어 프로세스가 끝나면 그 종료 코드와 화면이 떠나던 중이었는지를 화면의 진단 기록에 남긴다. 화면이 떠나기 전에 끝났다면 코어가
+ * 뜻밖에 끝난 것이고, 그 까닭은 코어의 기록에 있다.
  */
 class CoreChildProcess private constructor(
     private val process: Process,
@@ -25,31 +32,70 @@ class CoreChildProcess private constructor(
     val framesFromCore: ReceiveChannel<String>,
     /** 코어에 보낼 틀 줄. 닫으면 코어의 stdin 이 닫힌다 — 코어는 그것을 화면이 떠났다는 말로 듣는다. */
     val framesToCore: SendChannel<String>,
+    private val diagnosticLog: DiagnosticLog,
 ) {
 
     val pid: Long get() = process.pid()
 
-    /** 코어 프로세스가 끝나면 그 종료 코드로 [action] 을 부른다. 화면이 떠나서든 코어가 뜻밖에 끝나서든. */
-    fun whenExited(action: (exitCode: Int) -> Unit) {
-        process.onExit().thenAccept { action(it.exitValue()) }
+    /** 화면이 코어의 stdin 을 닫았다. 그 뒤에 코어가 끝나는 것은 기다리던 끝이다. */
+    private val screenLeaving = AtomicBoolean(false)
+
+    init {
+        process.onExit().thenAccept { exited ->
+            diagnosticLog.record(DiagnosticLogEntry.CoreProcessExited(exited.exitValue(), screenWasLeaving = screenLeaving.get()))
+        }
+    }
+
+    /**
+     * 이 코어의 stdio 에 거울을 세운다. 거울은 첫 스냅샷이 다 온 뒤에 서므로, 창은 처음부터 코어의 상태를 들고 뜬다.
+     *
+     * 세우다 실패하면(코어가 틀이 아닌 줄을 썼거나 첫 스냅샷 전에 끝났다) 코어의 stdin 을 닫고 끝나기를 [leaveTimeout] 까지 기다린 뒤
+     * 그 실패를 던진다. 그러지 않고 던지면 띄운 코어가 주인 없이 남는다. 판이 다르면 거울이 코어로 가는 줄을 이미 닫았다 — 코어는
+     * 작별하고 스스로 끝난다.
+     *
+     * @param readingScope 틀을 읽는 코루틴이 사는 자리. 화면 스레드가 아니어야 한다(CoreMirror.connect).
+     */
+    suspend fun connectMirror(readingScope: CoroutineScope, screenVersionLabel: String, leaveTimeout: Duration): CoreConnection {
+        val connecting = runCatching {
+            CoreMirror.connect(
+                framesFromCore = framesFromCore,
+                framesToCore = framesToCore,
+                readingScope = readingScope,
+                diagnosticLog = diagnosticLog,
+                screenVersionLabel = screenVersionLabel,
+            )
+        }
+        val connection = connecting.getOrElse { connectFailure ->
+            closeStandardInputAndAwaitExit(leaveTimeout) { framesToCore.close() }
+            throw connectFailure
+        }
+        if (connection is CoreConnection.ProtocolMismatch) {
+            screenLeaving.set(true)
+        }
+        return connection
     }
 
     /**
      * 화면이 떠난다. 코어의 stdin 을 닫고, 코어가 모든 세션을 끝내고 나가기를 [timeout] 까지 기다린다. 그 안에 나가지 않으면 강제로
-     * 끝낸다 — 그때는 끝내지 못한 세션의 claude 가 남을 수 있어 화면이 그 사실을 기록한다.
+     * 끝낸다 — 그때는 끝내지 못한 세션의 claude 가 남을 수 있어 그 사실을 기록한다.
      *
      * 끝내는 것을 명령으로 시키지 않는다. 크래시한 화면은 명령을 보낼 수 없지만 stdin 의 끝은 언제나 간다 — 닫기와 크래시가 같은 길을
      * 가야 코어가 화면의 작별 인사에 기대지 않는다(원칙 21).
      */
-    suspend fun leave(mirror: CoreMirror, timeout: Duration): Exit {
+    suspend fun leave(mirror: CoreMirror, timeout: Duration): Exit = closeStandardInputAndAwaitExit(timeout) { mirror.endAllSessions() }
+
+    /** [closeStandardInput] 으로 코어의 stdin 을 닫고 코어가 나가기를 [timeout] 까지 기다린다. 넘기면 강제로 끝내고 기록한다. */
+    private suspend fun closeStandardInputAndAwaitExit(timeout: Duration, closeStandardInput: suspend () -> Unit): Exit {
+        screenLeaving.set(true)
         val exitCode = withTimeoutOrNull(timeout) {
-            mirror.endAllSessions()
+            closeStandardInput()
             process.onExit().await().exitValue()
         }
         if (exitCode != null) {
             return Exit.EndedByItself(exitCode)
         }
         process.destroyForcibly()
+        diagnosticLog.record(DiagnosticLogEntry.CoreProcessKilledAfterTimeout(timeout.inWholeSeconds))
         return Exit.KilledAfterTimeout
     }
 
@@ -65,9 +111,14 @@ class CoreChildProcess private constructor(
          * [command] 를 셸 없이 띄운다(설계 6.12 — 셸은 바이트와 인용을 고친다). stderr 는 화면의 stderr 로 그대로 흘린다 — 코어의
          * 진단은 코어의 기록 파일에 있고, stderr 는 터미널에서 화면을 띄운 사람이 보는 자리다.
          *
+         * @param diagnosticLog 화면의 진단 기록. 코어 프로세스가 끝난 것과 강제로 끝낸 것을 남긴다.
          * @param configureProcess 환경을 다듬는 자리. 시험이 코어의 기록 자리와 엔진을 격리한다.
          */
-        fun start(command: List<String>, configureProcess: ProcessBuilder.() -> Unit = {}): CoreChildProcess {
+        fun start(
+            command: List<String>,
+            diagnosticLog: DiagnosticLog,
+            configureProcess: ProcessBuilder.() -> Unit = {},
+        ): CoreChildProcess {
             val process = ProcessBuilder(command)
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .apply(configureProcess)
@@ -104,7 +155,7 @@ class CoreChildProcess private constructor(
                 }
             }
 
-            return CoreChildProcess(process, framesFromCore, framesToCore)
+            return CoreChildProcess(process, framesFromCore, framesToCore, diagnosticLog)
         }
     }
 }

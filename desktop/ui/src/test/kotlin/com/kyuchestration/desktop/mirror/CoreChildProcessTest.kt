@@ -3,22 +3,26 @@ package com.kyuchestration.desktop.mirror
 import com.kyuchestration.desktop.core.TEST_SCREEN_VERSION_LABEL
 import com.kyuchestration.desktop.core.coreProcessCommandForTests
 import com.kyuchestration.desktop.core.isolatedCoreEnvironment
-import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.SerializationException
 
 /**
  * 화면이 코어를 진짜 자식 프로세스로 띄우고 그 stdio 에 거울을 잇는다(core-ui-split-design.md 7 절 2 단계).
@@ -32,6 +36,8 @@ class CoreChildProcessTest {
 
     private val readingScope = CoroutineScope(Dispatchers.Default)
 
+    private val diagnosticLog = RecordingDiagnosticLog()
+
     @AfterTest
     fun cleanUp() {
         readingScope.cancel()
@@ -39,7 +45,7 @@ class CoreChildProcessTest {
     }
 
     @Test
-    fun `코어 프로세스가 강제로 죽으면 거울이 연결 끊김을 세운다`() = runBlocking {
+    fun `코어 프로세스가 강제로 죽으면 거울이 연결 끊김을 세우고 화면이 떠나기 전에 끝났다고 기록한다`() = runBlocking {
         val coreProcess = startCoreProcess()
         val mirror = connect(coreProcess)
 
@@ -47,6 +53,7 @@ class CoreChildProcessTest {
 
         val failure = withTimeout(PROCESS_TIMEOUT) { mirror.coreConnectionFailure.filterNotNull().first() }
         assertEquals("CoreMirror.ConnectionLost", failure.kind)
+        assertFalse(recordedCoreExit().screenWasLeaving)
     }
 
     @Test
@@ -59,25 +66,46 @@ class CoreChildProcessTest {
         assertEquals(CoreChildProcess.Exit.EndedByItself(exitCode = 0), exit)
         assertFalse(ProcessHandle.of(coreProcess.pid).map { it.isAlive }.orElse(false))
         assertEquals(null, mirror.coreConnectionFailure.value)
+        assertEquals(DiagnosticLogEntry.CoreProcessExited(exitCode = 0, screenWasLeaving = true), recordedCoreExit())
     }
 
-    private fun startCoreProcess(): CoreChildProcess = CoreChildProcess.start(coreProcessCommandForTests()) {
+    @Test
+    fun `거울을 세우다 실패하면 코어의 stdin 을 닫고 끝나기를 기다린 뒤 그 실패를 던진다`() = runBlocking {
+        // 첫 스냅샷 전에 화면이 던지고 떠나면 띄운 코어가 주인 없이 남는다 — 코어는 stdin 의 끝을 받아야 세션을 끝낸다.
+        val brokenCore = CoreChildProcess.start(listOf("sh", "-c", "echo 틀이-아닌-줄; cat > /dev/null"), diagnosticLog)
+
+        assertFailsWith<SerializationException> {
+            brokenCore.connectMirror(readingScope, TEST_SCREEN_VERSION_LABEL, leaveTimeout = PROCESS_TIMEOUT)
+        }
+
+        assertFalse(ProcessHandle.of(brokenCore.pid).map { it.isAlive }.orElse(false))
+        assertEquals(DiagnosticLogEntry.CoreProcessExited(exitCode = 0, screenWasLeaving = true), recordedCoreExit())
+    }
+
+    private fun startCoreProcess(): CoreChildProcess = CoreChildProcess.start(coreProcessCommandForTests(), diagnosticLog) {
         isolatedCoreEnvironment(scratchDirectory, scratchDirectory.resolve("kyu"))
     }
 
     private suspend fun connect(coreProcess: CoreChildProcess): CoreMirror = withTimeout(PROCESS_TIMEOUT) {
         assertIs<CoreConnection.Connected>(
-            CoreMirror.connect(
-                framesFromCore = coreProcess.framesFromCore,
-                framesToCore = coreProcess.framesToCore,
-                readingScope = readingScope,
-                diagnosticLog = DiagnosticLog.Discarding,
-                screenVersionLabel = TEST_SCREEN_VERSION_LABEL,
-            ),
+            coreProcess.connectMirror(readingScope, TEST_SCREEN_VERSION_LABEL, leaveTimeout = PROCESS_TIMEOUT),
         ).mirror
+    }
+
+    /** 프로세스가 끝난 것을 알리는 기록은 다른 스레드에서 온다. 올 때까지 기다린다. */
+    private suspend fun recordedCoreExit(): DiagnosticLogEntry.CoreProcessExited = withTimeout(PROCESS_TIMEOUT) {
+        var coreExit: DiagnosticLogEntry.CoreProcessExited? = null
+        while (coreExit == null) {
+            coreExit = diagnosticLog.recordedEntries.filterIsInstance<DiagnosticLogEntry.CoreProcessExited>().singleOrNull()
+            if (coreExit == null) {
+                delay(POLL_INTERVAL)
+            }
+        }
+        coreExit
     }
 
     private companion object {
         val PROCESS_TIMEOUT = 30.seconds
+        val POLL_INTERVAL = 0.05.seconds
     }
 }

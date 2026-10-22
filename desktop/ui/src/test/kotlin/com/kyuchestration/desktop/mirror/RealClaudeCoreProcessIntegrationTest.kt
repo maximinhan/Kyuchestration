@@ -59,18 +59,12 @@ class RealClaudeCoreProcessIntegrationTest {
     fun `프로세스 경계를 건너 메인 챗 · 관문 · 하위 세션이 돌고 화면이 떠나면 코어가 claude 를 모두 끝내고 나간다`(): Unit = runBlocking {
         val kyuExecutable = requireRealClaudeAndKyuOrSkip()
         workDirPath.resolve("gated").createDirectories().resolve(".mcp.json").writeText("""{"mcpServers":{}}""")
-        val coreProcess = CoreChildProcess.start(coreProcessCommandForTests()) {
+        val coreProcess = CoreChildProcess.start(coreProcessCommandForTests(), DiagnosticLog.Discarding) {
             isolatedCoreEnvironment(scratchDirectory, kyuExecutable)
         }
         val mirror = withTimeout(STEP_TIMEOUT) {
             assertIs<CoreConnection.Connected>(
-                CoreMirror.connect(
-                    coreProcess.framesFromCore,
-                    coreProcess.framesToCore,
-                    readingScope,
-                    DiagnosticLog.Discarding,
-                    TEST_SCREEN_VERSION_LABEL,
-                ),
+                coreProcess.connectMirror(readingScope, TEST_SCREEN_VERSION_LABEL, leaveTimeout = LEAVE_TIMEOUT),
             ).mirror
         }
 
