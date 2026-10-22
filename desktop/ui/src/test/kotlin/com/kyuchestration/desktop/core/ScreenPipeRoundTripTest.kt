@@ -318,7 +318,7 @@ class ScreenPipeRoundTripTest {
     }
 
     @Test
-    fun `명령 도중 코어가 실패해도 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
+    fun `명령 도중 코어가 실패하면 모든 세션을 끝내고 그 실패를 실어 자기 줄을 닫는다`() = runTest {
         // 세션 끝내기를 건너뛰고 줄만 닫히면, 화면은 떠나도 claude 프로세스들이 주인 없이 남는다.
         val core = RecordingScreenFacingCore().apply { commandThatFails = ScreenCommand.RefreshWorkDir }
         val pipe = FramePipe(this)
@@ -331,9 +331,11 @@ class ScreenPipeRoundTripTest {
         pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
         runCurrent()
 
-        assertFailsWith<IllegalStateException> { serving.await() }
+        val holderFailure = assertFailsWith<IllegalStateException> { serving.await() }
         assertEquals(1, core.endAllSessionsCount)
-        assertTrue(pipe.coreToScreen.isClosedForReceive)
+        // 실패를 싣지 않고 닫으면 코어 프로세스는 0 으로 끝나 크래시가 정상 종료처럼 보인다(CoreMain 의 종료 코드는 이 실패로 정해진다).
+        // 코루틴이 경계를 넘기며 예외를 다시 지을 수 있어(스택 복원) 같은 객체가 아니라 같은 실패인지를 본다.
+        assertEquals(holderFailure.message, assertFailsWith<IllegalStateException> { pipe.coreToScreen.receive() }.message)
     }
 
     @Test

@@ -52,10 +52,8 @@ suspend fun serveScreen(
 
     fun write(frame: FrameToScreen) = framesToScreen.write(encodeFrameToScreen(frame))
     fun sendSnapshot() {
-        val snapshotLines = publisher.snapshotLines()
-        lastSnapshotBytes = snapshotLines.sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() }
         screenFellBehind = false
-        snapshotLines.forEach(framesToScreen::write)
+        lastSnapshotBytes = publisher.snapshotLines().sumOf(framesToScreen::write)
     }
     fun publishPendingChanges() {
         // 밀린 동안에도 견주기는 한다 — 게시자의 기준선이 지금 상태를 따라가야, 다시 맞출 때 보낼 스냅샷과 그 뒤의 변화가 이어진다.
@@ -69,6 +67,9 @@ suspend fun serveScreen(
         }
     }
 
+    // 코어가 실패로 끝났으면 그 까닭. 화면 쪽 줄을 그것을 실어 닫아야 코어 프로세스가 실패로 끝난다(CoreMain) — 실어 닫지 않으면 크래시가
+    // 정상 종료처럼 보인다. 취소도 여기 실린다: 화면이 떠나지 않았는데 serveScreen 이 멈췄다는 뜻이라 정상 종료가 아니다.
+    var coreFailure: Throwable? = null
     try {
         coroutineScope {
             val watchingCore = launch {
@@ -136,11 +137,14 @@ suspend fun serveScreen(
             watchingCore.cancel()
             catchingUpScreen.cancel()
         }
+    } catch (failure: Throwable) {
+        coreFailure = failure
+        throw failure
     } finally {
         // 화면이 떠났든(줄의 끝), 명령 도중 코어가 실패했든, 코어 스코프가 취소됐든 세션은 여기서 끝낸다. 건너뛰면 claude
         // 프로세스들이 주인 없이 남는다 — 취소된 뒤에도 끝내기가 마저 돌도록 취소를 받지 않는 자리에서 부른다.
         withContext(NonCancellable) { core.endAllSessions() }
-        framesToScreen.close()
+        framesToScreen.close(coreFailure)
     }
 }
 

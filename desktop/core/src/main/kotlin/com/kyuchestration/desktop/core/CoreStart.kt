@@ -47,7 +47,9 @@ fun startCore(
             framesFromScreen = framesFromScreen,
             framesToScreen = framesToScreen,
         )
-        // 화면이 떠나고 세션도 다 끝났다. 홀더들이 걸어 둔 반복(대시보드의 관찰 같은 것)을 함께 거둔다.
+        // 화면이 떠나고 세션도 다 끝났다. 홀더들이 걸어 둔 반복(대시보드의 관찰 같은 것)을 함께 거둔다. 이 취소는 정상 종료다 —
+        // serveScreen 이 화면 쪽 줄을 이미 까닭 없이 닫았으므로, 아래 invokeOnCompletion 이 이 취소를 실어 닫으려 해도 아무 일이
+        // 없고 코어 프로세스는 0 으로 끝난다.
         coreScope.cancel()
     }
     // 코어가 어떻게 끝나든 화면 쪽 줄을 그 이유로 닫는다. 조립이 던지면 serveScreen 에 들어가 보지도 못해 줄을 닫을 자리가

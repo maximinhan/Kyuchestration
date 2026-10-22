@@ -12,8 +12,8 @@ import kotlinx.coroutines.launch
 fun ScreenFrameOutbox.linesDeliveredIn(scope: CoroutineScope): ReceiveChannel<String> {
     val lines = Channel<String>(Channel.UNLIMITED)
     scope.launch {
-        val failure = runCatching { deliverEach { lines.send(it) } }.exceptionOrNull()
-        lines.close(failure)
+        val coreFailure = deliverEach { frameLine -> lines.send(frameLine.bytes.toString(Charsets.UTF_8)) }
+        lines.close(coreFailure)
     }
     return lines
 }
