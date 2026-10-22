@@ -88,6 +88,16 @@ class ChatScreenStateTest {
     }
 
     @Test
+    fun `고른 세션에 볼 것이 없으면 보는 세션은 없다`() {
+        val child = SessionTarget.Child("child-1")
+
+        assertEquals(MAIN, viewedTargetStillThere(MAIN, mapOf(MAIN to mainConversation), emptyMap()))
+        assertEquals(REPO, viewedTargetStillThere(REPO, emptyMap(), mapOf(REPO to SessionEntryState.Running)))
+        assertEquals(null, viewedTargetStillThere(child, mapOf(MAIN to mainConversation), emptyMap()))
+        assertEquals(null, viewedTargetStillThere(null, mapOf(MAIN to mainConversation), emptyMap()))
+    }
+
+    @Test
     fun `보던 세션의 진입 실패는 다른 데로 옮길 때 닫는다`() {
         val failed = mapOf(REPO to SessionEntryState.Failed(TerminalSessionFailure.KyuExecutableNotFound()))
 

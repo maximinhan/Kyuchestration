@@ -44,6 +44,16 @@ sealed interface ChatScreenState {
 }
 
 /**
+ * 사람이 고른 세션 중 아직 볼 것이 있는 것. 대화도 진입 상태도 없으면(세션을 끝냈거나, 워크디렉토리를 닫았거나, 메인을
+ * 새로 띄워 그 하위를 놓았다) null 이다 — 보이지 않는 세션을 "보는 중" 으로 들면 패널이 없는 줄을 짚고 명령이 허공으로 간다.
+ */
+fun viewedTargetStillThere(
+    chosenTarget: SessionTarget?,
+    conversations: Map<SessionTarget, ChatConversation>,
+    sessionEntries: Map<PersonOpenedSessionTarget, SessionEntryState>,
+): SessionTarget? = chosenTarget?.takeIf { it in conversations || it in sessionEntries }
+
+/**
  * 사람이 보던 세션을 끝낸 뒤 화면이 볼 세션.
  *
  * 하위를 끝내면 메인으로 돌아간다 — 하위는 메인이 시킨 일이라 사람이 돌아갈 자리가 메인이다. 그 밖의 세션을 끝내면

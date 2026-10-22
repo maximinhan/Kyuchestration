@@ -72,8 +72,6 @@ private fun runDesktopApplication(
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
     val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
     val initializationState by screenFacingCore.workDirInitializationState.collectAsState()
-    val chatConversations by screenFacingCore.chatConversations.collectAsState()
-    val chatSessionEntries by screenFacingCore.chatSessionEntries.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
     // 하나로 합치면 카드를 오갈 때마다 목록 전체가 다시 그려진다.
     val heldChatSessionTargets by screenFacingCore.heldChatSessionTargets.collectAsState()
@@ -85,18 +83,14 @@ private fun runDesktopApplication(
     // 고른 것과 시스템이 답한 것을 합치는 판단만 순수 함수로 갈라 두었다(resolveDarkTheme).
     var themePreference by remember { mutableStateOf(ThemePreference.AlwaysDark) }
 
-    // 어느 세션을 보는가는 화면의 것이다(core-ui-split-design.md 6.8 (가) · 원칙 21). 코어는 모든 대화를 세션마다
-    // 내놓고, 여기서 고른 하나를 그린다. 세션을 오갈 때 코어에 묻지 않는다.
-    var viewedChatTarget by remember { mutableStateOf<SessionTarget?>(null) }
-    val chatScreenState = chatScreenStateFor(viewedChatTarget, chatConversations, chatSessionEntries)
-
-    // 보는 세션을 옮기는 길은 이것 하나다. 떠나는 세션이 띄우지 못한 세션이면 그 실패를 닫는다 — 실패를 언제 더 볼
-    // 필요가 없는지는 사람이 어디를 보는지 아는 화면만 안다(entryFailureLeftBehind).
-    fun viewChatTarget(nextTarget: SessionTarget?) {
-        entryFailureLeftBehind(viewedChatTarget, nextTarget, screenFacingCore.chatSessionEntries.value)
-            ?.let(screenFacingCore::dismissSessionEntryFailure)
-        viewedChatTarget = nextTarget
-    }
+    // 어느 세션을 보는가는 화면의 것이다(core-ui-split-design.md 6.8 (가) · 원칙 21). 대화 맵과 진입 상태는 여기서
+    // 통째로 읽지 않는다 — 읽으면 보지 않는 하위의 글자 조각마다 창 전체가 다시 그려진다. ChatViewing 이 보는 세션의 몫만 꺼낸다.
+    val chatConversations = screenFacingCore.chatConversations.collectAsState()
+    val chatViewing = rememberChatViewing(
+        chatConversations = chatConversations,
+        chatSessionEntries = screenFacingCore.chatSessionEntries.collectAsState(),
+        dismissSessionEntryFailure = screenFacingCore::dismissSessionEntryFailure,
+    )
 
     Window(
         onCloseRequest = {
@@ -128,7 +122,7 @@ private fun runDesktopApplication(
             claudeAuthenticationState = claudeAuthenticationState,
             dashboardState = dashboardState,
             initializationState = initializationState,
-            chatScreenState = chatScreenState,
+            chatScreenState = chatViewing.screenState,
             heldChatSessionTargets = heldChatSessionTargets,
             screenFacingCore = screenFacingCore,
             themePreference = themePreference,
@@ -147,27 +141,25 @@ private fun runDesktopApplication(
             onInitializeOpenedWorkDirRequested = screenFacingCore::initializeOpenedWorkDir,
             onCloneRepositoriesRequested = screenFacingCore::openRepositoryClone,
             onRefreshRequested = screenFacingCore::refreshWorkDir,
-            onCloseWorkDirRequested = {
-                viewChatTarget(null)
-                screenFacingCore.closeWorkDir()
-            },
+            // 보는 세션은 손으로 비우지 않는다. 대화가 놓이는 순간 ChatViewing 이 저절로 접는다.
+            onCloseWorkDirRequested = screenFacingCore::closeWorkDir,
             onEnterSessionRequested = { target, conversationChoice ->
                 // 이미 보유 중인 세션이면 코어는 아무것도 하지 않는다 — 화면만 옮긴다.
-                viewChatTarget(target)
+                chatViewing.moveTo(target)
                 screenFacingCore.enterSession(target, conversationChoice)
             },
             onSendUserMessageRequested = { text ->
-                viewedChatTarget?.let { target -> screenFacingCore.sendUserMessage(target, text) }
+                chatViewing.viewedTarget?.let { target -> screenFacingCore.sendUserMessage(target, text) }
             },
             onInterruptTurnRequested = {
-                viewedChatTarget?.let(screenFacingCore::interruptTurn)
+                chatViewing.viewedTarget?.let(screenFacingCore::interruptTurn)
             },
             onPermissionChoiceMade = { toolUseId, choice ->
-                viewedChatTarget?.let { target -> screenFacingCore.answerPermission(target, toolUseId, choice) }
+                chatViewing.viewedTarget?.let { target -> screenFacingCore.answerPermission(target, toolUseId, choice) }
             },
             onEndChatSessionRequested = {
-                viewedChatTarget?.let { target ->
-                    viewChatTarget(viewedTargetAfterEnding(target))
+                chatViewing.viewedTarget?.let { target ->
+                    chatViewing.moveTo(viewedTargetAfterEnding(target))
                     screenFacingCore.endSession(target)
                 }
             },
@@ -176,8 +168,8 @@ private fun runDesktopApplication(
             onChildSessionChosen = { childId ->
                 // 끝난 하위도 전사가 남아 있으면 선다 — 왜 끝났는지 읽을 자리다.
                 val childTarget = SessionTarget.Child(childId)
-                if (childTarget in chatConversations) {
-                    viewChatTarget(childTarget)
+                if (childTarget in chatConversations.value) {
+                    chatViewing.moveTo(childTarget)
                 }
             },
             onChildSessionGateAnswered = screenFacingCore::answerGate,
