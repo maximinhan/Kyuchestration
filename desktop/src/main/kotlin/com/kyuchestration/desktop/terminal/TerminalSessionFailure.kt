@@ -22,6 +22,8 @@ sealed class TerminalSessionFailure(
     cause: Throwable? = null,
 ) : Exception(message, cause), GuidedFailure {
 
+    final override val failureFamily: String get() = "TerminalSessionFailure"
+
     class KyuExecutableNotFound : TerminalSessionFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",
         guidance = "세션이 무엇을 띄우는지는 kyu 가 답합니다 — 앱은 그 답을 실행할 뿐입니다. " +

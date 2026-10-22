@@ -128,7 +128,7 @@ class ClaudeAuthenticationStateHolderTest {
         testScheduler.advanceUntilIdle()
 
         val state = assertIs<ClaudeAuthenticationState.CredentialsMissing>(holder.state.value)
-        assertEquals("BrowserLoginRefused", state.lastFailure?.kind)
+        assertEquals("ClaudeAuthenticationFailure.BrowserLoginRefused", state.lastFailure?.kind)
     }
 
     @Test
@@ -178,7 +178,7 @@ class ClaudeAuthenticationStateHolderTest {
 
             assertEquals(emptyList<String>(), store.storedTokens)
             val state = assertIs<ClaudeAuthenticationState.CredentialsMissing>(holder.state.value)
-            assertEquals("PastedTokenRefused", state.lastFailure?.kind)
+            assertEquals("ClaudeAuthenticationFailure.PastedTokenRefused", state.lastFailure?.kind)
         }
     }
 

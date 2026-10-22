@@ -21,7 +21,7 @@ data class FailureView(
 )
 
 /**
- * 사람에게 할 일을 안내하는 실패. 실패 갈래 다섯(엔진 설치 · claude 인증 · 관찰 · 세션 진입 · 클론)이 모두 이 모양이라,
+ * 사람에게 할 일을 안내하는 실패. 실패 계열 다섯(엔진 설치 · claude 인증 · 관찰 · 세션 진입 · 클론)이 모두 이 모양이라,
  * 값으로 바꾸는 규칙을 한 자리([toFailureView])에 둔다.
  */
 interface GuidedFailure {
@@ -29,10 +29,16 @@ interface GuidedFailure {
     val message: String?
 
     val guidance: String
+
+    /**
+     * 이 실패가 속한 계열의 이름. 계열을 갈래 이름 앞에 붙여야 [FailureView.kind] 가 겹치지 않는다 — kyu 를 찾지 못한 것은
+     * 관찰 · 세션 진입 · 클론 세 계열에 같은 이름으로 있고, 사람이 할 일이 계열마다 다르다.
+     */
+    val failureFamily: String
 }
 
-fun GuidedFailure.toFailureView(): FailureView = FailureView(
-    kind = this::class.simpleName.orEmpty(),
-    message = message.orEmpty(),
-    guidance = guidance,
-)
+fun GuidedFailure.toFailureView(): FailureView {
+    // 갈래는 이름 있는 클래스여야 한다. 이름 없는 하위 클래스로 실패를 만들면 화면이 고를 갈래가 사라지므로 여기서 멈춘다.
+    val caseName = checkNotNull(this::class.simpleName) { "$failureFamily 의 이름 없는 갈래는 화면에 넘길 수 없다" }
+    return FailureView(kind = "$failureFamily.$caseName", message = message.orEmpty(), guidance = guidance)
+}

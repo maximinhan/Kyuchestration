@@ -24,6 +24,8 @@ sealed class ClaudeAuthenticationFailure(
     cause: Throwable? = null,
 ) : Exception(message, cause), GuidedFailure {
 
+    final override val failureFamily: String get() = "ClaudeAuthenticationFailure"
+
     /**
      * claude 를 띄우지 못했다 — PATH 에 없거나, 실행 권한이 없거나.
      *

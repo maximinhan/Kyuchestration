@@ -19,6 +19,8 @@ sealed class WorkDirObservationFailure(
     cause: Throwable? = null,
 ) : Exception(message, cause), GuidedFailure {
 
+    final override val failureFamily: String get() = "WorkDirObservationFailure"
+
     class KyuExecutableNotFound : WorkDirObservationFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",
         guidance = "앱을 다시 띄우면 엔진 설치 화면이 뜹니다. " +

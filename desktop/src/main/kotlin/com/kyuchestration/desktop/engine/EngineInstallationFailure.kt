@@ -19,6 +19,8 @@ sealed class EngineInstallationFailure(
     cause: Throwable? = null,
 ) : Exception(message, cause), GuidedFailure {
 
+    final override val failureFamily: String get() = "EngineInstallationFailure"
+
     /**
      * 윈도우 네이티브 JVM 에서 눌렀다.
      *

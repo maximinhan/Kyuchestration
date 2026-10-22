@@ -1,7 +1,9 @@
 package com.kyuchestration.desktop.protocol
 
 import com.kyuchestration.desktop.engine.EngineInstallationFailure
+import com.kyuchestration.desktop.repoclone.CloneStepFailure
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -19,7 +21,7 @@ class FailureViewTest {
 
         assertEquals(
             FailureView(
-                kind = "GitHubUnreachable",
+                kind = "EngineInstallationFailure.GitHubUnreachable",
                 message = "GitHub 에 닿지 못했습니다.",
                 guidance = "네트워크와 프록시 설정을 확인한 뒤 다시 시도하세요. 원인: connect timed out",
             ),
@@ -33,7 +35,26 @@ class FailureViewTest {
 
         val view = TerminalSessionFailure.EngineTooOld("v0.13.0", "v0.14.0", refusal).toFailureView()
 
-        assertEquals("EngineTooOld", view.kind)
+        assertEquals("TerminalSessionFailure.EngineTooOld", view.kind)
         assertTrue("모르는 옵션" in view.guidance)
+    }
+
+    @Test
+    fun `같은 이름의 갈래가 다른 실패 계열에 있어도 갈래 이름이 겹치지 않는다`() {
+        // kyu 를 찾지 못한 것은 관찰 · 세션 진입 · 클론 세 계열에 다 있고, 사람이 할 일이 계열마다 다르다.
+        val kinds = listOf(
+            WorkDirObservationFailure.KyuExecutableNotFound().toFailureView().kind,
+            TerminalSessionFailure.KyuExecutableNotFound().toFailureView().kind,
+            CloneStepFailure.KyuExecutableNotFound().toFailureView().kind,
+        )
+
+        assertEquals(
+            listOf(
+                "WorkDirObservationFailure.KyuExecutableNotFound",
+                "TerminalSessionFailure.KyuExecutableNotFound",
+                "CloneStepFailure.KyuExecutableNotFound",
+            ),
+            kinds,
+        )
     }
 }
