@@ -30,9 +30,14 @@ import com.kyuchestration.desktop.terminal.chat.TurnState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -229,6 +234,59 @@ class CoreMirrorTest {
         assertTrue(ending.isCompleted)
     }
 
+    @Test
+    fun `창을 닫으며 줄을 닫은 끝은 연결이 깨진 것이 아니다`() = runTest {
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
+        val mirror = pipe.connect(this)
+
+        val ending = async { mirror.endAllSessions() }
+        runCurrent()
+        // 코어는 화면이 줄을 닫은 것을 보고 세션을 다 끝낸 뒤에 자기 줄을 닫는다.
+        pipe.fromCore.close()
+        runCurrent()
+
+        assertTrue(ending.isCompleted)
+        assertNull(mirror.coreConnectionFailure.value)
+    }
+
+    @Test
+    fun `코어가 뜻밖에 줄을 닫으면 거울이 연결이 깨졌다고 드러낸다`() = runTest {
+        // 화면이 그것을 모르면 마지막 상태로 멈춘 창 앞에서 사람은 무엇이 잘못됐는지 알 길이 없다.
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
+        val mirror = pipe.connect(this)
+
+        pipe.fromCore.close()
+        runCurrent()
+
+        assertEquals("CoreMirror.ConnectionLost", mirror.coreConnectionFailure.value?.kind)
+    }
+
+    @Test
+    fun `읽지 못할 틀에 거울의 읽기가 멈춰도 연결이 깨졌다고 드러내고 창을 닫는 기다림은 끝난다`() = runTest {
+        // 읽기가 예외로 멈추고 끝을 알리지 않으면, 창을 닫는 자리가 화면 스레드를 붙잡은 채 영원히 기다린다.
+        val readingFailures = mutableListOf<Throwable>()
+        val readingScope = CoroutineScope(
+            StandardTestDispatcher(testScheduler) + SupervisorJob() + CoroutineExceptionHandler { _, failure -> readingFailures += failure },
+        )
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
+        val mirror = pipe.connect(this, readingScope)
+
+        pipe.fromCore.trySend("{\"frame\":\"change\",\"seq\":1,\"change\":{\"type\":\"conversation_tail\",\"target\":{\"type\":\"main\"},\"fromIndex\":0,\"entries\":[]}}")
+        runCurrent()
+
+        assertEquals(1, readingFailures.size)
+        assertEquals("CoreMirror.ConnectionLost", mirror.coreConnectionFailure.value?.kind)
+        val ending = async { mirror.endAllSessions() }
+        runCurrent()
+        assertTrue(ending.isCompleted)
+    }
+
     private class MirrorTestPipe(private val diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding) {
         val fromCore = Channel<String>(Channel.UNLIMITED)
         val toCore = Channel<String>(Channel.UNLIMITED)
@@ -243,12 +301,13 @@ class CoreMirrorTest {
             parts.forEachIndexed { index, part -> coreSends(FrameToScreen.Snapshot(seq, part, last = index == parts.lastIndex)) }
         }
 
-        suspend fun connect(testScope: TestScope): CoreMirror = CoreMirror.connect(
-            framesFromCore = fromCore,
-            framesToCore = toCore,
-            readingScope = testScope.backgroundScope,
-            diagnosticLog = diagnosticLog,
-        )
+        suspend fun connect(testScope: TestScope, readingScope: CoroutineScope = testScope.backgroundScope): CoreMirror =
+            CoreMirror.connect(
+                framesFromCore = fromCore,
+                framesToCore = toCore,
+                readingScope = readingScope,
+                diagnosticLog = diagnosticLog,
+            )
 
         fun framesSentToCore(): List<FrameToCore> {
             while (true) {

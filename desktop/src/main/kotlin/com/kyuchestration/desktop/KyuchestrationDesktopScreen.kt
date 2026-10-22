@@ -55,6 +55,11 @@ fun KyuchestrationDesktopScreen(
      * 사용자가 할 일이 "그 파일을 보내는 것" 하나로 정해져야, 진단이 화면 캡처 한 장에 걸리지 않는다.
      */
     diagnosticLogPathLabel: String,
+    /**
+     * 코어와의 연결이 깨졌으면 그 사실(CoreMirror.coreConnectionFailure). 서면 다른 모든 화면보다 앞선다 — 나머지 상태는
+     * 깨지기 직전의 모습에 멈춰 있어, 그것을 그대로 그리면 사람은 눌러도 아무 일이 없는 창을 본다.
+     */
+    coreConnectionFailure: FailureView?,
     engineInstallationState: EngineInstallationState,
     engineDirectoryLabel: String,
     /**
@@ -122,7 +127,9 @@ fun KyuchestrationDesktopScreen(
             // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
             // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
             // 무엇을 눌러도 같은 실패를 만난다. 갈림길을 여기 하나 두어 그 자리를 아예 만들지 않는다.
-            if (engineInstallationState != EngineInstallationState.EngineReady) {
+            if (coreConnectionFailure != null) {
+                CoreConnectionLostScreen(coreConnectionFailure, diagnosticLogPathLabel)
+            } else if (engineInstallationState != EngineInstallationState.EngineReady) {
                 EngineInstallationScreen(
                     versionLabel = versionLabel,
                     engineDirectoryLabel = engineDirectoryLabel,
@@ -373,6 +380,20 @@ private fun ObservationFailureScreen(
             Button(onClick = onRetryRequested) { Text("다시 시도") }
             TextButton(onClick = onOpenAnotherWorkDirRequested) { Text("다른 워크디렉토리") }
         }
+    }
+}
+
+@Composable
+private fun CoreConnectionLostScreen(failure: FailureView, diagnosticLogPathLabel: String) {
+    CenteredColumn {
+        Text(failure.message, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+        Text(
+            text = failure.guidance,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
     }
 }
 

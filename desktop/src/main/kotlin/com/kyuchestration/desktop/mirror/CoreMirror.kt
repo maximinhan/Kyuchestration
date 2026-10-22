@@ -9,6 +9,7 @@ import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.CoreStateImage
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.ScreenChange
@@ -95,12 +96,33 @@ class CoreMirror private constructor(
 
     private val coreClosedItsFrames = CompletableDeferred<Unit>()
 
+    /** 화면이 떠나려고 코어로 가는 줄을 닫았다. 그 뒤의 줄 끝은 기다리던 끝이지 깨진 연결이 아니다. */
+    @Volatile
+    private var screenIsLeaving = false
+
+    private val mutableCoreConnectionFailure = MutableStateFlow<FailureView?>(null)
+
+    /**
+     * 코어와의 연결이 깨졌으면 그 사실. 코어가 뜻밖에 줄을 닫았거나, 거울이 코어의 틀을 읽다 멈췄다.
+     *
+     * [ScreenFacingCore] 가 아니라 거울의 것이다 — 같은 JVM 의 코어에는 끊길 연결이 없다. 깨진 뒤의 다른 흐름들은 마지막으로
+     * 받은 상태에 멈춰 있으므로, 화면은 이것이 서면 그 상태 대신 이것을 보여야 한다.
+     */
+    val coreConnectionFailure: StateFlow<FailureView?> = mutableCoreConnectionFailure.asStateFlow()
+
     private val sessionEntriesShownLock = Any()
 
     private fun startReading(framesFromCore: ReceiveChannel<String>, readingScope: CoroutineScope) {
-        readingScope.launch {
+        val reading = readingScope.launch {
             for (line in framesFromCore) {
                 receive(decodeFrameToScreen(line))
+            }
+        }
+        // 읽기가 어떻게 끝나든(줄의 끝 · 읽지 못할 틀 · 취소) 여기를 지난다. 예외로 끝나 이 끝을 알리지 않으면, 창을 닫는 자리가
+        // 화면 스레드를 붙잡은 채 [endAllSessions] 에서 영원히 기다린다. 예외 자체는 읽기 스코프의 미처리 예외로 진단 기록에 간다.
+        reading.invokeOnCompletion { readingFailure ->
+            if (readingFailure != null || !screenIsLeaving) {
+                mutableCoreConnectionFailure.value = CORE_CONNECTION_LOST
             }
             coreClosedItsFrames.complete(Unit)
         }
@@ -268,6 +290,7 @@ class CoreMirror private constructor(
      * stdin 의 EOF 를 받는다(설계 6.13 의 2~4 단계). 끝내라는 명령이 따로 있으면 크래시한 화면은 그 명령을 보내지 못한다.
      */
     override suspend fun endAllSessions() {
+        screenIsLeaving = true
         framesToCore.close()
         coreClosedItsFrames.await()
     }
@@ -306,6 +329,13 @@ class CoreMirror private constructor(
         }
     }
 }
+
+private val CORE_CONNECTION_LOST = FailureView(
+    kind = "CoreMirror.ConnectionLost",
+    message = "코어와의 연결이 끊겼습니다.",
+    guidance = "세션을 쥔 코어가 멈췄거나 이 화면이 코어의 말을 읽지 못했습니다. 지금 보이는 것은 끊기기 직전의 모습입니다. " +
+        "진단 기록을 확인한 뒤 앱을 다시 띄우세요.",
+)
 
 /** 조각으로 오는 스냅샷 하나를 모은다. 첫 조각은 작은 상태 전부여야 한다 — 거울의 새 기준이 거기서 선다. */
 private class SnapshotAssembly {

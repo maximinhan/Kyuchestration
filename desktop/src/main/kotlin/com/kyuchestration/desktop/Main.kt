@@ -68,7 +68,7 @@ fun main() {
  *
  * 줄은 받는 쪽이 밀려도 쓰기가 멈추지 않는 것이다 — 코어는 틀을 쓰다 멈추면 안 된다(serveScreen).
  */
-private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog): ScreenFacingCore {
+private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog): CoreMirror {
     val framesToCore = Channel<String>(Channel.UNLIMITED)
     val framesToScreen = Channel<String>(Channel.UNLIMITED)
     startCoreInThisProcess(framesFromScreen = framesToCore, framesToScreen = framesToScreen, diagnosticLog = diagnosticLog)
@@ -89,9 +89,10 @@ private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog): ScreenFaci
  *   보고할 때 건네면 되는지가 그 자리에 있어야, 원격에서 진단할 수 있는 것이 화면 문구를 넘어선다.
  */
 private fun runDesktopApplication(
-    screenFacingCore: ScreenFacingCore,
+    screenFacingCore: CoreMirror,
     diagnosticLogPathLabel: String,
 ) = application {
+    val coreConnectionFailure by screenFacingCore.coreConnectionFailure.collectAsState()
     val engineInstallationState by screenFacingCore.engineInstallationState.collectAsState()
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
     val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
@@ -142,6 +143,7 @@ private fun runDesktopApplication(
         KyuchestrationDesktopScreen(
             versionLabel = DesktopBuildVersion.label,
             diagnosticLogPathLabel = diagnosticLogPathLabel,
+            coreConnectionFailure = coreConnectionFailure,
             engineInstallationState = engineInstallationState,
             engineDirectoryLabel = screenFacingCore.engineDirectoryLabel,
             claudeAuthenticationState = claudeAuthenticationState,
