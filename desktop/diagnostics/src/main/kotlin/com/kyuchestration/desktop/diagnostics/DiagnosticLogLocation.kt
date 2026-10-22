@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.diagnostics
 
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
 import com.kyuchestration.desktop.platform.runningOnMac
 import com.kyuchestration.desktop.platform.runningOnWindows
 import java.nio.file.Path
@@ -30,7 +31,7 @@ import java.nio.file.Path
  */
 fun diagnosticLogFile(
     owner: DiagnosticLogOwner,
-    osName: String = System.getProperty("os.name").orEmpty(),
+    osName: String = currentOperatingSystemName(),
     userHomeDirectory: Path = Path.of(System.getProperty("user.home").orEmpty()),
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
 ): Path = diagnosticLogDirectory(osName, userHomeDirectory, lookUpEnvironmentVariable).resolve(owner.logFileName)

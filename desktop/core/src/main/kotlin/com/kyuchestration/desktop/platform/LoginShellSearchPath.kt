@@ -24,7 +24,7 @@ import java.util.concurrent.TimeoutException
  */
 internal fun loginShellSearchPath(
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
-    osName: String = System.getProperty("os.name").orEmpty(),
+    osName: String = currentOperatingSystemName(),
     readLoginShellOutput: (List<String>) -> String? = ::loginShellStandardOutput,
 ): String? {
     val command = loginShellSearchPathCommand(lookUpEnvironmentVariable(SHELL_ENV_NAME), osName)

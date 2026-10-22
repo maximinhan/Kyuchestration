@@ -1,12 +1,12 @@
 package com.kyuchestration.desktop.mirror
 
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
-import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.platform.currentOperatingSystemWord
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.CoreStateImage
 import com.kyuchestration.desktop.protocol.FailureView
@@ -15,9 +15,9 @@ import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenCommand
+import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.decodeFrameToScreen
 import com.kyuchestration.desktop.protocol.encodeFrameToCore
-import com.kyuchestration.desktop.protocol.operatingSystemWordOf
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -327,7 +327,7 @@ class CoreMirror private constructor(
             readingScope: CoroutineScope,
             diagnosticLog: DiagnosticLog,
             screenVersionLabel: String,
-            screenOperatingSystem: String? = operatingSystemWordOf(System.getProperty("os.name").orEmpty()),
+            screenOperatingSystem: String? = currentOperatingSystemWord(),
         ): CoreConnection {
             framesToCore.send(
                 encodeFrameToCore(

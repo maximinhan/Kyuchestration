@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.core
 
-import com.kyuchestration.desktop.protocol.operatingSystemWordOf
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
+import com.kyuchestration.desktop.platform.operatingSystemWordOf
 
 /**
  * 코어가 인사 답(welcome)에 싣는 자기 소개(core-ui-split-design.md 6.4 · 6.14).
@@ -26,7 +27,7 @@ data class CoreIdentity(
 fun coreIdentityOf(
     versionLabel: String,
     diagnosticLogPath: String,
-    osName: String = System.getProperty("os.name").orEmpty(),
+    osName: String = currentOperatingSystemName(),
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
 ): CoreIdentity = CoreIdentity(
     versionLabel = versionLabel,

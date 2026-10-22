@@ -129,14 +129,6 @@ class ScreenProtocolSerializationTest {
     }
 
     @Test
-    fun `JVM 의 os 이름을 틀의 OS 낱말로 옮긴다`() {
-        assertEquals("windows", operatingSystemWordOf("Windows 11"))
-        assertEquals("macos", operatingSystemWordOf("Mac OS X"))
-        assertEquals("linux", operatingSystemWordOf("Linux"))
-        assertEquals(null, operatingSystemWordOf("SunOS"))
-    }
-
-    @Test
     fun `판을 싣기 전의 화면이 보낸 인사는 규약 판 0 으로 읽힌다`() {
         // 판 필드가 없는 상대를 읽지 못하는 틀로 버리면 판 불일치의 길(6.14)에 닿지 못한다 — 코어는 그 인사를 조용히 건너뛰고,
         // 화면은 오지 않을 인사 답을 영영 기다린다.

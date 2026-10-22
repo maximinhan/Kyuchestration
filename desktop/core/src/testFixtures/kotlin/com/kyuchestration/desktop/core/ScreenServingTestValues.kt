@@ -1,10 +1,10 @@
 package com.kyuchestration.desktop.core
 
+import com.kyuchestration.desktop.platform.currentOperatingSystemWord
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
-import com.kyuchestration.desktop.protocol.operatingSystemWordOf
 
 /** 시험이 세우는 코어가 인사 답에 싣는 자기 소개. */
 val TEST_CORE_IDENTITY = CoreIdentity(
@@ -21,7 +21,7 @@ const val TEST_SCREEN_VERSION_LABEL = "v0.15.0"
 val TEST_SCREEN_HELLO = FrameToCore.Hello(
     protocol = SCREEN_PROTOCOL_VERSION,
     screenVersion = TEST_SCREEN_VERSION_LABEL,
-    screenOs = operatingSystemWordOf(System.getProperty("os.name").orEmpty()),
+    screenOs = currentOperatingSystemWord(),
 )
 
 /** [TEST_CORE_IDENTITY] 로 선 [core] 가 인사에 답하는 틀. */

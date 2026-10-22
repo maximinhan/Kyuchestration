@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.kyu
 
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
 import com.kyuchestration.desktop.platform.findExecutableOnSearchPath
 import com.kyuchestration.desktop.platform.isExecutableRegularFile
 import com.kyuchestration.desktop.platform.runningOnMac
@@ -125,7 +126,7 @@ private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.applicatio
  * 미리 두면 시험할 수 없는 코드가 하나 생긴다.
  */
 internal fun managedEngineDirectory(
-    osName: String = System.getProperty("os.name").orEmpty(),
+    osName: String = currentOperatingSystemName(),
     userHomeDirectory: Path = Path.of(System.getProperty("user.home").orEmpty()),
 ): Path = if (runningOnMac(osName)) {
     userHomeDirectory.resolve("Library/Application Support/Kyuchestration/engine")
