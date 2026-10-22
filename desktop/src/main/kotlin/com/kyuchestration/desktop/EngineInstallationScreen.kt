@@ -21,8 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.engine.EngineInstallationState
+import com.kyuchestration.desktop.protocol.FailureView
 
 /**
  * 엔진이 없는 채로 앱을 띄웠을 때 가장 먼저 뜨는 화면.
@@ -168,13 +168,13 @@ private fun InstallationProgressOrWhatToDoNext(
  * 사람이 같은 말을 들으면, 둘 중 하나는 하지 않아도 될 일을 하게 된다.
  */
 @Composable
-private fun InstallationFailureReason(failure: EngineInstallationFailure) {
+private fun InstallationFailureReason(failure: FailureView) {
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = failure.message.orEmpty(),
+            text = failure.message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
             textAlign = TextAlign.Center,

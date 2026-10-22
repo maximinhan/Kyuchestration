@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.claudeauth
 
+import com.kyuchestration.desktop.protocol.FailureView
+
 /**
  * 이 머신의 claude 가 로그인돼 있는가, 아니라면 로그인시키려는 걸음이 어디까지 왔는가.
  *
@@ -20,7 +22,7 @@ sealed interface ClaudeAuthenticationState {
      * 설치다. 엔진과 달리 앱이 대신 받아 놓지 않는 것은 claude 가 이 도구의 것이 아니어서다 —
      * 설치 방법도 판올림도 앤트로픽이 정한다.
      */
-    data class ClaudeCliMissing(val failure: ClaudeAuthenticationFailure) : ClaudeAuthenticationState
+    data class ClaudeCliMissing(val failure: FailureView) : ClaudeAuthenticationState
 
     /**
      * claude 는 있는데 자격 증명이 없다. 사용자가 고를 자리다.
@@ -32,7 +34,7 @@ sealed interface ClaudeAuthenticationState {
      *   것을 지우는 것뿐이다(kyu auth add 가 같은 자세다).
      */
     data class CredentialsMissing(
-        val lastFailure: ClaudeAuthenticationFailure?,
+        val lastFailure: FailureView?,
         val tokenWouldBeStoredInPlaintext: Boolean,
     ) : ClaudeAuthenticationState
 

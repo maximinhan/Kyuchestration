@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.engine
 
+import com.kyuchestration.desktop.protocol.FailureView
+
 /**
  * 엔진이 이 머신에 있는가, 없다면 놓으려는 시도가 어디까지 왔는가.
  *
@@ -19,7 +21,7 @@ sealed interface EngineInstallationState {
 
     data object InstallationRunning : EngineInstallationState
 
-    data class InstallationFailed(val failure: EngineInstallationFailure) : EngineInstallationState
+    data class InstallationFailed(val failure: FailureView) : EngineInstallationState
 
     /**
      * 부를 kyu 가 있다. 앱의 나머지가 여기서부터다.

@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.engine
 
+import com.kyuchestration.desktop.protocol.toFailureView
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -78,7 +79,7 @@ class EngineInstallationStateHolder(
                 withContext(installationDispatcher) { engineInstaller.installEngine() }
                 EngineInstallationState.EngineReady
             } catch (failure: EngineInstallationFailure) {
-                EngineInstallationState.InstallationFailed(failure)
+                EngineInstallationState.InstallationFailed(failure.toFailureView())
             }
         }
     }
@@ -115,7 +116,7 @@ class EngineInstallationStateHolder(
             // 동봉된 엔진을 들고 있으면서 "엔진이 없다" 고만 말하면, 사용자는 자기가 방금 설치한
             // 앱이 왜 자기 엔진을 못 쓰는지 알 길이 없다. 그 이유를 들고 설치 화면으로 간다 —
             // 거기서 [다시 시도] 로 받아 오는 길은 그대로 열려 있다.
-            bundledEngineFailure != null -> EngineInstallationState.InstallationFailed(bundledEngineFailure)
+            bundledEngineFailure != null -> EngineInstallationState.InstallationFailed(bundledEngineFailure.toFailureView())
 
             else -> EngineInstallationState.EngineMissing
         }

@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.terminal.chat
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.protocol.toFailureView
 import com.kyuchestration.desktop.terminal.AssignedChildSession
 import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
 import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
@@ -1382,7 +1383,7 @@ class ChatSessionStateHolder(
                 guidance = failure.guidance,
             ),
         )
-        mutableSessionEntries.value += target to SessionEntryState.Failed(failure)
+        mutableSessionEntries.value += target to SessionEntryState.Failed(failure.toFailureView())
     }
 
     /** 그 세션의 대화를 고친다. 대화가 없는 세션(이미 놓았다)이면 아무 일도 하지 않는다. */

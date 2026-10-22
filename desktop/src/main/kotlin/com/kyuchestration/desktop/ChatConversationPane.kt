@@ -31,9 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
-import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChildLifecycle
 import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
@@ -361,13 +361,13 @@ private fun NoChatOpenNotice(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ChatSessionEntryFailureNotice(
-    failure: TerminalSessionFailure,
+    failure: FailureView,
     diagnosticLogPathLabel: String,
     modifier: Modifier = Modifier,
 ) {
     CenteredChatNotice(modifier) {
         Text(
-            text = failure.message.orEmpty(),
+            text = failure.message,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )

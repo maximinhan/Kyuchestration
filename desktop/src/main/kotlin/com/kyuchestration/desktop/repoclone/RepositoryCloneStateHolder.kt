@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.repoclone
 
+import com.kyuchestration.desktop.protocol.toFailureView
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -141,7 +142,7 @@ class RepositoryCloneStateHolder(
             } catch (failure: CloneStepFailure) {
                 // 지우기는 끝났는데 다시 묻지 못한 자리다. 이쪽은 되풀이해도 되는 일이라
                 // 그대로 "다시 시도" 로 보낸다.
-                mutableState.value = RepositoryCloneState.StepFailed(CloneStep.LoadTokenProfiles, failure)
+                mutableState.value = RepositoryCloneState.StepFailed(CloneStep.LoadTokenProfiles, failure.toFailureView())
                 return@launch
             }
 
@@ -280,7 +281,7 @@ class RepositoryCloneStateHolder(
                 val outcome = try {
                     withContext(cloneStepDispatcher) { performCloneStep(step) }
                 } catch (failure: CloneStepFailure) {
-                    mutableState.value = RepositoryCloneState.StepFailed(step, failure)
+                    mutableState.value = RepositoryCloneState.StepFailed(step, failure.toFailureView())
                     return@launch
                 }
 

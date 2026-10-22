@@ -28,6 +28,7 @@ import com.kyuchestration.desktop.core.ScreenFacingCore
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -37,7 +38,6 @@ import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.theme.resolveDarkTheme
-import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
 import java.nio.file.Path
 
 /**
@@ -344,7 +344,7 @@ private fun FirstObservationRunningScreen(workDirPath: Path, onCancelRequested: 
 @Composable
 private fun ObservationFailureScreen(
     workDirPath: Path,
-    failure: WorkDirObservationFailure,
+    failure: FailureView,
     diagnosticLogPathLabel: String,
     onRetryRequested: () -> Unit,
     onOpenAnotherWorkDirRequested: () -> Unit,
@@ -358,7 +358,7 @@ private fun ObservationFailureScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = failure.message.orEmpty(),
+            text = failure.message,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )

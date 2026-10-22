@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop
 
+import com.kyuchestration.desktop.protocol.toFailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
@@ -35,7 +36,7 @@ class ChatScreenStateTest {
 
     @Test
     fun `띄우지 못한 세션을 보면 그 이유가 선다`() {
-        val failure = TerminalSessionFailure.KyuExecutableNotFound()
+        val failure = TerminalSessionFailure.KyuExecutableNotFound().toFailureView()
 
         assertEquals(
             ChatScreenState.ChatSessionEntryFailed(REPO, failure),
@@ -99,7 +100,7 @@ class ChatScreenStateTest {
 
     @Test
     fun `보던 세션의 진입 실패는 다른 데로 옮길 때 닫는다`() {
-        val failed = mapOf(REPO to SessionEntryState.Failed(TerminalSessionFailure.KyuExecutableNotFound()))
+        val failed = mapOf(REPO to SessionEntryState.Failed(TerminalSessionFailure.KyuExecutableNotFound().toFailureView()))
 
         assertEquals(REPO, entryFailureLeftBehind(from = REPO, to = MAIN, sessionEntries = failed))
         assertEquals(REPO, entryFailureLeftBehind(from = REPO, to = null, sessionEntries = failed))

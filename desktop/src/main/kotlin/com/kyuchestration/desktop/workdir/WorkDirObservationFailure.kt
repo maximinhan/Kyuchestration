@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.workdir
 
+import com.kyuchestration.desktop.protocol.GuidedFailure
+
 /**
  * 관찰이 성립하지 않은 이유.
  *
@@ -13,9 +15,9 @@ package com.kyuchestration.desktop.workdir
 sealed class WorkDirObservationFailure(
     message: String,
     /** 사람이 지금 할 수 있는 일. 화면이 오류 문구 아래에 그대로 보여준다. */
-    val guidance: String,
+    override val guidance: String,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(message, cause), GuidedFailure {
 
     class KyuExecutableNotFound : WorkDirObservationFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",

@@ -236,7 +236,7 @@ private fun StepRunningBody(step: CloneStep) {
 
 @Composable
 private fun StepFailedBody(state: RepositoryCloneState.StepFailed, diagnosticLogPathLabel: String) {
-    Text(state.failure.message.orEmpty(), style = MaterialTheme.typography.bodyMedium)
+    Text(state.failure.message, style = MaterialTheme.typography.bodyMedium)
     Text(
         // kyu 가 stderr 에 적은 사람 말 그대로다. 앱이 다시 지어낸 문구보다 정확하다.
         text = state.failure.guidance,

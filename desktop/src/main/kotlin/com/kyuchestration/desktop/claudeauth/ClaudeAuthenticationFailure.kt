@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.claudeauth
 
+import com.kyuchestration.desktop.protocol.GuidedFailure
+
 /**
  * claude 로그인이 서지 못한 이유.
  *
@@ -18,9 +20,9 @@ package com.kyuchestration.desktop.claudeauth
  */
 sealed class ClaudeAuthenticationFailure(
     message: String,
-    val guidance: String,
+    override val guidance: String,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(message, cause), GuidedFailure {
 
     /**
      * claude 를 띄우지 못했다 — PATH 에 없거나, 실행 권한이 없거나.

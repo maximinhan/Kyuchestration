@@ -9,6 +9,7 @@ import androidx.compose.runtime.Recomposer
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
+import com.kyuchestration.desktop.protocol.toFailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
@@ -67,7 +68,7 @@ class ChatViewingTest {
 
     @Test
     fun `띄우지 못한 세션을 떠나면 그 실패를 닫는다`() = runTest {
-        val failed = SessionEntryState.Failed(TerminalSessionFailure.KyuExecutableNotFound())
+        val failed = SessionEntryState.Failed(TerminalSessionFailure.KyuExecutableNotFound().toFailureView())
         val bed = viewingBed(conversations = mapOf(MAIN to MAIN_CONVERSATION), entries = mapOf(REPO to failed))
         bed.change { bed.viewing.moveTo(REPO) }
 

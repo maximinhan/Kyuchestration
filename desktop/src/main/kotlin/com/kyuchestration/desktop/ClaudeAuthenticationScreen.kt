@@ -33,8 +33,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationFailure
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
+import com.kyuchestration.desktop.protocol.FailureView
 
 /**
  * claude 가 로그인되지 않은 채로 앱을 띄웠을 때 엔진 설치 화면 다음에 뜨는 화면.
@@ -154,7 +154,7 @@ private fun WhatToDoAboutCredentials(
  */
 @Composable
 private fun ClaudeCliInstallationGuidance(
-    failure: ClaudeAuthenticationFailure,
+    failure: FailureView,
     onCheckCredentialsRequested: () -> Unit,
 ) {
     Column(
@@ -343,13 +343,13 @@ private fun BrowserLoginCodeForm(
 
 /** 무슨 일이 있었는가와 지금 무엇을 할 수 있는가. 뒤엣줄이 실패마다 다른 것이 요점이다. */
 @Composable
-private fun FailureReason(failure: ClaudeAuthenticationFailure) {
+private fun FailureReason(failure: FailureView) {
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = failure.message.orEmpty(),
+            text = failure.message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
             textAlign = TextAlign.Center,

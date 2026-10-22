@@ -1,6 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
-import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import com.kyuchestration.desktop.protocol.FailureView
 
 /**
  * 사람이 띄우라고 한 세션 하나가 아직 보유되지 못한 사이의 모습. 보유되면 이 값이 없어지고 대화가 선다.
@@ -13,5 +13,5 @@ sealed interface SessionEntryState {
     /** 무엇을 띄울지 엔진에게 묻고 프로세스를 띄우는 중이다. */
     data object Running : SessionEntryState
 
-    data class Failed(val failure: TerminalSessionFailure) : SessionEntryState
+    data class Failed(val failure: FailureView) : SessionEntryState
 }

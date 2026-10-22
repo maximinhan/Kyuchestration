@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.repoclone
 
+import com.kyuchestration.desktop.protocol.FailureView
 import java.nio.file.Path
 
 /**
@@ -24,7 +25,7 @@ sealed interface RepositoryCloneState {
      * 되풀이할 수 있는 걸음만 여기 온다. 토큰 등록은 이 자리에 오지 못하는데, 되풀이하려면
      * 토큰을 들고 있어야 하기 때문이다 — 그쪽은 폼으로 돌아가 다시 붙여넣게 한다.
      */
-    data class StepFailed(val step: CloneStep.Retryable, val failure: CloneStepFailure) : RepositoryCloneState
+    data class StepFailed(val step: CloneStep.Retryable, val failure: FailureView) : RepositoryCloneState
 
     /**
      * 1 단계 — 어느 토큰으로 GitHub 에 붙을지 고른다.

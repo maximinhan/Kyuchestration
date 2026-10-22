@@ -1,6 +1,6 @@
 package com.kyuchestration.desktop.dashboard
 
-import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.workdir.WorkDirSnapshot
 import java.nio.file.Path
 
@@ -38,13 +38,13 @@ sealed interface WorkDirDashboardState {
     data class WorkDirObserved(
         override val workDirPath: Path,
         val snapshot: WorkDirSnapshot,
-        val lastRefreshFailure: WorkDirObservationFailure?,
+        val lastRefreshFailure: FailureView?,
         val planFilePresent: Boolean,
     ) : WorkDirDashboardState
 
     /** 한 번도 성공하지 못했다. 보여줄 것이 실패의 이유뿐이다. */
     data class FirstObservationFailed(
         override val workDirPath: Path,
-        val failure: WorkDirObservationFailure,
+        val failure: FailureView,
     ) : WorkDirDashboardState
 }
