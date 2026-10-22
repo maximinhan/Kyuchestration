@@ -1,7 +1,6 @@
 package com.kyuchestration.desktop.app
 
 import com.kyuchestration.desktop.core.runCoreCommand
-import com.kyuchestration.desktop.mirror.CorePlace
 import com.kyuchestration.desktop.runScreen
 import java.lang.management.ManagementFactory
 import java.nio.file.Path
@@ -17,7 +16,7 @@ fun main(arguments: Array<String>) {
     if (arguments.firstOrNull() == CORE_VERB) {
         exitProcess(runCoreCommand(arguments.drop(1)))
     }
-    runScreen(CorePlace.SameMachine(coreLaunchCommand()))
+    runScreen(sameMachineCoreLaunchCommand = { coreLaunchCommand() })
 }
 
 /**

@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.diagnostics
 
 import com.kyuchestration.desktop.platform.runningOnMac
+import com.kyuchestration.desktop.platform.runningOnWindows
 import java.nio.file.Path
 
 /**
@@ -19,9 +20,9 @@ import java.nio.file.Path
  * "다시 만들 수 있지만 지워지면 아쉬운 것" 이고, 명세가 그것을 위해 둔 자리가 state 다.
  * 설정하지 않은 머신의 기본값(`~/.local/state`)도 명세가 정해 둔 것을 그대로 쓴다.
  *
- * 윈도우 갈래는 두지 않는다. 릴리스가 윈도우 설치 패키지를 내지 않아(app/build.gradle.kts 의
- * targetFormats) 그 갈래를 지날 실행이 없고, 쓰지도 않을 AppData 갈래를 미리 두면 시험할 수
- * 없는 분기가 하나 생긴다 — 엔진 디렉토리가 같은 이유로 두 갈래인 것과 같은 선이다.
+ * 윈도우는 `%LOCALAPPDATA%\Kyuchestration\Logs` 다. 윈도우에서 뜨는 것은 화면뿐이고(코어는 WSL 안 — core-ui-split-design.md
+ * 6.16), 윈도우 사용자가 앱의 기록을 찾는 자리가 그 아래다. 로밍되는 APPDATA 가 아닌 것은 기록이 그 머신에서 난 일이라 다른
+ * 머신으로 따라갈 까닭이 없어서다.
  *
  * @param owner 누가 적는 기록인가. 화면과 코어는 다른 프로세스라 파일을 나눈다 — 자리는 같다.
  * @param lookUpEnvironmentVariable 환경 변수를 읽는 자리. 검사가 진짜 환경을 건드리지 않고
@@ -39,6 +40,15 @@ private fun diagnosticLogDirectory(
     userHomeDirectory: Path,
     lookUpEnvironmentVariable: (String) -> String?,
 ): Path {
+    if (runningOnWindows(osName)) {
+        // 윈도우가 언제나 채워 두는 변수다. 비었으면 윈도우가 그 변수에 두는 자리를 그대로 쓴다.
+        val localApplicationData = lookUpEnvironmentVariable(LOCAL_APPLICATION_DATA_VARIABLE)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(Path::of)
+            ?: userHomeDirectory.resolve("AppData").resolve("Local")
+        return localApplicationData.resolve("Kyuchestration").resolve("Logs")
+    }
+
     if (runningOnMac(osName)) {
         // 창 제목이 아니라 설치 패키지 이름(Kyuchestration)을 쓴다. 콘솔 앱과 Finder 가 이
         // 디렉토리 이름을 그대로 보여주는데, 한글 이름은 그 자리에서 사용자가 앱과 잇기 어렵다.
@@ -68,3 +78,5 @@ enum class DiagnosticLogOwner(val logFileName: String) {
 }
 
 private const val XDG_STATE_HOME_VARIABLE = "XDG_STATE_HOME"
+
+private const val LOCAL_APPLICATION_DATA_VARIABLE = "LOCALAPPDATA"

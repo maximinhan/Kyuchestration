@@ -12,3 +12,11 @@ package com.kyuchestration.desktop.platform
  */
 fun runningOnMac(osName: String = System.getProperty("os.name").orEmpty()): Boolean =
     osName.startsWith("Mac", ignoreCase = true)
+
+/**
+ * 이 프로그램이 윈도우에서 돌고 있는가. 윈도우에서 뜨는 것은 화면뿐이다 — 코어는 WSL 안에 있다(core-ui-split-design.md 6.16).
+ *
+ * JVM 은 `os.name` 을 "Windows 10" · "Windows 11" · "Windows Server 2022" 처럼 판을 붙여 답한다. 앞만 본다.
+ */
+fun runningOnWindows(osName: String = System.getProperty("os.name").orEmpty()): Boolean =
+    osName.startsWith("Windows", ignoreCase = true)

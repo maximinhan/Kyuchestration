@@ -1,9 +1,11 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -19,13 +21,22 @@ import com.kyuchestration.desktop.mirror.CoreChildProcess
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.mirror.CorePlace
+import com.kyuchestration.desktop.platform.runningOnWindows
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.wsl.ChosenWslDistributionFile
+import com.kyuchestration.desktop.wsl.WslCommandLine
+import com.kyuchestration.desktop.wsl.WslCorePlacePreparation
+import com.kyuchestration.desktop.wsl.WslCorePlacePreparationState
+import com.kyuchestration.desktop.wsl.chosenWslDistributionFilePath
+import com.kyuchestration.desktop.wsl.wslExecutablePath
+import kotlin.io.path.isRegularFile
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -34,11 +45,15 @@ import kotlinx.coroutines.runBlocking
  * 화면은 코어를 [ScreenFacingCore] 하나로만 본다 — 상태 홀더도, 그 뒤의 kyu 도 모른다(core-ui-split-design.md 6.2). 그
  * [ScreenFacingCore] 는 거울([CoreMirror])이고, 거울은 화면이 자식으로 띄운 코어 프로세스의 stdio 위에 선다(7 절 2 단계).
  * 같은 머신이어도 언제나 이 길이다(원칙 20) — 화면 모듈은 코어의 클래스를 컴파일 시점에 볼 수조차 없다. 이 파일에 남은 것은 화면의
- * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
+ * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기, 윈도우에서 코어를 띄울 WSL 배포판.
  *
- * @param corePlace 코어를 띄울 자리(CorePlace). 화면이 코어에 닿는 길에서 OS 가 갈리는 것은 그것 하나다.
+ * 코어를 어디서 띄우는지([CorePlace])만 OS 가 가른다. 맥 · 리눅스는 같은 머신에서, 윈도우는 사람이 고른 WSL 배포판 안에서
+ * 띄운다(core-ui-split-design.md 6.12 · 6.17). 띄운 뒤는 같은 길이다.
+ *
+ * @param sameMachineCoreLaunchCommand 같은 머신에서 코어를 `serve --stdio` 로 띄우는 명령. 무엇으로 띄우는지는 이 프로그램을 띄운
+ *   쪽(app 모듈)이 안다 — 설치 패키지에서는 앱의 실행기, 소스에서는 같은 클래스패스의 java 다. 윈도우에서는 묻지 않는다.
  */
-fun runScreen(corePlace: CorePlace) {
+fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
     val diagnosticLogPath = diagnosticLogFile(DiagnosticLogOwner.Screen)
     val diagnosticLog = FileDiagnosticLog(diagnosticLogPath)
 
@@ -53,6 +68,11 @@ fun runScreen(corePlace: CorePlace) {
     )
 
     try {
+        val corePlace = if (runningOnWindows()) {
+            prepareWslCorePlace(diagnosticLogPath.toString()) ?: return
+        } else {
+            CorePlace.SameMachine(sameMachineCoreLaunchCommand())
+        }
         val coreProcess = CoreChildProcess.start(corePlace, diagnosticLog)
         val connection = runBlocking {
             coreProcess.connectMirror(
@@ -81,6 +101,55 @@ fun runScreen(corePlace: CorePlace) {
         diagnosticLog.record(DiagnosticLogEntry.UnhandledFailure(Thread.currentThread().name, failure))
         throw failure
     }
+}
+
+/**
+ * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null.
+ *
+ * 지난번에 고른 배포판에 코어가 있으면 창 없이 곧바로 간다 — 맥 · 리눅스가 코어에 붙은 뒤에야 창을 띄우는 것과 같은 박자다. 물어야
+ * 할 때만 고르는 창을 띄우고, 정해지면 그 창을 닫고 본 창으로 넘어간다.
+ */
+private fun prepareWslCorePlace(diagnosticLogPathLabel: String): CorePlace.WslDistribution? {
+    val wslExecutable = wslExecutablePath()
+    if (!wslExecutable.isRegularFile()) {
+        application {
+            Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 360.dp))) {
+                WslMissingScreen(wslExecutable.toString())
+            }
+        }
+        return null
+    }
+    val wslCommandLine = WslCommandLine(wslExecutable)
+    val chosenDistribution = ChosenWslDistributionFile(chosenWslDistributionFilePath())
+    val preparation = WslCorePlacePreparation(
+        listDistributions = wslCommandLine::listDistributions,
+        checkCore = wslCommandLine::checkCore,
+        rememberedDistribution = chosenDistribution::read,
+        rememberDistribution = chosenDistribution::write,
+    )
+    runBlocking { preparation.lookAround() }
+    if (preparation.state.value !is WslCorePlacePreparationState.Ready) {
+        // 본 창을 이어서 띄워야 하므로 이 창이 닫혀도 프로세스를 끝내지 않는다.
+        application(exitProcessOnExit = false) {
+            val state by preparation.state.collectAsState()
+            val preparationScope = rememberCoroutineScope()
+            LaunchedEffect(state) {
+                if (state is WslCorePlacePreparationState.Ready) {
+                    exitApplication()
+                }
+            }
+            Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 480.dp))) {
+                WslCorePlaceScreen(
+                    state = state,
+                    diagnosticLogPathLabel = diagnosticLogPathLabel,
+                    onLookAroundAgainRequested = { preparationScope.launch { preparation.lookAround() } },
+                    onDistributionChosen = { distributionName -> preparationScope.launch { preparation.choose(distributionName) } },
+                )
+            }
+        }
+    }
+    val ready = preparation.state.value as? WslCorePlacePreparationState.Ready ?: return null
+    return CorePlace.WslDistribution(wslExecutable, ready.distributionName)
 }
 
 /**
