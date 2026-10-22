@@ -17,17 +17,19 @@ import kotlinx.coroutines.withTimeout
  * 코어를 이 JVM 의 자기 스레드에 세우는 자리. 세우다 실패하면 화면이 그것을 봐야 한다 — 거울은 첫 스냅샷을 기다리며 서므로,
  * 코어 쪽 줄이 닫히지 않으면 화면은 창 하나 없이 영원히 기다린다.
  */
-class InProcessCoreStartTest {
+class CoreStartTest {
 
     @Test
     fun `코어를 조립하다 실패하면 화면 쪽 줄이 그 실패로 닫혀 거울을 세우던 자리가 같은 실패를 받는다`() {
         val framesToCore = Channel<String>(Channel.UNLIMITED)
-        val framesToScreen = Channel<String>(Channel.UNLIMITED)
+        val coreOutbox = ScreenFrameOutbox()
+        val framesToScreen = coreOutbox.linesDeliveredIn(CoroutineScope(Dispatchers.Default))
         val recordedEntries = CopyOnWriteArrayList<DiagnosticLogEntry>()
 
-        startCoreInThisProcess(
+        startCore(
             framesFromScreen = framesToCore,
-            framesToScreen = framesToScreen,
+            framesToScreen = coreOutbox,
+            coreIdentity = TEST_CORE_IDENTITY,
             diagnosticLog = object : DiagnosticLog {
                 override fun record(entry: DiagnosticLogEntry) {
                     recordedEntries += entry
@@ -39,7 +41,7 @@ class InProcessCoreStartTest {
         val failure = runBlocking {
             withTimeout(10_000) {
                 assertFailsWith<IllegalStateException> {
-                    CoreMirror.connect(framesToScreen, framesToCore, CoroutineScope(Dispatchers.Default), DiagnosticLog.Discarding)
+                    CoreMirror.connect(framesToScreen, framesToCore, CoroutineScope(Dispatchers.Default), DiagnosticLog.Discarding, TEST_SCREEN_VERSION_LABEL)
                 }
             }
         }

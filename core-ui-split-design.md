@@ -400,6 +400,7 @@ app-owned 의 개정(*"GUI 세션은 앱과 생사를 같이한다"*)은 창과 
                                                    └──────────────────────────────────────────────────────┘
 
 맥 · 리눅스: 같은 그림에서 wsl.exe 칸만 빠진다. 화면이 <앱>/core/bin/kyuchestration-core attach 를 로컬 자식으로 띄운다.
+(2 단계 정정) 맥 · 리눅스 패키지에는 실행기가 하나다 — 화면은 자기 실행기를 `<앱>/bin/Kyuchestration core serve --stdio` 로 다시 띄운다(6.16).
 ```
 
 **`serve` 와 `attach` 는 같은 실행 파일의 두 동사다.** `serve` 는 세션을 쥐는 데몬, `attach` 는 화면의 stdio 를 데몬의 소켓에 잇는 중계다(4.9). 단계 2~4 에는 데몬이 없다 — 화면이 `serve --stdio` 를 직접 띄우고 코어는 stdin EOF 에 끝난다(4.4). 데몬과 `attach` 는 5 단계에 선다.
@@ -510,6 +511,8 @@ app-owned 의 개정(*"GUI 세션은 앱과 생사를 같이한다"*)은 창과 
 | **`reply` 는 "받았다/거절했다" 까지만** | `accepted` 는 코어가 그 명령을 받아들였다는 뜻이지 일이 끝났다는 뜻이 아니다. 결과는 언제나 `change` 로 온다 — 결과가 오는 길이 둘이면 화면이 둘을 맞춰야 한다. `rejected` 는 낡은 명령(이미 답한 물음, 끝난 세션, 다른 화면이 먼저 답함)을 화면이 알 수 있게 한다 |
 | `seq` | 코어가 낸 변화마다 1 씩 는다. 스냅샷은 그것을 찍은 `seq` 를 단다. 화면은 `seq` 가 하나라도 건너뛰면 다시 붙어 스냅샷을 받는다 — 거울이 조용히 어긋나지 않게 |
 | `protocol` 은 정수 하나 | 6.14 |
+| **(2 단계 정정)** 지금 싣는 필드 | `hello { protocol, screenVersion }` · `welcome { protocol, coreVersion, coreDiagnosticLog, engineDirectory }` · `bye { reason: protocol_mismatch }`. `screenOs` · `coreOs` · `wslDistro` 는 쓰는 자리(3 단계의 경로 변환 · 진단 기록 경로)가 생길 때 더한다 — 필드를 더하는 변경은 판을 올리지 않는다. `bye` 의 나머지 까닭 둘은 5 단계의 것이다 |
+| **(2 단계 정정)** 낡은 답의 `rejected` 사유 | `question_not_open` 하나 — 승인 · 관문 물음이 이미 닫혔다(답이 갔거나 claude 가 거뒀거나 세션이 끝났다). 물음이 열려 있는지는 챗 홀더가 답 함수의 결과로 알리고(`answerPermission` · `answerGateQuestion` 이 닿았는가를 돌려준다), serveScreen 은 그 결과로 거절을 쓴다. 어느 까닭으로 닫혔는지는 가르지 않는다 — 화면이 할 일은 같다 |
 
 ### 6.5 변화를 보내는 법 — `StateFlow` 를 그대로 두고, 코어 안의 게시자가 변화로 바꾼다
 
@@ -637,6 +640,7 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 | `--cd ~` + 상대 경로 | 3.7 — 화면은 리눅스 홈을 모르고, `wsl.exe -e` 의 PATH 에는 `~/.local/bin` 이 없다. 셸 없이 실행 파일에 닿는 길이 이것이다 |
 | `wsl.exe` 의 절대 경로 | 사용자의 PATH 에 다른 `wsl.exe`(옛 `bash.exe` 시절 래퍼 등)가 앞에 있어도 갈리지 않게 |
 | 인자는 동사 하나(`serve --stdio` 또는 `attach`) | 나머지(판, 화면 OS)는 `hello` 로 보낸다 |
+| **(2 단계 정정)** 지금의 함수 | `Local` 갈래만 있다 — `app` 모듈의 `coreLaunchCommand()` 가 자기 실행기(`jpackage.app-path`)에 `core serve --stdio` 를 붙이거나, 실행기 없이 떴으면(`./gradlew run`) 같은 java · 클래스패스 · 앱 리소스 자리로 같은 main 을 부른다. `WslDistribution` 은 3 단계에서 더한다 |
 | 코어의 `claude`·`kyu` 찾기 | 코어가 한다 — 지금 앱의 `LoginShellSearchPath.kt` 그대로(3.7 이 그것이 여전히 필요함을 보였다) |
 | 윈도우 JVM 이 `wsl.exe` 를 찾지 못하면 | "WSL 이 설치되어 있지 않습니다" 화면(6.17). 지금의 `WindowsNeedsWsl` 이 화면 쪽으로 옮겨 온 모양이다 |
 
@@ -674,7 +678,7 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 
 ```
 desktop/
-├─ settings.gradle.kts           include(":protocol", ":core", ":ui")
+├─ settings.gradle.kts           include(":protocol", ":diagnostics", ":core", ":ui", ":app")   ← (2 단계 정정)
 ├─ protocol/   kotlinx-serialization-json + kotlinx-coroutines.  틀(frame)·명령·변화·화면 모델(@Serializable)·FailureView
 │              · 경계 인터페이스 ScreenFacingCore
 ├─ core/       protocol + kotlinx-coroutines.  Compose 없음.
@@ -685,13 +689,20 @@ desktop/
                coreLaunchCommand · diagnostics/(화면 몫)
 ```
 
+**(2 단계 정정)** 실제로는 모듈이 다섯이다.
+
+| 모듈 | 무엇 | 근거 |
+|---|---|---|
+| `diagnostics` | 진단 기록(닫힌 사건 갈래 · 파일 · 미처리 예외) · `runningOnMac` · 판 라벨(`BuildVersion`) | 화면과 코어가 각자 자기 파일(`desktop.log` · `core.log`)에 적지만 같은 사건 갈래를 쓴다. 둘로 베끼면 "기록에 비밀이 들어가지 않는가" 를 두 자리에서 답해야 한다 |
+| `app` | 실행기 하나(`DesktopEntry`)와 설치 패키지 · 동봉 엔진 | 패키지에 실행 파일을 하나밖에 둘 수 없다(6.16 정정). 첫 인자 `core` 면 코어, 아니면 화면 — 둘을 함께 아는 것은 이 자리뿐이라 `ui` 는 `core` 를 의존하지 않는다(시험만 의존) |
+
 | 판단 | 근거 |
 |---|---|
 | `core` 는 Compose 를 의존하지 않는다 | 3.6 — 클래스패스의 86 % 가 화면 것. 그리고 의존 방향을 빌드가 막는다 — 코어 코드가 Compose 타입을 쓰면 컴파일이 안 된다(헥사고날 방향을 모듈 의존으로 강제하는 것과 같은 자세) |
 | `ui` 는 `core` 를 의존하지 않는다 | 원칙 20. 화면이 코어 클래스를 import 할 수 있으면 같은 JVM 지름길이 생긴다 |
 | `protocol` 에 화면 모델을 둔다 | 6.3 의 "하나의 모델". `ChatEntry`·`ChatConversation`·`SessionTree` 등이 여기로 온다 |
 | **(2a 정정)** `protocol` 은 kotlinx-coroutines 도 의존한다 | 경계 인터페이스 `ScreenFacingCore` 가 상태를 `StateFlow` 로 내놓는다. 코어의 구현과 화면의 거울(`CoreMirror`)이 같은 인터페이스를 지키려면 그것이 둘이 함께 보는 `protocol` 에 있어야 한다(PR #77) |
-| 동봉 엔진(`buildBundledEngine`)은 `core` 의 패키징으로 | 엔진을 부르는 것은 코어다. 윈도우 화면 패키지(msi)는 엔진을 담지 않는다 — 지금 `hostBundledEngineTarget` 이 윈도우에서 던지는 것(`build.gradle.kts` 의 그 자리)이 `ui` 에 걸리지 않게 된다. **(2a 정정)** 지금은 `ui/build.gradle.kts` 에 있다 — 설치 패키지(jpackage)를 내는 모듈이 `ui` 하나라 엔진을 앱 리소스로 넣는 자리도 거기다. 코어가 따로 패키징되는 4 단계(WSL 의 코어 이미지)에서 옮긴다 |
+| 동봉 엔진(`buildBundledEngine`)은 `core` 의 패키징으로 | 엔진을 부르는 것은 코어다. 윈도우 화면 패키지(msi)는 엔진을 담지 않는다 — 지금 `hostBundledEngineTarget` 이 윈도우에서 던지는 것(`build.gradle.kts` 의 그 자리)이 `ui` 에 걸리지 않게 된다. **(2 단계 정정)** 지금은 `app/build.gradle.kts` 에 있다 — 설치 패키지(jpackage)를 내는 모듈이 `app` 하나라 엔진을 앱 리소스로 넣는 자리도 거기다. 코어가 따로 패키징되는 4 단계(WSL 의 코어 이미지)에서 옮긴다 |
 
 **시험이 가는 곳** — 지금 `desktop/src/test` 의 77 개 파일.
 
@@ -722,6 +733,7 @@ desktop/
 | `install.sh` 를 넓힌다: `--with-core` 면 `kyu` 와 코어 이미지를 함께 받아 `~/.local` 아래에 둔다. sudo 없음 | 지금 `install.sh` 가 이미 `~/.local/bin` 에 `kyu` 를 둔다(`install.sh:309`). 같은 자리, 같은 인증 순서(무인증 먼저, 거절되면 `GITHUB_TOKEN`) |
 | msi 는 `windows-latest` 러너에서 Compose 의 `packageMsi` | `jpackage` 는 자기 OS 용만 만든다 — dmg 잡이 맥 러너를 쓰는 것과 같은 이유(`release.yml` 의 그 주석). WiX 는 Compose 플러그인이 받는 것으로 읽힌다(3.8 — 실측 아님). 사용자 단위 설치(`perUserInstall`)로 관리자 권한을 묻지 않고, 판을 올려 덮어 깔 수 있게 `upgradeUuid` 를 고정한다 |
 | 맥·리눅스 패키지 안의 코어 | 화면이 띄울 실행 파일이 패키지 안에 있어야 한다. `jpackage` 의 추가 실행기(`--add-launcher`)로 같은 런타임을 나눠 쓰는 길이 가장 작다. Compose 플러그인이 그것을 여는지는 확인하지 않았다 — 2 단계에서 정한다 |
+| **(2 단계 실측)** 맥·리눅스 패키지 안의 코어 | **앱의 실행기 하나를 화면과 코어가 함께 쓴다** — 화면이 `<앱>/bin/Kyuchestration core serve --stdio` 로 다시 띄운다. 다른 길이 막혔다: ① Compose 플러그인 1.12.0 은 `--add-launcher` 를 열지 않는다(`AbstractJPackageTask` 에 그 인자가 없다) ② Compose 가 런타임을 만들 때 `--strip-native-commands` 를 고정으로 넘겨(`createRuntimeImage.args.txt`) 런타임에 `bin/java` 가 없다 — 같은 런타임으로 `java -cp` 할 수 없다 ③ 앱 리소스로 넣은 파일은 deb 에서 `-rw-r--r--` 로 실행 권한을 잃는다 — 코어의 앱 이미지를 리소스로 담아도 그 실행기와 `jspawnhelper` 를 부를 수 없다. 대가: 코어의 클래스패스에 Compose jar 가 함께 실린다(읽히지 않아 RSS 차이는 몇 MB). 4 단계의 WSL 코어 이미지는 따로 만든다 |
 | 화면과 코어는 **같은 태그, 같은 판** | `release.yml` 의 `resolve-version` 이 이미 하나의 판을 모든 잡에 나눠 준다. 잡이 둘(윈도우 msi · 리눅스 코어 tar.gz) 는다 |
 
 ### 6.17 첫 실행 — 윈도우 화면이 코어를 찾기까지

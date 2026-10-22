@@ -12,9 +12,27 @@ import kotlin.test.assertEquals
  */
 class DiagnosticLogLocationTest {
 
+    /**
+     * 화면과 코어는 따로 적는다(core-ui-split-design.md 6.10). 둘이 다른 프로세스라 한 파일에 함께 쓰면 줄이 섞이고 크기 상한의
+     * 옮겨 두기가 서로를 지운다. 같은 디렉토리에 두는 것은 사람이 "그 폴더를 보내 주세요" 한마디로 둘을 함께 건네게 하려는 것이다.
+     */
+    @Test
+    fun `코어는 화면과 같은 자리의 다른 파일에 적는다`() {
+        fun logFileOf(owner: DiagnosticLogOwner) = diagnosticLogFile(
+            owner = owner,
+            osName = "Linux",
+            userHomeDirectory = Path.of("/home/yawn"),
+            lookUpEnvironmentVariable = { null },
+        )
+
+        assertEquals(Path.of("/home/yawn/.local/state/kyuchestration/core.log"), logFileOf(DiagnosticLogOwner.Core))
+        assertEquals(logFileOf(DiagnosticLogOwner.Screen).parent, logFileOf(DiagnosticLogOwner.Core).parent)
+    }
+
     @Test
     fun `맥에서는 콘솔 앱이 들여다보는 자리에 둔다`() {
         val logFile = diagnosticLogFile(
+            owner = DiagnosticLogOwner.Screen,
             osName = "Mac OS X",
             userHomeDirectory = Path.of("/Users/yawn"),
             lookUpEnvironmentVariable = { null },
@@ -26,6 +44,7 @@ class DiagnosticLogLocationTest {
     @Test
     fun `리눅스에서는 XDG_STATE_HOME 을 따른다`() {
         val logFile = diagnosticLogFile(
+            owner = DiagnosticLogOwner.Screen,
             osName = "Linux",
             userHomeDirectory = Path.of("/home/yawn"),
             lookUpEnvironmentVariable = { if (it == "XDG_STATE_HOME") "/home/yawn/.state" else null },
@@ -37,6 +56,7 @@ class DiagnosticLogLocationTest {
     @Test
     fun `XDG_STATE_HOME 이 없으면 그 명세가 정한 기본값을 쓴다`() {
         val logFile = diagnosticLogFile(
+            owner = DiagnosticLogOwner.Screen,
             osName = "Linux",
             userHomeDirectory = Path.of("/home/yawn"),
             lookUpEnvironmentVariable = { null },
@@ -54,6 +74,7 @@ class DiagnosticLogLocationTest {
     @Test
     fun `XDG_STATE_HOME 이 비어 있으면 설정되지 않은 것으로 본다`() {
         val logFile = diagnosticLogFile(
+            owner = DiagnosticLogOwner.Screen,
             osName = "Linux",
             userHomeDirectory = Path.of("/home/yawn"),
             lookUpEnvironmentVariable = { "" },
@@ -71,6 +92,7 @@ class DiagnosticLogLocationTest {
     @Test
     fun `맥에서는 XDG_STATE_HOME 이 설정돼 있어도 무시한다`() {
         val logFile = diagnosticLogFile(
+            owner = DiagnosticLogOwner.Screen,
             osName = "Mac OS X",
             userHomeDirectory = Path.of("/Users/yawn"),
             lookUpEnvironmentVariable = { "/Users/yawn/.state" },

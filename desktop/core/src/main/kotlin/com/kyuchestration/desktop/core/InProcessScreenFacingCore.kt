@@ -46,7 +46,7 @@ class InProcessScreenFacingCore(
     private val chatSessions: ChatSessionStateHolder,
     override val engineDirectoryLabel: String,
     private val coroutineScope: CoroutineScope,
-) : ScreenFacingCore {
+) : ScreenServingCore {
 
     override val engineInstallationState: StateFlow<EngineInstallationState> = engineInstallation.state
     override val claudeAuthenticationState: StateFlow<ClaudeAuthenticationState> = claudeAuthentication.state
@@ -148,7 +148,7 @@ class InProcessScreenFacingCore(
 
     override fun interruptTurn(target: SessionTarget) = chatSessions.interruptTurn(target)
 
-    override fun answerPermission(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice) =
+    override fun answerPermissionIfStillAsked(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice): Boolean =
         chatSessions.answerPermission(target, toolUseId, choice)
 
     override fun endSession(target: SessionTarget) {
@@ -156,7 +156,7 @@ class InProcessScreenFacingCore(
         coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) { chatSessions.endSession(target) }
     }
 
-    override fun answerGate(gateQuestionId: String, approved: Boolean) =
+    override fun answerGateIfStillOpen(gateQuestionId: String, approved: Boolean): Boolean =
         chatSessions.answerGateQuestion(gateQuestionId, approved)
 
     override fun openRepositoryClone() {

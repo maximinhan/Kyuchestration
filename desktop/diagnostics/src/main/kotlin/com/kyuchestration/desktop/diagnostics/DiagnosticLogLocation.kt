@@ -19,18 +19,20 @@ import java.nio.file.Path
  * "다시 만들 수 있지만 지워지면 아쉬운 것" 이고, 명세가 그것을 위해 둔 자리가 state 다.
  * 설정하지 않은 머신의 기본값(`~/.local/state`)도 명세가 정해 둔 것을 그대로 쓴다.
  *
- * 윈도우 갈래는 두지 않는다. 릴리스가 윈도우 설치 패키지를 내지 않아(ui/build.gradle.kts 의
+ * 윈도우 갈래는 두지 않는다. 릴리스가 윈도우 설치 패키지를 내지 않아(app/build.gradle.kts 의
  * targetFormats) 그 갈래를 지날 실행이 없고, 쓰지도 않을 AppData 갈래를 미리 두면 시험할 수
  * 없는 분기가 하나 생긴다 — 엔진 디렉토리가 같은 이유로 두 갈래인 것과 같은 선이다.
  *
+ * @param owner 누가 적는 기록인가. 화면과 코어는 다른 프로세스라 파일을 나눈다 — 자리는 같다.
  * @param lookUpEnvironmentVariable 환경 변수를 읽는 자리. 검사가 진짜 환경을 건드리지 않고
  *   XDG 규칙을 확인하기 위한 이음매다.
  */
 fun diagnosticLogFile(
+    owner: DiagnosticLogOwner,
     osName: String = System.getProperty("os.name").orEmpty(),
     userHomeDirectory: Path = Path.of(System.getProperty("user.home").orEmpty()),
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
-): Path = diagnosticLogDirectory(osName, userHomeDirectory, lookUpEnvironmentVariable).resolve(LOG_FILE_NAME)
+): Path = diagnosticLogDirectory(osName, userHomeDirectory, lookUpEnvironmentVariable).resolve(owner.logFileName)
 
 private fun diagnosticLogDirectory(
     osName: String,
@@ -52,11 +54,17 @@ private fun diagnosticLogDirectory(
 }
 
 /**
- * 파일 이름이 앱을 가리킨다.
+ * 기록을 적는 쪽. 파일 이름이 그것을 가리킨다.
  *
- * 엔진(kyu)도 언젠가 자기 기록을 남기게 되면 같은 디렉토리를 쓸 수 있다. 그때 어느 쪽이 남긴
- * 것인지가 파일 이름에서 갈라지지 않으면, 받은 기록을 읽는 쪽이 먼저 그것부터 가려내야 한다.
+ * 화면과 코어는 다른 프로세스라 한 파일에 함께 쓰면 줄이 섞이고, 크기 상한에서 옮겨 두는 일(FileDiagnosticLog)이 서로를
+ * 지운다. 엔진(kyu)도 언젠가 자기 기록을 남기게 되면 같은 디렉토리를 쓸 수 있다 — 어느 쪽이 남긴 것인지가 파일 이름에서
+ * 갈라지지 않으면, 받은 기록을 읽는 쪽이 먼저 그것부터 가려내야 한다.
+ *
+ * 화면의 이름이 `desktop.log` 인 것은 갈라지기 전부터 사용자가 건네 온 이름이라서다.
  */
-private const val LOG_FILE_NAME = "desktop.log"
+enum class DiagnosticLogOwner(val logFileName: String) {
+    Screen("desktop.log"),
+    Core("core.log"),
+}
 
 private const val XDG_STATE_HOME_VARIABLE = "XDG_STATE_HOME"

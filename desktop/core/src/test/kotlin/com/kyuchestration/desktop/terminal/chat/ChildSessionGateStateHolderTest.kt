@@ -7,6 +7,7 @@ import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
@@ -159,9 +160,10 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion(firstQuestion.gateQuestionId, approved = true)
+        val lateAnswerReachedQuestion = bed.holder.answerGateQuestion(firstQuestion.gateQuestionId, approved = true)
         runCurrent()
 
+        assertFalse(lateAnswerReachedQuestion)
         assertNull(asked.answerSoFar())
         val secondQuestion = bed.holder.gateQuestions.value.single()
         assertEquals(firstQuestion.prompt to firstQuestion.gate, secondQuestion.prompt to secondQuestion.gate)

@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.diagnostics
 
+import java.util.concurrent.CopyOnWriteArrayList
+
 /**
  * 남긴 기록을 들고만 있는 자리. 파일을 건드리지 않는다.
  *
@@ -8,7 +10,8 @@ package com.kyuchestration.desktop.diagnostics
  */
 class RecordingDiagnosticLog : DiagnosticLog {
 
-    val recordedEntries = mutableListOf<DiagnosticLogEntry>()
+    // 다른 스레드(자식 프로세스가 끝난 것을 알리는 자리 같은)가 남기는 기록도 받는다.
+    val recordedEntries: MutableList<DiagnosticLogEntry> = CopyOnWriteArrayList()
 
     override fun record(entry: DiagnosticLogEntry) {
         recordedEntries += entry

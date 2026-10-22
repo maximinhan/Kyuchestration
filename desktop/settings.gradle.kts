@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 
 // 화면(ui)과 코어(core)가 그 사이를 건너는 값(protocol)을 함께 쓴다(core-ui-split-design.md 6.15). 모듈 의존이 방향을 막는다 —
 // core 는 Compose 를 볼 수 없다.
-include(":protocol", ":core", ":ui")
+include(":protocol", ":diagnostics", ":core", ":ui", ":app")

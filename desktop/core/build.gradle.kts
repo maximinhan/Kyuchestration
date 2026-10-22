@@ -12,6 +12,7 @@ plugins {
 
 dependencies {
     api(project(":protocol"))
+    api(project(":diagnostics"))
     implementation(libs.kotlinxSerializationJson)
     implementation(libs.kotlinxCoroutinesCore)
 
@@ -22,4 +23,5 @@ dependencies {
     // useJUnitPlatform 을 보고 같은 junit5 변형을 고르므로 판이 갈리지 않는다.
     testFixturesImplementation(kotlin("test-junit5"))
     testFixturesImplementation(libs.kotlinxCoroutinesTest)
+    testFixturesApi(testFixtures(project(":diagnostics")))
 }

@@ -12,6 +12,7 @@ import com.kyuchestration.desktop.protocol.CoreStateImage
 import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
+import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenCommand
 import com.kyuchestration.desktop.protocol.decodeFrameToScreen
@@ -38,7 +39,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 화면 쪽에서 코어를 비추는 거울(core-ui-split-design.md 6.5). 코어가 보낸 틀로 `StateFlow` 열 개를 다시 세우고, 명령은 틀로
- * 보낸다 — 화면은 같은 JVM 의 코어를 볼 때와 같은 [ScreenFacingCore] 를 본다.
+ * 보낸다 — 화면은 코어 프로세스 안의 구현(InProcessScreenFacingCore)과 같은 [ScreenFacingCore] 를 본다.
  *
  * **`seq` 가 하나라도 건너뛰면 다시 인사한다**(6.4). 건너뛴 변화를 모른 채 다음 변화를 얹으면 거울이 코어와 조용히 어긋난다.
  * 다시 받은 스냅샷의 마지막 조각이 올 때까지는 거울을 그대로 둔다 — 반쯤 온 스냅샷을 그리면 대화가 잘려 보인다(6.6).
@@ -56,6 +57,9 @@ class CoreMirror private constructor(
     private val framesToCore: SendChannel<String>,
     initialImage: CoreStateImage,
     override val engineDirectoryLabel: String,
+    /** 코어가 진단을 적는 파일(인사 답). 화면의 기록과 다른 프로세스의 파일이라 오류 자리에서 함께 알린다. */
+    val coreDiagnosticLogPath: String,
+    private val screenVersionLabel: String,
     private val diagnosticLog: DiagnosticLog,
 ) : ScreenFacingCore {
 
@@ -87,7 +91,7 @@ class CoreMirror private constructor(
 
     private var nextChangeSequence: Long = 0
 
-    /** 다시 인사한 뒤 모으는 중인 스냅샷. 인사하지 않았으면 null 이다. */
+    /** 모으는 중인 스냅샷 — 다시 인사했거나 코어가 밀린 화면을 다시 맞추는 중이다. 아니면 null 이다. */
     private var snapshotBeingAssembled: SnapshotAssembly? = null
 
     private val lastCommandNumber = AtomicLong(0)
@@ -132,7 +136,11 @@ class CoreMirror private constructor(
         when (frame) {
             // 인사 답은 처음 붙을 때만 뜻이 있다. 다시 인사해 받은 것은 같은 코어의 같은 자리다.
             is FrameToScreen.Welcome -> Unit
-            is FrameToScreen.Snapshot -> snapshotBeingAssembled?.let { assembly ->
+            // 작별 뒤에는 코어가 줄을 닫는다. 연결이 끊긴 것을 화면에 세우는 일은 그 줄의 끝(startReading)이 맡는다.
+            is FrameToScreen.Bye -> Unit
+            // 다시 인사하지 않았는데 온 스냅샷은 코어가 밀린 화면을 다시 맞추는 것이다(설계 6.5) — 그사이 버린 변화를 이것이 담는다.
+            is FrameToScreen.Snapshot -> {
+                val assembly = snapshotBeingAssembled ?: SnapshotAssembly().also { snapshotBeingAssembled = it }
                 assembly.add(frame)?.let { assembled ->
                     snapshotBeingAssembled = null
                     nextChangeSequence = frame.seq + 1
@@ -151,7 +159,7 @@ class CoreMirror private constructor(
         }
         if (frame.seq != nextChangeSequence) {
             snapshotBeingAssembled = SnapshotAssembly()
-            sendFrame(FrameToCore.Hello)
+            sendFrame(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = screenVersionLabel))
             return
         }
         nextChangeSequence = frame.seq + 1
@@ -301,18 +309,32 @@ class CoreMirror private constructor(
          * 코어에 인사하고 인사 답과 스냅샷을 받아 거울을 세운다. 거울은 첫 스냅샷이 다 온 뒤에야 생긴다 — `StateFlow` 는 첫 값을
          * 들고 태어나야 하고, 반쯤 온 스냅샷을 첫 값으로 삼을 수는 없다.
          *
+         * 코어의 틀 규약 판이 이 화면과 다르면 거울을 세우지 않고 두 판을 돌려준다(6.14). 그 코어의 틀을 이 화면의 뜻으로 읽으면
+         * 뜻이 바뀐 필드를 다르게 그린다. 그때 코어로 가는 줄은 닫는다 — 코어는 작별하고 스스로 끝난다.
+         *
          * @param readingScope 틀을 읽는 코루틴이 사는 자리. 화면 스레드가 아니어야 한다 — 창을 닫는 자리가 화면 스레드를 붙잡고
          *   [endAllSessions] 를 기다리는데, 그 기다림을 푸는 것이 이 코루틴이다.
+         * @param screenVersionLabel 이 화면의 판. 인사에 실어 코어의 기록에 남고, 판이 갈렸을 때 사람에게 보인다.
          */
         suspend fun connect(
             framesFromCore: ReceiveChannel<String>,
             framesToCore: SendChannel<String>,
             readingScope: CoroutineScope,
             diagnosticLog: DiagnosticLog,
-        ): CoreMirror {
-            framesToCore.send(encodeFrameToCore(FrameToCore.Hello))
+            screenVersionLabel: String,
+        ): CoreConnection {
+            framesToCore.send(encodeFrameToCore(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = screenVersionLabel)))
             val welcome = decodeFrameToScreen(framesFromCore.receive()) as? FrameToScreen.Welcome
                 ?: error("코어가 인사에 welcome 이 아닌 틀로 답했다")
+            if (welcome.protocol != SCREEN_PROTOCOL_VERSION) {
+                framesToCore.close()
+                return CoreConnection.ProtocolMismatch(
+                    screenVersion = screenVersionLabel,
+                    screenProtocol = SCREEN_PROTOCOL_VERSION,
+                    coreVersion = welcome.coreVersion,
+                    coreProtocol = welcome.protocol,
+                )
+            }
             val assembly = SnapshotAssembly()
             var assembled: CoreStateImage? = null
             var snapshotSequence = 0L
@@ -322,10 +344,18 @@ class CoreMirror private constructor(
                 snapshotSequence = snapshot.seq
                 assembled = assembly.add(snapshot)
             }
-            return CoreMirror(framesToCore, assembled, welcome.engineDirectory, diagnosticLog).apply {
+            val mirror = CoreMirror(
+                framesToCore = framesToCore,
+                initialImage = assembled,
+                engineDirectoryLabel = welcome.engineDirectory,
+                coreDiagnosticLogPath = welcome.coreDiagnosticLog,
+                screenVersionLabel = screenVersionLabel,
+                diagnosticLog = diagnosticLog,
+            ).apply {
                 nextChangeSequence = snapshotSequence + 1
                 startReading(framesFromCore, readingScope)
             }
+            return CoreConnection.Connected(mirror)
         }
     }
 }
