@@ -107,7 +107,7 @@ internal fun bundledEngineCopyPath(engineDirectory: Path = managedEngineDirector
  * Compose 가 앱 리소스 자리를 알려 주는 시스템 프로퍼티.
  *
  * 설치한 앱에서는 실행기가 `$APPDIR/resources` 를 넣어 주고(app 이미지의 .cfg),
- * `./gradlew run` 에서는 Gradle 이 `build/compose/tmp/prepareAppResources` 를 넣어 준다.
+ * `./gradlew run` 에서는 Gradle 이 `desktop/ui/build/compose/tmp/prepareAppResources` 를 넣어 준다.
  * 그 자리에 무엇이 들어가는지는 desktop/ui/build.gradle.kts 의 appResourcesRootDir 이 정한다.
  */
 private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.application.resources.dir"

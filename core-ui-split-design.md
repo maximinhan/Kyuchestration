@@ -675,7 +675,8 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 ```
 desktop/
 ├─ settings.gradle.kts           include(":protocol", ":core", ":ui")
-├─ protocol/   kotlinx-serialization-json 만.  틀(frame)·명령·변화·화면 모델(@Serializable)·FailureView
+├─ protocol/   kotlinx-serialization-json + kotlinx-coroutines.  틀(frame)·명령·변화·화면 모델(@Serializable)·FailureView
+│              · 경계 인터페이스 ScreenFacingCore
 ├─ core/       protocol + kotlinx-coroutines.  Compose 없음.
 │              terminal/ · terminal/chat/ · terminal/kyucli/ · kyu/ · engine/ · claudeauth/ · workdir/ ·
 │              repoclone/ · dashboard/ · initialization/ · platform/ · diagnostics/(코어 몫)
@@ -689,19 +690,22 @@ desktop/
 | `core` 는 Compose 를 의존하지 않는다 | 3.6 — 클래스패스의 86 % 가 화면 것. 그리고 의존 방향을 빌드가 막는다 — 코어 코드가 Compose 타입을 쓰면 컴파일이 안 된다(헥사고날 방향을 모듈 의존으로 강제하는 것과 같은 자세) |
 | `ui` 는 `core` 를 의존하지 않는다 | 원칙 20. 화면이 코어 클래스를 import 할 수 있으면 같은 JVM 지름길이 생긴다 |
 | `protocol` 에 화면 모델을 둔다 | 6.3 의 "하나의 모델". `ChatEntry`·`ChatConversation`·`SessionTree` 등이 여기로 온다 |
-| 동봉 엔진(`buildBundledEngine`)은 `core` 의 패키징으로 | 엔진을 부르는 것은 코어다. 윈도우 화면 패키지(msi)는 엔진을 담지 않는다 — 지금 `hostBundledEngineTarget` 이 윈도우에서 던지는 것(`build.gradle.kts` 의 그 자리)이 `ui` 에 걸리지 않게 된다 |
+| **(2a 정정)** `protocol` 은 kotlinx-coroutines 도 의존한다 | 경계 인터페이스 `ScreenFacingCore` 가 상태를 `StateFlow` 로 내놓는다. 코어의 구현과 화면의 거울(`CoreMirror`)이 같은 인터페이스를 지키려면 그것이 둘이 함께 보는 `protocol` 에 있어야 한다(PR #77) |
+| 동봉 엔진(`buildBundledEngine`)은 `core` 의 패키징으로 | 엔진을 부르는 것은 코어다. 윈도우 화면 패키지(msi)는 엔진을 담지 않는다 — 지금 `hostBundledEngineTarget` 이 윈도우에서 던지는 것(`build.gradle.kts` 의 그 자리)이 `ui` 에 걸리지 않게 된다. **(2a 정정)** 지금은 `ui/build.gradle.kts` 에 있다 — 설치 패키지(jpackage)를 내는 모듈이 `ui` 하나라 엔진을 앱 리소스로 넣는 자리도 거기다. 코어가 따로 패키징되는 4 단계(WSL 의 코어 이미지)에서 옮긴다 |
 
 **시험이 가는 곳** — 지금 `desktop/src/test` 의 77 개 파일.
 
 | 시험 | 가는 곳 |
 |---|---|
 | `terminal/chat/` 의 홀더·소켓·접기·스트림 시험(`ChatSessionStateHolderTest`·`ChildSession*StateHolderTest`·`AppSocketTest`·`ChatConversationFoldingTest`·`ChatStreamLineReadingTest`·`ProcessChatSession*Test`·`SessionTree*Test` …) | `core` |
-| **실 `claude` 통합 시험**(`RealClaudeChatSessionIntegrationTest`·`RealClaudeChatConversationIntegrationTest`·`RealClaudeDelegationIntegrationTest`·`RealClaudePermissionBridgeIntegrationTest`·`RealClaudeSessionTreeIntegrationTest`·`RealClaudeToolWaitInterruptIntegrationTest`·`RealClaudeAuthenticationIntegrationTest`) | `core`. 환경 변수(`KYU_BINARY_PATH`·`KYU_CLAUDE_CHAT_INTEGRATION`)를 시험 JVM 에 싣는 설정(`build.gradle.kts` 의 `tasks.test`)도 함께 |
+| **실 `claude` 통합 시험**(`RealClaudeChatSessionIntegrationTest`·`RealClaudeChatConversationIntegrationTest`·`RealClaudePermissionBridgeIntegrationTest`·`RealClaudeSessionTreeIntegrationTest`·`RealClaudeToolWaitInterruptIntegrationTest`·`RealClaudeAuthenticationIntegrationTest`) | `core`. 환경 변수(`KYU_BINARY_PATH`·`KYU_CLAUDE_CHAT_INTEGRATION`)를 시험 JVM 에 싣는 설정은 루트 `desktop/build.gradle.kts` 의 `subprojects` 한 자리 — 모듈마다 두면 하나가 빠질 때 그 모듈의 실 claude 시험이 조용히 건너뛴다 |
+| **(2a 정정)** `RealClaudeDelegationIntegrationTest` | `ui`. 위임 카드가 읽는 엔진의 답 문서를 화면의 `delegationAnswerOrNull` 로 읽어 보는 시험이라서다 |
 | `kyucli/`·`workdir/kyucli/`·`repoclone/`·`claudeauth/`·`engine/`·`kyu/`·`platform/`·`dashboard/`·`initialization/` 시험 | `core` |
 | `theme/` 시험 · `ToolCallCardContentTest` · `ChatTurnBadgeTextTest` · `ChatInterruptionEchoTest` · `CodeFenceLanguageNameTest` · `DelegationAnswerReadingTest` · `AskParentAnswerReadingTest` · `SpawnSessionAnswerReadingTest` · `WorkDirDirectoryChooserTest` · `DesktopBuildVersionTest` | `ui` |
 | `diagnostics/` 시험 | 둘 다(각자 몫) |
-| **새로**: 틀·명령·변화의 직렬화 왕복과 비밀 가리기 | `protocol` |
-| **새로**: 게시자 → 거울 — 실제 홀더의 `StateFlow` 변화가 거울에 같은 값으로 서는가(스냅샷 + 변화, `seq` 건너뛰기에 다시 맞추기) | `core`(거울은 시험 몫으로 `protocol` 의 순수 함수만 쓴다) |
+| **새로**: 틀·명령·변화의 직렬화 왕복과 비밀 가리기 | `protocol`. **(2a 정정)** 비밀 가리기(`SecretsStayOffTheScreenFramesTest`)는 `ui` — 진짜 홀더와 거울을 함께 세운다 |
+| **(2a 정정)** `FailureViewTest` | `core`. 상태 갈래의 실패 예외(코어의 것)를 `FailureView` 로 바꾸는 시험이라 `protocol` 에서는 그 예외를 볼 수 없다 |
+| **새로**: 게시자 → 거울 — 실제 홀더의 `StateFlow` 변화가 거울에 같은 값으로 서는가(스냅샷 + 변화, `seq` 건너뛰기에 다시 맞추기) | 게시자만 보는 왕복(`ScreenChangeRoundTripTest`)은 `core`(`protocol` 의 순수 함수만 쓴다). **(2a 정정)** 진짜 거울까지 세우는 시험(`ScreenPipeRoundTripTest`·`InProcessCoreStartTest`)은 `ui` — `CoreMirror` 가 `ui` 에 있다. 그 시험들이 쓰는 코어 시험대는 `core` 의 testFixtures |
 | **새로**: `attach` 가 stdin EOF 를 넘기고 끝나는가, 새 화면이 옛 연결을 밀어내는가 | `core` |
 
 ### 6.16 설치와 릴리스

@@ -64,8 +64,6 @@ class KyuCliWorkDirObserverIntegrationTest {
         assertEquals(1, projectB.doneTaskCount)
         assertEquals(2, projectB.totalTaskCount)
 
-        // 엔진이 답하는 상태는 이제 git 이 본 것 하나뿐이다. RUNNING 이 실려 오면 카드의 git 상태가
-        // 그 값에 가려지고(dashboard/CardSessionFacts — 화면 모듈), 앱은 세션을 띄운 적도 없는데 "돌고 있다" 를 읽게 된다.
         assertTrue(
             snapshot.repos.none { it.state.rawValue == "RUNNING" },
             "엔진이 답한 상태: ${snapshot.repos.map { it.state.rawValue }}",
