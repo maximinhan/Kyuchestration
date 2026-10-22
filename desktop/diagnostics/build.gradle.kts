@@ -7,15 +7,3 @@ plugins {
     // 기록하는 가짜(RecordingDiagnosticLog)를 코어와 화면의 시험이 함께 쓴다.
     `java-test-fixtures`
 }
-
-kotlin {
-    jvmToolchain(21)
-}
-
-dependencies {
-    testImplementation(kotlin("test"))
-}
-
-tasks.test {
-    useJUnitPlatform()
-}
