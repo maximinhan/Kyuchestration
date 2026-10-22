@@ -101,6 +101,20 @@ class WslCommandLineTest {
         assertEquals(WslCoreCheck.NotInstalled, WslCommandLine(fakeWsl).checkCore("Ubuntu-24.04"))
     }
 
+    /**
+     * `wsl.exe` 자신도 1 로 끝난다 — 배포판을 WSL 2 로 바꾸라 · 커널을 갱신하라 · 기본 사용자가 없다 같은 말을 쓰고. 셸 없는 `test` 는
+     * 아무것도 쓰지 않으므로, 1 이라도 글이 있으면 `wsl.exe` 의 실패다. "코어를 설치하세요" 로 보이면 그 말이 버려진다.
+     */
+    @Test
+    fun `1 로 끝나도 wsl 이 글을 썼으면 코어가 없는 것이 아니라 배포판을 띄우지 못한 것이다`() = runTest {
+        fakeWslAnswering("WSL 2 를 사용하려면 커널 구성 요소를 업데이트해야 합니다.\r\n", exitCode = 1)
+
+        assertEquals(
+            WslCoreCheck.DistributionFailed("WSL 2 를 사용하려면 커널 구성 요소를 업데이트해야 합니다."),
+            WslCommandLine(fakeWsl).checkCore("Ubuntu-24.04"),
+        )
+    }
+
     @Test
     fun `그 밖의 종료 코드는 wsl 이 배포판을 띄우지 못한 것이고 그 말을 돌려준다`() = runTest {
         fakeWslAnswering("제공된 이름의 배포가 없습니다.\r\n오류 코드: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\r\n", exitCode = 255)

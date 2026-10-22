@@ -45,16 +45,17 @@ class WslCommandLine(private val wslExecutable: Path) {
 
     /**
      * 코어를 띄울 때와 같은 `--cd ~` 와 홈 기준 상대 경로로 코어 실행 파일을 `test -x` 로 본다. 셸이 없으니 `test` 는 실행 파일
-     * (`/usr/bin/test`)이다. 1 은 `test` 의 "아니다" 이고, 그 밖의 실패는 `wsl.exe` 의 것이다 — 리눅스 쪽에서 255 로, 윈도우 JVM
-     * 에서는 -1 로 보인다.
+     * (`/usr/bin/test`)이다. 아무 글 없이 1 로 끝나면 `test` 의 "아니다" 다. 그 밖은 `wsl.exe` 의 실패다 — 없는 배포판은 리눅스
+     * 쪽에서 255(윈도우 JVM 에서는 -1)이고, 커널 갱신 · 기본 사용자 없음 같은 것은 글을 쓰고 1 로 끝난다. `test` 는 아무것도 쓰지
+     * 않으므로 글이 있으면 `wsl.exe` 의 것이다.
      */
     suspend fun checkCore(distributionName: String): WslCoreCheck {
         val (exitCode, output) = runWsl(
             listOf("-d", distributionName, "--cd", "~", "-e", "test", "-x", WSL_CORE_EXECUTABLE_FROM_HOME),
         )
-        return when (exitCode) {
-            0 -> WslCoreCheck.Installed
-            TEST_SAYS_NO -> WslCoreCheck.NotInstalled
+        return when {
+            exitCode == 0 -> WslCoreCheck.Installed
+            exitCode == TEST_SAYS_NO && output.isEmpty() -> WslCoreCheck.NotInstalled
             else -> WslCoreCheck.DistributionFailed(wslMessageOf(output))
         }
     }
