@@ -31,6 +31,7 @@ import kotlinx.coroutines.test.runTest
  * 토큰을 다시 받을 까닭이 없고, 그 줄은 언젠가 진단을 위해 기록될 줄이다. 그리고 토큰을 싣는 명령이 문자열로 찍히는 자리
  * (거절 사유 · 시험 실패 문구 · 디버거)에서는 토큰이 가려져야 한다.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SecretsStayOffTheScreenFramesTest {
 
     private val workDirPath: Path = createTempDirectory("kyu-secrets")

@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.runTest
  * 코어 쪽은 진짜 홀더 여섯이다(포트만 가짜). 화면 쪽은 거울이다. 둘 사이에는 문자열 줄 두 가닥뿐이다 — 2 단계에서 그 두
  * 가닥이 자식 프로세스의 stdin · stdout 으로 바뀐다.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 class ScreenPipeRoundTripTest {
 
     private val workDirPath: Path = createTempDirectory("kyu-screen-pipe")

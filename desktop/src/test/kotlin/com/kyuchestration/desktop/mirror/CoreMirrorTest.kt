@@ -43,6 +43,7 @@ import kotlinx.coroutines.test.runTest
  * 코어 쪽은 손으로 쓴 틀이다. 게시자가 낸 틀이 거울에 같은 상태로 서는지는 파이프 왕복 시험이 본다 — 여기는 거울의 규칙
  * (인사 → 스냅샷, `seq` 건너뜀에 다시 인사, 명령의 id 와 답)만 본다.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 class CoreMirrorTest {
 
     @Test
