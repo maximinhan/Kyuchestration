@@ -223,7 +223,7 @@ class RealClaudeSessionTreeIntegrationTest {
         assertEquals("gated", question.gate.relativeCwd)
         assertEquals(listOf(".mcp.json"), question.gate.executionConfigs.map { it.relativePath })
 
-        onHolder { holder.answerGateQuestion(question, approved = false) }
+        onHolder { holder.answerGateQuestion(question.gateQuestionId, approved = false) }
 
         waitUntil("메인의 턴이 끝나기를", holder) {
             conversationOn(holder, SessionTarget.Main).entries.any { it is ChatEntry.TurnEnded }

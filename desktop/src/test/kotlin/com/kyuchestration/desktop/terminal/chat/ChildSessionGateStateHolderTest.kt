@@ -8,6 +8,7 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -43,7 +44,7 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single().gateQuestionId, approved = true)
         runCurrent()
 
         assertEquals(listOf(null, "sha256:first"), bed.childSource.askedRequests.map { it.approvedFingerprint })
@@ -57,7 +58,7 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = false)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single().gateQuestionId, approved = false)
         runCurrent()
 
         assertEquals(
@@ -96,7 +97,7 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single().gateQuestionId, approved = true)
         asked.closeConnection()
         runCurrent()
 
@@ -117,13 +118,13 @@ class ChildSessionGateStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single().gateQuestionId, approved = true)
         runCurrent()
 
         assertEquals(changedGate, bed.holder.gateQuestions.value.single().gate)
         assertNull(asked.answerSoFar())
 
-        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single(), approved = true)
+        bed.holder.answerGateQuestion(bed.holder.gateQuestions.value.single().gateQuestionId, approved = true)
         runCurrent()
 
         assertEquals(listOf(null, "sha256:first", "sha256:second"), bed.childSource.askedRequests.map { it.approvedFingerprint })
@@ -136,10 +137,10 @@ class ChildSessionGateStateHolderTest {
         bed.mainChannel.askSessionTree(spawn())
         runCurrent()
         val question = bed.holder.gateQuestions.value.single()
-        bed.holder.answerGateQuestion(question, approved = false)
+        bed.holder.answerGateQuestion(question.gateQuestionId, approved = false)
         runCurrent()
 
-        bed.holder.answerGateQuestion(question, approved = true)
+        bed.holder.answerGateQuestion(question.gateQuestionId, approved = true)
         runCurrent()
 
         assertEquals(1, bed.childSource.askedRequests.size)
@@ -147,22 +148,24 @@ class ChildSessionGateStateHolderTest {
 
     @Test
     fun `같은 자리 같은 일을 다시 물어도 앞서 답한 물음의 답이 되지 않는다`() = runTest {
-        // 관문 물음에는 아직 하위의 이름이 없다(이름은 엔진이 띄울 수 있다고 답할 때 짓는다). 물음 하나하나가 열쇠다 —
-        // 내용이 같다고 같은 물음으로 읽으면 앞 물음에 늦게 누른 버튼이 다음 물음의 답이 된다.
+        // 관문 물음에는 아직 하위의 이름이 없다(이름은 엔진이 띄울 수 있다고 답할 때 짓는다). 물음마다 홀더가 지은 id 가
+        // 열쇠다 — 내용이 같다고 같은 물음으로 읽으면 앞 물음에 늦게 누른 버튼이 다음 물음의 답이 된다.
         val bed = gateTestBed(gates = listOf(GATE, GATE))
         bed.mainChannel.askSessionTree(spawn())
         runCurrent()
         val firstQuestion = bed.holder.gateQuestions.value.single()
-        bed.holder.answerGateQuestion(firstQuestion, approved = false)
+        bed.holder.answerGateQuestion(firstQuestion.gateQuestionId, approved = false)
         runCurrent()
         val asked = bed.mainChannel.askSessionTree(spawn())
         runCurrent()
 
-        bed.holder.answerGateQuestion(firstQuestion, approved = true)
+        bed.holder.answerGateQuestion(firstQuestion.gateQuestionId, approved = true)
         runCurrent()
 
         assertNull(asked.answerSoFar())
-        assertEquals(1, bed.holder.gateQuestions.value.size)
+        val secondQuestion = bed.holder.gateQuestions.value.single()
+        assertEquals(firstQuestion.prompt to firstQuestion.gate, secondQuestion.prompt to secondQuestion.gate)
+        assertNotEquals(firstQuestion.gateQuestionId, secondQuestion.gateQuestionId)
     }
 
     private fun spawn() = SessionTreeRequest.SpawnSession(

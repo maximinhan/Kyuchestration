@@ -196,11 +196,14 @@ class ChatSessionStateHolder(
     val gateQuestions: StateFlow<List<ChildSessionGateQuestion>> = mutableGateQuestions.asStateFlow()
 
     /**
-     * 아직 답하지 않은 관문 물음의 답 자리. 물음 그 자체가 열쇠다 — 관문에 걸린 하위에게는 아직 이름이 없다(이름은
-     * 엔진이 띄울 수 있다고 답할 때 짓는다). [ChildSessionGateQuestion] 은 같음을 정체로 가르는 클래스라, 내용이 같은
-     * 다음 물음이 앞 물음의 늦은 답을 받지 않는다.
+     * 아직 답하지 않은 관문 물음의 답 자리. 이 자리가 지은 물음의 id 가 열쇠다 — 관문에 걸린 하위에게는 아직 이름이
+     * 없다(이름은 엔진이 띄울 수 있다고 답할 때 짓는다). 물음마다 새 id 라, 내용이 같은 다음 물음이 앞 물음의 늦은
+     * 답을 받지 않는다.
      */
-    private val gateDecisions = mutableMapOf<ChildSessionGateQuestion, CompletableDeferred<GateAnswer>>()
+    private val gateDecisions = mutableMapOf<String, CompletableDeferred<GateAnswer>>()
+
+    /** 이번 실행에서 지은 관문 물음의 수. 물음의 id 가 이것으로 갈린다. */
+    private var lastGateQuestionOrdinal = 0
 
     /**
      * 상위가 `await_session` 으로 기다리는 중이면 그 기다림(6.11 의 `pendingAwait`). **원칙 18 의 갈림길이 이 값 하나다** —
@@ -718,7 +721,8 @@ class ChatSessionStateHolder(
                 }
 
                 is ChildSessionOpening.GateRequired -> {
-                    val question = ChildSessionGateQuestion(request.prompt, opening.gate)
+                    lastGateQuestionOrdinal++
+                    val question = ChildSessionGateQuestion("gate-$lastGateQuestionOrdinal", request.prompt, opening.gate)
                     val gateAnswer = askPersonAboutGate(question, asked)
                     if (parent !in mutableHeldSessions.value) {
                         return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
@@ -799,7 +803,7 @@ class ChatSessionStateHolder(
      */
     private suspend fun askPersonAboutGate(question: ChildSessionGateQuestion, asked: AskedSessionTreeRequest): GateAnswer {
         val decision = CompletableDeferred<GateAnswer>()
-        gateDecisions[question] = decision
+        gateDecisions[question.gateQuestionId] = decision
         mutableGateQuestions.value = mutableGateQuestions.value + question
 
         val watchingConnection = coroutineScope.launch {
@@ -812,19 +816,20 @@ class ChatSessionStateHolder(
 
     /** 관문 물음 하나를 거두고 대화 상자를 내린다. 이미 답한 물음이면 아무 일도 하지 않는다. */
     private fun withdrawGateQuestion(question: ChildSessionGateQuestion) {
-        val decision = gateDecisions.remove(question) ?: return
-        mutableGateQuestions.value = mutableGateQuestions.value - question
+        val decision = gateDecisions.remove(question.gateQuestionId) ?: return
+        mutableGateQuestions.value -= question
         decision.complete(GateAnswer.Withdrawn)
     }
 
     /**
-     * 관문 대화 상자에 사람이 답했다.
+     * 관문 대화 상자에 사람이 답했다. 물음은 객체가 아니라 이 자리가 지은 id 로 가리킨다(core-ui-split 6.7 · 원칙 22) —
+     * 화면이 다른 프로세스가 되면 객체의 정체는 경계를 건너지 못한다.
      *
-     * 이미 답한 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
+     * 이미 답한(또는 거둬진) 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
      */
-    fun answerGateQuestion(question: ChildSessionGateQuestion, approved: Boolean) {
-        val decision = gateDecisions.remove(question) ?: return
-        mutableGateQuestions.value = mutableGateQuestions.value - question
+    fun answerGateQuestion(gateQuestionId: String, approved: Boolean) {
+        val decision = gateDecisions.remove(gateQuestionId) ?: return
+        mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.gateQuestionId == gateQuestionId }
         decision.complete(if (approved) GateAnswer.Approved else GateAnswer.Declined)
     }
 
@@ -1374,12 +1379,12 @@ class ChatSessionStateHolder(
  *
  * 하위의 이름은 없다. 엔진은 띄울 수 있다고 답할 때 이름을 지어 기록에 적고, 관문에 걸린 하위는 아직 그 앞이다.
  *
- * **data class 가 아니다.** 같음이 곧 정체다 — 답 자리(`gateDecisions`)의 열쇠가 이 물음이라, 내용으로 같음을 가르면
- * 같은 자리 같은 일을 다시 물은 다음 물음이 앞 물음에 늦게 누른 답을 받는다.
- *
+ * @param gateQuestionId 챗 홀더가 물음마다 새로 짓는 이름. 답은 이것으로 물음을 가리킨다 — 같은 자리 같은 일을 다시
+ *   물은 다음 물음은 내용이 같아도 id 가 달라, 앞 물음에 늦게 누른 답을 받지 않는다.
  * @param prompt 상위가 그 하위에게 시키려던 일. 사람이 "이 설정으로 무엇이 돌게 되는가" 를 판단할 재료다.
  */
-class ChildSessionGateQuestion(
+data class ChildSessionGateQuestion(
+    val gateQuestionId: String,
     val prompt: String,
     val gate: ChildSessionGate,
 )
