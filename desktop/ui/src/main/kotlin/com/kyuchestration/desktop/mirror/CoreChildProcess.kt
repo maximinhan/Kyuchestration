@@ -108,18 +108,22 @@ class CoreChildProcess private constructor(
     companion object {
 
         /**
-         * [command] 를 셸 없이 띄운다(설계 6.12 — 셸은 바이트와 인용을 고친다). stderr 는 화면의 stderr 로 그대로 흘린다 — 코어의
-         * 진단은 코어의 기록 파일에 있고, stderr 는 터미널에서 화면을 띄운 사람이 보는 자리다.
+         * [place] 의 코어를 셸 없이 띄운다(설계 6.12 — 셸은 바이트와 인용을 고친다). 어디서 띄우는지는 띄우는 명령에서만 갈리고, 그 뒤의
+         * 두 가닥은 같다(원칙 20). stderr 는 화면의 stderr 로 그대로 흘린다 — 코어의 진단은 코어의 기록 파일에 있고, stderr 는
+         * 터미널에서 화면을 띄운 사람이 보는 자리다.
+         *
+         * 윈도우에서 띄운 것은 `wsl.exe` 다. 그래서 [leave] 의 강제 종료는 `wsl.exe` 만 끝내고 WSL 안의 코어에는 신호가 가지 않는다
+         * (설계 3.2 B). 코어를 끝내는 길이 stdin 의 끝인 까닭이 이것이기도 하다 — `wsl.exe` 는 그 끝을 코어까지 나른다(3.5 N1 · N2).
          *
          * @param diagnosticLog 화면의 진단 기록. 코어 프로세스가 끝난 것과 강제로 끝낸 것을 남긴다.
          * @param configureProcess 환경을 다듬는 자리. 시험이 코어의 기록 자리와 엔진을 격리한다.
          */
         fun start(
-            command: List<String>,
+            place: CorePlace,
             diagnosticLog: DiagnosticLog,
             configureProcess: ProcessBuilder.() -> Unit = {},
         ): CoreChildProcess {
-            val process = ProcessBuilder(command)
+            val process = place.coreProcessBuilder()
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .apply(configureProcess)
                 .start()

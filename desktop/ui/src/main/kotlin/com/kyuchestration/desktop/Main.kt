@@ -18,6 +18,7 @@ import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
 import com.kyuchestration.desktop.mirror.CoreChildProcess
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
+import com.kyuchestration.desktop.mirror.CorePlace
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
@@ -35,10 +36,9 @@ import kotlinx.coroutines.runBlocking
  * 같은 머신이어도 언제나 이 길이다(원칙 20) — 화면 모듈은 코어의 클래스를 컴파일 시점에 볼 수조차 없다. 이 파일에 남은 것은 화면의
  * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
  *
- * @param coreLaunchCommand 코어를 `serve --stdio` 로 띄우는 명령. 무엇으로 띄우는지는 이 프로그램을 띄운 쪽(app 모듈)이 안다 —
- *   설치 패키지에서는 앱의 실행기, 소스에서는 같은 클래스패스의 java 다.
+ * @param corePlace 코어를 띄울 자리(CorePlace). 화면이 코어에 닿는 길에서 OS 가 갈리는 것은 그것 하나다.
  */
-fun runScreen(coreLaunchCommand: List<String>) {
+fun runScreen(corePlace: CorePlace) {
     val diagnosticLogPath = diagnosticLogFile(DiagnosticLogOwner.Screen)
     val diagnosticLog = FileDiagnosticLog(diagnosticLogPath)
 
@@ -53,7 +53,7 @@ fun runScreen(coreLaunchCommand: List<String>) {
     )
 
     try {
-        val coreProcess = CoreChildProcess.start(coreLaunchCommand, diagnosticLog)
+        val coreProcess = CoreChildProcess.start(corePlace, diagnosticLog)
         val connection = runBlocking {
             coreProcess.connectMirror(
                 // 화면 스레드가 아니다. 창을 닫는 자리가 화면 스레드를 붙잡고 코어가 끝나기를 기다리는데, 그것을 알리는 틀을 읽는
