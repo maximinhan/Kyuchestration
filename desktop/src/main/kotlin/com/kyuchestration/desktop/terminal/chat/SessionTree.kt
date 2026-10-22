@@ -1,7 +1,10 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import com.kyuchestration.desktop.protocol.InstantAsIsoStringSerializer
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.time.Instant
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /**
  * 메인 아래 하위 세션들(session-tree-design.md 6.11).
@@ -12,6 +15,7 @@ import java.time.Instant
  * **끝난 하위도 남는다.** `list_sessions` 가 끝난 것까지 답하고(6.2), 사람은 그 하위가 왜 끝났는지
  * 전사를 다시 볼 수 있어야 한다. 트리에서 하위가 사라지는 것은 상위의 대화가 사라질 때다(6.13).
  */
+@Serializable
 data class SessionTree(val children: List<ChildSessionNode> = emptyList()) {
 
     /** 살아 있는 하위들의 자리 — 엔진에게 `--live-child-cwd` 로 넘기는 값이다(6.8). */
@@ -49,16 +53,19 @@ data class SessionTree(val children: List<ChildSessionNode> = emptyList()) {
  *   침묵을 해석하는 재료이고, 앱 재시작 뒤 맥락을 되찾는 재료다(6.15).
  * @param endedAt 하위가 끝난 시각. 살아 있으면 null.
  */
+@Serializable
 data class ChildSessionNode(
     val childId: String,
     val title: String,
     val relativeCwd: String,
     val workingDirectory: String,
     val conversationId: String,
+    @Serializable(with = InstantAsIsoStringSerializer::class)
     val startedAt: Instant,
     val waitingFor: ChildWaitingFor = ChildWaitingFor.Nothing,
     val lifecycle: ChildLifecycle = ChildLifecycle.Running,
     val lastTurnResult: ChildTurnResult? = null,
+    @Serializable(with = InstantAsIsoStringSerializer::class)
     val endedAt: Instant? = null,
 ) {
 
@@ -84,14 +91,20 @@ enum class ChildWaitingFor(val wireName: String) {
  *
  * @param result 그 턴의 마지막 답 텍스트(`result.result`). 실패한 턴에서는 비어 있을 수 있다.
  */
+@Serializable
 data class ChildTurnResult(val result: String, val isError: Boolean)
 
 /** 하위의 수명(6.13). 살아 있거나, 어떤 이유로 끝났다. */
+@Serializable
 sealed interface ChildLifecycle {
 
+    @Serializable
+    @SerialName("running")
     data object Running : ChildLifecycle
 
     /** @param exitCode 프로세스가 남긴 종료 코드. 앱이 거둬 아직 받지 못했으면 null. */
+    @Serializable
+    @SerialName("ended")
     data class Ended(val reason: ChildEndReason, val exitCode: Int?) : ChildLifecycle
 }
 

@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 
 /**
  * 앱이 보유한 챗 세션들과 그 대화들을 쥐고 있는 자리. Compose 를 모른다(chat-ui-design.md 5.5).
@@ -1449,6 +1450,7 @@ class ChatSessionStateHolder(
  *   물은 다음 물음은 내용이 같아도 id 가 달라, 앞 물음에 늦게 누른 답을 받지 않는다.
  * @param prompt 상위가 그 하위에게 시키려던 일. 사람이 "이 설정으로 무엇이 돌게 되는가" 를 판단할 재료다.
  */
+@Serializable
 data class ChildSessionGateQuestion(
     val gateQuestionId: String,
     val prompt: String,

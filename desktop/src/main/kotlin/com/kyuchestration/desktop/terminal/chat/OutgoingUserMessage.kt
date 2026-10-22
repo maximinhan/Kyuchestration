@@ -1,6 +1,8 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import java.util.UUID
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /**
  * 앱이 `claude` 에게 보내는 사용자의 말 한 줄.
@@ -16,6 +18,7 @@ import java.util.UUID
  * @param sender 이 말을 누가 했는가. 되돌아온 말풍선을 누구의 것으로 그릴지가 이 값이다(session-tree 6.12) —
  *   `uuid` 가 이 말과 되돌아온 줄을 잇고, 이 값이 그 줄의 주인을 말한다.
  */
+@Serializable
 data class OutgoingUserMessage(
     val text: String,
     val sender: UserMessageSender = UserMessageSender.Human,
@@ -29,14 +32,21 @@ data class OutgoingUserMessage(
  * 화면이 출처를 읽는 재료는 이 값이다. **접두로 가르지 않는다.** 사람이 `[상위 세션]` 을 직접 쳐도 그것은
  * 사람의 말이다(3.5 (다)).
  */
+@Serializable
 sealed interface UserMessageSender {
 
     /** 사람이 입력창에 친 말. */
+    @Serializable
+    @SerialName("human")
     data object Human : UserMessageSender
 
     /** 상위 세션이 이 하위에게 한 말 — 첫 프롬프트와 `send_to_session`. */
+    @Serializable
+    @SerialName("parent_session")
     data object ParentSession : UserMessageSender
 
     /** 하위 세션이 상위에게 한 말 — 쉬는 상위에게 앱이 대신 옮긴 사건. */
+    @Serializable
+    @SerialName("child_session")
     data class ChildSession(val childId: String) : UserMessageSender
 }

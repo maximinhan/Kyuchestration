@@ -1,6 +1,9 @@
 package com.kyuchestration.desktop.repoclone
 
 import com.kyuchestration.desktop.protocol.FailureView
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * 레포를 골라 받아 오는 화면이 지금 보여줄 것.
@@ -10,12 +13,17 @@ import com.kyuchestration.desktop.protocol.FailureView
  * 이유를 보여주거나. 그래서 "무엇을 시켰는가"(CloneStep)와 "그 일이 어디까지 왔는가"(이 타입)를
  * 갈라 두었다.
  */
+@Serializable
 sealed interface RepositoryCloneState {
 
     /** 이 화면이 열려 있지 않다. */
+    @Serializable
+    @SerialName("closed")
     data object Closed : RepositoryCloneState
 
     /** 엔진에게 시킨 일이 돌고 있다. 무엇을 시켰는지가 기다리는 동안의 말이 된다. */
+    @Serializable
+    @SerialName("step_running")
     data class StepRunning(val step: CloneStep) : RepositoryCloneState
 
     /**
@@ -24,6 +32,8 @@ sealed interface RepositoryCloneState {
      * 되풀이할 수 있는 걸음만 여기 온다. 토큰 등록은 이 자리에 오지 못하는데, 되풀이하려면
      * 토큰을 들고 있어야 하기 때문이다 — 그쪽은 폼으로 돌아가 다시 붙여넣게 한다.
      */
+    @Serializable
+    @SerialName("step_failed")
     data class StepFailed(val step: CloneStep.Retryable, val failure: FailureView) : RepositoryCloneState
 
     /**
@@ -34,6 +44,8 @@ sealed interface RepositoryCloneState {
      *   되풀이하게 두면, 첫 번째가 사실은 성공했는데 앱이 실패로 읽은 경우에 두 번째가
      *   "없는 프로필" 로 끝나고 사용자는 자기가 무엇을 지웠는지 알 수 없게 된다.
      */
+    @Serializable
+    @SerialName("choosing_token_profile")
     data class ChoosingTokenProfile(
         val profiles: List<TokenProfile>,
         val removalRejectionReason: String? = null,
@@ -49,6 +61,8 @@ sealed interface RepositoryCloneState {
      * @param profileName 지울 프로필의 이름. 확인 문구가 이 이름을 그대로 말한다 — "정말
      *   지울까요?" 만으로는 사용자가 무엇을 지우는지 그 자리에서 확인할 수 없다.
      */
+    @Serializable
+    @SerialName("confirming_token_profile_removal")
     data class ConfirmingTokenProfileRemoval(
         val profileName: String,
         val profilesToReturnTo: List<TokenProfile>,
@@ -63,6 +77,8 @@ sealed interface RepositoryCloneState {
      * @param rejectionReason 지난 시도가 거절당한 이유. 처음 열렸으면 null 이다. 토큰은 여기
      *   담기지 않는다 — 담으면 화면이 들고 있는 동안 계속 남는다.
      */
+    @Serializable
+    @SerialName("registering_token_profile")
     data class RegisteringTokenProfile(
         val profilesToReturnTo: List<TokenProfile>,
         val rejectionReason: String?,
@@ -75,9 +91,13 @@ sealed interface RepositoryCloneState {
      * 확인해준 login 을 사용자가 보는 그 자리에서만 막힌다 — 조용히 다음 화면으로 넘어가면
      * 엉뚱한 계정의 레포 목록을 보고 나서야 알아차린다.
      */
+    @Serializable
+    @SerialName("token_profile_registered")
     data class TokenProfileRegistered(val profile: RegisteredTokenProfile) : RepositoryCloneState
 
     /** 2 단계 — 누구의 레포를 볼지 고른다. 고를 것이 하나뿐이면 이 화면은 뜨지 않는다. */
+    @Serializable
+    @SerialName("choosing_owner")
     data class ChoosingOwner(
         val profileName: String,
         val owners: List<RepositoryOwner>,
@@ -92,6 +112,8 @@ sealed interface RepositoryCloneState {
      * @param searchText 검색 칸에 적힌 것. 거르는 일은 화면이 아니라 여기서 한다 — 무엇을 걸러
      *   보여주는가는 시험할 수 있어야 하는 판단이다.
      */
+    @Serializable
+    @SerialName("choosing_repositories")
     data class ChoosingRepositories(
         val profileName: String,
         val ownerLogin: String,
@@ -102,6 +124,7 @@ sealed interface RepositoryCloneState {
     ) : RepositoryCloneState {
 
         /** 검색어에 걸린 것만. 검색어가 비어 있으면 전부다. */
+        @Transient
         val matchedRepositories: List<RemoteRepository> = searchText.trim().let { keyword ->
             if (keyword.isEmpty()) {
                 repositories
@@ -120,6 +143,8 @@ sealed interface RepositoryCloneState {
      * 화면을 닫는 것은 사용자의 몫이다. 결과를 보여주자마자 닫으면 무엇이 건너뛰어졌고 무엇이
      * 실패했는지 읽을 틈이 없다. 새 레포가 카드로 뜨는 것은 대시보드의 다음 갱신이 알아서 한다.
      */
+    @Serializable
+    @SerialName("clone_finished")
     data class CloneFinished(val outcome: CloneOutcome) : RepositoryCloneState
 }
 
@@ -128,6 +153,7 @@ sealed interface RepositoryCloneState {
  *
  * 무엇을 시켰는지가 기다리는 동안의 말이 되고, 실패한 뒤에는 "다시 시도" 가 되풀이할 대상이 된다.
  */
+@Serializable
 sealed interface CloneStep {
 
     /**
@@ -143,19 +169,32 @@ sealed interface CloneStep {
      * 그 결정을 주석이 아니라 타입으로 적어 두면, 뒷날 누가 "다시 시도" 에 둘 중 하나를
      * 얹으려 해도 컴파일이 되지 않는다.
      */
+    @Serializable
     sealed interface Retryable : CloneStep
 
+    @Serializable
+    @SerialName("load_token_profiles")
     data object LoadTokenProfiles : Retryable
 
     /** @param profileName 이름만 들고 있다. 토큰은 이 값 어디에도 없다. */
+    @Serializable
+    @SerialName("register_token_profile")
     data class RegisterTokenProfile(val profileName: String) : CloneStep
 
+    @Serializable
+    @SerialName("remove_token_profile")
     data class RemoveTokenProfile(val profileName: String) : CloneStep
 
+    @Serializable
+    @SerialName("load_owners")
     data class LoadOwners(val profileName: String) : Retryable
 
+    @Serializable
+    @SerialName("load_repositories")
     data class LoadRepositories(val profileName: String, val ownerLogin: String) : Retryable
 
+    @Serializable
+    @SerialName("clone_repositories")
     data class CloneRepositories(
         val workDirPath: String,
         val profileName: String,

@@ -1,6 +1,8 @@
 package com.kyuchestration.desktop.claudeauth
 
 import com.kyuchestration.desktop.protocol.FailureView
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /**
  * 이 머신의 claude 가 로그인돼 있는가, 아니라면 로그인시키려는 걸음이 어디까지 왔는가.
@@ -10,9 +12,12 @@ import com.kyuchestration.desktop.protocol.FailureView
  * 세션을 열 때마다 "Not logged in" 한 줄과 종료 코드 1 을 만난다(chat-ui-design.md 7.1).
  * 그 자리를 아예 만들지 않기 위해 갈림길을 여기 하나 둔다.
  */
+@Serializable
 sealed interface ClaudeAuthenticationState {
 
     /** claude 에게 묻는 중. 앱을 띄운 직후와 걸음이 끝날 때마다 잠깐 지난다. */
+    @Serializable
+    @SerialName("checking_credentials")
     data object CheckingCredentials : ClaudeAuthenticationState
 
     /**
@@ -22,6 +27,8 @@ sealed interface ClaudeAuthenticationState {
      * 설치다. 엔진과 달리 앱이 대신 받아 놓지 않는 것은 claude 가 이 도구의 것이 아니어서다 —
      * 설치 방법도 판올림도 앤트로픽이 정한다.
      */
+    @Serializable
+    @SerialName("claude_cli_missing")
     data class ClaudeCliMissing(val failure: FailureView) : ClaudeAuthenticationState
 
     /**
@@ -33,12 +40,16 @@ sealed interface ClaudeAuthenticationState {
      *   **토큰을 받기 전에 알려야 한다.** 받은 뒤에 알리면 사용자가 할 수 있는 일은 이미 저장된
      *   것을 지우는 것뿐이다(kyu auth add 가 같은 자세다).
      */
+    @Serializable
+    @SerialName("credentials_missing")
     data class CredentialsMissing(
         val lastFailure: FailureView?,
         val tokenWouldBeStoredInPlaintext: Boolean,
     ) : ClaudeAuthenticationState
 
     /** claude auth login 을 띄웠고 아직 주소가 오지 않았다. */
+    @Serializable
+    @SerialName("browser_login_starting")
     data object BrowserLoginStarting : ClaudeAuthenticationState
 
     /**
@@ -48,12 +59,18 @@ sealed interface ClaudeAuthenticationState {
      * 앤트로픽의 주소라(chat-ui-design.md 7.3 가), 앱이 열어 둘 콜백도 물어볼 자리도 없다 —
      * 완료를 아는 길은 사용자가 붙여넣는 코드 하나다.
      */
+    @Serializable
+    @SerialName("browser_login_waiting_for_code")
     data class BrowserLoginWaitingForCode(val authorizationUrl: String) : ClaudeAuthenticationState
 
     /** 코드를 넣었고 claude 가 그것을 교환하는 중이다. */
+    @Serializable
+    @SerialName("browser_login_finishing")
     data object BrowserLoginFinishing : ClaudeAuthenticationState
 
     /** 붙여넣은 토큰이 통하는지 claude 에게 한 턴을 태워 묻는 중이다. */
+    @Serializable
+    @SerialName("pasted_token_verifying")
     data object PastedTokenVerifying : ClaudeAuthenticationState
 
     /**
@@ -62,5 +79,7 @@ sealed interface ClaudeAuthenticationState {
      * 브라우저로 방금 로그인한 것과 원래 로그인돼 있던 것을 가르지 않는다. 화면이 하는 일이
      * 같기 때문이다 — 엔진 설치 화면이 EngineReady 하나로 두는 것과 같은 자세다.
      */
+    @Serializable
+    @SerialName("credentials_ready")
     data object CredentialsReady : ClaudeAuthenticationState
 }

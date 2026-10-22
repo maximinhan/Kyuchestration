@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.protocol
 
+import kotlinx.serialization.Serializable
+
 /**
  * 화면에 보일 실패 하나(core-ui-split-design.md 6.3).
  *
@@ -11,6 +13,7 @@ package com.kyuchestration.desktop.protocol
  *   갈래를 알아내면 문구를 고치는 날 그 판단이 조용히 깨진다.
  * @param guidance 사람이 지금 할 수 있는 일. 화면이 문구 아래에 그대로 보인다.
  */
+@Serializable
 data class FailureView(
     val kind: String,
     val message: String,

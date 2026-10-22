@@ -1,0 +1,102 @@
+@file:OptIn(ExperimentalSerializationApi::class)
+
+package com.kyuchestration.desktop.protocol
+
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonClassDiscriminator
+
+/**
+ * 화면 → 코어의 틀(core-ui-split-design.md 6.4). 줄 하나가 틀 하나다.
+ *
+ * **겉 열쇠가 `kind` 가 아니라 `frame` 이다.** 앱 소켓은 `kind` 로 요청을 가르고 `kind` 가 없는 줄을 승인 물음으로 읽는다
+ * (AppSocket). 화면의 틀이 어떤 실수로 앱 소켓에 닿아도 승인 물음으로 읽히지 않게, 그리고 로그를 읽는 사람이 두 규약을
+ * 한눈에 가르게 열쇠 자체를 다르게 둔다.
+ */
+@Serializable
+@JsonClassDiscriminator("frame")
+sealed interface FrameToCore {
+
+    /** 붙었다 — 스냅샷을 달라. `seq` 가 건너뛴 화면도 이것을 다시 보내 처음부터 받는다(6.4). */
+    @Serializable
+    @SerialName("hello")
+    data object Hello : FrameToCore
+
+    /** @param id 화면이 지은 이름. 코어가 같은 id 로 답한다. */
+    @Serializable
+    @SerialName("command")
+    data class Command(val id: String, val command: ScreenCommand) : FrameToCore
+}
+
+/** 코어 → 화면의 틀. */
+@Serializable
+@JsonClassDiscriminator("frame")
+sealed interface FrameToScreen {
+
+    /**
+     * 인사에 대한 답. 스냅샷보다 먼저 온다.
+     *
+     * @param engineDirectory 엔진을 받아 두는 자리. 엔진은 코어 옆에 놓이므로 코어 OS 의 사실이다(6.2 (다)).
+     */
+    @Serializable
+    @SerialName("welcome")
+    data class Welcome(val engineDirectory: String) : FrameToScreen
+
+    /**
+     * 스냅샷 한 조각(6.6). 첫 조각은 작은 상태 전부이고 나머지는 대화의 변화다. 화면은 [last] 를 받기 전까지 거울을 바꾸지
+     * 않는다 — 반쯤 온 스냅샷을 그리면 대화가 잘려 보인다.
+     *
+     * @param seq 이 스냅샷이 담은 마지막 변화의 번호. 다음 변화는 이것보다 하나 크다.
+     */
+    @Serializable
+    @SerialName("snapshot")
+    data class Snapshot(val seq: Long, val part: ScreenChange, val last: Boolean) : FrameToScreen
+
+    /** @param seq 코어가 낸 변화마다 1 씩 는다. 하나라도 건너뛰면 화면은 다시 인사한다(6.4). */
+    @Serializable
+    @SerialName("change")
+    data class Change(val seq: Long, val change: ScreenChange) : FrameToScreen
+
+    /**
+     * 명령을 받았다 · 거절했다. **결과가 아니다** — 결과는 언제나 [Change] 로 온다(6.4). 결과가 오는 길이 둘이면 화면이
+     * 둘을 맞춰야 한다.
+     *
+     * 코어는 명령이 지금 상태에 남긴 변화를 이 답보다 먼저 보낸다. 그래서 답을 받은 화면은 그 명령의 즉각적인 결과(띄우는
+     * 중인 진입 같은 것)를 이미 거울에 들고 있다.
+     */
+    @Serializable
+    @SerialName("reply")
+    data class Reply(val id: String, val outcome: CommandOutcome, val reason: String? = null) : FrameToScreen
+}
+
+@Serializable
+enum class CommandOutcome {
+    @SerialName("accepted")
+    Accepted,
+
+    @SerialName("rejected")
+    Rejected,
+}
+
+/**
+ * 틀을 줄로 쓰고 읽는 규칙.
+ *
+ * - 모르는 필드는 건너뛴다. 필드를 더하는 변경은 판을 올리지 않는다(6.14).
+ * - null 은 싣지 않는다. 틀은 사람이 읽는 줄이기도 하고, 큰 대화의 스냅샷에서 빈 필드가 차지하는 몫이 작지 않다.
+ */
+private val screenProtocolJson = Json {
+    classDiscriminator = "type"
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+    explicitNulls = false
+}
+
+fun encodeFrameToCore(frame: FrameToCore): String = screenProtocolJson.encodeToString(FrameToCore.serializer(), frame)
+
+fun decodeFrameToCore(line: String): FrameToCore = screenProtocolJson.decodeFromString(FrameToCore.serializer(), line)
+
+fun encodeFrameToScreen(frame: FrameToScreen): String = screenProtocolJson.encodeToString(FrameToScreen.serializer(), frame)
+
+fun decodeFrameToScreen(line: String): FrameToScreen = screenProtocolJson.decodeFromString(FrameToScreen.serializer(), line)
