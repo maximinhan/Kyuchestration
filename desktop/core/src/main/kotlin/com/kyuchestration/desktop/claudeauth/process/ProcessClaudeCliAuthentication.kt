@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.claudeauth.ClaudeBrowserLogin
 import com.kyuchestration.desktop.claudeauth.ClaudeCliAuthentication
 import com.kyuchestration.desktop.claudeauth.ClaudeTokenVerdict
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.platform.commandResolvedOnChildSearchPath
 import com.kyuchestration.desktop.platform.environmentCarryingClaudeAuthToken
 import com.kyuchestration.desktop.platform.withEnvironment
 import java.io.IOException
@@ -18,8 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
@@ -149,8 +150,9 @@ class ProcessClaudeCliAuthentication(
     }
 
     private fun startClaude(arguments: List<String>, claudeAuthToken: String?): Process = try {
-        ProcessBuilder(listOf(CLAUDE_EXECUTABLE_NAME) + arguments)
-            .withEnvironment(environmentCarryingClaudeAuthToken(baseEnvironment, claudeAuthToken))
+        val environment = environmentCarryingClaudeAuthToken(baseEnvironment, claudeAuthToken)
+        ProcessBuilder(commandResolvedOnChildSearchPath(listOf(CLAUDE_EXECUTABLE_NAME) + arguments, environment))
+            .withEnvironment(environment)
             .start()
     } catch (failure: IOException) {
         throw ClaudeAuthenticationFailure.ClaudeCliCouldNotRun(failure)

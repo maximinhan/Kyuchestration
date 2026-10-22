@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import com.kyuchestration.desktop.platform.commandResolvedOnChildSearchPath
 import com.kyuchestration.desktop.platform.withEnvironment
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
@@ -18,7 +19,8 @@ class ProcessChatSessionOpener : ChatSessionOpener {
 
     override suspend fun openChatSession(plan: SessionEntryPlan): OpenedChatSession {
         val process = try {
-            ProcessBuilder(plan.command)
+            // 엔진은 명령을 이름(claude)으로 답하고 그것을 찾을 PATH 를 환경에 담는다. 그 PATH 로 찾는다(commandResolvedOnChildSearchPath).
+            ProcessBuilder(commandResolvedOnChildSearchPath(plan.command, plan.environment))
                 .directory(plan.workingDirectory.toFile())
                 // 환경을 통째로 갈아 끼운다. 계획이 담은 것이 이미 손본 바탕 환경이라
                 // (planSessionEntry), 덧씌우기만 하면 덜어낸 것이 도로 살아난다.
