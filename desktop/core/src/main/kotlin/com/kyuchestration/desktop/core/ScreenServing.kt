@@ -176,7 +176,7 @@ private fun ScreenCommand.applyTo(core: ScreenServingCore): String? {
         is ScreenCommand.SubmitClaudeBrowserLoginCode -> core.submitClaudeBrowserLoginCode(code)
         ScreenCommand.CancelClaudeBrowserLogin -> core.cancelClaudeBrowserLogin()
         is ScreenCommand.UseClaudeToken -> core.useClaudeToken(token)
-        is ScreenCommand.OpenWorkDir -> core.openWorkDir(hostPath)
+        is ScreenCommand.OpenWorkDir -> core.openWorkDir(workDirPath)
         ScreenCommand.InitializeOpenedWorkDir -> core.initializeOpenedWorkDir()
         ScreenCommand.RefreshWorkDir -> core.refreshWorkDir()
         ScreenCommand.CloseWorkDir -> core.closeWorkDir()

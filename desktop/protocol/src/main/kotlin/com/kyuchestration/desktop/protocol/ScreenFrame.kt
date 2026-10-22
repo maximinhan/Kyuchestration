@@ -19,8 +19,11 @@ import kotlinx.serialization.json.contentOrNull
  *
  * 필드를 더하는 변경은 올리지 않는다 — 받는 쪽이 모르는 필드는 건너뛴다(아래 screenProtocolJson). 뜻이 바뀌거나 필드가 빠지면
  * 올린다. `internal/workdir/conversations.go` 의 `schemaVersion` 규약과 같은 선이다.
+ *
+ * 2: `open_workdir` 의 경로 필드가 `hostPath`(화면 OS 의 경로, 코어가 푼다)에서 `workDirPath`(코어의 경로)로 바뀌었다(3 단계 — 윈도우
+ * 화면이 `\\wsl.localhost\…` 를 옮겨 보낸다). 필드가 빠지고 뜻이 바뀌었으므로 올린다.
  */
-const val SCREEN_PROTOCOL_VERSION: Int = 1
+const val SCREEN_PROTOCOL_VERSION: Int = 2
 
 /**
  * 판을 싣기 전의 상대가 말하는 규약 판. 1 단계(PR #76)의 화면 · 코어는 인사와 인사 답에 판을 싣지 않았다.

@@ -54,7 +54,7 @@ sealed interface ScreenCommand {
 
     @Serializable
     @SerialName("open_workdir")
-    data class OpenWorkDir(val hostPath: String) : ScreenCommand
+    data class OpenWorkDir(val workDirPath: String) : ScreenCommand
 
     @Serializable
     @SerialName("initialize_opened_workdir")

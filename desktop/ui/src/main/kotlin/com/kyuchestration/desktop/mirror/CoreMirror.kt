@@ -238,7 +238,7 @@ class CoreMirror private constructor(
 
     override fun useClaudeToken(token: String) = send(ScreenCommand.UseClaudeToken(token))
 
-    override fun openWorkDir(hostPath: String) = send(ScreenCommand.OpenWorkDir(hostPath))
+    override fun openWorkDir(workDirPath: String) = send(ScreenCommand.OpenWorkDir(workDirPath))
 
     override fun initializeOpenedWorkDir() = send(ScreenCommand.InitializeOpenedWorkDir)
 

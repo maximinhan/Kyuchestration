@@ -26,11 +26,16 @@ import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.wsl.ChosenWslDistributionFile
+import com.kyuchestration.desktop.wsl.CoreWorkDirPath
 import com.kyuchestration.desktop.wsl.WslCommandLine
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparation
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparationState
 import com.kyuchestration.desktop.wsl.chosenWslDistributionFilePath
+import com.kyuchestration.desktop.wsl.coreWorkDirPathOf
+import com.kyuchestration.desktop.wsl.screenPathOfCorePath
 import com.kyuchestration.desktop.wsl.wslExecutablePath
+import java.nio.file.Path
+import javax.swing.JOptionPane
 import kotlin.io.path.isRegularFile
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineName
@@ -84,11 +89,20 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
             )
         }
         when (connection) {
-            is CoreConnection.Connected -> runDesktopApplication(
-                screenFacingCore = connection.mirror,
-                coreProcess = coreProcess,
-                diagnosticLogPathLabel = diagnosticLogPathsLabel(diagnosticLogPath.toString(), connection.mirror.coreDiagnosticLogPath),
-            )
+            is CoreConnection.Connected -> {
+                // 화면이 윈도우이고 코어가 WSL 안이면 두 쪽의 경로가 다르다. WSLg 화면은 코어와 같은 리눅스를 보므로 옮기지 않는다.
+                val coreWslDistributionAcrossScreen = connection.mirror.coreWslDistributionName.takeIf { runningOnWindows() }
+                runDesktopApplication(
+                    screenFacingCore = connection.mirror,
+                    coreProcess = coreProcess,
+                    coreWslDistributionAcrossScreen = coreWslDistributionAcrossScreen,
+                    diagnosticLogPathLabel = diagnosticLogPathsLabel(
+                        screenDiagnosticLogPath = diagnosticLogPath.toString(),
+                        // 사람이 탐색기에 붙여 넣어 열 수 있는 모양으로 알린다(6.2 (다)).
+                        coreDiagnosticLogPath = screenPathOfCorePath(connection.mirror.coreDiagnosticLogPath, coreWslDistributionAcrossScreen),
+                    ),
+                )
+            }
             is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(connection, diagnosticLogPath.toString())
         }
     } catch (failure: Throwable) {
@@ -153,6 +167,11 @@ private fun prepareWslCorePlace(diagnosticLogPathLabel: String): CorePlace.WslDi
 }
 
 /**
+ * 윈도우 화면의 폴더 선택 창이 처음 여는 WSL 쪽 자리. 화면은 코어 사용자의 리눅스 홈을 모른다 — 그 한 칸 위다.
+ */
+private const val WSL_HOME_DIRECTORIES = "/home"
+
+/**
  * 오류 자리마다 알릴 기록 파일들. 화면과 코어가 각자 적으므로(core-ui-split-design.md 6.10) 둘 다 알린다.
  */
 private fun diagnosticLogPathsLabel(screenDiagnosticLogPath: String, coreDiagnosticLogPath: String): String =
@@ -178,12 +197,15 @@ private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch,
 private val CORE_LEAVE_TIMEOUT = 30.seconds
 
 /**
+ * @param coreWslDistributionAcrossScreen 화면이 윈도우이고 코어가 WSL 안이면 코어의 배포판. 화면의 경로와 코어의 경로를 옮기는
+ *   근거다(coreWorkDirPathOf). 맥 · 리눅스 · WSLg 에서는 null.
  * @param diagnosticLogPathLabel 화면이 오류 자리마다 알려 줄 기록 파일의 경로. 사용자가 무엇을
  *   보고할 때 건네면 되는지가 그 자리에 있어야, 원격에서 진단할 수 있는 것이 화면 문구를 넘어선다.
  */
 private fun runDesktopApplication(
     screenFacingCore: CoreMirror,
     coreProcess: CoreChildProcess,
+    coreWslDistributionAcrossScreen: String?,
     diagnosticLogPathLabel: String,
 ) = application {
     val coreConnectionFailure by screenFacingCore.coreConnectionFailure.collectAsState()
@@ -255,7 +277,21 @@ private fun runDesktopApplication(
             onClaudeTokenSubmitted = screenFacingCore::useClaudeToken,
             onOpenWorkDirRequested = {
                 // 고르는 창은 사람이 앉은 OS 의 것이라 화면에 남는다(원칙 19). 고른 경로만 코어에게 건넨다.
-                chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory -> screenFacingCore.openWorkDir(chosenDirectory.toString()) }
+                val startingDirectory = coreWslDistributionAcrossScreen?.let { distribution ->
+                    Path.of(screenPathOfCorePath(WSL_HOME_DIRECTORIES, distribution))
+                }
+                chooseWorkDirDirectory(ownerWindow, startingDirectory)?.let { chosenDirectory ->
+                    when (val corePath = coreWorkDirPathOf(chosenDirectory.toString(), coreWslDistributionAcrossScreen)) {
+                        is CoreWorkDirPath.Translated -> screenFacingCore.openWorkDir(corePath.corePath)
+                        // 코어가 열 수 없는 자리는 고른 그 자리에서 알린다. 코어에 보내면 왕복 뒤에 같은 말을 듣는다.
+                        is CoreWorkDirPath.Refused -> JOptionPane.showMessageDialog(
+                            ownerWindow,
+                            corePath.reason,
+                            "이 폴더는 열 수 없습니다",
+                            JOptionPane.WARNING_MESSAGE,
+                        )
+                    }
+                }
             },
             onInitializeOpenedWorkDirRequested = screenFacingCore::initializeOpenedWorkDir,
             onCloneRepositoriesRequested = screenFacingCore::openRepositoryClone,

@@ -87,14 +87,13 @@ class InProcessScreenFacingCore(
 
     override fun useClaudeToken(token: String) = claudeAuthentication.useToken(token)
 
-    override fun openWorkDir(hostPath: String) {
+    override fun openWorkDir(workDirPath: String) {
         // 여는 일과 초기화하는 일이 홀더 둘로 나뉘어 있어 여기서 이어 붙인다. 초기화 쪽이 고른 자리를 조율할 수 있게
         // 만들어 놓고, 그때 무엇을 "연다" 고 하는지는 대시보드 쪽이 정한다.
         //
-        // 화면과 코어가 같은 OS 인 동안은 화면 경로가 곧 코어 경로다. 윈도우 화면의 경로를 푸는 자리(wslpath)가 여기
-        // 서는 것은 3 단계다(설계 6.9).
+        // 받는 것은 이미 코어 경로다. 윈도우 화면은 고른 `\\wsl.localhost\…` 를 옮겨 보낸다(설계 6.9 의 3 단계 정정).
         val chosenDirectory = try {
-            Path.of(hostPath)
+            Path.of(workDirPath)
         } catch (unreadable: InvalidPathException) {
             // 화면이 보낸 문자열이 이 OS 의 경로가 아니다. 던지면 명령 하나로 코어가 끝나므로, 여는 걸음의 실패로 답한다 —
             // 사람은 시작 화면에서 그 이유를 보고 다른 자리를 고른다.
