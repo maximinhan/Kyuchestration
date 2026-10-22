@@ -615,7 +615,7 @@ conversation_removed  { target }
 |---|---|
 | **선 위의 경로는 언제나 코어 경로** — 화면이 옮긴다 | 처음 설계가 코어에 맡긴 근거는 자동 마운트 자리(`/mnt/c`, `wsl.conf` 의 `[automount] root`)가 코어 OS 의 사실이라서였다. `C:\…` 를 받지 않으면 그 근거가 남지 않는다 — 남는 것은 `\\wsl.localhost\<배포판>\` 의 뿌리가 그 배포판의 `/` 라는 고정된 사실과 윈도우 쪽 이름 바꾸기(U+F000) 하나다. 거절도 왕복 없이 고른 그 자리에서 알린다 |
 | `C:\…` 를 거절한다(처음 설계는 받아들였다) | 그 위에서 `claude` · `kyu` · `git` 이 9P 너머 윈도우 파일 시스템을 쓰게 된다 — 느리고(8 절 6), 실행 권한 · 대소문자 규칙이 리눅스와 다르다. 코어는 WSL 안의 폴더만 연다 |
-| 배포판은 코어가 `welcome.wslDistro` 로 말한 것 | 화면이 `-d` 로 고른 이름이 아니라 코어가 사는 자리의 사실로 옮긴다. 화면이 윈도우일 때만 옮긴다 — WSLg 화면에도 `WSL_DISTRO_NAME` 이 있지만 코어와 같은 리눅스를 본다 |
+| 배포판은 코어가 `welcome.wslDistro` 로 말한 것, 없으면 화면이 고른 것 | 코어가 사는 자리의 사실이 먼저다. 코어가 말하지 않으면(`WSL_DISTRO_NAME` 없음) `-d` 로 고른 배포판으로 옮긴다 — 비우면 UNC 경로가 거절도 변환도 없이 코어에 간다. 코어를 WSL 너머에 띄웠을 때만 옮긴다 — WSLg 화면에도 `WSL_DISTRO_NAME` 이 있지만 코어와 같은 리눅스를 본다 |
 | 필드 이름을 바꾸고 `protocol` 을 2 로 | `hostPath`(화면 경로, 코어가 푼다)와 `workDirPath`(코어 경로)는 뜻이 다르다. 필드가 빠지고 뜻이 바뀌면 판을 올린다(6.14) |
 | 폴더 선택 창 | 윈도우도 JFileChooser 다(AWT `FileDialog` 는 윈도우에서 폴더를 못 고른다). `\\wsl.localhost\<배포판>\home` 에서 시작한다 — 화면은 코어 사용자의 리눅스 홈을 모른다. 네이티브 창(`IFileOpenDialog`)이 "Linux" 아래 폴더를 어떤 경로로 주는지는 사람이 눌러 봐야 안다(3.8, 4 단계 손 확인) |
 
@@ -785,9 +785,9 @@ desktop/
 
 | 걸음 | 코드 |
 |---|---|
-| 코어가 있는가 | `version` 동사 대신 `wsl.exe -d D --cd ~ -e test -x .local/bin/kyuchestration-core`(셸 없는 `/usr/bin/test`). 0 있음 · 1 없음 · 그 밖은 `wsl.exe` 의 실패(없는 배포판이면 리눅스 쪽 255, 윈도우 JVM 에서는 -1)라 그 말을 그대로 보인다. 판은 붙은 뒤 `welcome` 이 견준다(6.14) |
+| 코어가 있는가 | `version` 동사 대신 `wsl.exe -d D --cd ~ -e test -x .local/bin/kyuchestration-core`(셸 없는 `/usr/bin/test`). 0 있음 · 글 없는 1 없음 · 그 밖(글을 쓴 1 포함 — wsl.exe 의 커널 갱신 · 기본 사용자 없음 같은 것)은 `wsl.exe` 의 실패(없는 배포판이면 리눅스 쪽 255, 윈도우 JVM 에서는 -1)라 그 말을 그대로 보인다. 판은 붙은 뒤 `welcome` 이 견준다(6.14) |
 | 미리 보지 않는다 | 배포판마다 코어가 있는지 미리 묻지 않는다 — `wsl.exe -d` 는 멈춘 배포판을 띄운다. 고른(또는 기억한) 배포판만 본다 |
-| 기억 | 지난번에 고른 배포판이 목록에 있고 코어가 있으면 **창 없이** 간다. 기억은 코어에 닿을 수 있을 때만 적는다(`%APPDATA%\Kyuchestration\wsl-distribution`). 화면의 진단 기록은 `%LOCALAPPDATA%\Kyuchestration\Logs\desktop.log` |
+| 기억 | 준비 창을 먼저 띄운다(멈춘 배포판을 깨우는 `test` 가 수십 초 걸릴 수 있다). 지난번에 고른 배포판이 목록에 있고 코어가 있으면 묻지 않고 준비 창을 닫는다. 기억 파일을 못 읽으면 기억이 없는 것으로 본다. 기억은 코어에 닿을 수 있을 때만 적는다(`%APPDATA%\Kyuchestration\wsl-distribution`). 화면의 진단 기록은 `%LOCALAPPDATA%\Kyuchestration\Logs\desktop.log` |
 | 목록 | `-l -v` 를 `WSL_UTF8=1` 로. 옛 판의 UTF-16LE 도 NUL 바이트로 가려 읽는다. 머리줄은 한국어 로케일에서도 영어였다(실측) |
 | 코어 없음 안내 | 지금은 자리(`~/.local/bin/kyuchestration-core`)만 알린다. 설치 명령 한 줄(복사 버튼)은 설치 스크립트와 함께 3b |
 
