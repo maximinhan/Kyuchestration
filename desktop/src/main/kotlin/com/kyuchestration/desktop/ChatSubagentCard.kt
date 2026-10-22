@@ -20,7 +20,6 @@ import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.SubagentRun
 import com.kyuchestration.desktop.theme.KyuTheme
-import java.nio.file.Path
 
 /**
  * 서브에이전트 하나가 한 일(설계 6.3 의 `SubagentCard` · 3.10).
@@ -38,7 +37,7 @@ import java.nio.file.Path
 internal fun SubagentCard(
     entry: ChatEntry.ToolCall,
     run: SubagentRun,
-    sessionWorkingDirectory: Path?,
+    sessionWorkingDirectory: String?,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     /** 서브에이전트도 메인의 도구를 물려받아 하위를 띄울 수 있다 — 안쪽 spawn 카드의 "열기" 자리. */
     onOpenChildSessionRequested: (String) -> Unit,

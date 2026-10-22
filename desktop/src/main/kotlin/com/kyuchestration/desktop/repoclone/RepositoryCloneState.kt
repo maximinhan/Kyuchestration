@@ -1,7 +1,6 @@
 package com.kyuchestration.desktop.repoclone
 
 import com.kyuchestration.desktop.protocol.FailureView
-import java.nio.file.Path
 
 /**
  * 레포를 골라 받아 오는 화면이 지금 보여줄 것.
@@ -158,7 +157,7 @@ sealed interface CloneStep {
     data class LoadRepositories(val profileName: String, val ownerLogin: String) : Retryable
 
     data class CloneRepositories(
-        val workDirPath: Path,
+        val workDirPath: String,
         val profileName: String,
         val repositoryFullNames: List<String>,
     ) : Retryable

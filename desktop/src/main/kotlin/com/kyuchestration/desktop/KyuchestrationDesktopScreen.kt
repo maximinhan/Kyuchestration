@@ -38,7 +38,6 @@ import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.theme.resolveDarkTheme
-import java.nio.file.Path
 
 /**
  * 창 안의 모든 화면이 갈라지는 자리.
@@ -327,12 +326,12 @@ private fun StartScreen(
 }
 
 @Composable
-private fun FirstObservationRunningScreen(workDirPath: Path, onCancelRequested: () -> Unit) {
+private fun FirstObservationRunningScreen(workDirPath: String, onCancelRequested: () -> Unit) {
     CenteredColumn {
         CircularProgressIndicator(modifier = Modifier.size(32.dp))
         Text("kyu 에게 이 워크디렉토리를 묻는 중입니다", style = MaterialTheme.typography.bodyMedium)
         Text(
-            text = workDirPath.toString(),
+            text = workDirPath,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -343,7 +342,7 @@ private fun FirstObservationRunningScreen(workDirPath: Path, onCancelRequested: 
 
 @Composable
 private fun ObservationFailureScreen(
-    workDirPath: Path,
+    workDirPath: String,
     failure: FailureView,
     diagnosticLogPathLabel: String,
     onRetryRequested: () -> Unit,
@@ -352,7 +351,7 @@ private fun ObservationFailureScreen(
     CenteredColumn {
         Text("워크디렉토리를 읽지 못했습니다", style = MaterialTheme.typography.headlineSmall)
         Text(
-            text = workDirPath.toString(),
+            text = workDirPath,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

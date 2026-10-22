@@ -48,7 +48,7 @@ class WorkDirDashboardStateHolder(
     private var observationLoop: Job? = null
 
     fun openWorkDir(workDirPath: Path) {
-        restartObservationLoop(workDirPath, WorkDirDashboardState.FirstObservationRunning(workDirPath))
+        restartObservationLoop(workDirPath, WorkDirDashboardState.FirstObservationRunning(workDirPath.toString()))
     }
 
     /**
@@ -58,7 +58,7 @@ class WorkDirDashboardStateHolder(
      * 사용자가 보고 있던 목록이 매번 한 번씩 사라졌다 돌아온다.
      */
     fun refreshNow() {
-        val workDirPath = mutableState.value.workDirPath ?: return
+        val workDirPath = mutableState.value.workDirPath?.let(Path::of) ?: return
         restartObservationLoop(workDirPath, mutableState.value)
     }
 
@@ -95,7 +95,7 @@ class WorkDirDashboardStateHolder(
         }
 
         mutableState.value = WorkDirDashboardState.WorkDirObserved(
-            workDirPath = workDirPath,
+            workDirPath = workDirPath.toString(),
             snapshot = observation.snapshot,
             lastRefreshFailure = null,
             planFilePresent = observation.planFilePresent,
@@ -111,7 +111,7 @@ class WorkDirDashboardStateHolder(
         // 한 번이라도 본 적이 있으면 그 목록을 지우지 않는다. 갱신 한 번 실패했다고 목록이
         // 사라지면 사용자는 워크디렉토리가 없어진 것과 구분할 수 없다.
         is WorkDirDashboardState.WorkDirObserved -> current.copy(lastRefreshFailure = failure.toFailureView())
-        else -> WorkDirDashboardState.FirstObservationFailed(workDirPath, failure.toFailureView())
+        else -> WorkDirDashboardState.FirstObservationFailed(workDirPath.toString(), failure.toFailureView())
     }
 
     companion object {

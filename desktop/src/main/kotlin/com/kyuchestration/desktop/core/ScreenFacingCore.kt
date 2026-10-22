@@ -13,7 +13,6 @@ import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import com.kyuchestration.desktop.terminal.chat.SessionTree
-import java.nio.file.Path
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -75,8 +74,12 @@ interface ScreenFacingCore {
     /** 토큰을 싣는다 — 비밀이 경계를 건너는 두 명령 중 하나다(6.11). */
     fun useClaudeToken(token: String)
 
-    /** 화면의 파일 선택기가 고른 자리를 워크디렉토리로 연다. 초기화가 필요하면 그 걸음도 코어가 잇는다. */
-    fun openWorkDir(chosenDirectory: Path)
+    /**
+     * 화면의 파일 선택기가 고른 자리를 워크디렉토리로 연다. 초기화가 필요하면 그 걸음도 코어가 잇는다.
+     *
+     * @param hostPath 화면 OS 의 경로 문자열. 화면 경로가 경계에 오르는 자리는 여기 하나이고, 푸는 것은 코어다(설계 6.9).
+     */
+    fun openWorkDir(hostPath: String)
 
     fun initializeOpenedWorkDir()
 

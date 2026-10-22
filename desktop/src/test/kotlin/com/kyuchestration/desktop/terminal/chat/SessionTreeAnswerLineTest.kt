@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop.terminal.chat
 
-import java.nio.file.Path
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -180,7 +179,7 @@ class SessionTreeAnswerLineTest {
         childId = childId,
         title = childId,
         relativeCwd = relativeCwd,
-        workingDirectory = Path.of("/w").resolve(relativeCwd),
+        workingDirectory = "/w/$relativeCwd",
         conversationId = "conversation-$childId",
         startedAt = Instant.parse("2026-10-20T10:01:12Z"),
     )

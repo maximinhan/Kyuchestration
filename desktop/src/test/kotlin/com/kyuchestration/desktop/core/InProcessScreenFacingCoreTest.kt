@@ -85,17 +85,17 @@ class InProcessScreenFacingCoreTest {
     fun `고른 자리를 열면 초기화를 거쳐 대시보드가 그 자리를 관찰한다`() = runTest {
         val bed = coreTestBed()
 
-        bed.core.openWorkDir(workDirPath)
+        bed.core.openWorkDir(workDirPath.toString())
         runCurrent()
 
         assertIs<WorkDirDashboardState.WorkDirObserved>(bed.core.workDirDashboardState.value)
-        assertEquals(workDirPath, bed.core.workDirDashboardState.value.workDirPath)
+        assertEquals(workDirPath.toString(), bed.core.workDirDashboardState.value.workDirPath)
     }
 
     @Test
     fun `세션은 열린 워크디렉토리에서 띄우고 보유 세션은 대상만 내놓는다`() = runTest {
         val bed = coreTestBed()
-        bed.core.openWorkDir(workDirPath)
+        bed.core.openWorkDir(workDirPath.toString())
         runCurrent()
 
         bed.core.enterSession(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
@@ -118,7 +118,7 @@ class InProcessScreenFacingCoreTest {
     @Test
     fun `워크디렉토리를 닫으면 그 안의 세션을 끝내고 대시보드를 닫는다`() = runTest {
         val bed = coreTestBed()
-        bed.core.openWorkDir(workDirPath)
+        bed.core.openWorkDir(workDirPath.toString())
         runCurrent()
         bed.core.enterSession(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
         runCurrent()
@@ -136,7 +136,7 @@ class InProcessScreenFacingCoreTest {
         // 세션 놓기가 뒤로 밀리면, 닫힌 대시보드에서 새 워크디렉토리를 열고 메인에 들어가는 사이 옛 메인이 아직 보유
         // 중이라 그 진입이 버려지고 옛 전사가 화면에 선다.
         val bed = coreTestBed()
-        bed.core.openWorkDir(workDirPath)
+        bed.core.openWorkDir(workDirPath.toString())
         runCurrent()
         bed.core.enterSession(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
         runCurrent()

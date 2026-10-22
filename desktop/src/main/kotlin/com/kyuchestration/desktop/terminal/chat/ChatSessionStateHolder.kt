@@ -610,7 +610,7 @@ class ChatSessionStateHolder(
     private fun hold(held: HeldChatSession) {
         mutableConversations.value += held.target to ChatConversation(
             target = held.target,
-            workingDirectory = held.workingDirectory,
+            workingDirectory = held.workingDirectory.toString(),
             resumedConversationId = held.resumedConversationId,
             entries = held.engineWarnings.map(ChatEntry::EngineNotice),
         )
@@ -836,7 +836,7 @@ class ChatSessionStateHolder(
                 childId = assigned.childId,
                 title = assigned.title,
                 relativeCwd = assigned.relativeCwd,
-                workingDirectory = opened.held.workingDirectory,
+                workingDirectory = opened.held.workingDirectory.toString(),
                 conversationId = assigned.conversationId,
                 startedAt = clock.instant(),
             ),

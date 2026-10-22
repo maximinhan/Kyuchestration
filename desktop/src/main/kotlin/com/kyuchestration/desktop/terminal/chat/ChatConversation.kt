@@ -2,7 +2,6 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.resumeFailureSuspected
-import java.nio.file.Path
 
 /**
  * 세션 하나의 대화 전부 — 화면이 그릴 것과, 그리는 데 필요한 사실들(chat-ui-design.md 5.5).
@@ -40,7 +39,7 @@ import java.nio.file.Path
  */
 data class ChatConversation(
     val target: SessionTarget,
-    val workingDirectory: Path? = null,
+    val workingDirectory: String? = null,
     val conversationId: String? = null,
     val modelName: String? = null,
     val resumedConversationId: String? = null,

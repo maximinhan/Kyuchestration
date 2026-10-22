@@ -245,7 +245,7 @@ class RepositoryCloneStateHolder(
 
         runCloneStep(
             CloneStep.CloneRepositories(
-                workDirPath = workDirPath,
+                workDirPath = workDirPath.toString(),
                 profileName = choosing.profileName,
                 repositoryFullNames = choosing.selectedRepositoryFullNames.toList(),
             ),
@@ -326,7 +326,7 @@ class RepositoryCloneStateHolder(
 
         is CloneStep.CloneRepositories -> CloneStepOutcome.Settled(
             RepositoryCloneState.CloneFinished(
-                workDirRepositoryCloner.cloneInto(step.workDirPath, step.profileName, step.repositoryFullNames),
+                workDirRepositoryCloner.cloneInto(Path.of(step.workDirPath), step.profileName, step.repositoryFullNames),
             ),
         )
     }

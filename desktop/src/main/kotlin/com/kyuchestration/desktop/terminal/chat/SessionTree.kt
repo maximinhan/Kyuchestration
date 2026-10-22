@@ -1,7 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
-import java.nio.file.Path
 import java.time.Instant
 
 /**
@@ -54,7 +53,7 @@ data class ChildSessionNode(
     val childId: String,
     val title: String,
     val relativeCwd: String,
-    val workingDirectory: Path,
+    val workingDirectory: String,
     val conversationId: String,
     val startedAt: Instant,
     val waitingFor: ChildWaitingFor = ChildWaitingFor.Nothing,

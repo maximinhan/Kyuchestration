@@ -85,17 +85,23 @@ class InProcessScreenFacingCore(
 
     override fun useClaudeToken(token: String) = claudeAuthentication.useToken(token)
 
-    override fun openWorkDir(chosenDirectory: Path) {
+    override fun openWorkDir(hostPath: String) {
         // 여는 일과 초기화하는 일이 홀더 둘로 나뉘어 있어 여기서 이어 붙인다. 초기화 쪽이 고른 자리를 조율할 수 있게
         // 만들어 놓고, 그때 무엇을 "연다" 고 하는지는 대시보드 쪽이 정한다.
+        //
+        // 화면과 코어가 같은 OS 인 동안은 화면 경로가 곧 코어 경로다. 윈도우 화면의 경로를 푸는 자리(wslpath)가 여기
+        // 서는 것은 3 단계다(설계 6.9).
         workDirInitialization.openChosenDirectoryAsWorkDir(
-            workDirPath = chosenDirectory,
+            workDirPath = Path.of(hostPath),
             onWorkDirReady = workDirDashboard::openWorkDir,
         )
     }
 
+    /** 대시보드가 연 워크디렉토리. 상태에는 경계를 건널 문자열로 있고, kyu 를 부를 때는 이 OS 의 경로로 푼다. */
+    private fun openedWorkDirPath(): Path? = workDirDashboard.state.value.workDirPath?.let(Path::of)
+
     override fun initializeOpenedWorkDir() {
-        workDirDashboard.state.value.workDirPath?.let(workDirInitialization::initializeOpenedWorkDir)
+        openedWorkDirPath()?.let(workDirInitialization::initializeOpenedWorkDir)
     }
 
     override fun refreshWorkDir() = workDirDashboard.refreshNow()
@@ -120,7 +126,7 @@ class InProcessScreenFacingCore(
     }
 
     override fun enterSession(target: PersonOpenedSessionTarget, conversationChoice: SessionConversationChoice) {
-        workDirDashboard.state.value.workDirPath?.let { workDirPath ->
+        openedWorkDirPath()?.let { workDirPath ->
             chatSessions.enterSession(workDirPath, target, conversationChoice)
         }
     }
@@ -148,7 +154,7 @@ class InProcessScreenFacingCore(
         // 더 훑어야 하는데, 그 앎은 대시보드의 것이다.
         (workDirDashboard.state.value as? WorkDirDashboardState.WorkDirObserved)?.let { observed ->
             repositoryClone.open(
-                workDirPath = observed.workDirPath,
+                workDirPath = Path.of(observed.workDirPath),
                 alreadyClonedRepositoryNames = observed.snapshot.repos.map { it.name }.toSet(),
             )
         }

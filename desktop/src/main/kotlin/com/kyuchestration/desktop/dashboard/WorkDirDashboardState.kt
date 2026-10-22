@@ -2,7 +2,6 @@ package com.kyuchestration.desktop.dashboard
 
 import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.workdir.WorkDirSnapshot
-import java.nio.file.Path
 
 /**
  * 대시보드가 지금 보여줄 것.
@@ -14,15 +13,15 @@ import java.nio.file.Path
 sealed interface WorkDirDashboardState {
 
     /** 열려 있는 워크디렉토리의 경로. 아직 아무것도 열지 않았으면 null. */
-    val workDirPath: Path?
+    val workDirPath: String?
 
     data object NoWorkDirOpened : WorkDirDashboardState {
-        override val workDirPath: Path? = null
+        override val workDirPath: String? = null
     }
 
     /** 처음 여는 중이다 — 대신 보여줄 이전 스냅샷이 아직 없다. */
     data class FirstObservationRunning(
-        override val workDirPath: Path,
+        override val workDirPath: String,
     ) : WorkDirDashboardState
 
     /**
@@ -36,7 +35,7 @@ sealed interface WorkDirDashboardState {
      *   WorkDirSnapshot 은 `kyu list --json` 이 말한 것만 담는다.
      */
     data class WorkDirObserved(
-        override val workDirPath: Path,
+        override val workDirPath: String,
         val snapshot: WorkDirSnapshot,
         val lastRefreshFailure: FailureView?,
         val planFilePresent: Boolean,
@@ -44,7 +43,7 @@ sealed interface WorkDirDashboardState {
 
     /** 한 번도 성공하지 못했다. 보여줄 것이 실패의 이유뿐이다. */
     data class FirstObservationFailed(
-        override val workDirPath: Path,
+        override val workDirPath: String,
         val failure: FailureView,
     ) : WorkDirDashboardState
 }

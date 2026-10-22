@@ -136,7 +136,7 @@ private fun runDesktopApplication(
             onClaudeTokenSubmitted = screenFacingCore::useClaudeToken,
             onOpenWorkDirRequested = {
                 // 고르는 창은 사람이 앉은 OS 의 것이라 화면에 남는다(원칙 19). 고른 경로만 코어에게 건넨다.
-                chooseWorkDirDirectory(ownerWindow)?.let(screenFacingCore::openWorkDir)
+                chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory -> screenFacingCore.openWorkDir(chosenDirectory.toString()) }
             },
             onInitializeOpenedWorkDirRequested = screenFacingCore::initializeOpenedWorkDir,
             onCloneRepositoriesRequested = screenFacingCore::openRepositoryClone,
