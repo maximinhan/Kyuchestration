@@ -80,6 +80,7 @@ internal fun TestScope.inProcessCoreTestBed(
             gitHubRepositoryCatalog = UnusedGitHubRepositoryCatalog,
             workDirRepositoryCloner = UnusedWorkDirRepositoryCloner,
             coroutineScope = backgroundScope,
+            cloneStepDispatcher = testDispatcher,
         ),
         chatSessions = stateHolder(chatSessionOpener, sessionCommandSource),
         engineDirectoryLabel = "/tmp/engine",
