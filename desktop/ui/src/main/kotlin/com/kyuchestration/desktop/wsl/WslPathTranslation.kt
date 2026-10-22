@@ -36,18 +36,27 @@ fun coreWorkDirPathOf(screenPath: String, coreWslDistributionName: String?): Cor
     if (!isWslShare) {
         return CoreWorkDirPath.Refused(
             "코어는 WSL($coreWslDistributionName) 안의 폴더만 엽니다. 고른 자리($screenPath)는 윈도우 쪽입니다 — " +
-                "선택 창 왼쪽의 Linux › $coreWslDistributionName 아래에서 고르세요.",
+                wslFolderGuidance(coreWslDistributionName),
         )
     }
     val chosenDistribution = segments[3]
     if (!chosenDistribution.equals(coreWslDistributionName, ignoreCase = true)) {
         return CoreWorkDirPath.Refused(
             "이 코어는 WSL 의 $coreWslDistributionName 에 있습니다. 다른 배포판($chosenDistribution)의 폴더는 열 수 없습니다 — " +
-                "$coreWslDistributionName 아래에서 고르세요.",
+                wslFolderGuidance(coreWslDistributionName),
         )
     }
     val linuxNames = segments.drop(WSL_SHARE_LEADING_SEGMENTS).filter { it.isNotEmpty() }.map(::linuxNameOf)
     return CoreWorkDirPath.Translated(linuxNames.joinToString(separator = "/", prefix = "/"))
+}
+
+/**
+ * 거절 뒤 사람이 따라 할 길. 선택 창은 JFileChooser 라 탐색기의 "Linux" 항목이 없다 — 선택 창이 처음 여는 자리와, 파일 이름 칸에
+ * 적을 수 있는 경로를 알린다.
+ */
+private fun wslFolderGuidance(coreWslDistributionName: String): String {
+    val distributionRoot = "\\\\${WSL_SHARE_HOSTS.first()}\\$coreWslDistributionName\\"
+    return "선택 창이 처음 여는 ${distributionRoot}home 아래에서 고르거나, 파일 이름 칸에 ${distributionRoot}… 경로를 적으세요."
 }
 
 /**

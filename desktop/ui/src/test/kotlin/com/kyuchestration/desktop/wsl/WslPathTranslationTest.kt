@@ -71,6 +71,21 @@ class WslPathTranslationTest {
         assertTrue("C:\\Users\\maxim\\work" in refused.reason && "Ubuntu-24.04" in refused.reason, refused.reason)
     }
 
+    /**
+     * 선택 창은 JFileChooser 라 탐색기의 "Linux" 항목이 없다. 사람이 따라 할 수 있는 길 — 파일 이름 칸에 적을 경로와 선택 창이
+     * 처음 여는 자리 — 을 알린다.
+     */
+    @Test
+    fun `거절 문구는 선택 창에서 실제로 갈 수 있는 WSL 경로를 알린다`() {
+        val refusals = listOf("C:\\Users\\maxim\\work", "\\\\wsl.localhost\\docker-desktop\\tmp")
+            .map { assertIs<CoreWorkDirPath.Refused>(coreWorkDirPathOf(it, distribution)).reason }
+
+        refusals.forEach { reason ->
+            assertTrue("\\\\wsl.localhost\\Ubuntu-24.04\\" in reason, reason)
+            assertTrue("Linux ›" !in reason, reason)
+        }
+    }
+
     @Test
     fun `WSL 이 아닌 네트워크 공유도 거절한다`() {
         assertIs<CoreWorkDirPath.Refused>(coreWorkDirPathOf("\\\\fileserver\\share\\work", distribution))
