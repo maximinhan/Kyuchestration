@@ -131,6 +131,23 @@ class InProcessScreenFacingCoreTest {
         assertEquals(WorkDirDashboardState.NoWorkDirOpened, bed.core.workDirDashboardState.value)
     }
 
+    @Test
+    fun `워크디렉토리를 닫는 그 자리에서 세션과 전사를 놓고 대시보드까지 닫는다`() = runTest {
+        // 세션 놓기가 뒤로 밀리면, 닫힌 대시보드에서 새 워크디렉토리를 열고 메인에 들어가는 사이 옛 메인이 아직 보유
+        // 중이라 그 진입이 버려지고 옛 전사가 화면에 선다.
+        val bed = coreTestBed()
+        bed.core.openWorkDir(workDirPath)
+        runCurrent()
+        bed.core.enterSession(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        bed.core.closeWorkDir()
+
+        assertEquals(emptySet(), bed.core.heldChatSessionTargets.value)
+        assertEquals(emptyMap(), bed.core.chatConversations.value)
+        assertEquals(WorkDirDashboardState.NoWorkDirOpened, bed.core.workDirDashboardState.value)
+    }
+
     private fun TestScope.coreTestBed(engineInstalledAtStart: Boolean = true): CoreTestBed {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         var engineExecutable: Path? = if (engineInstalledAtStart) ENGINE_EXECUTABLE else null

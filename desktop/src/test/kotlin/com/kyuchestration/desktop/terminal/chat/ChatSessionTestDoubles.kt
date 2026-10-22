@@ -330,14 +330,22 @@ internal fun TestScope.mainWithChildrenTestBed(childCount: Int): MainWithChildre
     val opener = RecordingChatSessionOpener()
     val childSource = RecordingChildSessionCommandSource()
     val channels = mutableListOf<FakeAppSocketChannel>()
-    val holder = stateHolder(opener = opener, permissionChannels = channels, childSessionCommandSource = childSource)
+    val reopenedAfterEveryEarlierSessionEnded = mutableListOf<Boolean>()
+    val sessionsOpenedBeforeTheBedWasReady = childCount + 1
+    val recordingOpener = ChatSessionOpener { plan ->
+        if (opener.openedSessions.size >= sessionsOpenedBeforeTheBedWasReady) {
+            reopenedAfterEveryEarlierSessionEnded += opener.openedSessions.all { it.endSessionCount == 1 }
+        }
+        opener.openChatSession(plan)
+    }
+    val holder = stateHolder(opener = recordingOpener, permissionChannels = channels, childSessionCommandSource = childSource)
     holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
     runCurrent()
     repeat(childCount) { index ->
         channels.first().askSessionTree(spawnRequest("proj-$index"))
         runCurrent()
     }
-    return MainWithChildrenTestBed(holder, opener, childSource, channels)
+    return MainWithChildrenTestBed(holder, opener, childSource, channels, reopenedAfterEveryEarlierSessionEnded)
 }
 
 internal class MainWithChildrenTestBed(
@@ -346,6 +354,8 @@ internal class MainWithChildrenTestBed(
     val childSource: RecordingChildSessionCommandSource,
     /** 연 차례대로 — 맨 앞이 메인의 소켓이고, n 번째가 n 번째 하위의 것이다. */
     val channels: List<FakeAppSocketChannel>,
+    /** 시험대가 선 뒤 새 세션을 띄울 때마다, 그 순간 앞서 띄운 세션이 모두 끝나 있었는가. */
+    val reopenedAfterEveryEarlierSessionEnded: List<Boolean>,
 ) {
     val main: FakeChatSession get() = opener.openedSessions.first()
     val mainChannel: FakeAppSocketChannel get() = channels.first()

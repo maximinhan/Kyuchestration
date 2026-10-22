@@ -21,6 +21,7 @@ import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import com.kyuchestration.desktop.terminal.chat.SessionTree
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -99,10 +100,18 @@ class InProcessScreenFacingCore(
 
     override fun refreshWorkDir() = workDirDashboard.refreshNow()
 
+    /**
+     * 네 걸음을 이 순서로, 이 자리에서 곧바로 지난다 — 세션 놓기 → 초기화 실패 잊기 → 클론 닫기 → 대시보드 닫기.
+     *
+     * 세션 놓기는 [CoroutineStart.UNDISPATCHED] 로 띄워 보유 목록과 전사를 놓는 데까지 이 호출 안에서 끝낸다. 프로세스가
+     * 실제로 끝나기를 기다리는 꼬리만 뒤에서 돈다. 그 꼬리가 도는 사이 새 워크디렉토리에서 들어온 진입은 홀더가 꼬리 뒤로
+     * 미룬다(ChatSessionStateHolder.sessionsEnding). 대시보드를 꼬리 뒤에 닫지 않는 이유는, 그러면 프로세스가 끝나기를
+     * 기다리는 몇 초 동안 닫는 중인 워크디렉토리의 카드가 눌리는 채로 서 있어 그 자리에 새 세션이 뜰 수 있어서다.
+     */
     override fun closeWorkDir() {
         // 워크디렉토리를 바꾸면 그 안의 세션을 둘 이유가 없다. 끝내지 않으면 다른 워크디렉토리의 목록 아래에 이전
         // 워크디렉토리의 세션이 남는다.
-        coroutineScope.launch { chatSessions.endAllSessions() }
+        coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) { chatSessions.endAllSessions() }
         // 초기화 실패 문구도, 고르던 레포도 그 워크디렉토리의 것이다. 같은 이유로 함께 놓는다 — 다른 워크디렉토리를 연
         // 채로 앞 워크디렉토리에 받을 레포를 고르고 있으면, 받아 온 것이 화면에 없는 자리에 떨어진다.
         workDirInitialization.forgetLastFailure()
@@ -124,7 +133,8 @@ class InProcessScreenFacingCore(
         chatSessions.answerPermission(target, toolUseId, choice)
 
     override fun endSession(target: SessionTarget) {
-        coroutineScope.launch { chatSessions.endSession(target) }
+        // 보유 목록에서 빼는 데까지 이 호출 안에서 끝낸다 — closeWorkDir 와 같은 이유다.
+        coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) { chatSessions.endSession(target) }
     }
 
     override fun answerGate(gateQuestionId: String, approved: Boolean) =

@@ -7,6 +7,8 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
@@ -59,6 +61,46 @@ class ChildSessionLifecycleStateHolderTest {
         assertEquals(setOf(bed.child(1), bed.child(2)), bed.opener.endedSessions.take(2).toSet())
         assertEquals(bed.main, bed.opener.endedSessions.last())
         assertEquals(emptyList(), bed.holder.sessionTree.value.children)
+    }
+
+    @Test
+    fun `모두 끝내기를 시작한 순간 보유와 대화를 놓고 그 사이 들어온 진입은 옛 프로세스가 끝난 뒤 띄운다`() = runTest {
+        // 하위를 끝내기를 기다리는 사이 메인이 보유 목록에 남아 있으면, 새 워크디렉토리에서 메인에 들어가는 요청이
+        // "이미 보유 중" 으로 버려지고 옛 전사가 화면에 남는다. 그렇다고 옛 메인이 끝나기 전에 새 메인을 띄우면 같은
+        // 대화를 두 프로세스가 연다(5.6 의 --session-id already in use).
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) { bed.holder.endAllSessions() }
+
+        // 하위는 끝내는 걸음이 보유 목록에서 찾아 끝내므로 그때까지 남는다. 사람이 다시 들어갈 수 있는 세션만 곧바로 빠진다.
+        assertEquals(setOf<SessionTarget>(SessionTarget.Child("child-1")), bed.holder.heldSessionTargets.value)
+        assertEquals(emptyMap(), bed.holder.conversations.value)
+
+        bed.holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        val reopenedMain = bed.opener.openedSessions.last()
+        assertEquals(listOf(bed.child(1), bed.main), bed.opener.endedSessions)
+        assertEquals(3, bed.opener.openedSessions.size)
+        assertEquals(0, reopenedMain.endSessionCount)
+        assertEquals(setOf<SessionTarget>(SessionTarget.Main), bed.holder.heldSessionTargets.value)
+        assertEquals(listOf(true), bed.reopenedAfterEveryEarlierSessionEnded)
+    }
+
+    @Test
+    fun `메인 끝내기를 시작한 순간 보유에서 빠지고 다시 들어온 메인은 옛 메인이 끝난 뒤 띄운다`() = runTest {
+        val bed = mainWithChildrenTestBed(childCount = 1)
+
+        backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) { bed.holder.endSession(SessionTarget.Main) }
+
+        assertEquals(setOf<SessionTarget>(SessionTarget.Child("child-1")), bed.holder.heldSessionTargets.value)
+
+        bed.holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        assertEquals(3, bed.opener.openedSessions.size)
+        assertEquals(setOf<SessionTarget>(SessionTarget.Main), bed.holder.heldSessionTargets.value)
+        assertEquals(listOf(true), bed.reopenedAfterEveryEarlierSessionEnded)
     }
 
     @Test

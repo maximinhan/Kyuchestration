@@ -178,6 +178,15 @@ class ChatSessionStateHolder(
 
     private var lastEntryRequestId = 0L
 
+    /**
+     * 사람이 시킨 끝내기(세션 하나 · 전부)가 아직 프로세스를 기다리는 중이면 그 끝. 새 진입은 이것을 기다린 뒤 띄운다.
+     *
+     * 끝내기는 보유 목록과 전사를 **시작하는 순간** 놓는다 — 그래야 그 사이 들어온 진입이 "이미 보유 중" 으로 버려지지
+     * 않는다. 대신 프로세스는 아직 살아 있으므로, 같은 대화를 곧바로 다시 띄우면 두 프로세스가 한 대화를 연다
+     * (5.6 의 `--session-id already in use`). 진입이 이 끝을 기다리는 것이 그 둘을 함께 지키는 자리다.
+     */
+    private var sessionsEnding: Job? = null
+
     private val mutableSessionTree = MutableStateFlow(SessionTree())
 
     /**
@@ -268,8 +277,10 @@ class ChatSessionStateHolder(
         val requestId = lastEntryRequestId
         pendingEntryRequestIds[target] = requestId
         mutableSessionEntries.value += target to SessionEntryState.Running
+        val endingBeforeEntry = sessionsEnding
 
         coroutineScope.launch {
+            endingBeforeEntry?.join()
             val opened = withContext(sessionEntryDispatcher) {
                 runCatching { openChatSession(workDirPath, target, conversationChoice) }
             }
@@ -416,16 +427,38 @@ class ChatSessionStateHolder(
         mutableSessionEntries.value -= target
         mutableConversations.value -= target
 
-        // 원칙 17 — 메인이 끝나면 하위가 끝난다. 하위 먼저다: 메인이 먼저 끝나면 하위의 물음이 답 없이 끊긴다.
-        if (target == SessionTarget.Main) {
-            endChildrenOfMain()
-            forgetChildren()
-        }
+        // 하위를 기다리기 전에 목록에서 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가르고,
+        // 그 사이 다시 들어온 진입이 "이미 보유 중" 으로 버려지지 않는다([sessionsEnding]).
+        val held = mutableHeldSessions.value.firstOrNull { it.target == target }
+        held?.let { replaceHeldSessions(mutableHeldSessions.value - it) }
 
-        val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
-        // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
-        replaceHeldSessions(mutableHeldSessions.value - held)
-        endSessionProcess(held)
+        endingSessions {
+            // 원칙 17 — 메인이 끝나면 하위가 끝난다. 하위 먼저다: 메인이 먼저 끝나면 하위의 물음이 답 없이 끊긴다.
+            if (target == SessionTarget.Main) {
+                endChildrenOfMain()
+                forgetChildren()
+            }
+            held?.let { endSessionProcess(it) }
+        }
+    }
+
+    /**
+     * 끝내기 하나를 [sessionsEnding] 으로 걸어 두고 돈다. 앞서 걸린 끝내기가 아직 돌면 그것까지 기다린 뒤 풀린다 —
+     * 그 뒤의 진입은 앞의 모든 끝내기를 지난다.
+     *
+     * 새 코루틴을 띄우지 않고 부른 쪽에서 돈다. 창을 닫는 자리는 화면 스레드를 runBlocking 으로 붙잡고 이것을 기다리는데,
+     * 그 스레드의 스코프로 띄우면 영영 돌 차례가 오지 않는다.
+     */
+    private suspend fun endingSessions(end: suspend () -> Unit) {
+        val earlierEnding = sessionsEnding
+        val ending = Job()
+        sessionsEnding = ending
+        try {
+            end()
+            earlierEnding?.join()
+        } finally {
+            ending.complete()
+        }
     }
 
     /**
@@ -484,15 +517,20 @@ class ChatSessionStateHolder(
         pendingEntryRequestIds.clear()
         mutableSessionEntries.value = emptyMap()
 
-        // 하위 먼저, 상위 나중(6.13). 하위끼리는 한꺼번에 끝낸다.
-        endChildrenOfMain()
-        forgetChildren()
+        // 사람이 연 세션과 전사는 기다리기 전에 놓는다. 하위를 끝내는 사이 메인이 보유 목록에 남아 있으면, 그 사이 새
+        // 워크디렉토리에서 들어온 진입이 "이미 보유 중" 으로 버려지고 옛 전사가 화면에 선다. 하위는 목록에 남긴다 —
+        // 하위를 끝내는 걸음(endChildSession)이 그 목록에서 하위를 찾아 끝낸다.
+        val personOpenedSessions = mutableHeldSessions.value.filter { it.target is PersonOpenedSessionTarget }
+        replaceHeldSessions(mutableHeldSessions.value - personOpenedSessions.toSet())
         mutableConversations.value = emptyMap()
 
-        val endingSessions = mutableHeldSessions.value
-        replaceHeldSessions(emptyList())
-        coroutineScope {
-            endingSessions.map { async { endSessionProcess(it) } }.awaitAll()
+        endingSessions {
+            // 하위 먼저, 상위 나중(6.13). 하위끼리는 한꺼번에 끝낸다.
+            endChildrenOfMain()
+            forgetChildren()
+            coroutineScope {
+                personOpenedSessions.map { async { endSessionProcess(it) } }.awaitAll()
+            }
         }
     }
 
