@@ -15,6 +15,9 @@ import com.kyuchestration.desktop.terminal.chat.SessionTree
 /**
  * 화면이 받은 틀로 다시 세운 코어의 상태 — `ScreenFacingCore` 의 `StateFlow` 열 개가 들 값이다.
  *
+ * 게시자(코어 쪽)도 같은 타입으로 "마지막으로 보낸 상태" 를 든다. 흐름이 하나 늘면 고칠 자리가 이 타입과 그 짝([smallStates] ·
+ * [of] · [after])뿐이도록 — 게시자와 거울이 따로 사본을 들면 한쪽에서 빠진 필드는 스냅샷에서만 조용히 빠진다.
+ *
  * 변화를 상태에 얹는 규칙([after])을 순수 함수로 둔다. 거울은 이것을 받아 흐름에 싣기만 하고, 게시자 → 거울의 왕복은 화면
  * 없이 이 함수로 시험한다(core-ui-split-design.md 6.15).
  */
@@ -76,6 +79,19 @@ data class CoreStateImage(
         )
     }
 
+    /** 스냅샷의 첫 조각 — 대화를 뺀 전부. [of] 의 짝이다. */
+    fun smallStates() = SmallStates(
+        engineInstallation = engineInstallation,
+        claudeAuthentication = claudeAuthentication,
+        workDirDashboard = workDirDashboard,
+        workDirInitialization = workDirInitialization,
+        sessionEntries = sessionEntries.toWire(),
+        heldSessions = heldSessions.toList(),
+        sessionTree = sessionTree,
+        gateQuestions = gateQuestions,
+        repositoryClone = repositoryClone,
+    )
+
     private fun conversationTheChangeNeeds(change: ScreenChange.ConversationChange): ChatConversation =
         checkNotNull(conversations[change.target]) { "${change.target.label} 대화의 머리보다 ${change::class.simpleName} 이 먼저 왔다" }
 
@@ -99,6 +115,10 @@ data class CoreStateImage(
         )
     }
 }
+
+/** 진입 상태 맵을 선 위의 목록으로. JSON 객체의 열쇠는 문자열뿐이라 대상을 열쇠로 둘 수 없다. */
+fun Map<PersonOpenedSessionTarget, SessionEntryState>.toWire(): List<SessionEntryOfTarget> =
+    map { (target, entry) -> SessionEntryOfTarget(target, entry) }
 
 private fun List<SessionEntryOfTarget>.toSessionEntryMap(): Map<PersonOpenedSessionTarget, SessionEntryState> =
     associate { it.target to it.entry }

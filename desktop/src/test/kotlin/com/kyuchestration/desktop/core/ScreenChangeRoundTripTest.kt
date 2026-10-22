@@ -35,7 +35,7 @@ class ScreenChangeRoundTripTest {
             SessionTarget.Main to ChatConversation(SessionTarget.Main, entries = List(3) { ChatEntry.AssistantSaid("가".repeat(200_000)) }),
         )
         var image = imageFromSnapshot()
-        assertEquals(coreImage(), image)
+        assertEquals(core.currentStateImage(), image)
 
         val steps: List<() -> Unit> = listOf(
             { updateMain { it.copy(entries = it.entries + ChatEntry.UserSaid("다음")) } },
@@ -71,7 +71,7 @@ class ScreenChangeRoundTripTest {
         steps.forEach { step ->
             step()
             image = publisher.pendingChangeFrames().fold(image) { current, frame -> current.after(throughTheWire(frame).change) }
-            assertEquals(coreImage(), image)
+            assertEquals(core.currentStateImage(), image)
         }
     }
 
@@ -85,18 +85,6 @@ class ScreenChangeRoundTripTest {
         return parts.drop(1).fold(CoreStateImage.of(first.states)) { image, part -> image.after(part) }
     }
 
-    private fun coreImage() = CoreStateImage(
-        engineInstallation = core.engineInstallationState.value,
-        claudeAuthentication = core.claudeAuthenticationState.value,
-        workDirDashboard = core.workDirDashboardState.value,
-        workDirInitialization = core.workDirInitializationState.value,
-        conversations = core.chatConversations.value,
-        sessionEntries = core.chatSessionEntries.value,
-        heldSessions = core.heldChatSessionTargets.value,
-        sessionTree = core.sessionTree.value,
-        gateQuestions = core.childSessionGateQuestions.value,
-        repositoryClone = core.repositoryCloneState.value,
-    )
 
     @Suppress("UNCHECKED_CAST")
     private fun <T : FrameToScreen> throughTheWire(frame: T): T = decodeFrameToScreen(encodeFrameToScreen(frame)) as T

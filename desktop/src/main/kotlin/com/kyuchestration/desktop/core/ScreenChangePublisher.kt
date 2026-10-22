@@ -1,24 +1,15 @@
 package com.kyuchestration.desktop.core
 
-import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
-import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
-import com.kyuchestration.desktop.engine.EngineInstallationState
-import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.protocol.CoreStateImage
 import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenChange.ConversationChange
-import com.kyuchestration.desktop.protocol.SessionEntryOfTarget
-import com.kyuchestration.desktop.protocol.SmallStates
 import com.kyuchestration.desktop.protocol.encodedByteCount
 import com.kyuchestration.desktop.protocol.header
-import com.kyuchestration.desktop.repoclone.RepositoryCloneState
-import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
+import com.kyuchestration.desktop.protocol.toWire
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
-import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
-import com.kyuchestration.desktop.terminal.chat.SessionEntryState
-import com.kyuchestration.desktop.terminal.chat.SessionTree
 
 /**
  * 코어의 상태를 화면에 보낼 틀로 바꾸는 자리(core-ui-split-design.md 6.5).
@@ -36,7 +27,7 @@ import com.kyuchestration.desktop.terminal.chat.SessionTree
 class ScreenChangePublisher(private val core: ScreenFacingCore) {
 
     /** 화면이 마지막으로 받은 상태. 스냅샷을 내기 전(아직 붙은 화면이 없다)에는 없다. */
-    private var lastSent: PublishedState? = null
+    private var lastSent: CoreStateImage? = null
 
     private var lastSequence: Long = 0
 
@@ -47,7 +38,7 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
      * 1 MiB 를 넘으면 그 조각만 크다 — 쪼개면 반쪽짜리 카드를 그리는 길이 생긴다.
      */
     fun snapshotFrames(): List<FrameToScreen.Snapshot> {
-        val now = currentState()
+        val now = core.currentStateImage()
         lastSent = now
         val parts = buildList {
             add(ScreenChange.SmallStatesReplaced(now.smallStates()))
@@ -71,7 +62,7 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
      */
     fun pendingChangeFrames(): List<FrameToScreen.Change> {
         val sent = lastSent ?: return emptyList()
-        val now = currentState()
+        val now = core.currentStateImage()
         lastSent = now
 
         val changes = buildList {
@@ -112,18 +103,6 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
         return changes.map { change -> FrameToScreen.Change(seq = ++lastSequence, change = change) }
     }
 
-    private fun currentState() = PublishedState(
-        engineInstallation = core.engineInstallationState.value,
-        claudeAuthentication = core.claudeAuthenticationState.value,
-        workDirDashboard = core.workDirDashboardState.value,
-        workDirInitialization = core.workDirInitializationState.value,
-        conversations = core.chatConversations.value,
-        sessionEntries = core.chatSessionEntries.value,
-        heldSessions = core.heldChatSessionTargets.value,
-        sessionTree = core.sessionTree.value,
-        gateQuestions = core.childSessionGateQuestions.value,
-        repositoryClone = core.repositoryCloneState.value,
-    )
 
     private fun tailInPieces(target: SessionTarget, entries: List<ChatEntry>): List<ScreenChange.ConversationTailChanged> {
         val pieces = mutableListOf<ScreenChange.ConversationTailChanged>()
@@ -144,30 +123,6 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
         return pieces
     }
 
-    private data class PublishedState(
-        val engineInstallation: EngineInstallationState,
-        val claudeAuthentication: ClaudeAuthenticationState,
-        val workDirDashboard: WorkDirDashboardState,
-        val workDirInitialization: WorkDirInitializationState,
-        val conversations: Map<SessionTarget, ChatConversation>,
-        val sessionEntries: Map<PersonOpenedSessionTarget, SessionEntryState>,
-        val heldSessions: Set<SessionTarget>,
-        val sessionTree: SessionTree,
-        val gateQuestions: List<ChildSessionGateQuestion>,
-        val repositoryClone: RepositoryCloneState,
-    ) {
-        fun smallStates() = SmallStates(
-            engineInstallation = engineInstallation,
-            claudeAuthentication = claudeAuthentication,
-            workDirDashboard = workDirDashboard,
-            workDirInitialization = workDirInitialization,
-            sessionEntries = sessionEntries.toWire(),
-            heldSessions = heldSessions.toList(),
-            sessionTree = sessionTree,
-            gateQuestions = gateQuestions,
-            repositoryClone = repositoryClone,
-        )
-    }
 
     private companion object {
         /** 스냅샷 꼬리 조각 하나의 한도. 1.26 MB 한 줄 왕복이 65 ms 였다(설계 3.1) — 조각 하나가 화면을 그만큼만 붙잡는다. */
@@ -175,8 +130,20 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
     }
 }
 
-private fun Map<PersonOpenedSessionTarget, SessionEntryState>.toWire(): List<SessionEntryOfTarget> =
-    map { (target, entry) -> SessionEntryOfTarget(target, entry) }
+
+/** 코어의 흐름 열 개의 지금 값. 게시자가 견주는 기준이자, 거울이 다시 세우는 것과 같은 타입이다. */
+internal fun ScreenFacingCore.currentStateImage() = CoreStateImage(
+    engineInstallation = engineInstallationState.value,
+    claudeAuthentication = claudeAuthenticationState.value,
+    workDirDashboard = workDirDashboardState.value,
+    workDirInitialization = workDirInitializationState.value,
+    conversations = chatConversations.value,
+    sessionEntries = chatSessionEntries.value,
+    heldSessions = heldChatSessionTargets.value,
+    sessionTree = sessionTree.value,
+    gateQuestions = childSessionGateQuestions.value,
+    repositoryClone = repositoryCloneState.value,
+)
 
 /**
  * 대화 하나가 [previous] 에서 [current] 로 온 길. [previous] 가 없으면 새로 선 대화다.
