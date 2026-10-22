@@ -1,7 +1,9 @@
 package com.kyuchestration.desktop.core
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.mirror.CoreMirror
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -21,11 +23,16 @@ class InProcessCoreStartTest {
     fun `코어를 조립하다 실패하면 화면 쪽 줄이 그 실패로 닫혀 거울을 세우던 자리가 같은 실패를 받는다`() {
         val framesToCore = Channel<String>(Channel.UNLIMITED)
         val framesToScreen = Channel<String>(Channel.UNLIMITED)
+        val recordedEntries = CopyOnWriteArrayList<DiagnosticLogEntry>()
 
         startCoreInThisProcess(
             framesFromScreen = framesToCore,
             framesToScreen = framesToScreen,
-            diagnosticLog = DiagnosticLog.Discarding,
+            diagnosticLog = object : DiagnosticLog {
+                override fun record(entry: DiagnosticLogEntry) {
+                    recordedEntries += entry
+                }
+            },
             assembleCore = { error("홀더를 세우다 실패했다") },
         )
 
@@ -37,5 +44,7 @@ class InProcessCoreStartTest {
             }
         }
         assertEquals("홀더를 세우다 실패했다", failure.message)
+        val recorded = recordedEntries.filterIsInstance<DiagnosticLogEntry.UnhandledFailure>().single()
+        assertEquals("홀더를 세우다 실패했다", recorded.failure.message)
     }
 }

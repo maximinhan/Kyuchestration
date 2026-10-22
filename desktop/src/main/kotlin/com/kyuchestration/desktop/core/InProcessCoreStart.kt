@@ -1,7 +1,9 @@
 package com.kyuchestration.desktop.core
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -31,9 +33,13 @@ fun startCoreInThisProcess(
 ) {
     // 데몬 스레드인 것은 코어가 끝난 뒤 이 스레드가 할 일 없이 남아 JVM 이 끝나는 것을 막지 않게다.
     val coreDispatcher = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "kyuchestration-core").apply { isDaemon = true }
+        Thread(task, CORE_THREAD_NAME).apply { isDaemon = true }
     }.asCoroutineDispatcher()
-    val coreScope = CoroutineScope(coreDispatcher + CoroutineName("core"))
+    // 코어가 실패로 끝나면 그 원인은 여기서 진단 기록에 남는다. 화면 쪽은 줄이 그 실패로 닫히는 것을 보고 알린다(아래).
+    val recordingCoreFailure = CoroutineExceptionHandler { _, failure ->
+        diagnosticLog.record(DiagnosticLogEntry.UnhandledFailure(CORE_THREAD_NAME, failure))
+    }
+    val coreScope = CoroutineScope(coreDispatcher + CoroutineName("core") + recordingCoreFailure)
     val coreRun = coreScope.launch {
         serveScreen(
             core = assembleCore(coreScope),
@@ -48,3 +54,5 @@ fun startCoreInThisProcess(
     // 자리가 같은 예외를 받아, 화면이 그 실패를 기록하고 눈에 보이게 끝난다. serveScreen 이 이미 닫았으면 아무 일도 없다.
     coreRun.invokeOnCompletion { cause -> framesToScreen.close(cause) }
 }
+
+private const val CORE_THREAD_NAME = "kyuchestration-core"
