@@ -33,7 +33,11 @@ import kotlinx.coroutines.test.TestScope
  * 같은 JVM 의 홀더 여섯을 [InProcessScreenFacingCore] 로 세운다. 포트는 람다와 작은 가짜다 — 조립 결정을 보는 시험과, 그
  * 조립 위에 파이프와 거울을 얹는 시험이 같은 코어를 쓴다.
  */
-internal fun TestScope.inProcessCoreTestBed(engineInstalledAtStart: Boolean = true): InProcessCoreTestBed {
+internal fun TestScope.inProcessCoreTestBed(
+    engineInstalledAtStart: Boolean = true,
+    claudeTokenStore: ClaudeTokenStore = NothingStoredClaudeTokenStore,
+    tokenProfileRegistry: TokenProfileRegistry = UnusedTokenProfileRegistry,
+): InProcessCoreTestBed {
     val testDispatcher = StandardTestDispatcher(testScheduler)
     var engineExecutable: Path? = if (engineInstalledAtStart) ENGINE_EXECUTABLE else null
     val claudeCli = RecordingClaudeCliAuthentication()
@@ -54,7 +58,7 @@ internal fun TestScope.inProcessCoreTestBed(engineInstalledAtStart: Boolean = tr
         ),
         claudeAuthentication = ClaudeAuthenticationStateHolder(
             claudeCliAuthentication = claudeCli,
-            claudeTokenStore = NothingStoredClaudeTokenStore,
+            claudeTokenStore = claudeTokenStore,
             coroutineScope = backgroundScope,
             tokenStoreDispatcher = testDispatcher,
         ),
@@ -72,7 +76,7 @@ internal fun TestScope.inProcessCoreTestBed(engineInstalledAtStart: Boolean = tr
             initializationDispatcher = testDispatcher,
         ),
         repositoryClone = RepositoryCloneStateHolder(
-            tokenProfileRegistry = UnusedTokenProfileRegistry,
+            tokenProfileRegistry = tokenProfileRegistry,
             gitHubRepositoryCatalog = UnusedGitHubRepositoryCatalog,
             workDirRepositoryCloner = UnusedWorkDirRepositoryCloner,
             coroutineScope = backgroundScope,
@@ -91,7 +95,7 @@ internal class InProcessCoreTestBed(
     val chatSessionOpener: RecordingChatSessionOpener,
 )
 
-/** 로그인돼 있다고 답하고, 몇 번 물었는지 센다. 이 시험들은 "언제 묻는가" 만 본다. */
+/** 로그인돼 있다고 답하고 붙여넣은 토큰도 받는다. 몇 번 물었는지 센다. */
 class RecordingClaudeCliAuthentication : ClaudeCliAuthentication {
     var credentialChecks = 0
         private set
@@ -103,7 +107,7 @@ class RecordingClaudeCliAuthentication : ClaudeCliAuthentication {
 
     override suspend fun startBrowserLogin(): ClaudeBrowserLogin = error("이 시험은 브라우저 로그인을 부르지 않는다")
 
-    override suspend fun tokenIsAccepted(token: String): ClaudeTokenVerdict = error("이 시험은 토큰을 검증하지 않는다")
+    override suspend fun tokenIsAccepted(token: String): ClaudeTokenVerdict = ClaudeTokenVerdict.Accepted
 }
 
 private object NothingStoredClaudeTokenStore : ClaudeTokenStore {

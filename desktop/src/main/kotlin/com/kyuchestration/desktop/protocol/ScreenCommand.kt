@@ -11,6 +11,10 @@ import kotlinx.serialization.Serializable
  * 화면이 코어에게 시키는 일 하나 — `ScreenFacingCore` 의 명령 하나가 틀 위에서 갖는 모양이다(core-ui-split-design.md 6.2 (나)).
  *
  * 이름은 목적어까지 적는다(6.4). 앱 소켓의 `kind`(`spawn` · `send` · `end` …)와 같은 낱말이 두 규약에서 다른 뜻이 되지 않게.
+ *
+ * **비밀을 싣는 명령 셋은 `toString` 에서 그 값을 가린다**(6.11). 명령은 거절 사유 · 시험의 실패 문구 · 디버거에 그대로
+ * 찍히기 쉬운 값이고, data class 의 기본 `toString` 은 토큰을 평문으로 적는다. 선 위에는 그대로 실린다 — 받는 쪽이 그것을
+ * 써야 하므로.
  */
 @Serializable
 sealed interface ScreenCommand {
@@ -31,9 +35,12 @@ sealed interface ScreenCommand {
     @SerialName("start_claude_browser_login")
     data object StartClaudeBrowserLogin : ScreenCommand
 
+    /** 브라우저가 준 코드는 한 번 쓰는 비밀이다 — 기록에 남기지 않는 것이 인증 쪽의 규칙이다(ClaudeAuthenticationFailure). */
     @Serializable
     @SerialName("submit_claude_browser_login_code")
-    data class SubmitClaudeBrowserLoginCode(val code: String) : ScreenCommand
+    data class SubmitClaudeBrowserLoginCode(val code: String) : ScreenCommand {
+        override fun toString(): String = "SubmitClaudeBrowserLoginCode(code=$MASKED_SECRET)"
+    }
 
     @Serializable
     @SerialName("cancel_claude_browser_login")
@@ -41,7 +48,9 @@ sealed interface ScreenCommand {
 
     @Serializable
     @SerialName("use_claude_token")
-    data class UseClaudeToken(val token: String) : ScreenCommand
+    data class UseClaudeToken(val token: String) : ScreenCommand {
+        override fun toString(): String = "UseClaudeToken(token=$MASKED_SECRET)"
+    }
 
     @Serializable
     @SerialName("open_workdir")
@@ -128,7 +137,9 @@ sealed interface ScreenCommand {
 
     @Serializable
     @SerialName("register_token_profile")
-    data class RegisterTokenProfile(val profileName: String, val token: String) : ScreenCommand
+    data class RegisterTokenProfile(val profileName: String, val token: String) : ScreenCommand {
+        override fun toString(): String = "RegisterTokenProfile(profileName=$profileName, token=$MASKED_SECRET)"
+    }
 
     @Serializable
     @SerialName("continue_with_registered_token_profile")
@@ -154,3 +165,5 @@ sealed interface ScreenCommand {
     @SerialName("retry_failed_clone_step")
     data object RetryFailedCloneStep : ScreenCommand
 }
+
+private const val MASKED_SECRET = "***"
