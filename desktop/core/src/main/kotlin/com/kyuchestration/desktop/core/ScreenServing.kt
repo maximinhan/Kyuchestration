@@ -50,6 +50,8 @@ suspend fun serveScreen(
     val publisher = ScreenChangePublisher(core)
     var lastSnapshotBytes = 0L
     var screenFellBehind = false
+    // 거울은 seq 가 건너뛰면 같은 연결에서 다시 인사한다(6.4). 화면이 붙은 것은 연결의 첫 인사 한 번이다.
+    var screenGreeted = false
 
     fun write(frame: FrameToScreen) = framesToScreen.write(encodeFrameToScreen(frame))
     fun sendSnapshot() {
@@ -109,7 +111,10 @@ suspend fun serveScreen(
                 }
                 when (frame) {
                     is FrameToCore.Hello -> {
-                        diagnosticLog.record(DiagnosticLogEntry.ScreenGreeted(frame.screenVersion, frame.screenOs))
+                        if (!screenGreeted) {
+                            screenGreeted = true
+                            diagnosticLog.record(DiagnosticLogEntry.ScreenGreeted(frame.screenVersion, frame.screenOs))
+                        }
                         write(
                             FrameToScreen.Welcome(
                                 protocol = SCREEN_PROTOCOL_VERSION,

@@ -315,6 +315,29 @@ class ScreenPipeRoundTripTest {
         assertEquals(TEST_CORE_IDENTITY.wslDistributionName, welcome.wslDistro)
     }
 
+    /** 거울은 seq 가 건너뛰면 다시 인사한다(6.4). 같은 화면이 여러 번 붙은 것처럼 적히면 기록을 읽는 사람이 화면을 셀 수 없다. */
+    @Test
+    fun `같은 연결에서 다시 온 인사는 화면이 붙었다고 다시 적지 않는다`() = runTest {
+        val coreDiagnosticLog = RecordingDiagnosticLog()
+        val pipe = FramePipe(this)
+        backgroundScope.launch {
+            serveScreen(
+                RecordingScreenFacingCore(),
+                TEST_CORE_IDENTITY,
+                framesFromScreen = pipe.screenToCore,
+                framesToScreen = pipe.coreOutbox,
+                diagnosticLog = coreDiagnosticLog,
+            )
+        }
+
+        pipe.screenSends(TEST_SCREEN_HELLO)
+        pipe.screenSends(TEST_SCREEN_HELLO)
+        runCurrent()
+
+        assertEquals(1, coreDiagnosticLog.recordedEntries.filterIsInstance<DiagnosticLogEntry.ScreenGreeted>().size)
+        assertEquals(2, pipe.framesReceivedByScreen().filterIsInstance<FrameToScreen.Welcome>().size)
+    }
+
     @Test
     fun `코어 스코프가 취소돼도 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
         val core = RecordingScreenFacingCore()
