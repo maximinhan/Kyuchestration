@@ -39,6 +39,24 @@ class ChildProcessCommandTest {
         assertEquals(listOf("claude"), command)
     }
 
+    /**
+     * PATH 의 상대 항목(`bin` · `.`)은 자식이 도는 자리 기준이다 — 자식은 그 디렉토리에서 실행된다. 이 JVM 의 작업 디렉토리 기준으로
+     * 찾으면 찾은 파일과 실행되는 파일이 갈린다. 넘기는 것은 언제나 절대 경로다.
+     */
+    @Test
+    fun `PATH 의 상대 항목은 자식의 작업 디렉토리 기준으로 찾아 절대 경로로 넘긴다`() {
+        val sessionDirectory = Path.of("/work/proj-a")
+
+        val command = commandResolvedOnChildSearchPath(
+            command = listOf("claude"),
+            childEnvironment = mapOf("PATH" to listOf("bin", "/usr/bin").joinToString(File.pathSeparator)),
+            childWorkingDirectory = sessionDirectory,
+            isExecutableFile = setOf(Path.of("/work/proj-a/bin/claude"), Path.of("/usr/bin/claude"))::contains,
+        )
+
+        assertEquals(listOf("/work/proj-a/bin/claude"), command)
+    }
+
     @Test
     fun `경로가 담긴 명령은 찾지 않는다`() {
         val command = commandResolvedOnChildSearchPath(

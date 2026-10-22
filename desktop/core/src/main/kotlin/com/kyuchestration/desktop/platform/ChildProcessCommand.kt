@@ -13,19 +13,30 @@ import kotlin.io.path.isRegularFile
  * 물려주는데(childProcessEnvironment), 그 PATH 로 찾지 않으면 물려준 것과 부른 것이 갈린다. `wsl.exe -e` 로 뜬 코어의 JVM PATH
  * 에는 `~/.local/bin` 이 없어(설계 3.7) claude 를 아예 찾지 못했고, Finder 로 띄운 맥 앱도 같은 처지다.
  *
+ * PATH 의 상대 항목(`bin` · `.`)은 [childWorkingDirectory] 기준으로 푼다 — 자식은 그 자리에서 실행된다. 이 JVM 의 작업 디렉토리
+ * 기준으로 찾으면 찾은 파일과 실행되는 파일이 갈린다. 넘기는 것은 언제나 절대 경로다.
+ *
  * 찾지 못하면 그대로 두는 것은 띄우는 자리가 "실행하지 못했다" 를 이미 사람의 말로 알리기 때문이다.
+ *
+ * @param childWorkingDirectory 자식이 도는 자리. null 이면 이 JVM 의 작업 디렉토리다 — ProcessBuilder 에 자리를 주지 않으면
+ *   자식이 그것을 물려받는다.
  */
 internal fun commandResolvedOnChildSearchPath(
     command: List<String>,
     childEnvironment: Map<String, String>,
+    childWorkingDirectory: Path? = null,
     isExecutableFile: (Path) -> Boolean = ::isExecutableRegularFile,
 ): List<String> {
     val executableName = command.firstOrNull() ?: return command
     if (File.separatorChar in executableName || '/' in executableName) {
         return command
     }
-    val found = findExecutableOnSearchPath(executableName, childEnvironment[SEARCH_PATH_VARIABLE], isExecutableFile)
-        ?: return command
+    val searchPath = childEnvironment[SEARCH_PATH_VARIABLE].orEmpty()
+        .split(File.pathSeparatorChar)
+        .filter { it.isNotBlank() }
+        .map { entry -> (childWorkingDirectory ?: Path.of("")).resolve(entry).toAbsolutePath().toString() }
+        .joinToString(File.pathSeparator)
+    val found = findExecutableOnSearchPath(executableName, searchPath, isExecutableFile) ?: return command
     return listOf(found.toString()) + command.drop(1)
 }
 
