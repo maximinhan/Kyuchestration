@@ -29,4 +29,34 @@ require(Regex("""\d+\.\d+\.\d+""").matches(desktopVersion)) {
 subprojects {
     group = "com.kyuchestration.desktop"
     version = desktopVersion
+
+    plugins.withId("org.jetbrains.kotlin.jvm") {
+        // 툴체인을 고정해 두면 개발자 머신의 기본 JDK 가 무엇이든 같은 바이트코드가 나온다.
+        extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
+            jvmToolchain(21)
+        }
+        dependencies {
+            // kotlin("test") 는 적용된 Kotlin 플러그인의 버전을 그대로 따라간다. 버전 카탈로그에 한 줄 더 적으면 Kotlin 을
+            // 올릴 때 두 곳을 맞춰야 하므로 일부러 버전을 적지 않는다.
+            "testImplementation"(kotlin("test"))
+        }
+    }
+
+    tasks.withType<Test>().configureEach {
+        useJUnitPlatform()
+
+        // 통합 검증이 읽는 환경 변수를 시험 JVM 까지 실어 보낸다. 모듈마다 적어 두면 한 곳에서 빠지는 날 그 모듈의 실 claude
+        // 시험이 조용히 건너뛴다 — 그래서 모든 모듈의 시험이 이 한 자리를 지난다.
+        //
+        // 그러지 않으면 조용히 건너뛴다. Gradle 데몬은 한 번 뜨면 그때의 환경을 들고 계속 사는데,
+        // 시험 JVM 은 그 데몬의 환경을 물려받는다 — 그래서 KYU_BINARY_PATH 를 주고 불러도 데몬이
+        // 먼저 떠 있었으면 시험은 그 값을 못 본다. 검증이 실패로 끝나는 것이 아니라 **건너뛴 채로
+        // 초록**이 되므로, 준 사람은 자기가 검증했다고 믿는다.
+        //
+        // providers.environmentVariable 은 이 빌드를 부른 쪽의 환경을 읽는다(데몬의 것이 아니다).
+        // 그 값을 여기서 시험 JVM 에 다시 실어 주면 부를 때마다 준 값이 그대로 닿는다.
+        listOf("KYU_BINARY_PATH", "KYU_CLAUDE_CHAT_INTEGRATION").forEach { variableName ->
+            providers.environmentVariable(variableName).orNull?.let { value -> environment(variableName, value) }
+        }
+    }
 }
