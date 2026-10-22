@@ -10,14 +10,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.core.startCoreInThisProcess
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
 import com.kyuchestration.desktop.mirror.CoreMirror
+import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
 import kotlinx.coroutines.CoroutineName
@@ -35,7 +36,7 @@ import kotlinx.coroutines.runBlocking
  * 띄우는 자리 하나만 바뀐다. 이 파일에 남은 것은 화면의 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
  */
 fun main() {
-    val diagnosticLogPath = diagnosticLogFile()
+    val diagnosticLogPath = diagnosticLogFile(DiagnosticLogOwner.Screen)
     val diagnosticLog = FileDiagnosticLog(diagnosticLogPath)
 
     // 창을 세우기 전에 세운다. 화면을 조립하다 죽는 예외도 받아야 하기 때문이다.
