@@ -3,18 +3,22 @@ package com.kyuchestration.desktop.mirror
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import com.kyuchestration.desktop.core.CALLS_TO_EVERY_SCREEN_COMMAND
 import com.kyuchestration.desktop.core.RecordingScreenFacingCore
-import com.kyuchestration.desktop.protocol.ScreenFacingCore
+import com.kyuchestration.desktop.core.TEST_SCREEN_HELLO
+import com.kyuchestration.desktop.core.TEST_SCREEN_VERSION_LABEL
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.protocol.ByeReason
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.ConversationHeader
 import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
+import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenChange
+import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.SessionEntryOfTarget
 import com.kyuchestration.desktop.protocol.SmallStates
 import com.kyuchestration.desktop.protocol.decodeFrameToCore
@@ -30,6 +34,7 @@ import com.kyuchestration.desktop.terminal.chat.TurnState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -54,12 +59,12 @@ class CoreMirrorTest {
     @Test
     fun `붙으면 인사하고 인사 답과 스냅샷으로 첫 상태를 세운다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome(engineDirectory = "/home/yawn/engine"))
+        pipe.coreSends(welcome(engineDirectory = "/home/yawn/engine"))
         pipe.coreSendsSnapshot(seq = 4, SMALL_STATES, MAIN_HEADER, MAIN_TAIL)
 
         val mirror = pipe.connect(this)
 
-        assertEquals(listOf<FrameToCore>(FrameToCore.Hello), pipe.framesSentToCore())
+        assertEquals(listOf<FrameToCore>(TEST_SCREEN_HELLO), pipe.framesSentToCore())
         assertEquals("/home/yawn/engine", mirror.engineDirectoryLabel)
         assertEquals(EngineInstallationState.EngineReady, mirror.engineInstallationState.value)
         assertEquals(mapOf<PersonOpenedSessionTarget, SessionEntryState>(SessionTarget.Repo("proj-a") to SessionEntryState.Running), mirror.chatSessionEntries.value)
@@ -68,9 +73,41 @@ class CoreMirrorTest {
     }
 
     @Test
+    fun `코어의 진단 기록 자리를 인사 답에서 받아 둔다`() = runTest {
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(welcome())
+        pipe.coreSendsSnapshot(seq = 1, SMALL_STATES)
+
+        val mirror = pipe.connect(this)
+
+        assertEquals("/home/yawn/.local/state/kyuchestration/core.log", mirror.coreDiagnosticLogPath)
+    }
+
+    @Test
+    fun `코어의 규약 판이 다르면 거울을 세우지 않고 두 판을 돌려주며 코어로 가는 줄을 닫는다`() = runTest {
+        // 다른 규약의 틀로 거울을 세우면 뜻이 바뀐 필드를 이 화면의 뜻으로 읽는다(설계 6.14).
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(welcome(protocol = SCREEN_PROTOCOL_VERSION + 1, coreVersion = "v9.0.0"))
+        pipe.coreSends(FrameToScreen.Bye(ByeReason.ProtocolMismatch))
+
+        val connection = pipe.connectOrMismatch(this)
+
+        assertEquals(
+            CoreConnection.ProtocolMismatch(
+                screenVersion = TEST_SCREEN_VERSION_LABEL,
+                screenProtocol = SCREEN_PROTOCOL_VERSION,
+                coreVersion = "v9.0.0",
+                coreProtocol = SCREEN_PROTOCOL_VERSION + 1,
+            ),
+            connection,
+        )
+        assertTrue(pipe.toCore.isClosedForSend)
+    }
+
+    @Test
     fun `이어지는 변화를 그 흐름에 얹는다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 4, SMALL_STATES, MAIN_HEADER, MAIN_TAIL)
         val mirror = pipe.connect(this)
 
@@ -88,19 +125,19 @@ class CoreMirrorTest {
     @Test
     fun `seq 가 건너뛰면 다시 인사하고 새 스냅샷의 마지막 조각이 올 때까지 거울을 그대로 둔다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 4, SMALL_STATES, MAIN_HEADER, MAIN_TAIL)
         val mirror = pipe.connect(this)
 
         pipe.coreSends(FrameToScreen.Change(6, ScreenChange.EngineInstallationChanged(EngineInstallationState.InstallationRunning)))
         runCurrent()
 
-        assertEquals(listOf<FrameToCore>(FrameToCore.Hello, FrameToCore.Hello), pipe.framesSentToCore())
+        assertEquals(listOf<FrameToCore>(TEST_SCREEN_HELLO, TEST_SCREEN_HELLO), pipe.framesSentToCore())
         assertEquals(EngineInstallationState.EngineReady, mirror.engineInstallationState.value)
 
         // 다시 인사한 뒤로도 그 전에 나간 변화가 먼저 온다. 스냅샷이 오기 전의 것은 거울에 얹지 않는다.
         pipe.coreSends(FrameToScreen.Change(7, ScreenChange.EngineInstallationChanged(EngineInstallationState.EngineMissing)))
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSends(FrameToScreen.Snapshot(7, ScreenChange.SmallStatesReplaced(SMALL_STATES.copy(engineInstallation = EngineInstallationState.EngineMissing)), last = false))
         runCurrent()
         assertEquals(EngineInstallationState.EngineReady, mirror.engineInstallationState.value)
@@ -117,7 +154,7 @@ class CoreMirrorTest {
     @Test
     fun `명령마다 다른 id 를 단 명령 틀을 보내고 그 모양은 같은 JVM 의 코어가 받는 것과 같다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
         val mirror = pipe.connect(this)
         val inProcess = RecordingScreenFacingCore()
@@ -137,7 +174,7 @@ class CoreMirrorTest {
         // 화면은 진입을 보내자마자 그 세션을 본다(ChatViewing.moveTo). 거울이 코어의 답을 기다리는 동안 그 세션이 맵 어디에도
         // 없으면 보는 세션이 null 로 접히고 고른 것까지 놓친다.
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES.copy(sessionEntries = emptyList()))
         val mirror = pipe.connect(this)
 
@@ -159,7 +196,7 @@ class CoreMirrorTest {
     @Test
     fun `답을 기다리는 사이 코어가 보낸 그 세션의 진입 상태가 거울의 짐작보다 먼저다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES.copy(sessionEntries = emptyList()))
         val mirror = pipe.connect(this)
         val failure = FailureView("KyuExecutableNotFound", "kyu 실행 파일을 찾지 못했습니다.", "앱을 다시 띄우세요.")
@@ -183,7 +220,7 @@ class CoreMirrorTest {
     fun `이미 대화가 선 세션에 다시 들어가면 띄우는 중으로 세지 않는다`() = runTest {
         // 보유 중인 세션이면 코어는 아무것도 하지 않는다. 그 사이 띄우는 중을 들면 대화 대신 진행 표시가 한 번 번쩍인다.
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES.copy(sessionEntries = emptyList()), MAIN_HEADER, MAIN_TAIL)
         val mirror = pipe.connect(this)
 
@@ -200,7 +237,7 @@ class CoreMirrorTest {
                 recordedEntries += entry
             }
         })
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
         val mirror = pipe.connect(this)
 
@@ -218,7 +255,7 @@ class CoreMirrorTest {
     @Test
     fun `모든 세션을 끝내는 것은 코어로 가는 줄을 닫고 코어가 줄을 닫을 때까지 기다리는 것이다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
         val mirror = pipe.connect(this)
 
@@ -237,7 +274,7 @@ class CoreMirrorTest {
     @Test
     fun `창을 닫으며 줄을 닫은 끝은 연결이 깨진 것이 아니다`() = runTest {
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
         val mirror = pipe.connect(this)
 
@@ -255,7 +292,7 @@ class CoreMirrorTest {
     fun `코어가 뜻밖에 줄을 닫으면 거울이 연결이 깨졌다고 드러낸다`() = runTest {
         // 화면이 그것을 모르면 마지막 상태로 멈춘 창 앞에서 사람은 무엇이 잘못됐는지 알 길이 없다.
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
         val mirror = pipe.connect(this)
 
@@ -273,7 +310,7 @@ class CoreMirrorTest {
             StandardTestDispatcher(testScheduler) + SupervisorJob() + CoroutineExceptionHandler { _, failure -> readingFailures += failure },
         )
         val pipe = MirrorTestPipe()
-        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSends(welcome())
         pipe.coreSendsSnapshot(seq = 0, SMALL_STATES)
         val mirror = pipe.connect(this, readingScope)
 
@@ -302,11 +339,15 @@ class CoreMirrorTest {
         }
 
         suspend fun connect(testScope: TestScope, readingScope: CoroutineScope = testScope.backgroundScope): CoreMirror =
+            assertIs<CoreConnection.Connected>(connectOrMismatch(testScope, readingScope)).mirror
+
+        suspend fun connectOrMismatch(testScope: TestScope, readingScope: CoroutineScope = testScope.backgroundScope): CoreConnection =
             CoreMirror.connect(
                 framesFromCore = fromCore,
                 framesToCore = toCore,
                 readingScope = readingScope,
                 diagnosticLog = diagnosticLog,
+                screenVersionLabel = TEST_SCREEN_VERSION_LABEL,
             )
 
         fun framesSentToCore(): List<FrameToCore> {
@@ -319,6 +360,17 @@ class CoreMirrorTest {
     }
 
     private companion object {
+        fun welcome(
+            engineDirectory: String = "/e",
+            protocol: Int = SCREEN_PROTOCOL_VERSION,
+            coreVersion: String = "v0.15.0",
+        ) = FrameToScreen.Welcome(
+            protocol = protocol,
+            coreVersion = coreVersion,
+            coreDiagnosticLog = "/home/yawn/.local/state/kyuchestration/core.log",
+            engineDirectory = engineDirectory,
+        )
+
         val SMALL_STATES = SmallStates(
             engineInstallation = EngineInstallationState.EngineReady,
             claudeAuthentication = ClaudeAuthenticationState.CredentialsReady,

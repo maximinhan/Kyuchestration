@@ -1,8 +1,10 @@
 package com.kyuchestration.desktop.core
 
+import com.kyuchestration.desktop.protocol.ByeReason
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
+import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenCommand
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.commandIdOfUnreadableFrame
@@ -31,9 +33,13 @@ import kotlinx.serialization.SerializationException
  *
  * 화면이 줄을 닫으면(stdin EOF) 모든 세션을 끝내고 자기 줄을 닫는다 — 창을 닫든 화면이 죽든 같은 길이다(6.13 의 2~4 단계).
  * 명령 도중 코어가 실패하거나 코어 스코프가 취소돼도 같은 끝을 지난다. 실패는 그 뒤에 그대로 던진다.
+ *
+ * 틀 규약의 판이 다른 화면에는 인사 답 뒤에 작별(`bye`)하고 같은 끝을 지난다(6.14). 판이 다르면 같은 필드가 다른 뜻일 수
+ * 있어, 그 화면의 명령은 하나도 받지 않는다.
  */
 suspend fun serveScreen(
     core: ScreenFacingCore,
+    coreIdentity: CoreIdentity,
     framesFromScreen: ReceiveChannel<String>,
     framesToScreen: SendChannel<String>,
 ) {
@@ -60,7 +66,7 @@ suspend fun serveScreen(
                     core.repositoryCloneState,
                 ).collect { publishPendingChanges() }
             }
-            for (line in framesFromScreen) {
+            screenFrames@ for (line in framesFromScreen) {
                 val frame = try {
                     decodeFrameToCore(line)
                 } catch (unreadable: SerializationException) {
@@ -74,8 +80,19 @@ suspend fun serveScreen(
                     continue
                 }
                 when (frame) {
-                    FrameToCore.Hello -> {
-                        write(FrameToScreen.Welcome(engineDirectory = core.engineDirectoryLabel))
+                    is FrameToCore.Hello -> {
+                        write(
+                            FrameToScreen.Welcome(
+                                protocol = SCREEN_PROTOCOL_VERSION,
+                                coreVersion = coreIdentity.versionLabel,
+                                coreDiagnosticLog = coreIdentity.diagnosticLogPath,
+                                engineDirectory = core.engineDirectoryLabel,
+                            ),
+                        )
+                        if (frame.protocol != SCREEN_PROTOCOL_VERSION) {
+                            write(FrameToScreen.Bye(ByeReason.ProtocolMismatch))
+                            break@screenFrames
+                        }
                         publisher.snapshotLines().forEach(::writeLine)
                     }
                     is FrameToCore.Command -> {

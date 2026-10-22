@@ -1,4 +1,4 @@
-package com.kyuchestration.desktop
+package com.kyuchestration.desktop.diagnostics
 
 import java.nio.file.Path
 import java.util.jar.Attributes
@@ -11,7 +11,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class DesktopBuildVersionTest {
+class BuildVersionTest {
 
     private val temporaryDirectory: Path = createTempDirectory("desktop-build-version")
 
@@ -22,17 +22,17 @@ class DesktopBuildVersionTest {
 
     @Test
     fun `패키징된 빌드는 매니페스트 버전에 v 를 붙여 보여준다`() {
-        assertEquals("v0.1.0", DesktopBuildVersion.formatVersionLabel("0.1.0"))
+        assertEquals("v0.1.0", BuildVersion.formatVersionLabel("0.1.0"))
     }
 
     @Test
     fun `매니페스트가 없는 실행은 개발 빌드로 표시한다`() {
-        assertEquals("개발 빌드", DesktopBuildVersion.formatVersionLabel(null))
+        assertEquals("개발 빌드", BuildVersion.formatVersionLabel(null))
     }
 
     @Test
     fun `매니페스트 값이 공백뿐이어도 개발 빌드로 떨어진다`() {
-        assertEquals("개발 빌드", DesktopBuildVersion.formatVersionLabel("   "))
+        assertEquals("개발 빌드", BuildVersion.formatVersionLabel("   "))
     }
 
     /**
@@ -43,18 +43,18 @@ class DesktopBuildVersionTest {
     fun `클래스가 실린 jar 의 매니페스트에서 판을 읽는다`() {
         val screenJar = jarWithImplementationVersion("0.15.0")
 
-        assertEquals("0.15.0", DesktopBuildVersion.implementationVersionOf(screenJar))
+        assertEquals("0.15.0", BuildVersion.implementationVersionOf(screenJar))
     }
 
     @Test
     fun `판을 적지 않은 jar 면 판이 없다`() {
-        assertNull(DesktopBuildVersion.implementationVersionOf(jarWithImplementationVersion(null)))
+        assertNull(BuildVersion.implementationVersionOf(jarWithImplementationVersion(null)))
     }
 
     @Test
     fun `클래스 디렉토리에서 돌면 판이 없다`() {
         // ./gradlew run 과 IDE 실행이 이 모양이다.
-        assertNull(DesktopBuildVersion.implementationVersionOf(temporaryDirectory))
+        assertNull(BuildVersion.implementationVersionOf(temporaryDirectory))
     }
 
     private fun jarWithImplementationVersion(implementationVersion: String?): Path {

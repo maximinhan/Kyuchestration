@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 fun startCoreInThisProcess(
     framesFromScreen: ReceiveChannel<String>,
     framesToScreen: SendChannel<String>,
+    coreIdentity: CoreIdentity,
     diagnosticLog: DiagnosticLog,
     assembleCore: (CoroutineScope) -> ScreenFacingCore = { coreScope -> assembleInProcessScreenFacingCore(coreScope, diagnosticLog) },
 ) {
@@ -44,6 +45,7 @@ fun startCoreInThisProcess(
     val coreRun = coreScope.launch {
         serveScreen(
             core = assembleCore(coreScope),
+            coreIdentity = coreIdentity,
             framesFromScreen = framesFromScreen,
             framesToScreen = framesToScreen,
         )

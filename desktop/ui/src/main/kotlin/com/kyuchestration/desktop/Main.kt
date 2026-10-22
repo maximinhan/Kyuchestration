@@ -10,13 +10,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.kyuchestration.desktop.core.CoreIdentity
 import com.kyuchestration.desktop.core.startCoreInThisProcess
+import com.kyuchestration.desktop.diagnostics.BuildVersion
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
+import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -50,7 +53,13 @@ fun main() {
     )
 
     try {
-        runDesktopApplication(connectToCoreInThisProcess(diagnosticLog), diagnosticLogPath.toString())
+        when (val connection = connectToCoreInThisProcess(diagnosticLog, diagnosticLogPath.toString())) {
+            is CoreConnection.Connected -> runDesktopApplication(
+                connection.mirror,
+                diagnosticLogPathLabel = diagnosticLogPathsLabel(diagnosticLogPath.toString(), connection.mirror.coreDiagnosticLogPath),
+            )
+            is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(connection, diagnosticLogPath.toString())
+        }
     } catch (failure: Throwable) {
         // Compose 의 합성에서 빠져나온 예외가 닿는 자리다. 기본 미처리 예외 핸들러는 스레드가
         // 예외로 끝날 때 도는데, 이쪽은 `application` 이 예외를 그대로 되던지므로 그 핸들러를
@@ -69,10 +78,15 @@ fun main() {
  *
  * 줄은 받는 쪽이 밀려도 쓰기가 멈추지 않는 것이다 — 코어는 틀을 쓰다 멈추면 안 된다(serveScreen).
  */
-private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog): CoreMirror {
+private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog, diagnosticLogPath: String): CoreConnection {
     val framesToCore = Channel<String>(Channel.UNLIMITED)
     val framesToScreen = Channel<String>(Channel.UNLIMITED)
-    startCoreInThisProcess(framesFromScreen = framesToCore, framesToScreen = framesToScreen, diagnosticLog = diagnosticLog)
+    startCoreInThisProcess(
+        framesFromScreen = framesToCore,
+        framesToScreen = framesToScreen,
+        coreIdentity = CoreIdentity(BuildVersion.labelOf(CoreIdentity::class.java), diagnosticLogPath),
+        diagnosticLog = diagnosticLog,
+    )
     return runBlocking {
         CoreMirror.connect(
             framesFromCore = framesToScreen,
@@ -81,7 +95,26 @@ private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog): CoreMirror
             // 것이 이 스코프다.
             readingScope = CoroutineScope(Dispatchers.Default + CoroutineName("core-mirror")),
             diagnosticLog = diagnosticLog,
+            screenVersionLabel = DesktopBuildVersion.label,
         )
+    }
+}
+
+/**
+ * 오류 자리마다 알릴 기록 파일들. 화면과 코어가 각자 적으므로(core-ui-split-design.md 6.10) 둘 다 알린다 — 둘이 같은 파일이면
+ * 하나만.
+ */
+private fun diagnosticLogPathsLabel(screenDiagnosticLogPath: String, coreDiagnosticLogPath: String): String =
+    listOf(coreDiagnosticLogPath, screenDiagnosticLogPath).distinct().joinToString(" · ")
+
+/** 코어가 다른 틀 규약을 말하면 세션을 하나도 열지 않고 두 판만 보인다(6.14). */
+private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch, diagnosticLogPathLabel: String) = application {
+    Window(
+        onCloseRequest = ::exitApplication,
+        title = "뀨케스트레이션",
+        state = rememberWindowState(size = DpSize(720.dp, 360.dp)),
+    ) {
+        CoreProtocolMismatchScreen(mismatch, diagnosticLogPathLabel)
     }
 }
 

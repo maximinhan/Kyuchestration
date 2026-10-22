@@ -430,10 +430,3 @@ compose.desktop {
     }
 }
 
-tasks.jar {
-    manifest {
-        // DesktopBuildVersion 이 화면에 올릴 버전을 여기서 읽는다. 이 한 줄이 빠지면 정식으로
-        // 패키징한 앱도 영영 "개발 빌드" 로 뜬다.
-        attributes("Implementation-Version" to project.version)
-    }
-}

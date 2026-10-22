@@ -4,6 +4,7 @@ import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import com.kyuchestration.desktop.claudeauth.ClaudeTokenStore
 import com.kyuchestration.desktop.claudeauth.StoredClaudeCredential
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.ScreenCommand
@@ -50,7 +51,7 @@ class SecretsStayOffTheScreenFramesTest {
         val coreToTap = Channel<String>(Channel.UNLIMITED)
         val tapToMirror = Channel<String>(Channel.UNLIMITED)
         val linesSentToScreen = mutableListOf<String>()
-        backgroundScope.launch { serveScreen(bed.core, framesFromScreen = screenToCore, framesToScreen = coreToTap) }
+        backgroundScope.launch { serveScreen(bed.core, TEST_CORE_IDENTITY, framesFromScreen = screenToCore, framesToScreen = coreToTap) }
         backgroundScope.launch {
             for (line in coreToTap) {
                 linesSentToScreen += line
@@ -58,7 +59,9 @@ class SecretsStayOffTheScreenFramesTest {
             }
             tapToMirror.close()
         }
-        val mirror = CoreMirror.connect(tapToMirror, screenToCore, backgroundScope, DiagnosticLog.Discarding)
+        val mirror = assertIs<CoreConnection.Connected>(
+            CoreMirror.connect(tapToMirror, screenToCore, backgroundScope, DiagnosticLog.Discarding, TEST_SCREEN_VERSION_LABEL),
+        ).mirror
 
         mirror.useClaudeToken(CLAUDE_TOKEN)
         runCurrent()

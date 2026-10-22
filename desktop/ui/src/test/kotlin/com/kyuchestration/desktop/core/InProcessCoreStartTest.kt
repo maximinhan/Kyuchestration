@@ -28,6 +28,7 @@ class InProcessCoreStartTest {
         startCoreInThisProcess(
             framesFromScreen = framesToCore,
             framesToScreen = framesToScreen,
+            coreIdentity = TEST_CORE_IDENTITY,
             diagnosticLog = object : DiagnosticLog {
                 override fun record(entry: DiagnosticLogEntry) {
                     recordedEntries += entry
@@ -39,7 +40,7 @@ class InProcessCoreStartTest {
         val failure = runBlocking {
             withTimeout(10_000) {
                 assertFailsWith<IllegalStateException> {
-                    CoreMirror.connect(framesToScreen, framesToCore, CoroutineScope(Dispatchers.Default), DiagnosticLog.Discarding)
+                    CoreMirror.connect(framesToScreen, framesToCore, CoroutineScope(Dispatchers.Default), DiagnosticLog.Discarding, TEST_SCREEN_VERSION_LABEL)
                 }
             }
         }

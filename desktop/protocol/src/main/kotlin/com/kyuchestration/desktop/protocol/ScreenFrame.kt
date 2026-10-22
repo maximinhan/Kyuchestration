@@ -15,6 +15,14 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
+ * 틀 규약의 판(core-ui-split-design.md 6.14). 정수 하나다.
+ *
+ * 필드를 더하는 변경은 올리지 않는다 — 받는 쪽이 모르는 필드는 건너뛴다(아래 screenProtocolJson). 뜻이 바뀌거나 필드가 빠지면
+ * 올린다. `internal/workdir/conversations.go` 의 `schemaVersion` 규약과 같은 선이다.
+ */
+const val SCREEN_PROTOCOL_VERSION: Int = 1
+
+/**
  * 화면 → 코어의 틀(core-ui-split-design.md 6.4). 줄 하나가 틀 하나다.
  *
  * **겉 열쇠가 `kind` 가 아니라 `frame` 이다.** 앱 소켓은 `kind` 로 요청을 가르고 `kind` 가 없는 줄을 승인 물음으로 읽는다
@@ -25,10 +33,15 @@ import kotlinx.serialization.json.contentOrNull
 @JsonClassDiscriminator("frame")
 sealed interface FrameToCore {
 
-    /** 붙었다 — 스냅샷을 달라. `seq` 가 건너뛴 화면도 이것을 다시 보내 처음부터 받는다(6.4). */
+    /**
+     * 붙었다 — 스냅샷을 달라. `seq` 가 건너뛴 화면도 이것을 다시 보내 처음부터 받는다(6.4).
+     *
+     * @param protocol 화면이 말하는 틀 규약의 판. 코어의 것과 다르면 코어는 인사 답 뒤에 [FrameToScreen.Bye] 로 닫는다.
+     * @param screenVersion 화면의 판 라벨("v0.15.0" · "개발 빌드"). 판이 갈렸을 때 어느 쪽이 낡았는지 사람에게 보이려고 싣는다.
+     */
     @Serializable
     @SerialName("hello")
-    data object Hello : FrameToCore
+    data class Hello(val protocol: Int, val screenVersion: String) : FrameToCore
 
     /** @param id 화면이 지은 이름. 코어가 같은 id 로 답한다. */
     @Serializable
@@ -42,13 +55,21 @@ sealed interface FrameToCore {
 sealed interface FrameToScreen {
 
     /**
-     * 인사에 대한 답. 스냅샷보다 먼저 온다.
+     * 인사에 대한 답. 스냅샷보다 먼저 온다. 규약의 판이 다르면 스냅샷 대신 [Bye] 가 뒤따른다.
      *
+     * @param protocol 코어가 말하는 틀 규약의 판.
+     * @param coreVersion 코어의 판 라벨. 화면과 코어는 같은 태그에서 같은 판으로 나가지만(6.14) 따로 깔리는 날이 온다.
+     * @param coreDiagnosticLog 코어가 진단을 적는 파일. 화면의 것과 다른 프로세스의 파일이라, 오류 자리에서 둘을 함께 알린다(6.2 (다)).
      * @param engineDirectory 엔진을 받아 두는 자리. 엔진은 코어 옆에 놓이므로 코어 OS 의 사실이다(6.2 (다)).
      */
     @Serializable
     @SerialName("welcome")
-    data class Welcome(val engineDirectory: String) : FrameToScreen
+    data class Welcome(
+        val protocol: Int,
+        val coreVersion: String,
+        val coreDiagnosticLog: String,
+        val engineDirectory: String,
+    ) : FrameToScreen
 
     /**
      * 스냅샷 한 조각(6.6). 첫 조각은 작은 상태 전부이고 나머지는 대화의 변화다. 화면은 [last] 를 받기 전까지 거울을 바꾸지
@@ -75,6 +96,22 @@ sealed interface FrameToScreen {
     @Serializable
     @SerialName("reply")
     data class Reply(val id: String, val outcome: CommandOutcome, val reason: String? = null) : FrameToScreen
+
+    /** 코어가 이 연결을 닫는다. 이 틀 뒤로는 아무것도 오지 않는다. */
+    @Serializable
+    @SerialName("bye")
+    data class Bye(val reason: ByeReason) : FrameToScreen
+}
+
+/**
+ * 코어가 연결을 닫는 까닭. 지금은 하나다 — 화면을 갈아 끼우거나 코어를 끝내는 까닭(설계 6.4 의 나머지 둘)은 코어가 화면 없이
+ * 사는 5 단계에서 생긴다.
+ */
+@Serializable
+enum class ByeReason {
+    /** 화면과 코어의 틀 규약 판이 다르다(6.14). 어느 쪽이 낡았는지는 [FrameToScreen.Welcome] 의 판이 말한다. */
+    @SerialName("protocol_mismatch")
+    ProtocolMismatch,
 }
 
 @Serializable

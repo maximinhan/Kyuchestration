@@ -1,10 +1,13 @@
 package com.kyuchestration.desktop.core
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
+import com.kyuchestration.desktop.protocol.ByeReason
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
+import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenCommand
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
@@ -19,6 +22,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -92,7 +96,7 @@ class ScreenPipeRoundTripTest {
         bed.core.openWorkDir(workDirPath.toString())
         runCurrent()
         val pipe = startPipe(bed.core)
-        pipe.screenSends(FrameToCore.Hello)
+        pipe.screenSends(TEST_SCREEN_HELLO)
         runCurrent()
         pipe.framesReceivedByScreen()
 
@@ -126,15 +130,45 @@ class ScreenPipeRoundTripTest {
 
         pipe.screenSendsLine("""{"frame":"bye","reason":"replaced_by_another_screen"}""")
         pipe.screenSendsLine("JSON 이 아닌 줄")
-        pipe.screenSends(FrameToCore.Hello)
+        pipe.screenSends(TEST_SCREEN_HELLO)
         pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
         runCurrent()
 
         val frames = pipe.framesReceivedByScreen()
-        assertEquals(FrameToScreen.Welcome(core.engineDirectoryLabel), frames.first())
+        assertEquals(welcomeFrom(core), frames.first())
         assertEquals(FrameToScreen.Reply("c-1", CommandOutcome.Accepted), frames.last())
         assertEquals(listOf<ScreenCommand>(ScreenCommand.RefreshWorkDir), core.receivedCommands)
         assertEquals(0, core.endAllSessionsCount)
+    }
+
+    @Test
+    fun `인사 답은 규약 판 · 코어 판 · 코어의 진단 기록 · 엔진 자리를 싣고 스냅샷이 뒤따른다`() = runTest {
+        val core = RecordingScreenFacingCore()
+        val pipe = startPipe(core)
+
+        pipe.screenSends(TEST_SCREEN_HELLO)
+        runCurrent()
+
+        val frames = pipe.framesReceivedByScreen()
+        assertEquals(welcomeFrom(core), frames.first())
+        assertTrue(frames.drop(1).all { it is FrameToScreen.Snapshot }, "인사 답 뒤에는 스냅샷: $frames")
+    }
+
+    @Test
+    fun `규약 판이 다른 화면에는 인사 답 뒤에 작별하고 세션을 끝내고 줄을 닫는다`() = runTest {
+        // 코어가 낡았는지 화면이 낡았는지는 인사 답의 판으로 화면이 가린다(설계 6.14). 다른 규약의 줄을 계속 받으면 화면은
+        // 뜻이 바뀐 필드를 제 뜻으로 읽는다.
+        val core = RecordingScreenFacingCore()
+        val pipe = startPipe(core)
+
+        pipe.screenSends(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION + 1, screenVersion = "v9.0.0"))
+        pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
+        runCurrent()
+
+        assertEquals(listOf(welcomeFrom(core), FrameToScreen.Bye(ByeReason.ProtocolMismatch)), pipe.framesReceivedByScreen())
+        assertEquals(emptyList(), core.receivedCommands)
+        assertEquals(1, core.endAllSessionsCount)
+        assertTrue(pipe.coreToScreen.isClosedForSend)
     }
 
     @Test
@@ -157,7 +191,7 @@ class ScreenPipeRoundTripTest {
         // 실패를 시험이 받아 보도록 Deferred 에 담는다 — 감독 Job 아래의 async 는 실패를 부모로 올리지 않는다.
         val servingScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob())
         val serving = servingScope.async {
-            serveScreen(core, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
         }
 
         pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
@@ -173,7 +207,7 @@ class ScreenPipeRoundTripTest {
         val core = RecordingScreenFacingCore()
         val pipe = FramePipe(this)
         val serving = backgroundScope.launch {
-            serveScreen(core, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
         }
         runCurrent()
 
@@ -200,7 +234,7 @@ class ScreenPipeRoundTripTest {
 
     private fun TestScope.startPipe(core: ScreenFacingCore): FramePipe {
         val pipe = FramePipe(this)
-        backgroundScope.launch { serveScreen(core, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen) }
+        backgroundScope.launch { serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen) }
         runCurrent()
         return pipe
     }
@@ -209,12 +243,15 @@ class ScreenPipeRoundTripTest {
         val screenToCore = Channel<String>(Channel.UNLIMITED)
         val coreToScreen = Channel<String>(Channel.UNLIMITED)
 
-        suspend fun connectMirror(): CoreMirror = CoreMirror.connect(
-            framesFromCore = coreToScreen,
-            framesToCore = screenToCore,
-            readingScope = testScope.backgroundScope,
-            diagnosticLog = DiagnosticLog.Discarding,
-        )
+        suspend fun connectMirror(): CoreMirror = assertIs<CoreConnection.Connected>(
+            CoreMirror.connect(
+                framesFromCore = coreToScreen,
+                framesToCore = screenToCore,
+                readingScope = testScope.backgroundScope,
+                diagnosticLog = DiagnosticLog.Discarding,
+                screenVersionLabel = TEST_SCREEN_VERSION_LABEL,
+            ),
+        ).mirror
 
         fun screenSends(frame: FrameToCore) = screenSendsLine(encodeFrameToCore(frame))
 

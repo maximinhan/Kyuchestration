@@ -43,6 +43,14 @@ subprojects {
         }
     }
 
+    tasks.withType<Jar>().configureEach {
+        manifest {
+            // 화면과 코어가 각자 자기 jar 에서 판을 읽는다(BuildVersion). 이 한 줄이 빠진 jar 의 프로그램은 정식으로
+            // 패키징해도 영영 "개발 빌드" 로 뜨고, 판이 갈렸을 때 어느 쪽이 낡았는지 보이지 않는다.
+            attributes("Implementation-Version" to project.version)
+        }
+    }
+
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
 
