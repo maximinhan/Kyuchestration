@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop
 
+import com.kyuchestration.desktop.core.InProcessScreenFacingCore
+import com.kyuchestration.desktop.core.ScreenChangePublisher
 import com.kyuchestration.desktop.terminal.chat.AppSocketChannel
 import com.kyuchestration.desktop.terminal.chat.AskedPermission
 import com.kyuchestration.desktop.terminal.chat.ChatSessionOpener
@@ -17,7 +19,7 @@ import kotlin.test.Test
  * 조용히 같은 JVM 의 지름길로 남는다(원칙 20). 모듈이 갈리는 2 단계부터는 빌드가 이 방향을 막고, 그때까지는 이 시험이
  * 바이트코드의 의존을 읽어 막는다.
  *
- * 화면은 루트 패키지(컴포저블들과 Main)와 theme 이다. 코어 쪽 패키지의 값 타입(대화 · 트리 · 상태 갈래)을 읽는 것은
+ * 화면은 루트 패키지(컴포저블들과 Main)와 theme, 그리고 화면 쪽에서 코어를 비추는 mirror 다. 코어 쪽 패키지의 값 타입(대화 · 트리 · 상태 갈래)을 읽는 것은
  * 괜찮다 — 그것들이 경계를 건너는 값이다(6.3).
  */
 class ScreenBoundaryArchitectureTest {
@@ -57,7 +59,26 @@ class ScreenBoundaryArchitectureTest {
             .check(productionClasses)
     }
 
+    @Test
+    fun `화면은 같은 JVM 의 코어를 직접 읽지 않고 틀을 거친 거울로만 본다`() {
+        // 코어를 세우는 자리(startCoreInThisProcess)는 화면에 아무것도 돌려주지 않는다. 화면이 조립된 코어나 그 게시자를 쥐면
+        // 거울을 건너뛰는 지름길이 생기고, 그 길로 그린 것은 2 단계에서 프로세스가 갈리는 날 조용히 사라진다(원칙 20).
+        noClasses().that().resideInAnyPackage(*SCREEN_PACKAGES)
+            .should().dependOnClassesThat().belongToAnyOf(
+                InProcessScreenFacingCore::class.java,
+                ScreenChangePublisher::class.java,
+                Class.forName("com.kyuchestration.desktop.core.InProcessCoreAssemblyKt"),
+                Class.forName("com.kyuchestration.desktop.core.ScreenServingKt"),
+            )
+            .because("화면은 같은 JVM 안에서도 직렬화된 줄을 거쳐서만 코어를 그린다(core-ui-split-design.md 7 절 1 단계)")
+            .check(productionClasses)
+    }
+
     private companion object {
-        val SCREEN_PACKAGES = arrayOf("com.kyuchestration.desktop", "com.kyuchestration.desktop.theme")
+        val SCREEN_PACKAGES = arrayOf(
+            "com.kyuchestration.desktop",
+            "com.kyuchestration.desktop.theme",
+            "com.kyuchestration.desktop.mirror",
+        )
     }
 }

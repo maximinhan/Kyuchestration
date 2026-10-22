@@ -31,10 +31,10 @@ import kotlinx.coroutines.CoroutineScope
  * 상태 홀더는 자기 포트만 안다 — 목록은 관찰 포트를, 여는 걸음은 초기화 포트를, 챗은 진입 포트를. "그 포트 뒤에 kyu
  * 프로세스가 있다" 는 사실을 아는 파일이 여기 하나뿐이라, 엔진을 바꿔 끼울 때 고칠 곳도 여기 하나다.
  *
- * 화면이 받는 것은 [ScreenFacingCore] 뿐이다. 홀더를 화면에 돌려주지 않는 것이 이 함수의 경계다 — 돌려주면 화면이 다시
- * 홀더에 닿는 길이 열린다(core-ui-split-design.md 6.2).
+ * 돌려주는 것은 [ScreenFacingCore] 뿐이다. 홀더를 돌려주지 않는 것이 이 함수의 경계다 — 이것을 받는 것은 화면이 아니라 화면에
+ * 틀을 잇는 자리(serveScreen)이고, 화면은 그 틀 위의 거울로 코어를 본다(core-ui-split-design.md 6.2 · 6.5).
  *
- * @param coroutineScope 화면을 그리는 단일 스레드 스코프. 코어가 갈라지기 전(7 절 1 단계)까지 홀더들이 이 스레드를 함께 쓴다.
+ * @param coroutineScope 코어의 단일 스레드 스코프(startCoreInThisProcess). 홀더들이 이 스레드를 함께 쓴다.
  */
 fun assembleInProcessScreenFacingCore(coroutineScope: CoroutineScope, diagnosticLog: DiagnosticLog): ScreenFacingCore {
     // 관찰과 초기화가 같은 실행기를 함께 쓴다. 실행기는 부를 때마다 kyu 를 새로 찾는 무상태라 둘로 나눌 이유가 없다.

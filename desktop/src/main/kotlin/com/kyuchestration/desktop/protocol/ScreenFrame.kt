@@ -6,8 +6,12 @@ import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonClassDiscriminator
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 화면 → 코어의 틀(core-ui-split-design.md 6.4). 줄 하나가 틀 하나다.
@@ -101,6 +105,22 @@ fun decodeFrameToCore(line: String): FrameToCore = screenProtocolJson.decodeFrom
 fun encodeFrameToScreen(frame: FrameToScreen): String = screenProtocolJson.encodeToString(FrameToScreen.serializer(), frame)
 
 fun decodeFrameToScreen(line: String): FrameToScreen = screenProtocolJson.decodeFromString(FrameToScreen.serializer(), line)
+
+/**
+ * 읽지 못한 줄이 명령 틀이면 그 id. 틀의 겉모양(frame · id)은 읽히는데 명령이 낯선 줄 — 화면이 이 코어보다 새 판일 때 —
+ * 에 거절로 답할 곳을 찾는다. 겉모양조차 읽히지 않으면 null 이다.
+ */
+fun commandIdOfUnreadableFrame(line: String): String? {
+    val frame = try {
+        screenProtocolJson.parseToJsonElement(line)
+    } catch (notJson: SerializationException) {
+        return null
+    } as? JsonObject ?: return null
+    if ((frame["frame"] as? JsonPrimitive)?.contentOrNull != "command") {
+        return null
+    }
+    return (frame["id"] as? JsonPrimitive)?.contentOrNull
+}
 
 /** 줄 하나가 틀 위에서 차지하는 바이트. 스냅샷을 1 MiB 안쪽 조각으로 나눌 때 잰다(6.6). */
 fun ChatEntry.encodedByteCount(): Int =

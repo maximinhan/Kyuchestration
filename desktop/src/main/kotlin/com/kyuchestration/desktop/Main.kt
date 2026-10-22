@@ -4,29 +4,35 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.kyuchestration.desktop.core.assembleInProcessScreenFacingCore
+import com.kyuchestration.desktop.core.ScreenFacingCore
+import com.kyuchestration.desktop.core.startCoreInThisProcess
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
+import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 
 /**
  * 화면이 뜨는 자리.
  *
- * 화면은 코어를 [com.kyuchestration.desktop.core.ScreenFacingCore] 하나로만 본다 — 상태 홀더도, 그 뒤의 kyu 도 모른다
- * (core-ui-split-design.md 6.2). 조립은 코어 쪽(assembleInProcessScreenFacingCore)에 있다. 이 파일에 남은 것은 화면의
- * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
+ * 화면은 코어를 [ScreenFacingCore] 하나로만 본다 — 상태 홀더도, 그 뒤의 kyu 도 모른다(core-ui-split-design.md 6.2). 그
+ * [ScreenFacingCore] 는 거울([CoreMirror])이다. 코어는 같은 JVM 의 자기 스레드에 서지만, 화면은 그 코어와 JSON 틀 줄 두
+ * 가닥으로만 말한다(7 절 1 단계). 2 단계에서 그 두 가닥이 코어 프로세스의 stdin · stdout 으로 바뀌어도 이 파일은 코어를
+ * 띄우는 자리 하나만 바뀐다. 이 파일에 남은 것은 화면의 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
  */
 fun main() {
     val diagnosticLogPath = diagnosticLogFile()
@@ -43,7 +49,7 @@ fun main() {
     )
 
     try {
-        runDesktopApplication(diagnosticLog, diagnosticLogPath.toString())
+        runDesktopApplication(connectToCoreInThisProcess(diagnosticLog), diagnosticLogPath.toString())
     } catch (failure: Throwable) {
         // Compose 의 합성에서 빠져나온 예외가 닿는 자리다. 기본 미처리 예외 핸들러는 스레드가
         // 예외로 끝날 때 도는데, 이쪽은 `application` 이 예외를 그대로 되던지므로 그 핸들러를
@@ -57,17 +63,35 @@ fun main() {
 }
 
 /**
+ * 코어를 이 JVM 에 세우고, 줄 두 가닥 위에 거울을 세워 돌려준다. 거울은 첫 스냅샷이 다 온 뒤에 서므로, 창은 처음부터
+ * 코어의 상태를 들고 뜬다.
+ *
+ * 줄은 받는 쪽이 밀려도 쓰기가 멈추지 않는 것이다 — 코어는 틀을 쓰다 멈추면 안 된다(serveScreen).
+ */
+private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog): ScreenFacingCore {
+    val framesToCore = Channel<String>(Channel.UNLIMITED)
+    val framesToScreen = Channel<String>(Channel.UNLIMITED)
+    startCoreInThisProcess(framesFromScreen = framesToCore, framesToScreen = framesToScreen, diagnosticLog = diagnosticLog)
+    return runBlocking {
+        CoreMirror.connect(
+            framesFromCore = framesToScreen,
+            framesToCore = framesToCore,
+            // 화면 스레드가 아니다. 창을 닫는 자리가 화면 스레드를 붙잡고 코어가 끝나기를 기다리는데, 그것을 알리는 틀을 읽는
+            // 것이 이 스코프다.
+            readingScope = CoroutineScope(Dispatchers.Default + CoroutineName("core-mirror")),
+            diagnosticLog = diagnosticLog,
+        )
+    }
+}
+
+/**
  * @param diagnosticLogPathLabel 화면이 오류 자리마다 알려 줄 기록 파일의 경로. 사용자가 무엇을
  *   보고할 때 건네면 되는지가 그 자리에 있어야, 원격에서 진단할 수 있는 것이 화면 문구를 넘어선다.
  */
 private fun runDesktopApplication(
-    diagnosticLog: DiagnosticLog,
+    screenFacingCore: ScreenFacingCore,
     diagnosticLogPathLabel: String,
 ) = application {
-    val applicationCoroutineScope = rememberCoroutineScope()
-    val screenFacingCore = remember(applicationCoroutineScope) {
-        assembleInProcessScreenFacingCore(applicationCoroutineScope, diagnosticLog)
-    }
     val engineInstallationState by screenFacingCore.engineInstallationState.collectAsState()
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
     val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
@@ -100,7 +124,8 @@ private fun runDesktopApplication(
             // 파이프에 물린 claude 는 부모가 사라진 것을 모른 채 계속 산다 — PTY 시절의 자식은
             // 적어도 SIGHUP 을 받았지만 이쪽은 그것조차 가지 않는다. 그래서 창이 닫히기 전에
             // 여기서 기다린다. 프로세스는 stdin 이 닫히면 곧 끝나고, 그러지 않는 것만 이 자리가
-            // 붙잡는다(ProcessChatSession).
+            // 붙잡는다(ProcessChatSession). 끝내는 것은 코어다 — 거울은 코어로 가는 줄을 닫고, 코어가 세션을 다 끝내고
+            // 자기 줄을 닫을 때까지 기다린다.
             runBlocking { screenFacingCore.endAllSessions() }
             exitApplication()
         },
