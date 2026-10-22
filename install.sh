@@ -7,6 +7,15 @@
 #
 # 설치 위치는 ~/.local/bin 이고 KYU_INSTALL_DIR 로 바꾼다.
 #
+# --with-core 를 주면 데스크톱 앱의 코어도 함께 놓는다(core-ui-split-design.md 6.16). 윈도우 화면(msi)이 WSL 안에서
+# 띄우는 것이 이 코어다 — WSL 터미널에서 돌린다.
+#
+#   curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash -s -- --with-core
+#
+# 코어 이미지는 ${XDG_DATA_HOME:-~/.local/share}/kyuchestration/core 에 풀고, 설치 위치에 kyuchestration-core 링크를 둔다.
+# 다시 돌리면 최신 릴리스의 것으로 갈아 끼운다. KYU_CORE_ARCHIVE 에 tar.gz 경로를 주면 릴리스 대신 그 파일을 푼다 —
+# 소스에서 만든 코어(./gradlew :core:packageCoreArchive)를 윈도우 화면에 붙여 볼 때 쓴다.
+#
 # 인증은 "없으면 없는 대로 먼저 해 본다" 순서다 — 무인증으로 먼저 부르고, 거절당했을 때에만
 # GITHUB_TOKEN 을 쓴다. 이 저장소는 지금 프라이빗이지만 공개로 바꿀 예정이라, 그 순간
 # 토큰 줄만 빼면 같은 명령이 그대로 동작해야 한다. 순서를 뒤집으면(토큰을 먼저 요구하면)
@@ -24,6 +33,7 @@ readonly GITHUB_API_VERSION="2022-11-28"
 # 받아 둔 임시 파일들. cleanup 이 EXIT 에서 지운다.
 RELEASE_JSON_PATH=""
 DOWNLOAD_PATH=""
+CORE_STAGING_PATH=""
 
 # 무인증으로 통과했으면 빈 문자열로 남는다. resolve_release_access 가 정한다.
 RESOLVED_GITHUB_TOKEN=""
@@ -31,6 +41,7 @@ RESOLVED_GITHUB_TOKEN=""
 cleanup() {
     [ -n "$RELEASE_JSON_PATH" ] && rm -f "$RELEASE_JSON_PATH"
     [ -n "$DOWNLOAD_PATH" ] && rm -f "$DOWNLOAD_PATH"
+    [ -n "$CORE_STAGING_PATH" ] && rm -rf "$CORE_STAGING_PATH"
     # 마지막 [ ] 가 거짓이면 트랩 전체가 실패로 끝나므로 성공을 못박는다.
     return 0
 }
@@ -228,6 +239,23 @@ resolve_release_access() {
     RESOLVED_GITHUB_TOKEN="$GITHUB_TOKEN"
 }
 
+# release_tag_name 은 릴리스 정보에서 태그 이름(v0.15.0)을 뽑는다. 코어 자산 이름에 판이 들어 있어
+# (kyuchestration-core_0.15.0_linux_amd64.tar.gz) 받을 파일 이름을 알려면 이 값이 먼저 필요하다.
+# install-app.sh 의 같은 함수와 같다 — 두 스크립트는 각자 curl 한 줄로 받아 도는 것이라 나눠 쓸 수 없다.
+release_tag_name() {
+    tr -d ' \t' < "$1" \
+        | tr ',' '\n' \
+        | awk '
+            match($0, /"tag_name":"[^"]*"/) {
+                value = substr($0, RSTART, RLENGTH)
+                sub(/^"tag_name":"/, "", value)
+                sub(/"$/, "", value)
+                print value
+                exit
+            }
+        '
+}
+
 # asset_api_url_for 는 릴리스 정보에서 자산 하나의 API 주소를 뽑는다. 없으면 아무것도 내지 않는다.
 #
 # jq 를 쓰지 않는다. 설치 스크립트가 다른 도구부터 깔라고 하면 "바이너리 하나 받아서 끝" 이라는
@@ -263,22 +291,101 @@ asset_api_url_for() {
 download_asset() {
     local asset_url="$1"
     local destination_path="$2"
-    local http_status
 
-    http_status=$(github_api_get "$asset_url" "application/octet-stream" \
-        "$DOWNLOAD_PATH" "$RESOLVED_GITHUB_TOKEN") \
-        || fail "자산을 내려받지 못했습니다: ${asset_url}"
-
-    if [ "$http_status" != "200" ]; then
-        fail "자산을 내려받지 못했습니다 (${http_status}): ${asset_url}"
-    fi
-
+    fetch_asset "$asset_url" "$DOWNLOAD_PATH"
     chmod +x "$DOWNLOAD_PATH"
 
     # 옆에 받아 두고 마지막에 자리를 바꾼다. 돌고 있는 바이너리를 직접 덮어쓰면 리눅스에서
     # Text file busy 로 실패하는데, 같은 파일 시스템 안의 mv 는 이름만 바꾸므로 그 일이 없다.
     mv "$DOWNLOAD_PATH" "$destination_path"
     DOWNLOAD_PATH=""
+}
+
+# fetch_asset 은 자산 하나를 output_path 에 내려받는다.
+fetch_asset() {
+    local asset_url="$1"
+    local output_path="$2"
+    local http_status
+
+    http_status=$(github_api_get "$asset_url" "application/octet-stream" \
+        "$output_path" "$RESOLVED_GITHUB_TOKEN") \
+        || fail "자산을 내려받지 못했습니다: ${asset_url}"
+
+    if [ "$http_status" != "200" ]; then
+        fail "자산을 내려받지 못했습니다 (${http_status}): ${asset_url}"
+    fi
+}
+
+# install_core 는 코어 이미지를 데이터 자리에 풀고 설치 위치에 실행 파일 링크를 둔다.
+#
+# 옆에 풀어 두고 마지막에 자리를 바꾼다. 받다가 · 풀다가 끊겨도 쓰던 코어가 그대로 남는다. 링크는 늘 같은 자리
+# (…/core/bin/kyuchestration-core)를 가리키므로 다시 설치해도 고칠 필요가 없지만, 처음 설치이거나 누가 지운 경우를 위해
+# 매번 다시 건다(ln -sfn).
+#
+# 윈도우 화면은 이 링크를 셸 없이 wsl.exe --cd ~ -e .local/bin/kyuchestration-core 로 부른다(설계 6.12). 그래서
+# KYU_INSTALL_DIR 을 바꿔도 화면이 찾는 자리는 ~/.local/bin 이다 — 다른 자리면 알린다.
+install_core() {
+    local target_platform="$1"
+    local install_dir="$2"
+    local data_dir core_dir core_archive_path previous_core_dir asset_name asset_url release_tag
+
+    case "$target_platform" in
+        linux_amd64) ;;
+        *)
+            fail "코어는 리눅스(WSL) x86-64 용만 냅니다: ${target_platform}" \
+                 "맥 · 리눅스 데스크톱은 앱 패키지(dmg · deb)에 코어가 함께 들어 있습니다."
+            ;;
+    esac
+
+    command -v tar > /dev/null 2>&1 || fail "tar 가 필요합니다."
+
+    data_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/kyuchestration"
+    core_dir="${data_dir}/core"
+    mkdir -p "$data_dir"
+    # 풀 자리를 같은 디렉토리 안에 둔다. 마지막의 mv 가 복사가 아닌 이름 바꾸기여야 반쯤 바뀐 코어가 남지 않는다.
+    CORE_STAGING_PATH=$(mktemp -d "${data_dir}/.core.staging.XXXXXX")
+
+    if [ -n "${KYU_CORE_ARCHIVE:-}" ]; then
+        [ -f "$KYU_CORE_ARCHIVE" ] || fail "KYU_CORE_ARCHIVE 가 가리키는 파일이 없습니다: ${KYU_CORE_ARCHIVE}"
+        core_archive_path="$KYU_CORE_ARCHIVE"
+        report "코어: 릴리스 대신 ${core_archive_path} 를 풉니다"
+    else
+        release_tag=$(release_tag_name "$RELEASE_JSON_PATH")
+        [ -n "$release_tag" ] || fail "최신 릴리스 정보에서 태그 이름을 읽지 못했습니다."
+        asset_name="kyuchestration-core_${release_tag#v}_${target_platform}.tar.gz"
+        asset_url=$(asset_api_url_for "$RELEASE_JSON_PATH" "$asset_name")
+        if [ -z "$asset_url" ]; then
+            fail "최신 릴리스(${release_tag})에 ${asset_name} 자산이 없습니다." \
+                 "코어 자산은 코어 · 화면 분리 3 단계 이후의 릴리스부터 붙습니다."
+        fi
+        core_archive_path="${CORE_STAGING_PATH}/core.tar.gz"
+        report "받는 중: ${asset_name}"
+        fetch_asset "$asset_url" "$core_archive_path"
+    fi
+
+    tar -xzf "$core_archive_path" -C "$CORE_STAGING_PATH" \
+        || fail "코어 묶음을 풀지 못했습니다: ${core_archive_path}"
+    [ -x "${CORE_STAGING_PATH}/kyuchestration-core/bin/kyuchestration-core" ] \
+        || fail "코어 묶음에 실행 파일(kyuchestration-core/bin/kyuchestration-core)이 없습니다: ${core_archive_path}"
+
+    previous_core_dir=""
+    if [ -e "$core_dir" ]; then
+        previous_core_dir="${CORE_STAGING_PATH}/previous"
+        mv "$core_dir" "$previous_core_dir"
+    fi
+    mv "${CORE_STAGING_PATH}/kyuchestration-core" "$core_dir"
+    ln -sfn "${core_dir}/bin/kyuchestration-core" "${install_dir}/kyuchestration-core"
+    report "코어 설치 완료: ${core_dir} (실행 파일 ${install_dir}/kyuchestration-core)"
+
+    if [ "$install_dir" != "${HOME}/.local/bin" ]; then
+        report "주의: 윈도우 화면은 ~/.local/bin/kyuchestration-core 를 부릅니다. 설치 위치가 ${install_dir} 이라 화면이 찾지 못합니다."
+    fi
+
+    # 화면 없이 띄워 본다 — stdin 이 곧바로 끝나므로 코어는 화면이 떠난 것으로 알고 0 으로 나간다.
+    if ! "${install_dir}/kyuchestration-core" serve --stdio < /dev/null > /dev/null; then
+        fail "설치한 코어를 띄우지 못했습니다: ${install_dir}/kyuchestration-core"
+    fi
+    report "코어가 뜨고 끝나는 것까지 확인했습니다."
 }
 
 # warn_if_not_on_path 는 설치한 자리가 PATH 밖이면 알린다.
@@ -295,8 +402,22 @@ warn_if_not_on_path() {
     report "  export PATH=\"${install_dir}:\$PATH\""
 }
 
+usage() {
+    fail "쓰는 법: install.sh [--with-core]" \
+         "  --with-core  데스크톱 앱의 코어도 함께 놓는다(윈도우 화면이 WSL 안에서 띄우는 것)."
+}
+
 main() {
-    local target_platform asset_name install_dir destination_path asset_url required_command
+    local target_platform asset_name install_dir destination_path asset_url required_command with_core
+
+    with_core="no"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --with-core) with_core="yes" ;;
+            *) usage ;;
+        esac
+        shift
+    done
 
     for required_command in curl uname awk tr mktemp; do
         command -v "$required_command" > /dev/null 2>&1 \
@@ -332,6 +453,10 @@ main() {
 
     if ! "$destination_path" version; then
         fail "설치한 바이너리를 실행하지 못했습니다: ${destination_path}"
+    fi
+
+    if [ "$with_core" = "yes" ]; then
+        install_core "$target_platform" "$install_dir"
     fi
 }
 
