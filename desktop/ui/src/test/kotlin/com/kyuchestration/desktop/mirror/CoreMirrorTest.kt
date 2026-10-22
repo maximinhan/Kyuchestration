@@ -16,11 +16,13 @@ import com.kyuchestration.desktop.protocol.ConversationHeader
 import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
+import com.kyuchestration.desktop.protocol.PROTOCOL_VERSION_BEFORE_NEGOTIATION
 import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.SessionEntryOfTarget
 import com.kyuchestration.desktop.protocol.SmallStates
+import com.kyuchestration.desktop.protocol.UNKNOWN_VERSION_LABEL
 import com.kyuchestration.desktop.protocol.decodeFrameToCore
 import com.kyuchestration.desktop.protocol.encodeFrameToScreen
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
@@ -119,6 +121,25 @@ class CoreMirrorTest {
         assertEquals(EngineInstallationState.InstallationRunning, mirror.engineInstallationState.value)
         assertEquals(ClaudeAuthenticationState.CheckingCredentials, mirror.claudeAuthenticationState.value)
         assertEquals(listOf<FrameToCore>(TEST_SCREEN_HELLO), pipe.framesSentToCore(), "다시 인사하지 않는다")
+    }
+
+    @Test
+    fun `판을 싣기 전의 코어가 답하면 판 불일치로 본다`() = runTest {
+        // 그 코어는 인사 답에 규약 판을 싣지 않는다. 읽지 못한다고 죽으면 사람은 왜 앱이 안 뜨는지 모른다.
+        val pipe = MirrorTestPipe()
+        pipe.fromCore.trySend("""{"frame":"welcome","engineDirectory":"/e"}""").getOrThrow()
+
+        val connection = pipe.connectOrMismatch(this)
+
+        assertEquals(
+            CoreConnection.ProtocolMismatch(
+                screenVersion = TEST_SCREEN_VERSION_LABEL,
+                screenProtocol = SCREEN_PROTOCOL_VERSION,
+                coreVersion = UNKNOWN_VERSION_LABEL,
+                coreProtocol = PROTOCOL_VERSION_BEFORE_NEGOTIATION,
+            ),
+            connection,
+        )
     }
 
     @Test

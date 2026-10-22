@@ -306,6 +306,18 @@ class ScreenPipeRoundTripTest {
     }
 
     @Test
+    fun `판을 싣기 전의 화면이 인사하면 판 불일치로 작별한다`() = runTest {
+        val core = RecordingScreenFacingCore()
+        val pipe = startPipe(core)
+
+        pipe.screenSendsLine("""{"frame":"hello"}""")
+        runCurrent()
+
+        assertEquals(listOf(welcomeFrom(core), FrameToScreen.Bye(ByeReason.ProtocolMismatch)), pipe.framesReceivedByScreen())
+        assertEquals(1, core.endAllSessionsCount)
+    }
+
+    @Test
     fun `화면이 줄을 닫으면 코어는 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
         val core = RecordingScreenFacingCore()
         val pipe = startPipe(core)

@@ -98,6 +98,29 @@ class ScreenProtocolSerializationTest {
     }
 
     @Test
+    fun `판을 싣기 전의 화면이 보낸 인사는 규약 판 0 으로 읽힌다`() {
+        // 판 필드가 없는 상대를 읽지 못하는 틀로 버리면 판 불일치의 길(6.14)에 닿지 못한다 — 코어는 그 인사를 조용히 건너뛰고,
+        // 화면은 오지 않을 인사 답을 영영 기다린다.
+        assertEquals(
+            FrameToCore.Hello(protocol = PROTOCOL_VERSION_BEFORE_NEGOTIATION, screenVersion = UNKNOWN_VERSION_LABEL),
+            decodeFrameToCore("""{"frame":"hello"}"""),
+        )
+    }
+
+    @Test
+    fun `판을 싣기 전의 코어가 보낸 인사 답은 규약 판 0 으로 읽힌다`() {
+        assertEquals(
+            FrameToScreen.Welcome(
+                protocol = PROTOCOL_VERSION_BEFORE_NEGOTIATION,
+                coreVersion = UNKNOWN_VERSION_LABEL,
+                coreDiagnosticLog = "",
+                engineDirectory = "/home/yawn/engine",
+            ),
+            decodeFrameToScreen("""{"frame":"welcome","engineDirectory":"/home/yawn/engine"}"""),
+        )
+    }
+
+    @Test
     fun `작별 틀은 까닭을 낱말로 싣는다`() {
         val bye = FrameToScreen.Bye(ByeReason.ProtocolMismatch)
 

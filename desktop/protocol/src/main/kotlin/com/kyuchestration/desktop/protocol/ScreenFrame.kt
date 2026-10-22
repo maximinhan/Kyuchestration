@@ -23,6 +23,17 @@ import kotlinx.serialization.json.contentOrNull
 const val SCREEN_PROTOCOL_VERSION: Int = 1
 
 /**
+ * 판을 싣기 전의 상대가 말하는 규약 판. 1 단계(PR #76)의 화면 · 코어는 인사와 인사 답에 판을 싣지 않았다.
+ *
+ * 판 필드가 없는 틀을 읽지 못하는 틀로 버리지 않고 이 값으로 읽는다. 버리면 판 불일치의 길(6.14)에 닿지 못한다 — 새 코어는 옛
+ * 화면의 인사를 조용히 건너뛰어 그 화면이 오지 않을 인사 답을 영영 기다리고, 새 화면은 옛 코어의 인사 답을 읽다 죽는다.
+ */
+const val PROTOCOL_VERSION_BEFORE_NEGOTIATION: Int = 0
+
+/** 판을 싣지 않은 상대의 판 라벨. 판 불일치 화면이 "어느 쪽이 낡았는가" 를 보일 때 쓴다. */
+const val UNKNOWN_VERSION_LABEL: String = "판을 알리지 않는 옛 판"
+
+/**
  * 화면 → 코어의 틀(core-ui-split-design.md 6.4). 줄 하나가 틀 하나다.
  *
  * **겉 열쇠가 `kind` 가 아니라 `frame` 이다.** 앱 소켓은 `kind` 로 요청을 가르고 `kind` 가 없는 줄을 승인 물음으로 읽는다
@@ -41,7 +52,10 @@ sealed interface FrameToCore {
      */
     @Serializable
     @SerialName("hello")
-    data class Hello(val protocol: Int, val screenVersion: String) : FrameToCore
+    data class Hello(
+        val protocol: Int = PROTOCOL_VERSION_BEFORE_NEGOTIATION,
+        val screenVersion: String = UNKNOWN_VERSION_LABEL,
+    ) : FrameToCore
 
     /** @param id 화면이 지은 이름. 코어가 같은 id 로 답한다. */
     @Serializable
@@ -65,9 +79,9 @@ sealed interface FrameToScreen {
     @Serializable
     @SerialName("welcome")
     data class Welcome(
-        val protocol: Int,
-        val coreVersion: String,
-        val coreDiagnosticLog: String,
+        val protocol: Int = PROTOCOL_VERSION_BEFORE_NEGOTIATION,
+        val coreVersion: String = UNKNOWN_VERSION_LABEL,
+        val coreDiagnosticLog: String = "",
         val engineDirectory: String,
     ) : FrameToScreen
 
