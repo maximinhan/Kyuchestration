@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop
 
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,49 +11,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationStateHolder
-import com.kyuchestration.desktop.claudeauth.kyucli.KyuCliClaudeTokenStore
-import com.kyuchestration.desktop.claudeauth.process.ProcessClaudeCliAuthentication
-import com.kyuchestration.desktop.dashboard.WorkDirDashboardStateHolder
+import com.kyuchestration.desktop.core.assembleInProcessScreenFacingCore
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
-import com.kyuchestration.desktop.engine.EngineInstallationState
-import com.kyuchestration.desktop.engine.EngineInstallationStateHolder
-import com.kyuchestration.desktop.engine.bundled.placeBundledEngineWhereItCanRun
-import com.kyuchestration.desktop.engine.githubrelease.GitHubReleaseEngineInstaller
-import com.kyuchestration.desktop.initialization.WorkDirInitializationStateHolder
-import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
-import com.kyuchestration.desktop.kyu.ProcessKyuCommandRunner
-import com.kyuchestration.desktop.kyu.findKyuExecutable
-import com.kyuchestration.desktop.kyu.managedEngineDirectory
-import com.kyuchestration.desktop.kyu.planFileExistsIn
-import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
-import com.kyuchestration.desktop.repoclone.kyucli.KyuCliGitHubRepositoryCatalog
-import com.kyuchestration.desktop.repoclone.kyucli.KyuCliTokenProfileRegistry
-import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.SessionTarget
-import com.kyuchestration.desktop.terminal.chat.ChatSessionStateHolder
-import com.kyuchestration.desktop.terminal.chat.ProcessChatSessionOpener
-import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
-import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.theme.ThemePreference
-import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
-import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * 조립이 일어나는 유일한 자리.
+ * 화면이 뜨는 자리.
  *
- * 화면은 상태 홀더만, 상태 홀더는 자기 포트만 안다 — 목록은 관찰 포트를, 여는 걸음은 초기화
- * 포트를, 챗은 진입 포트를. "그 포트 뒤에 kyu 프로세스가 있다" 는 사실을 아는 파일이 여기
- * 하나뿐이라, 엔진을 바꿔 끼울 때 고칠 곳도 여기 하나다.
- *
- * 홀더끼리 서로를 부르지 않는 것도 이 자리의 몫이다. 워크디렉토리를 바꿀 때 세션을 놓고
- * 초기화 실패 문구를 거두는 것은 어느 한 홀더의 일이 아니라 조립하는 쪽의 결정이다.
+ * 화면은 코어를 [com.kyuchestration.desktop.core.ScreenFacingCore] 하나로만 본다 — 상태 홀더도, 그 뒤의 kyu 도 모른다
+ * (core-ui-split-design.md 6.2). 조립은 코어 쪽(assembleInProcessScreenFacingCore)에 있다. 이 파일에 남은 것은 화면의
+ * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
  */
 fun main() {
     val diagnosticLogPath = diagnosticLogFile()
@@ -93,103 +65,28 @@ private fun runDesktopApplication(
     diagnosticLogPathLabel: String,
 ) = application {
     val applicationCoroutineScope = rememberCoroutineScope()
-    // 관찰과 초기화가 같은 실행기를 함께 쓴다. 실행기는 부를 때마다 kyu 를 새로 찾는 무상태라
-    // 둘로 나눌 이유가 없다.
-    val kyuCommandRunner = remember { ProcessKyuCommandRunner(diagnosticLog = diagnosticLog) }
-    // 앱의 첫 갈림길. 다른 홀더보다 먼저 세우는 것이 뜻이다 — 엔진이 없으면 나머지 화면은
-    // 뜨지 않는다. 세우는 것 자체가 걸음이기도 하다: 어디에도 엔진이 없으면 이 홀더가 그
-    // 자리에서 곧바로 받기 시작한다.
-    val engineInstallationStateHolder = remember(applicationCoroutineScope) {
-        EngineInstallationStateHolder(
-            // 이 두 자리도 기록을 받는다. 여기서 걸린 실행은 설치 화면에 멈춰 서고 그 뒤로
-            // 엔진을 부르는 일이 하나도 없어서, 넘기지 않으면 그 실행의 기록이 "앱이 시작했다"
-            // 한 줄로 끝난다 — 맥이 격리해 둔 바이너리처럼 원격으로 봐야 하는 실패가 그렇게 끝난다.
-            engineInstaller = GitHubReleaseEngineInstaller(diagnosticLog = diagnosticLog),
-            findEngineExecutable = ::findKyuExecutable,
-            placeBundledEngine = { placeBundledEngineWhereItCanRun(diagnosticLog = diagnosticLog) },
-            coroutineScope = applicationCoroutineScope,
-        )
+    val screenFacingCore = remember(applicationCoroutineScope) {
+        assembleInProcessScreenFacingCore(applicationCoroutineScope, diagnosticLog)
     }
-    // 엔진 다음 갈림길. 세션을 여는 걸음이 전부 claude 를 띄우는 일이라, 로그인되지 않은
-    // 채로는 워크디렉토리를 열어 봐야 첫 대화에서 막힌다(chat-ui-design.md 7.2).
-    val claudeAuthenticationStateHolder = remember(applicationCoroutineScope) {
-        ClaudeAuthenticationStateHolder(
-            // claude 에게 직접 묻는다. 엔진에는 claude 에게 물을 클라이언트가 없고, 이것은
-            // 세션이 무엇을 띄울지의 물음이 아니라 앱이 자기 온보딩을 위해 하는 물음이다.
-            claudeCliAuthentication = ProcessClaudeCliAuthentication(),
-            // 맡아 두는 일만 엔진에게 시킨다. 이 도구의 비밀이 사는 자리가 거기 하나다.
-            claudeTokenStore = KyuCliClaudeTokenStore(kyuCommandRunner),
-            coroutineScope = applicationCoroutineScope,
-            diagnosticLog = diagnosticLog,
-        )
-    }
-    val dashboardStateHolder = remember(applicationCoroutineScope) {
-        WorkDirDashboardStateHolder(
-            workDirObserver = KyuCliWorkDirObserver(kyuCommandRunner),
-            planFileExists = ::planFileExistsIn,
-            coroutineScope = applicationCoroutineScope,
-        )
-    }
-    val initializationStateHolder = remember(applicationCoroutineScope) {
-        WorkDirInitializationStateHolder(
-            workDirInitializer = KyuCliWorkDirInitializer(kyuCommandRunner),
-            planFileExists = ::planFileExistsIn,
-            coroutineScope = applicationCoroutineScope,
-        )
-    }
-    val repositoryCloneStateHolder = remember(applicationCoroutineScope) {
-        RepositoryCloneStateHolder(
-            tokenProfileRegistry = KyuCliTokenProfileRegistry(kyuCommandRunner),
-            gitHubRepositoryCatalog = KyuCliGitHubRepositoryCatalog(kyuCommandRunner),
-            workDirRepositoryCloner = KyuCliWorkDirRepositoryCloner(kyuCommandRunner),
-            coroutineScope = applicationCoroutineScope,
-        )
-    }
-    val chatSessionStateHolder = remember(applicationCoroutineScope) {
-        ChatSessionStateHolder(
-            // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11).
-            sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
-            chatSessionOpener = ProcessChatSessionOpener(),
-            // 하위 세션도 엔진이 조립한다(원칙 11) — 앱이 넘기는 것은 상위가 고른 것과 누가 살아 있는가뿐이다.
-            childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),
-            // 세션을 띄우는 순간의 값을 묻는다. 조립 시점에는 아직 인증 화면을 지나기 전이라
-            // 값이 없고, 지나고 나면 이 자리가 그것을 답한다.
-            claudeAuthToken = { claudeAuthenticationStateHolder.tokenForSessions.value },
-            coroutineScope = applicationCoroutineScope,
-            diagnosticLog = diagnosticLog,
-        )
-    }
-    val engineInstallationState by engineInstallationStateHolder.state.collectAsState()
-    val claudeAuthenticationState by claudeAuthenticationStateHolder.state.collectAsState()
-    val dashboardState by dashboardStateHolder.state.collectAsState()
-    val initializationState by initializationStateHolder.state.collectAsState()
-    val chatConversations by chatSessionStateHolder.conversations.collectAsState()
-    val chatSessionEntries by chatSessionStateHolder.sessionEntries.collectAsState()
+    val engineInstallationState by screenFacingCore.engineInstallationState.collectAsState()
+    val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
+    val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
+    val initializationState by screenFacingCore.workDirInitializationState.collectAsState()
+    val chatConversations by screenFacingCore.chatConversations.collectAsState()
+    val chatSessionEntries by screenFacingCore.chatSessionEntries.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
     // 하나로 합치면 카드를 오갈 때마다 목록 전체가 다시 그려진다.
-    val heldChatSessions by chatSessionStateHolder.heldSessions.collectAsState()
-    val sessionTree by chatSessionStateHolder.sessionTree.collectAsState()
-    val childSessionGateQuestions by chatSessionStateHolder.gateQuestions.collectAsState()
-    // 받아 둘 자리는 앱이 도는 동안 바뀌지 않는다. 그릴 때마다 홈 디렉토리와 os.name 을 다시
-    // 읽을 이유가 없다.
-    val engineDirectoryLabel = remember { managedEngineDirectory().toString() }
-
-    // 엔진이 선 뒤에 묻는다. 온보딩 순서가 곧 이 순서다 — 토큰을 맡아 두는 자리가 kyu 라서,
-    // 엔진이 아직 없을 때 물으면 "저장소가 답하지 않음" 이 기록에 쌓이고 그 줄은 진짜 문제가
-    // 아니다. 홀더의 생성자에서 곧바로 묻지 않는 이유가 그것이다.
-    LaunchedEffect(engineInstallationState) {
-        if (engineInstallationState == EngineInstallationState.EngineReady) {
-            claudeAuthenticationStateHolder.checkCredentials()
-        }
-    }
+    val heldChatSessionTargets by screenFacingCore.heldChatSessionTargets.collectAsState()
+    val sessionTree by screenFacingCore.sessionTree.collectAsState()
+    val childSessionGateQuestions by screenFacingCore.childSessionGateQuestions.collectAsState()
 
     // 테마만 상태 홀더 없이 여기 둔다. 다른 상태들은 포트를 부르고 그 결과를 갈래로 옮기는
     // 일이 있어 홀더가 필요하지만, 이것은 사용자가 고른 값 하나이고 옮길 갈래가 없다 —
     // 고른 것과 시스템이 답한 것을 합치는 판단만 순수 함수로 갈라 두었다(resolveDarkTheme).
     var themePreference by remember { mutableStateOf(ThemePreference.AlwaysDark) }
 
-    // 어느 세션을 보는가는 화면의 것이다(core-ui-split-design.md 6.8 (가) · 원칙 21). 홀더는 모든 대화를 세션마다
-    // 내놓고, 여기서 고른 하나를 그린다. 세션을 오갈 때 홀더에 묻지 않는다.
+    // 어느 세션을 보는가는 화면의 것이다(core-ui-split-design.md 6.8 (가) · 원칙 21). 코어는 모든 대화를 세션마다
+    // 내놓고, 여기서 고른 하나를 그린다. 세션을 오갈 때 코어에 묻지 않는다.
     var viewedChatTarget by remember { mutableStateOf<SessionTarget?>(null) }
     val chatScreenState = chatScreenStateFor(viewedChatTarget, chatConversations, chatSessionEntries)
 
@@ -202,7 +99,7 @@ private fun runDesktopApplication(
             // 적어도 SIGHUP 을 받았지만 이쪽은 그것조차 가지 않는다. 그래서 창이 닫히기 전에
             // 여기서 기다린다. 프로세스는 stdin 이 닫히면 곧 끝나고, 그러지 않는 것만 이 자리가
             // 붙잡는다(ProcessChatSession).
-            runBlocking { chatSessionStateHolder.endAllSessions() }
+            runBlocking { screenFacingCore.endAllSessions() }
             exitApplication()
         },
         title = "뀨케스트레이션",
@@ -219,79 +116,51 @@ private fun runDesktopApplication(
             versionLabel = DesktopBuildVersion.label,
             diagnosticLogPathLabel = diagnosticLogPathLabel,
             engineInstallationState = engineInstallationState,
-            engineDirectoryLabel = engineDirectoryLabel,
+            engineDirectoryLabel = screenFacingCore.engineDirectoryLabel,
             claudeAuthenticationState = claudeAuthenticationState,
             dashboardState = dashboardState,
             initializationState = initializationState,
             chatScreenState = chatScreenState,
-            heldChatSessionTargets = heldChatSessions.map { it.target }.toSet(),
-            repositoryCloneStateHolder = repositoryCloneStateHolder,
+            heldChatSessionTargets = heldChatSessionTargets,
+            screenFacingCore = screenFacingCore,
             themePreference = themePreference,
             onThemePreferenceChosen = { themePreference = it },
-            onRetryEngineInstallationRequested = engineInstallationStateHolder::installEngine,
-            onLookForEngineAgainRequested = engineInstallationStateHolder::lookForEngineAgain,
-            onCheckClaudeCredentialsRequested = claudeAuthenticationStateHolder::checkCredentials,
-            onClaudeBrowserLoginRequested = claudeAuthenticationStateHolder::startBrowserLogin,
-            onClaudeBrowserLoginCodeSubmitted = claudeAuthenticationStateHolder::submitBrowserLoginCode,
-            onClaudeBrowserLoginCancelled = claudeAuthenticationStateHolder::cancelBrowserLogin,
-            onClaudeTokenSubmitted = claudeAuthenticationStateHolder::useToken,
+            onRetryEngineInstallationRequested = screenFacingCore::installEngine,
+            onLookForEngineAgainRequested = screenFacingCore::lookForEngineAgain,
+            onCheckClaudeCredentialsRequested = screenFacingCore::checkClaudeCredentials,
+            onClaudeBrowserLoginRequested = screenFacingCore::startClaudeBrowserLogin,
+            onClaudeBrowserLoginCodeSubmitted = screenFacingCore::submitClaudeBrowserLoginCode,
+            onClaudeBrowserLoginCancelled = screenFacingCore::cancelClaudeBrowserLogin,
+            onClaudeTokenSubmitted = screenFacingCore::useClaudeToken,
             onOpenWorkDirRequested = {
-                chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory ->
-                    // 여는 일과 초기화하는 일이 홀더 둘로 나뉘어 있어 여기서 이어 붙인다. 초기화
-                    // 쪽이 고른 자리를 조율할 수 있게 만들어 놓고, 그때 무엇을 "연다" 고 하는지는
-                    // 대시보드 쪽이 정한다.
-                    initializationStateHolder.openChosenDirectoryAsWorkDir(
-                        workDirPath = chosenDirectory,
-                        onWorkDirReady = dashboardStateHolder::openWorkDir,
-                    )
-                }
+                // 고르는 창은 사람이 앉은 OS 의 것이라 화면에 남는다(원칙 19). 고른 경로만 코어에게 건넨다.
+                chooseWorkDirDirectory(ownerWindow)?.let(screenFacingCore::openWorkDir)
             },
-            onInitializeOpenedWorkDirRequested = {
-                dashboardState.workDirPath?.let(initializationStateHolder::initializeOpenedWorkDir)
-            },
-            onCloneRepositoriesRequested = {
-                // 무엇을 이미 받아 뒀는지는 방금 관찰한 목록이 알고 있다. 대화상자가 그것을 다시
-                // 알아내려면 워크디렉토리를 한 번 더 훑어야 하는데, 그 앎은 대시보드의 것이다.
-                (dashboardState as? WorkDirDashboardState.WorkDirObserved)?.let { observed ->
-                    repositoryCloneStateHolder.open(
-                        workDirPath = observed.workDirPath,
-                        alreadyClonedRepositoryNames = observed.snapshot.repos.map { it.name }.toSet(),
-                    )
-                }
-            },
-            onRefreshRequested = dashboardStateHolder::refreshNow,
+            onInitializeOpenedWorkDirRequested = screenFacingCore::initializeOpenedWorkDir,
+            onCloneRepositoriesRequested = screenFacingCore::openRepositoryClone,
+            onRefreshRequested = screenFacingCore::refreshWorkDir,
             onCloseWorkDirRequested = {
-                // 워크디렉토리를 바꾸면 그 안의 세션을 보고 있을 이유가 없다. 끝내지 않으면 다른
-                // 워크디렉토리의 목록 아래에 이전 워크디렉토리의 세션이 남는다.
                 viewedChatTarget = null
-                applicationCoroutineScope.launch { chatSessionStateHolder.endAllSessions() }
-                // 초기화 실패 문구도, 고르던 레포도 그 워크디렉토리의 것이다. 같은 이유로 여기서
-                // 함께 놓는다 — 다른 워크디렉토리를 연 채로 앞 워크디렉토리에 받을 레포를 고르고
-                // 있으면, 받아 온 것이 화면에 없는 자리에 떨어진다.
-                initializationStateHolder.forgetLastFailure()
-                repositoryCloneStateHolder.close()
-                dashboardStateHolder.closeWorkDir()
+                screenFacingCore.closeWorkDir()
             },
             onEnterSessionRequested = { target, conversationChoice ->
-                dashboardState.workDirPath?.let { workDirPath ->
-                    // 이미 보유 중인 세션이면 홀더는 아무것도 하지 않는다 — 화면만 옮긴다.
-                    viewedChatTarget = target
-                    chatSessionStateHolder.enterSession(workDirPath, target, conversationChoice)
-                }
+                // 이미 보유 중인 세션이면 코어는 아무것도 하지 않는다 — 화면만 옮긴다.
+                viewedChatTarget = target
+                screenFacingCore.enterSession(target, conversationChoice)
             },
             onSendUserMessageRequested = { text ->
-                viewedChatTarget?.let { target -> chatSessionStateHolder.sendUserMessage(target, text) }
+                viewedChatTarget?.let { target -> screenFacingCore.sendUserMessage(target, text) }
             },
             onInterruptTurnRequested = {
-                viewedChatTarget?.let(chatSessionStateHolder::interruptTurn)
+                viewedChatTarget?.let(screenFacingCore::interruptTurn)
             },
             onPermissionChoiceMade = { toolUseId, choice ->
-                viewedChatTarget?.let { target -> chatSessionStateHolder.answerPermission(target, toolUseId, choice) }
+                viewedChatTarget?.let { target -> screenFacingCore.answerPermission(target, toolUseId, choice) }
             },
             onEndChatSessionRequested = {
                 viewedChatTarget?.let { target ->
                     viewedChatTarget = viewedTargetAfterEnding(target)
-                    applicationCoroutineScope.launch { chatSessionStateHolder.endSession(target) }
+                    screenFacingCore.endSession(target)
                 }
             },
             sessionTree = sessionTree,
@@ -303,7 +172,7 @@ private fun runDesktopApplication(
                     viewedChatTarget = childTarget
                 }
             },
-            onChildSessionGateAnswered = chatSessionStateHolder::answerGateQuestion,
+            onChildSessionGateAnswered = screenFacingCore::answerGate,
         )
     }
 }

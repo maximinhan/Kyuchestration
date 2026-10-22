@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
  * 엔진이 있는지 보고, 없으면 놓는 걸음을 쥔 자리. Compose 를 모른다.
  *
  * @param findEngineExecutable 지금 부를 수 있는 kyu 가 어디 있는지 답하는 자리. 어디를 어떤
- *   순서로 뒤지는지는 이 홀더의 앎이 아니라 조립하는 쪽(Main.kt)이 정한다 — 대시보드 홀더가
+ *   순서로 뒤지는지는 이 홀더의 앎이 아니라 조립하는 쪽(core/InProcessCoreAssembly.kt)이 정한다 — 대시보드 홀더가
  *   계획 파일 유무를 함수로 받는 것과 같은 선이다. 검사는 여기에 있음과 없음을 그대로 준다.
  * @param placeBundledEngine 설치 패키지가 들고 온 엔진을 부를 수 있는 자리에 놓는 걸음. 찾기
  *   전에 지난다 — 동봉된 엔진은 놓이고 나서야 탐색에 걸린다.

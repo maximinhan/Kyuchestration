@@ -37,13 +37,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.kyuchestration.desktop.core.ScreenFacingCore
 import com.kyuchestration.desktop.repoclone.CloneStatus
 import com.kyuchestration.desktop.repoclone.CloneStep
 import com.kyuchestration.desktop.repoclone.OwnerKind
 import com.kyuchestration.desktop.repoclone.RemoteRepository
-import com.kyuchestration.desktop.repoclone.RepositoryCloneResult
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
-import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.repoclone.TokenStorage
 import com.kyuchestration.desktop.theme.KyuTheme
 import java.time.Instant
@@ -62,7 +61,7 @@ import java.time.format.DateTimeFormatter
  */
 @Composable
 fun RepositoryCloneDialog(
-    repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    screenFacingCore: ScreenFacingCore,
     diagnosticLogPathLabel: String,
     /**
      * 앱이 지금 메인 세션을 보유하고 있는가. 결과 화면이 "새로 받은 레포가 그 세션에 붙지
@@ -73,7 +72,7 @@ fun RepositoryCloneDialog(
      */
     mainSessionHeld: Boolean,
 ) {
-    val cloneState by repositoryCloneStateHolder.state.collectAsState()
+    val cloneState by screenFacingCore.repositoryCloneState.collectAsState()
     if (cloneState is RepositoryCloneState.Closed) {
         return
     }
@@ -84,7 +83,7 @@ fun RepositoryCloneDialog(
     var newProfileToken by remember { mutableStateOf("") }
 
     AlertDialog(
-        onDismissRequest = repositoryCloneStateHolder::close,
+        onDismissRequest = screenFacingCore::closeRepositoryClone,
         modifier = Modifier.width(760.dp),
         title = { Text(cloneState.title) },
         text = {
@@ -103,8 +102,8 @@ fun RepositoryCloneDialog(
 
                     is RepositoryCloneState.ChoosingTokenProfile -> TokenProfileChoiceBody(
                         state = state,
-                        onTokenProfileChosen = repositoryCloneStateHolder::chooseTokenProfile,
-                        onTokenProfileRemovalRequested = repositoryCloneStateHolder::startRemovingTokenProfile,
+                        onTokenProfileChosen = screenFacingCore::chooseTokenProfile,
+                        onTokenProfileRemovalRequested = screenFacingCore::startRemovingTokenProfile,
                     )
 
                     is RepositoryCloneState.ConfirmingTokenProfileRemoval ->
@@ -116,7 +115,7 @@ fun RepositoryCloneDialog(
                         newProfileToken = newProfileToken,
                         onNewProfileNameChanged = { newProfileName = it },
                         onNewProfileTokenChanged = { newProfileToken = it },
-                        onStopRequested = repositoryCloneStateHolder::stopRegisteringTokenProfile,
+                        onStopRequested = screenFacingCore::stopRegisteringTokenProfile,
                     )
 
                     is RepositoryCloneState.TokenProfileRegistered -> Text(
@@ -127,13 +126,13 @@ fun RepositoryCloneDialog(
 
                     is RepositoryCloneState.ChoosingOwner -> OwnerChoiceBody(
                         state = state,
-                        onOwnerChosen = repositoryCloneStateHolder::chooseOwner,
+                        onOwnerChosen = screenFacingCore::chooseRepositoryOwner,
                     )
 
                     is RepositoryCloneState.ChoosingRepositories -> RepositoryChoiceBody(
                         state = state,
-                        onSearchTextChanged = repositoryCloneStateHolder::changeRepositorySearchText,
-                        onSelectionToggled = repositoryCloneStateHolder::toggleRepositorySelection,
+                        onSearchTextChanged = screenFacingCore::changeRepositorySearchText,
+                        onSelectionToggled = screenFacingCore::toggleRepositorySelection,
                     )
 
                     is RepositoryCloneState.CloneFinished -> CloneResultBody(state, mainSessionHeld)
@@ -143,18 +142,18 @@ fun RepositoryCloneDialog(
         confirmButton = {
             CloneDialogConfirmButton(
                 cloneState = cloneState,
-                onRegisterTokenProfileRequested = repositoryCloneStateHolder::startRegisteringTokenProfile,
+                onRegisterTokenProfileRequested = screenFacingCore::startRegisteringTokenProfile,
                 onRegisterSubmitted = {
-                    repositoryCloneStateHolder.registerTokenProfile(newProfileName, newProfileToken)
+                    screenFacingCore.registerTokenProfile(newProfileName, newProfileToken)
                     // 건네자마자 화면에서 지운다. 거절당하면 다시 붙여넣게 되지만, 앱이 토큰을
                     // 들고 있는 시간을 그 대가로 줄인다.
                     newProfileToken = ""
                 },
-                onContinueRequested = repositoryCloneStateHolder::continueWithRegisteredTokenProfile,
-                onCloneRequested = repositoryCloneStateHolder::cloneSelectedRepositories,
-                onRetryRequested = repositoryCloneStateHolder::retryFailedStep,
-                onCloseRequested = repositoryCloneStateHolder::close,
-                onRemovalConfirmed = repositoryCloneStateHolder::removeChosenTokenProfile,
+                onContinueRequested = screenFacingCore::continueWithRegisteredTokenProfile,
+                onCloneRequested = screenFacingCore::cloneSelectedRepositories,
+                onRetryRequested = screenFacingCore::retryFailedCloneStep,
+                onCloseRequested = screenFacingCore::closeRepositoryClone,
+                onRemovalConfirmed = screenFacingCore::removeChosenTokenProfile,
             )
         },
         dismissButton = {
@@ -164,11 +163,11 @@ fun RepositoryCloneDialog(
                 // 지우기를 확인하는 자리에서 "닫기" 는 대화상자를 통째로 닫는 말로 읽힌다.
                 // 사용자가 무르려던 것은 지우기 하나이지 레포를 받는 일 전체가 아니다.
                 cloneState is RepositoryCloneState.ConfirmingTokenProfileRemoval ->
-                    TextButton(onClick = repositoryCloneStateHolder::stopRemovingTokenProfile) {
+                    TextButton(onClick = screenFacingCore::stopRemovingTokenProfile) {
                         Text("지우지 않기")
                     }
 
-                else -> TextButton(onClick = repositoryCloneStateHolder::close) { Text("닫기") }
+                else -> TextButton(onClick = screenFacingCore::closeRepositoryClone) { Text("닫기") }
             }
         },
     )

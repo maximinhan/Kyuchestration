@@ -83,6 +83,8 @@ dependencies {
 
     // 폴링을 실제로 3 초 기다리며 시험하면 테스트가 그만큼 느려진다. 가상 시간으로 돌린다.
     testImplementation(libs.kotlinxCoroutinesTest)
+
+    testImplementation(libs.archunit)
 }
 
 // 엔진(kyu)을 설치 패키지 안에 함께 넣는다. 앱만 설치하면 끝나야 하기 때문이다 — 화면이

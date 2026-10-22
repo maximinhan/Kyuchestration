@@ -23,6 +23,9 @@ markdownRenderer = "0.45.0"
 # 코드 펜스 하이라이트. -code 모듈이 끌고 오지만 우리가 테마를 직접 넘기므로(이 앱의 다크는
 # 사용자가 고르는 것이라 isSystemInDarkTheme 이 답하지 못한다) 쓰는 것을 그대로 적는다.
 highlights = "1.1.0"
+# 화면이 코어에 닿는 길을 경계(ScreenFacingCore) 하나로 묶어 둔 것을 시험이 지킨다(core-ui-split-design.md 6.2).
+# 모듈이 갈리면(7 절 2 단계) 그 방향은 빌드가 막지만, 그때까지는 바이트코드의 의존을 읽어 막는다.
+archunit = "1.5.0"
 
 [plugins]
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -42,3 +45,4 @@ markdownRenderer = { module = "com.mikepenz:multiplatform-markdown-renderer", ve
 markdownRendererM3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
 markdownRendererCode = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "markdownRenderer" }
 highlights = { module = "dev.snipme:highlights", version.ref = "highlights" }
+archunit = { module = "com.tngtech.archunit:archunit", version.ref = "archunit" }

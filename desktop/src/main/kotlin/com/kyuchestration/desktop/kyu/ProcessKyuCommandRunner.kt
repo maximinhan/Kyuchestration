@@ -28,7 +28,7 @@ import java.util.concurrent.CompletableFuture
  *   확인하기 위한 이음매이기도 하다.
  * @param diagnosticLog 실패를 남길 자리. 기본값이 아무 데도 남기지 않는 것인 이유는 시험이다 —
  *   진짜 파일을 기본값으로 두면 어댑터 시험 하나를 돌릴 때마다 이 머신의 홈에 기록이 쌓인다.
- *   앱은 조립하는 자리(Main.kt)에서 진짜 기록을 건넨다.
+ *   앱은 조립하는 자리(core/InProcessCoreAssembly.kt)에서 진짜 기록을 건넨다.
  */
 class ProcessKyuCommandRunner(
     private val fixedKyuExecutablePath: Path? = null,
