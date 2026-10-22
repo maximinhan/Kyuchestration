@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 화면 쪽에서 코어를 비추는 거울(core-ui-split-design.md 6.5). 코어가 보낸 틀로 `StateFlow` 열 개를 다시 세우고, 명령은 틀로
- * 보낸다 — 화면은 같은 JVM 의 코어를 볼 때와 같은 [ScreenFacingCore] 를 본다.
+ * 보낸다 — 화면은 코어 프로세스 안의 구현(InProcessScreenFacingCore)과 같은 [ScreenFacingCore] 를 본다.
  *
  * **`seq` 가 하나라도 건너뛰면 다시 인사한다**(6.4). 건너뛴 변화를 모른 채 다음 변화를 얹으면 거울이 코어와 조용히 어긋난다.
  * 다시 받은 스냅샷의 마지막 조각이 올 때까지는 거울을 그대로 둔다 — 반쯤 온 스냅샷을 그리면 대화가 잘려 보인다(6.6).

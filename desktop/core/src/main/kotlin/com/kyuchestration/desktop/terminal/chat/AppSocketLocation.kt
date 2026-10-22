@@ -22,7 +22,7 @@ import java.util.UUID
  * | 맥 | `$TMPDIR/kyuchestration` (없으면 같은 대비) |
  *
  * **윈도우 갈래를 두지 않는다.** 릴리스가 윈도우 설치 패키지를 내지 않아 그 갈래를 지날 실행이
- * 없고(ui/build.gradle.kts 의 targetFormats), 쓰지도 않을 `%LOCALAPPDATA%` 갈래를 미리 두면 시험할
+ * 없고(app/build.gradle.kts 의 targetFormats), 쓰지도 않을 `%LOCALAPPDATA%` 갈래를 미리 두면 시험할
  * 수 없는 분기가 하나 생긴다 — 진단 기록의 자리가 같은 이유로 두 갈래인 것과 같은 선이다.
  * 채널 자체는 윈도우에서도 성립한다(설계 5.4: JDK 16 이상의 `AF_UNIX` · Go 의 `net.Dial`).
  *

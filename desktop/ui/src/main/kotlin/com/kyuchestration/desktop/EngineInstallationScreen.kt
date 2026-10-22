@@ -27,7 +27,7 @@ import com.kyuchestration.desktop.protocol.FailureView
 /**
  * 엔진이 없는 채로 앱을 띄웠을 때 가장 먼저 뜨는 화면.
  *
- * 엔진이 닿는 길이 둘이다. 설치 패키지에는 함께 들어 있고(desktop/ui/build.gradle.kts 의
+ * 엔진이 닿는 길이 둘이다. 설치 패키지에는 함께 들어 있고(desktop/app/build.gradle.kts 의
  * appResourcesRootDir), 소스에서 띄울 때도 Go 가 있으면 옆 Go 모듈에서 만들어 넣는다(같은 파일의
  * run 게이트). 이 화면을 보는 사람은 그 둘 다 닿지 않은 자리에 있다 — 그래서 이 화면은 사라지지
  * 않고 남는다.

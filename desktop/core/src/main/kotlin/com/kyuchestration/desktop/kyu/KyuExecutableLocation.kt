@@ -78,7 +78,7 @@ internal fun findKyuExecutable(
  *
  * null 이 되는 실행이 둘이다. IDE 에서 main 을 띄우면 시스템 프로퍼티 자체가 없고,
  * `./gradlew run` 은 자리를 알려 주지만 Go 가 없는 머신에서는 엔진을 만드는 걸음을 건너뛰어
- * 그 자리가 비어 있다(desktop/ui/build.gradle.kts 의 run 게이트). 둘 다 "동봉이 없다" 로 답해야
+ * 그 자리가 비어 있다(desktop/app/build.gradle.kts 의 run 게이트). 둘 다 "동봉이 없다" 로 답해야
  * 나머지 길(PATH · 첫 화면이 스스로 받아 오는 것)이 그대로 열린다.
  *
  * @param lookUpSystemProperty Compose 가 앱 리소스 자리를 알려 주는 프로퍼티를 읽는 자리.
@@ -107,8 +107,8 @@ internal fun bundledEngineCopyPath(engineDirectory: Path = managedEngineDirector
  * Compose 가 앱 리소스 자리를 알려 주는 시스템 프로퍼티.
  *
  * 설치한 앱에서는 실행기가 `$APPDIR/resources` 를 넣어 주고(app 이미지의 .cfg),
- * `./gradlew run` 에서는 Gradle 이 `desktop/ui/build/compose/tmp/prepareAppResources` 를 넣어 준다.
- * 그 자리에 무엇이 들어가는지는 desktop/ui/build.gradle.kts 의 appResourcesRootDir 이 정한다.
+ * `./gradlew run` 에서는 Gradle 이 `desktop/app/build/compose/tmp/prepareAppResources` 를 넣어 준다.
+ * 그 자리에 무엇이 들어가는지는 desktop/app/build.gradle.kts 의 appResourcesRootDir 이 정한다.
  */
 private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.application.resources.dir"
 
@@ -153,7 +153,7 @@ internal const val PINNED_KYU_EXECUTABLE_VARIABLE = "KYU_BINARY_PATH"
  * 확장자가 붙은 이름(kyu.exe)은 찾지 않는다.
  *
  * 릴리스가 윈도우 바이너리를 내지 않고(release.yml 의 크로스 컴파일 목록), 설치 패키지에서도
- * msi 가 빠졌다(ui/build.gradle.kts 의 targetFormats). 그 둘이 그대로인 한 윈도우 네이티브는 대상이
+ * msi 가 빠졌다(app/build.gradle.kts 의 targetFormats). 그 둘이 그대로인 한 윈도우 네이티브는 대상이
  * 아니므로, 그 이름으로 찾아질 파일이 이 프로젝트에는 없다. 찾는 시늉만 하면 윈도우에서
  * 띄운 사람이 받게 될 답이 "WSL 에서 띄우세요" 가 아니라 침묵이 된다.
  */

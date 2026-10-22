@@ -22,8 +22,8 @@ import kotlin.io.path.isRegularFile
  * 권한을 되돌릴 수도 없다.
  *
  * 실측(리눅스 · 이 저장소의 deb):
- * - `desktop/ui/build/compose/tmp/prepareAppResources/kyu` → `-rwxr-xr-x` (Gradle 은 권한을 지킨다)
- * - `desktop/ui/build/compose/binaries/main/app/.../lib/app/resources/kyu` → `-rw-r--r--`
+ * - `desktop/app/build/compose/tmp/prepareAppResources/kyu` → `-rwxr-xr-x` (Gradle 은 권한을 지킨다)
+ * - `desktop/app/build/compose/binaries/main/app/.../lib/app/resources/kyu` → `-rw-r--r--`
  * - deb 안 `/opt/kyuchestration/lib/app/resources/kyu` → `-rw-r--r-- root/root`
  *
  * 맥에서도 같은 길을 쓴다. 권한이 남아 있더라도 받은 dmg 안의 파일에는 격리 표시(quarantine)가

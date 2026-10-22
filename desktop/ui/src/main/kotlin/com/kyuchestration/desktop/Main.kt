@@ -10,37 +10,37 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.kyuchestration.desktop.core.CoreIdentity
-import com.kyuchestration.desktop.core.ScreenFrameOutbox
-import com.kyuchestration.desktop.core.startCore
-import com.kyuchestration.desktop.diagnostics.BuildVersion
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
+import com.kyuchestration.desktop.mirror.CoreChildProcess
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
  * 화면이 뜨는 자리.
  *
  * 화면은 코어를 [ScreenFacingCore] 하나로만 본다 — 상태 홀더도, 그 뒤의 kyu 도 모른다(core-ui-split-design.md 6.2). 그
- * [ScreenFacingCore] 는 거울([CoreMirror])이다. 코어는 같은 JVM 의 자기 스레드에 서지만, 화면은 그 코어와 JSON 틀 줄 두
- * 가닥으로만 말한다(7 절 1 단계). 2 단계에서 그 두 가닥이 코어 프로세스의 stdin · stdout 으로 바뀌어도 이 파일은 코어를
- * 띄우는 자리 하나만 바뀐다. 이 파일에 남은 것은 화면의 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
+ * [ScreenFacingCore] 는 거울([CoreMirror])이고, 거울은 화면이 자식으로 띄운 코어 프로세스의 stdio 위에 선다(7 절 2 단계).
+ * 같은 머신이어도 언제나 이 길이다(원칙 20) — 화면 모듈은 코어의 클래스를 컴파일 시점에 볼 수조차 없다. 이 파일에 남은 것은 화면의
+ * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
+ *
+ * @param coreLaunchCommand 코어를 `serve --stdio` 로 띄우는 명령. 무엇으로 띄우는지는 이 프로그램을 띄운 쪽(app 모듈)이 안다 —
+ *   설치 패키지에서는 앱의 실행기, 소스에서는 같은 클래스패스의 java 다.
  */
-fun main() {
+fun runScreen(coreLaunchCommand: List<String>) {
     val diagnosticLogPath = diagnosticLogFile(DiagnosticLogOwner.Screen)
     val diagnosticLog = FileDiagnosticLog(diagnosticLogPath)
 
@@ -55,9 +55,12 @@ fun main() {
     )
 
     try {
-        when (val connection = connectToCoreInThisProcess(diagnosticLog, diagnosticLogPath.toString())) {
+        val coreProcess = CoreChildProcess.start(coreLaunchCommand)
+        when (val connection = connectMirror(coreProcess, diagnosticLog)) {
             is CoreConnection.Connected -> runDesktopApplication(
-                connection.mirror,
+                screenFacingCore = connection.mirror,
+                coreProcess = coreProcess,
+                diagnosticLog = diagnosticLog,
                 diagnosticLogPathLabel = diagnosticLogPathsLabel(diagnosticLogPath.toString(), connection.mirror.coreDiagnosticLogPath),
             )
             is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(connection, diagnosticLogPath.toString())
@@ -74,47 +77,26 @@ fun main() {
     }
 }
 
-/**
- * 코어를 이 JVM 에 세우고, 줄 두 가닥 위에 거울을 세워 돌려준다. 거울은 첫 스냅샷이 다 온 뒤에 서므로, 창은 처음부터
- * 코어의 상태를 들고 뜬다.
- *
- * 줄은 받는 쪽이 밀려도 쓰기가 멈추지 않는 것이다 — 코어는 틀을 쓰다 멈추면 안 된다(serveScreen).
- */
-private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog, diagnosticLogPath: String): CoreConnection {
-    val framesToCore = Channel<String>(Channel.UNLIMITED)
-    val coreOutbox = ScreenFrameOutbox()
-    startCore(
-        framesFromScreen = framesToCore,
-        framesToScreen = coreOutbox,
-        coreIdentity = CoreIdentity(BuildVersion.labelOf(CoreIdentity::class.java), diagnosticLogPath),
+/** 코어 프로세스의 stdio 에 거울을 세운다. 거울은 첫 스냅샷이 다 온 뒤에 서므로, 창은 처음부터 코어의 상태를 들고 뜬다. */
+private fun connectMirror(coreProcess: CoreChildProcess, diagnosticLog: DiagnosticLog): CoreConnection = runBlocking {
+    CoreMirror.connect(
+        framesFromCore = coreProcess.framesFromCore,
+        framesToCore = coreProcess.framesToCore,
+        // 화면 스레드가 아니다. 창을 닫는 자리가 화면 스레드를 붙잡고 코어가 끝나기를 기다리는데, 그것을 알리는 틀을 읽는
+        // 것이 이 스코프다.
+        readingScope = CoroutineScope(Dispatchers.Default + CoroutineName("core-mirror")),
         diagnosticLog = diagnosticLog,
+        screenVersionLabel = DesktopBuildVersion.label,
     )
-    val framesToScreen = Channel<String>(Channel.UNLIMITED)
-    CoroutineScope(Dispatchers.Default).launch {
-        val coreFailure = runCatching { coreOutbox.deliverEach { framesToScreen.send(it) } }.exceptionOrNull()
-        framesToScreen.close(coreFailure)
-    }
-    return runBlocking {
-        CoreMirror.connect(
-            framesFromCore = framesToScreen,
-            framesToCore = framesToCore,
-            // 화면 스레드가 아니다. 창을 닫는 자리가 화면 스레드를 붙잡고 코어가 끝나기를 기다리는데, 그것을 알리는 틀을 읽는
-            // 것이 이 스코프다.
-            readingScope = CoroutineScope(Dispatchers.Default + CoroutineName("core-mirror")),
-            diagnosticLog = diagnosticLog,
-            screenVersionLabel = DesktopBuildVersion.label,
-        )
-    }
 }
 
 /**
- * 오류 자리마다 알릴 기록 파일들. 화면과 코어가 각자 적으므로(core-ui-split-design.md 6.10) 둘 다 알린다 — 둘이 같은 파일이면
- * 하나만.
+ * 오류 자리마다 알릴 기록 파일들. 화면과 코어가 각자 적으므로(core-ui-split-design.md 6.10) 둘 다 알린다.
  */
 private fun diagnosticLogPathsLabel(screenDiagnosticLogPath: String, coreDiagnosticLogPath: String): String =
     listOf(coreDiagnosticLogPath, screenDiagnosticLogPath).distinct().joinToString(" · ")
 
-/** 코어가 다른 틀 규약을 말하면 세션을 하나도 열지 않고 두 판만 보인다(6.14). */
+/** 코어가 다른 틀 규약을 말하면 세션을 하나도 열지 않고 두 판만 보인다(6.14). 코어는 작별하고 스스로 끝난다. */
 private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch, diagnosticLogPathLabel: String) = application {
     Window(
         onCloseRequest = ::exitApplication,
@@ -126,13 +108,30 @@ private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch,
 }
 
 /**
+ * 창을 닫을 때 코어가 모든 세션을 끝내고 나가기를 기다리는 한도.
+ *
+ * 코어는 세션마다 claude 가 스스로 끝나기를 최대 5 초 기다린 뒤 강제로 끝내고(ProcessChatSession), 하위부터 차례로 끝낸다. 세션
+ * 여럿이 다 그 5 초를 채워도 넘지 않을 만큼 넉넉히 두되, 코어가 멈췄을 때 창이 영영 닫히지 않는 일은 없게 한다.
+ */
+private val CORE_LEAVE_TIMEOUT = 30.seconds
+
+/**
  * @param diagnosticLogPathLabel 화면이 오류 자리마다 알려 줄 기록 파일의 경로. 사용자가 무엇을
  *   보고할 때 건네면 되는지가 그 자리에 있어야, 원격에서 진단할 수 있는 것이 화면 문구를 넘어선다.
  */
 private fun runDesktopApplication(
     screenFacingCore: CoreMirror,
+    coreProcess: CoreChildProcess,
+    diagnosticLog: DiagnosticLog,
     diagnosticLogPathLabel: String,
 ) = application {
+    // 코어가 끝나면 그 종료 코드를 남긴다. 화면이 떠나기 전에 끝났다면 거울이 연결 끊김을 세우고, 까닭은 코어의 기록에 있다.
+    val leavingCore = remember { AtomicBoolean(false) }
+    remember {
+        coreProcess.whenExited { exitCode ->
+            diagnosticLog.record(DiagnosticLogEntry.CoreProcessExited(exitCode, screenWasLeaving = leavingCore.get()))
+        }
+    }
     val coreConnectionFailure by screenFacingCore.coreConnectionFailure.collectAsState()
     val engineInstallationState by screenFacingCore.engineInstallationState.collectAsState()
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
@@ -160,15 +159,17 @@ private fun runDesktopApplication(
 
     Window(
         onCloseRequest = {
-            // 창을 닫는 것이 곧 세션을 끝내는 일이다. 앱이 그 프로세스를 보유하므로 앱과 생사를
-            // 같이한다(설계 원칙 5 개정).
+            // 창을 닫는 것이 곧 세션을 끝내는 일이다. 코어가 세션을 보유하고 화면이 코어를 띄웠으므로, 2~4 단계에서는 세션이
+            // 화면과 생사를 같이한다(core-ui-split-design.md 6.13).
             //
-            // 파이프에 물린 claude 는 부모가 사라진 것을 모른 채 계속 산다 — PTY 시절의 자식은
-            // 적어도 SIGHUP 을 받았지만 이쪽은 그것조차 가지 않는다. 그래서 창이 닫히기 전에
-            // 여기서 기다린다. 프로세스는 stdin 이 닫히면 곧 끝나고, 그러지 않는 것만 이 자리가
-            // 붙잡는다(ProcessChatSession). 끝내는 것은 코어다 — 거울은 코어로 가는 줄을 닫고, 코어가 세션을 다 끝내고
-            // 자기 줄을 닫을 때까지 기다린다.
-            runBlocking { screenFacingCore.endAllSessions() }
+            // 파이프에 물린 claude 는 부모가 사라진 것을 모른 채 계속 산다. 그래서 창이 닫히기 전에 코어가 세션을 다 끝내고 나가기를
+            // 여기서 기다린다. 끝내는 것은 코어다 — 화면은 코어의 stdin 을 닫을 뿐이다. 한도 안에 나가지 않으면 강제로 끝내고 그 사실을
+            // 기록한다.
+            leavingCore.set(true)
+            val exit = runBlocking { coreProcess.leave(screenFacingCore, CORE_LEAVE_TIMEOUT) }
+            if (exit == CoreChildProcess.Exit.KilledAfterTimeout) {
+                diagnosticLog.record(DiagnosticLogEntry.CoreProcessKilledAfterTimeout(CORE_LEAVE_TIMEOUT.inWholeSeconds))
+            }
             exitApplication()
         },
         title = "뀨케스트레이션",
