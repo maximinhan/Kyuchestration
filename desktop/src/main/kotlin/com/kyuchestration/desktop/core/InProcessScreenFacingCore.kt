@@ -19,6 +19,7 @@ import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import com.kyuchestration.desktop.terminal.chat.SessionTree
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -91,8 +92,16 @@ class InProcessScreenFacingCore(
         //
         // 화면과 코어가 같은 OS 인 동안은 화면 경로가 곧 코어 경로다. 윈도우 화면의 경로를 푸는 자리(wslpath)가 여기
         // 서는 것은 3 단계다(설계 6.9).
+        val chosenDirectory = try {
+            Path.of(hostPath)
+        } catch (unreadable: InvalidPathException) {
+            // 화면이 보낸 문자열이 이 OS 의 경로가 아니다. 던지면 명령 하나로 코어가 끝나므로, 여는 걸음의 실패로 답한다 —
+            // 사람은 시작 화면에서 그 이유를 보고 다른 자리를 고른다.
+            workDirInitialization.refuseChosenDirectory("고른 자리를 이 컴퓨터의 경로로 읽지 못했습니다: ${unreadable.reason}")
+            return
+        }
         workDirInitialization.openChosenDirectoryAsWorkDir(
-            workDirPath = Path.of(hostPath),
+            workDirPath = chosenDirectory,
             onWorkDirReady = workDirDashboard::openWorkDir,
         )
     }

@@ -42,6 +42,9 @@ class RecordingScreenFacingCore(
     var endAllSessionsCount = 0
         private set
 
+    /** 이 명령을 받으면 던진다 — 홀더가 명령 도중 예외를 낸 자리를 흉내 낸다. */
+    var commandThatFails: ScreenCommand? = null
+
     override fun installEngine() = record(ScreenCommand.InstallEngine)
 
     override fun lookForEngineAgain() = record(ScreenCommand.LookForEngineAgain)
@@ -118,6 +121,7 @@ class RecordingScreenFacingCore(
     }
 
     private fun record(command: ScreenCommand) {
+        check(command != commandThatFails) { "홀더가 $command 를 받다 실패했다" }
         receivedCommands += command
     }
 }

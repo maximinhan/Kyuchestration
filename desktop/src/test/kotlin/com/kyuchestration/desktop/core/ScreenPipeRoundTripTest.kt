@@ -17,7 +17,10 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -137,6 +140,39 @@ class ScreenPipeRoundTripTest {
         val pipe = startPipe(core)
 
         pipe.screenToCore.close()
+        runCurrent()
+
+        assertEquals(1, core.endAllSessionsCount)
+        assertTrue(pipe.coreToScreen.isClosedForSend)
+    }
+
+    @Test
+    fun `명령 도중 코어가 실패해도 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
+        // 세션 끝내기를 건너뛰고 줄만 닫히면, 화면은 떠나도 claude 프로세스들이 주인 없이 남는다.
+        val core = RecordingScreenFacingCore().apply { commandThatFails = ScreenCommand.RefreshWorkDir }
+        val pipe = FramePipe(this)
+        val serving = backgroundScope.async(SupervisorJob()) {
+            serveScreen(core, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
+        }
+
+        pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
+        runCurrent()
+
+        assertFailsWith<IllegalStateException> { serving.await() }
+        assertEquals(1, core.endAllSessionsCount)
+        assertTrue(pipe.coreToScreen.isClosedForSend)
+    }
+
+    @Test
+    fun `코어 스코프가 취소돼도 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
+        val core = RecordingScreenFacingCore()
+        val pipe = FramePipe(this)
+        val serving = backgroundScope.launch {
+            serveScreen(core, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
+        }
+        runCurrent()
+
+        serving.cancel()
         runCurrent()
 
         assertEquals(1, core.endAllSessionsCount)

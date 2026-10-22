@@ -7,11 +7,13 @@ import com.kyuchestration.desktop.protocol.ScreenCommand
 import com.kyuchestration.desktop.protocol.commandIdOfUnreadableFrame
 import com.kyuchestration.desktop.protocol.decodeFrameToCore
 import com.kyuchestration.desktop.protocol.encodeFrameToScreen
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 
 /**
@@ -27,6 +29,7 @@ import kotlinx.serialization.SerializationException
  * 코어가 프로세스로 갈라져 그 줄이 stdout 이 될 때 선다.
  *
  * 화면이 줄을 닫으면(stdin EOF) 모든 세션을 끝내고 자기 줄을 닫는다 — 창을 닫든 화면이 죽든 같은 길이다(6.13 의 2~4 단계).
+ * 명령 도중 코어가 실패하거나 코어 스코프가 취소돼도 같은 끝을 지난다. 실패는 그 뒤에 그대로 던진다.
  */
 suspend fun serveScreen(
     core: ScreenFacingCore,
@@ -82,9 +85,11 @@ suspend fun serveScreen(
                 }
             }
             watchingCore.cancel()
-            core.endAllSessions()
         }
     } finally {
+        // 화면이 떠났든(줄의 끝), 명령 도중 코어가 실패했든, 코어 스코프가 취소됐든 세션은 여기서 끝낸다. 건너뛰면 claude
+        // 프로세스들이 주인 없이 남는다 — 취소된 뒤에도 끝내기가 마저 돌도록 취소를 받지 않는 자리에서 부른다.
+        withContext(NonCancellable) { core.endAllSessions() }
         framesToScreen.close()
     }
 }

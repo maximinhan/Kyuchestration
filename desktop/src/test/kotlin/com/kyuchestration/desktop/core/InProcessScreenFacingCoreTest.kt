@@ -3,6 +3,7 @@ package com.kyuchestration.desktop.core
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.engine.EngineInstallationState
+import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
@@ -118,6 +119,18 @@ class InProcessScreenFacingCoreTest {
 
         assertEquals(emptySet(), bed.core.heldChatSessionTargets.value)
         assertEquals(emptyMap(), bed.core.chatConversations.value)
+        assertEquals(WorkDirDashboardState.NoWorkDirOpened, bed.core.workDirDashboardState.value)
+    }
+
+    @Test
+    fun `이 OS 의 경로로 읽히지 않는 자리를 열면 예외가 아니라 여는 걸음의 실패로 답한다`() = runTest {
+        // 화면 경로는 화면 OS 의 문자열이다(설계 6.9). 코어가 그것을 풀다 던지면 그 명령 하나로 코어가 끝난다.
+        val bed = inProcessCoreTestBed()
+
+        bed.core.openWorkDir("/w/nul\u0000이름")
+        runCurrent()
+
+        assertIs<WorkDirInitializationState.Failed>(bed.core.workDirInitializationState.value)
         assertEquals(WorkDirDashboardState.NoWorkDirOpened, bed.core.workDirDashboardState.value)
     }
 }
