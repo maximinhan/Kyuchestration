@@ -57,4 +57,11 @@ class FailureViewTest {
             kinds,
         )
     }
+
+    @Test
+    fun `보일 줄에서 빈 문구는 빠진다`() {
+        // 예외의 문구가 없으면 값의 문구는 빈 문자열이다. 그것을 그대로 한 줄로 그리면 배너에 빈 줄이 선다.
+        assertEquals(listOf("다시 시도하세요."), FailureView(kind = "X.Y", message = "", guidance = "다시 시도하세요.").explanationLines)
+        assertEquals(listOf("문구", "안내"), FailureView(kind = "X.Y", message = "문구", guidance = "안내").explanationLines)
+    }
 }

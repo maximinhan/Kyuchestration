@@ -108,7 +108,7 @@ internal fun WorkDirSessionPanel(
                         NoticeBanner(
                             accentColor = KyuTheme.statusColors.failure,
                             title = "갱신하지 못했습니다",
-                            lines = listOf(failure.message, failure.guidance),
+                            lines = failure.explanationLines,
                         )
                     }
                 }
