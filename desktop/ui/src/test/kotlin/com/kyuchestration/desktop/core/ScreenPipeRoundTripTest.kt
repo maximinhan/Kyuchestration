@@ -13,9 +13,15 @@ import com.kyuchestration.desktop.protocol.ScreenCommand
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.decodeFrameToScreen
 import com.kyuchestration.desktop.protocol.encodeFrameToCore
+import com.kyuchestration.desktop.terminal.ChildSessionGate
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.chat.ChatConversation
+import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.terminal.chat.ChatSessionEvent
+import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
+import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
+import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -33,6 +39,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 
 /**
  * 같은 JVM 안에서 코어 → 게시자 → 틀 줄 → 거울이 화면에 코어와 같은 상태를 주는가(core-ui-split-design.md 7 절 1 단계).
@@ -76,7 +83,18 @@ class ScreenPipeRoundTripTest {
 
     @Test
     fun `명령 서른셋이 틀을 건너 같은 모양으로 코어에 닿는다`() = runTest {
-        val core = RecordingScreenFacingCore()
+        // 답 명령 둘이 낡은 답으로 거절되지 않게, 그 답이 가리키는 물음을 열어 둔다.
+        val core = RecordingScreenFacingCore().apply {
+            chatConversations.value = mapOf(
+                SessionTarget.Main to ChatConversation(
+                    target = SessionTarget.Main,
+                    entries = listOf(ChatEntry.PermissionAsked("toolu_01", "Write", JsonObject(emptyMap()))),
+                ),
+            )
+            childSessionGateQuestions.value = listOf(
+                ChildSessionGateQuestion("gate-1", "레포를 고쳐라", ChildSessionGate(relativeCwd = "proj-a", fingerprint = "f", executionConfigs = emptyList())),
+            )
+        }
         val mirror = startPipe(core).connectMirror()
         val expected = RecordingScreenFacingCore()
 
@@ -169,6 +187,85 @@ class ScreenPipeRoundTripTest {
         assertEquals(emptyList(), core.receivedCommands)
         assertEquals(1, core.endAllSessionsCount)
         assertTrue(pipe.coreToScreen.isClosedForSend)
+    }
+
+    @Test
+    fun `이미 답이 적힌 승인 카드에 온 답은 거절하고 코어에 건네지 않는다`() = runTest {
+        // 화면이 답을 보낸 순간 claude 가 그 도구 호출을 거뒀을 수 있다(설계 6.7). 홀더는 그 답을 조용히 버리는데, 그러면 화면은
+        // 자기 답이 갔다고 안다.
+        val core = RecordingScreenFacingCore()
+        core.chatConversations.value = mapOf(
+            SessionTarget.Main to ChatConversation(
+                target = SessionTarget.Main,
+                entries = listOf(ChatEntry.PermissionAsked("toolu_1", "Write", JsonObject(emptyMap()), answer = PermissionAnswer.Withdrawn)),
+            ),
+        )
+        val pipe = startPipe(core)
+
+        pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.AnswerPermission(SessionTarget.Main, "toolu_1", PermissionCardChoice.Deny("아니요"))))
+        runCurrent()
+
+        assertEquals(
+            listOf<FrameToScreen>(FrameToScreen.Reply("c-1", CommandOutcome.Rejected, "question_already_answered")),
+            pipe.framesReceivedByScreen(),
+        )
+        assertEquals(emptyList(), core.receivedCommands)
+    }
+
+    @Test
+    fun `묻지 않은 승인 카드에 온 답은 거절한다`() = runTest {
+        val core = RecordingScreenFacingCore()
+        val pipe = startPipe(core)
+
+        pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.AnswerPermission(SessionTarget.Main, "toolu_9", PermissionCardChoice.Deny("아니요"))))
+        runCurrent()
+
+        assertEquals(
+            listOf<FrameToScreen>(FrameToScreen.Reply("c-1", CommandOutcome.Rejected, "question_not_found")),
+            pipe.framesReceivedByScreen(),
+        )
+        assertEquals(emptyList(), core.receivedCommands)
+    }
+
+    @Test
+    fun `답을 기다리는 승인 카드의 답은 받아 코어에 건넨다`() = runTest {
+        val core = RecordingScreenFacingCore()
+        core.chatConversations.value = mapOf(
+            SessionTarget.Main to ChatConversation(
+                target = SessionTarget.Main,
+                entries = listOf(ChatEntry.PermissionAsked("toolu_1", "Write", JsonObject(emptyMap()))),
+            ),
+        )
+        val pipe = startPipe(core)
+        val answer = ScreenCommand.AnswerPermission(SessionTarget.Main, "toolu_1", PermissionCardChoice.Deny("아니요"))
+
+        pipe.screenSends(FrameToCore.Command("c-1", answer))
+        runCurrent()
+
+        assertEquals(listOf<FrameToScreen>(FrameToScreen.Reply("c-1", CommandOutcome.Accepted)), pipe.framesReceivedByScreen())
+        assertEquals(listOf<ScreenCommand>(answer), core.receivedCommands)
+    }
+
+    @Test
+    fun `이미 닫힌 관문 물음에 온 답은 거절하고 열린 물음의 답은 건넨다`() = runTest {
+        val core = RecordingScreenFacingCore()
+        core.childSessionGateQuestions.value = listOf(
+            ChildSessionGateQuestion("gate-2", "레포를 고쳐라", ChildSessionGate(relativeCwd = "proj-a", fingerprint = "f", executionConfigs = emptyList())),
+        )
+        val pipe = startPipe(core)
+
+        pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.AnswerGate("gate-1", approved = true)))
+        pipe.screenSends(FrameToCore.Command("c-2", ScreenCommand.AnswerGate("gate-2", approved = false)))
+        runCurrent()
+
+        assertEquals(
+            listOf<FrameToScreen>(
+                FrameToScreen.Reply("c-1", CommandOutcome.Rejected, "question_already_answered"),
+                FrameToScreen.Reply("c-2", CommandOutcome.Accepted),
+            ),
+            pipe.framesReceivedByScreen(),
+        )
+        assertEquals(listOf<ScreenCommand>(ScreenCommand.AnswerGate("gate-2", approved = false)), core.receivedCommands)
     }
 
     @Test

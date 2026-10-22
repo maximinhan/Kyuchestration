@@ -9,6 +9,7 @@ import com.kyuchestration.desktop.protocol.ScreenCommand
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.commandIdOfUnreadableFrame
 import com.kyuchestration.desktop.protocol.decodeFrameToCore
+import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.protocol.encodeFrameToScreen
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -96,6 +97,11 @@ suspend fun serveScreen(
                         publisher.snapshotLines().forEach(::writeLine)
                     }
                     is FrameToCore.Command -> {
+                        val staleness = frame.command.stalenessIn(core)
+                        if (staleness != null) {
+                            write(FrameToScreen.Reply(frame.id, CommandOutcome.Rejected, reason = staleness))
+                            continue@screenFrames
+                        }
                         frame.command.applyTo(core)
                         publishPendingChanges()
                         write(FrameToScreen.Reply(frame.id, CommandOutcome.Accepted))
@@ -113,6 +119,36 @@ suspend fun serveScreen(
 }
 
 private const val UNREADABLE_COMMAND = "unreadable_command"
+
+private const val QUESTION_ALREADY_ANSWERED = "question_already_answered"
+
+private const val QUESTION_NOT_FOUND = "question_not_found"
+
+/**
+ * 물음에 대한 답이 낡았으면 그 까닭(core-ui-split-design.md 6.7). 낡지 않았거나 물음에 대한 답이 아니면 null.
+ *
+ * 화면이 답을 보낸 순간 물음이 이미 닫혔을 수 있다 — claude 가 그 도구 호출을 거뒀거나(`PermissionAnswer.Withdrawn`), 세션이
+ * 끝났거나, 같은 관문에 먼저 답이 갔다. 홀더는 그런 답을 조용히 버린다. 여기서 거절로 돌려주어 화면이 자기 답이 가지 않았다는 것을
+ * 알게 한다.
+ *
+ * 판단의 근거는 화면이 본 것과 같은 상태다 — 대화의 승인 카드와 열린 관문 물음. 코어의 단일 스레드에서 보고 곧바로 명령을 부르므로,
+ * 본 뒤 부르기 전에 물음이 닫히는 틈이 없다.
+ */
+private fun ScreenCommand.stalenessIn(core: ScreenFacingCore): String? = when (this) {
+    is ScreenCommand.AnswerPermission -> {
+        val card = core.chatConversations.value[target]?.entries
+            ?.filterIsInstance<ChatEntry.PermissionAsked>()
+            ?.lastOrNull { it.toolUseId == toolUseId }
+        when {
+            card == null -> QUESTION_NOT_FOUND
+            card.answer != null -> QUESTION_ALREADY_ANSWERED
+            else -> null
+        }
+    }
+    is ScreenCommand.AnswerGate ->
+        QUESTION_ALREADY_ANSWERED.takeIf { core.childSessionGateQuestions.value.none { it.gateQuestionId == gateQuestionId } }
+    else -> null
+}
 
 private fun ScreenCommand.applyTo(core: ScreenFacingCore) = when (this) {
     ScreenCommand.InstallEngine -> core.installEngine()
