@@ -19,10 +19,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -151,7 +153,9 @@ class ScreenPipeRoundTripTest {
         // 세션 끝내기를 건너뛰고 줄만 닫히면, 화면은 떠나도 claude 프로세스들이 주인 없이 남는다.
         val core = RecordingScreenFacingCore().apply { commandThatFails = ScreenCommand.RefreshWorkDir }
         val pipe = FramePipe(this)
-        val serving = backgroundScope.async(SupervisorJob()) {
+        // 실패를 시험이 받아 보도록 Deferred 에 담는다 — 감독 Job 아래의 async 는 실패를 부모로 올리지 않는다.
+        val servingScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob())
+        val serving = servingScope.async {
             serveScreen(core, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
         }
 
