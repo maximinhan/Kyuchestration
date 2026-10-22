@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal
 
+import com.kyuchestration.desktop.protocol.GuidedFailure
 import java.nio.file.Path
 
 /**
@@ -17,9 +18,11 @@ import java.nio.file.Path
 sealed class TerminalSessionFailure(
     message: String,
     /** 사람이 지금 할 수 있는 일. 대화 자리에 오류 문구와 함께 뜬다. */
-    val guidance: String,
+    override val guidance: String,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(message, cause), GuidedFailure {
+
+    final override val failureFamily: String get() = "TerminalSessionFailure"
 
     class KyuExecutableNotFound : TerminalSessionFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",

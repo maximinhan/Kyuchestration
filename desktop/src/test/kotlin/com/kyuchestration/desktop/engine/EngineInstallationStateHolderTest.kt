@@ -46,7 +46,7 @@ class EngineInstallationStateHolderTest {
         runCurrent()
 
         val failed = assertIs<EngineInstallationState.InstallationFailed>(holder.state.value)
-        assertIs<EngineInstallationFailure.GitHubUnreachable>(failed.failure)
+        assertEquals("EngineInstallationFailure.GitHubUnreachable", failed.failure.kind)
         // 스스로 다시 받지 않는다. 망이 막힌 자리에서 되풀이하면 화면은 영영 진행 중이고, 왜
         // 안 되는지는 끝내 뜨지 않는다.
         assertEquals(1, installer.installationCount)
@@ -82,7 +82,7 @@ class EngineInstallationStateHolderTest {
         // 엔진을 들고 있으면서 "없다" 고만 말하면, 사용자는 자기가 방금 설치한 앱이 왜 자기
         // 엔진을 못 쓰는지 알 길이 없다.
         val failed = assertIs<EngineInstallationState.InstallationFailed>(holder.state.value)
-        assertIs<EngineInstallationFailure.BundledEngineDidNotRun>(failed.failure)
+        assertEquals("EngineInstallationFailure.BundledEngineDidNotRun", failed.failure.kind)
         // 자동으로 받는 것은 "어디에도 없다" 일 때다. 여기서 곧바로 받아 버리면 그 이유가 화면에
         // 뜨기도 전에 진행 표시로 덮이고, 못 쓰는 설치 패키지가 나갔다는 사실이 묻힌다.
         assertEquals(0, installer.installationCount)

@@ -1,8 +1,9 @@
 package com.kyuchestration.desktop.dashboard
 
-import com.kyuchestration.desktop.workdir.WorkDirObservationFailure
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.workdir.WorkDirSnapshot
-import java.nio.file.Path
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /**
  * 대시보드가 지금 보여줄 것.
@@ -11,18 +12,23 @@ import java.nio.file.Path
  * 스냅샷이 동시에 있는 상태처럼 뜻이 없는 조합이 표현 가능해지고, 화면이 그 조합마다
  * 어떻게 그릴지 정해야 한다. 갈래로 나눠 두면 있을 수 있는 화면이 딱 넷이다.
  */
+@Serializable
 sealed interface WorkDirDashboardState {
 
     /** 열려 있는 워크디렉토리의 경로. 아직 아무것도 열지 않았으면 null. */
-    val workDirPath: Path?
+    val workDirPath: String?
 
+    @Serializable
+    @SerialName("no_workdir_opened")
     data object NoWorkDirOpened : WorkDirDashboardState {
-        override val workDirPath: Path? = null
+        override val workDirPath: String? = null
     }
 
     /** 처음 여는 중이다 — 대신 보여줄 이전 스냅샷이 아직 없다. */
+    @Serializable
+    @SerialName("first_observation_running")
     data class FirstObservationRunning(
-        override val workDirPath: Path,
+        override val workDirPath: String,
     ) : WorkDirDashboardState
 
     /**
@@ -35,16 +41,20 @@ sealed interface WorkDirDashboardState {
      *   스냅샷 안이 아니라 여기 있는 이유는 kyu 문서가 실어 오는 사실이 아니기 때문이다 —
      *   WorkDirSnapshot 은 `kyu list --json` 이 말한 것만 담는다.
      */
+    @Serializable
+    @SerialName("workdir_observed")
     data class WorkDirObserved(
-        override val workDirPath: Path,
+        override val workDirPath: String,
         val snapshot: WorkDirSnapshot,
-        val lastRefreshFailure: WorkDirObservationFailure?,
+        val lastRefreshFailure: FailureView?,
         val planFilePresent: Boolean,
     ) : WorkDirDashboardState
 
     /** 한 번도 성공하지 못했다. 보여줄 것이 실패의 이유뿐이다. */
+    @Serializable
+    @SerialName("first_observation_failed")
     data class FirstObservationFailed(
-        override val workDirPath: Path,
-        val failure: WorkDirObservationFailure,
+        override val workDirPath: String,
+        val failure: FailureView,
     ) : WorkDirDashboardState
 }

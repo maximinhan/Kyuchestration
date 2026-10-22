@@ -108,7 +108,7 @@ class SessionTreeTest {
         childId = childId,
         title = childId,
         relativeCwd = relativeCwd,
-        workingDirectory = WORK_DIR_PATH.resolve(relativeCwd),
+        workingDirectory = WORK_DIR_PATH.resolve(relativeCwd).toString(),
         conversationId = "conversation-$childId",
         startedAt = Instant.parse("2026-10-20T10:01:12Z"),
     )

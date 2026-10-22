@@ -95,6 +95,18 @@ class WorkDirInitializationStateHolder(
     }
 
     /**
+     * 고른 자리를 열 수 없다는 것을 여는 걸음의 실패로 세운다 — 고른 경로가 이 OS 의 경로로 읽히지 않을 때다.
+     *
+     * 도는 시도가 있으면 그 결과를 덮지 않는다. [openChosenDirectoryAsWorkDir] 가 두 번째 요청을 흘려보내는 것과 같은 자세다.
+     */
+    fun refuseChosenDirectory(reason: String) {
+        if (mutableState.value == WorkDirInitializationState.Running) {
+            return
+        }
+        mutableState.value = WorkDirInitializationState.Failed(reason)
+    }
+
+    /**
      * 열어 둔 워크디렉토리를 그 자리에서 초기화한다.
      *
      * 여는 걸음이 이미 초기화까지 하므로, 이 길로 오는 것은 열고 난 뒤에 계획 파일이 사라진

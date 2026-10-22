@@ -1,5 +1,8 @@
 package com.kyuchestration.desktop.repoclone
 
+import com.kyuchestration.desktop.protocol.RawValueSerializer
+import kotlinx.serialization.Serializable
+
 /**
  * 이 머신에 등록된 GitHub 토큰 프로필을 보고, 새 토큰을 등록하는 자리.
  *
@@ -46,6 +49,7 @@ interface TokenProfileRegistry {
 /**
  * 등록된 토큰 프로필 하나. 토큰 값은 여기 없다 — 목록은 화면에 뜬 채로 캡처되기 가장 쉬운 것이다.
  */
+@Serializable
 data class TokenProfile(val name: String, val storage: TokenStorage)
 
 /**
@@ -57,6 +61,7 @@ data class TokenProfile(val name: String, val storage: TokenStorage)
  * 낱말을 타입으로 좁히되 모르는 값에서 멈추지 않는다 — RepoState 와 같은 이유다. 저장 자리가
  * 하나 늘었다고 GUI 가 프로필 목록을 통째로 못 보여주는 편이 더 나쁘다.
  */
+@Serializable(with = TokenStorageAsRawValueSerializer::class)
 sealed interface TokenStorage {
 
     /** kyu 문서에 실려 온 코드. */
@@ -93,4 +98,8 @@ sealed interface TokenStorage {
  *   알고 "무엇이 저장됐는지" 는 모른다 — 회사 토큰을 개인 프로필로 등록하는 것은 이 값을 화면에
  *   보여줘야만 그 자리에서 막힌다.
  */
+@Serializable
 data class RegisteredTokenProfile(val profileName: String, val gitHubLogin: String)
+
+internal object TokenStorageAsRawValueSerializer :
+    RawValueSerializer<TokenStorage>("TokenStorage", TokenStorage::rawValue, TokenStorage::ofRawValue)

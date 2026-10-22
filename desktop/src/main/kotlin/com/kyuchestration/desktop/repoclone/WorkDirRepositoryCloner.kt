@@ -1,6 +1,8 @@
 package com.kyuchestration.desktop.repoclone
 
+import com.kyuchestration.desktop.protocol.RawValueSerializer
 import java.nio.file.Path
+import kotlinx.serialization.Serializable
 
 /**
  * 고른 레포를 워크디렉토리 안으로 받아 오는 자리.
@@ -32,6 +34,7 @@ interface WorkDirRepositoryCloner {
  * 엔진이 자기가 띄운 메인 세션을 들여다보고 답하던 값이다. 세션을 띄우는 것이 앱뿐인 지금
  * 그 사실을 아는 것도 앱이라, 화면이 자기 보유 목록에서 직접 답한다.
  */
+@Serializable
 data class CloneOutcome(
     val results: List<RepositoryCloneResult>,
 )
@@ -42,6 +45,7 @@ data class CloneOutcome(
  * @param repositoryFullName 시킬 때 넘긴 그대로. 앱이 자기가 보낸 줄과 이 결과를 맞추는 열쇠다.
  * @param message 왜 그렇게 끝났는지. 받아 온 레포에서는 빈 문자열이다.
  */
+@Serializable
 data class RepositoryCloneResult(
     val repositoryFullName: String,
     val status: CloneStatus,
@@ -54,6 +58,7 @@ data class RepositoryCloneResult(
  * 모르는 낱말에서 멈추지 않는 것은 RepoState 와 같은 이유다 — GUI 가 엔진보다 늦게 배포되는 일은
  * 흔하고, 그때 결과를 통째로 못 보여주는 것보다 낯선 낱말 하나를 그대로 보여주는 편이 낫다.
  */
+@Serializable(with = CloneStatusAsRawValueSerializer::class)
 sealed interface CloneStatus {
 
     /** kyu 문서에 실려 온 낱말. */
@@ -83,3 +88,6 @@ sealed interface CloneStatus {
         }
     }
 }
+
+internal object CloneStatusAsRawValueSerializer :
+    RawValueSerializer<CloneStatus>("CloneStatus", CloneStatus::rawValue, CloneStatus::ofRawValue)

@@ -40,7 +40,6 @@ import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.ToolCallAnswer
 import com.kyuchestration.desktop.terminal.chat.TurnOutcome
 import com.kyuchestration.desktop.theme.KyuTheme
-import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.delay
@@ -61,7 +60,7 @@ internal fun ChatEntryView(
      * 이 세션이 도는 자리. 승인 카드가 "어느 레포의 물음인가" 를 말하는 근거다(6.4) — 챗이
      * 여럿 열려 있으면 그것이 판단의 절반이다.
      */
-    sessionWorkingDirectory: Path?,
+    sessionWorkingDirectory: String?,
     /** 승인 카드의 버튼이 눌린 자리. 도구 호출 하나와 사용자가 고른 것을 함께 올린다. */
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     /** spawn 카드의 "열기" — 그 하위의 챗을 가운데에 세운다(session-tree 6.12). */
@@ -197,7 +196,7 @@ private fun ThinkingBlock(text: String) {
 @Composable
 private fun ToolCallCard(
     entry: ChatEntry.ToolCall,
-    sessionWorkingDirectory: Path?,
+    sessionWorkingDirectory: String?,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onOpenChildSessionRequested: (String) -> Unit,
 ) {
@@ -741,7 +740,7 @@ private fun FullTextPanel(title: String, text: String, onDismissRequested: () ->
 @Composable
 private fun PermissionRequestCard(
     entry: ChatEntry.PermissionAsked,
-    sessionWorkingDirectory: Path?,
+    sessionWorkingDirectory: String?,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
 ) {
     val requestedInputText = remember(entry.input) { prettyPrintedToolInput(entry.input) }
@@ -785,7 +784,7 @@ private fun PermissionRequestCard(
         // 어느 자리에서 도는 세션의 물음인가. 챗이 여럿 열려 있으면 이것이 판단의 절반이다(6.4).
         sessionWorkingDirectory?.let {
             Text(
-                text = it.toString(),
+                text = it,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,

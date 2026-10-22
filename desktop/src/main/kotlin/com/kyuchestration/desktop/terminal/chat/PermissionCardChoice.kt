@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -9,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
  * "이 세션에서 계속 허용" 은 소켓 너머로 보낼 것이 아니라 앱이 기억할 것이라, 그 뜻을 통로의
  * 타입에 얹으면 엔진이 알 필요 없는 개념을 알게 된다 — 옮기는 자리는 상태 홀더 하나다.
  */
+@Serializable
 sealed interface PermissionCardChoice {
 
     /**
@@ -17,6 +20,8 @@ sealed interface PermissionCardChoice {
      * @param input 실제로 실행될 인자. 사용자가 카드에서 고쳤으면 고친 것이다 — 고친 대로
      *   실행되는 것을 실측이 쟀다(3.5).
      */
+    @Serializable
+    @SerialName("allow_once")
     data class AllowOnce(val input: JsonObject) : PermissionCardChoice
 
     /**
@@ -28,6 +33,8 @@ sealed interface PermissionCardChoice {
      * @param input 이번 호출에 쓸 인자. 고친 인자는 이번 한 번에만 적용된다 — 규칙이 무엇을
      *   허용하는지는 도구 이름까지이고, 다음 호출의 인자는 그때 모델이 정한다.
      */
+    @Serializable
+    @SerialName("allow_for_this_session")
     data class AllowForThisSession(val input: JsonObject) : PermissionCardChoice
 
     /**
@@ -36,5 +43,7 @@ sealed interface PermissionCardChoice {
      * @param reason 모델에게 그대로 갈 문구. 사용자가 적지 않았으면 앱이 정한 기본 문구다 —
      *   빈 문구를 보내면 모델은 왜 못 했는지 말할 것이 없다.
      */
+    @Serializable
+    @SerialName("deny")
     data class Deny(val reason: String) : PermissionCardChoice
 }

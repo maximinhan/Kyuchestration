@@ -35,7 +35,7 @@ class WorkDirDashboardStateHolderTest {
 
         holder.openWorkDir(WORK_DIR_PATH)
 
-        assertEquals(WorkDirDashboardState.FirstObservationRunning(WORK_DIR_PATH), holder.state.value)
+        assertEquals(WorkDirDashboardState.FirstObservationRunning(WORK_DIR_PATH.toString()), holder.state.value)
     }
 
     @Test
@@ -47,7 +47,7 @@ class WorkDirDashboardStateHolderTest {
         runCurrent()
 
         val observed = assertIs<WorkDirDashboardState.WorkDirObserved>(holder.state.value)
-        assertEquals(WORK_DIR_PATH, observed.workDirPath)
+        assertEquals(WORK_DIR_PATH.toString(), observed.workDirPath)
         assertEquals("WorkDir-featureX", observed.snapshot.name)
         assertNull(observed.lastRefreshFailure)
         assertEquals(listOf(WORK_DIR_PATH), observer.observedPaths)
@@ -97,7 +97,7 @@ class WorkDirDashboardStateHolderTest {
         val observed = assertIs<WorkDirDashboardState.WorkDirObserved>(holder.state.value)
         // 갱신 한 번 실패했다고 목록이 사라지면, 사용자는 워크디렉토리가 없어진 것과 구분할 수 없다.
         assertSame(firstSnapshot, observed.snapshot)
-        assertIs<WorkDirObservationFailure.KyuExecutableNotFound>(observed.lastRefreshFailure)
+        assertEquals("WorkDirObservationFailure.KyuExecutableNotFound", observed.lastRefreshFailure?.kind)
     }
 
     @Test
@@ -131,8 +131,8 @@ class WorkDirDashboardStateHolderTest {
         runCurrent()
 
         val failed = assertIs<WorkDirDashboardState.FirstObservationFailed>(holder.state.value)
-        assertEquals(WORK_DIR_PATH, failed.workDirPath)
-        assertIs<WorkDirObservationFailure.KyuExecutableNotFound>(failed.failure)
+        assertEquals(WORK_DIR_PATH.toString(), failed.workDirPath)
+        assertEquals("WorkDirObservationFailure.KyuExecutableNotFound", failed.failure.kind)
     }
 
     @Test

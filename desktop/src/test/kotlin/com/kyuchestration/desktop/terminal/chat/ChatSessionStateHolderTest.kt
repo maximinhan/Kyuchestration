@@ -458,7 +458,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         val failed = assertIs<SessionEntryState.Failed>(holder.sessionEntries.value[SessionTarget.Repo("proj-a")])
-        assertIs<TerminalSessionFailure.KyuExecutableNotFound>(failed.failure)
+        assertEquals("TerminalSessionFailure.KyuExecutableNotFound", failed.failure.kind)
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
         assertIs<DiagnosticLogEntry.SessionEntryFailed>(diagnosticLog.recordedEntries.single())
     }

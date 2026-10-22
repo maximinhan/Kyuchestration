@@ -13,7 +13,6 @@ import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import com.kyuchestration.desktop.terminal.chat.SessionTree
-import java.nio.file.Path
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -31,6 +30,9 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * 명령은 결과를 돌려주지 않는다. 결과는 언제나 상태의 변화로 온다(6.4 의 `reply` 판단) — 결과가 오는 길이 둘이면
  * 화면이 둘을 맞춰야 한다.
+ *
+ * 구현은 둘이다. 코어 쪽의 [InProcessScreenFacingCore] 는 홀더를 직접 부르고, 화면 쪽의 거울(CoreMirror)은 틀 줄을 건너
+ * 그것을 비춘다(6.5). 화면은 거울만 본다.
  */
 interface ScreenFacingCore {
 
@@ -75,8 +77,12 @@ interface ScreenFacingCore {
     /** 토큰을 싣는다 — 비밀이 경계를 건너는 두 명령 중 하나다(6.11). */
     fun useClaudeToken(token: String)
 
-    /** 화면의 파일 선택기가 고른 자리를 워크디렉토리로 연다. 초기화가 필요하면 그 걸음도 코어가 잇는다. */
-    fun openWorkDir(chosenDirectory: Path)
+    /**
+     * 화면의 파일 선택기가 고른 자리를 워크디렉토리로 연다. 초기화가 필요하면 그 걸음도 코어가 잇는다.
+     *
+     * @param hostPath 화면 OS 의 경로 문자열. 화면 경로가 경계에 오르는 자리는 여기 하나이고, 푸는 것은 코어다(설계 6.9).
+     */
+    fun openWorkDir(hostPath: String)
 
     fun initializeOpenedWorkDir()
 
@@ -135,8 +141,9 @@ interface ScreenFacingCore {
     /**
      * 보유한 세션을 전부 끝내고 프로세스가 실제로 끝날 때까지 기다린다 — 창을 닫는 자리다.
      *
-     * 기다리는 함수인 것은 한 JVM 인 지금만의 모양이다. 코어가 갈라지면(7 절 2 단계) 화면은 stdin 을 닫는 것으로
-     * 이 일을 맡기고, 코어가 EOF 를 보고 같은 순서로 끝낸다(6.13).
+     * 화면이 보는 구현(CoreMirror)은 이것을 명령으로 보내지 않는다 — 코어로 가는 줄을 닫고, 코어가 그 끝을 보고 모든 세션을
+     * 끝낸 뒤 자기 줄을 닫을 때까지 기다린다(serveScreen). 코어가 갈라진 뒤(7 절 2 단계)에는 그 줄이 stdin 이 되어, 화면이
+     * 크래시해도 코어는 같은 끝을 본다(6.13).
      */
     suspend fun endAllSessions()
 }

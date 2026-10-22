@@ -1,8 +1,8 @@
 package com.kyuchestration.desktop
 
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
-import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 
@@ -39,7 +39,7 @@ sealed interface ChatScreenState {
 
     data class ChatSessionEntryFailed(
         override val target: SessionTarget,
-        val failure: TerminalSessionFailure,
+        val failure: FailureView,
     ) : ChatScreenState
 }
 

@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.engine
 
+import com.kyuchestration.desktop.protocol.GuidedFailure
 import java.io.IOException
 import java.nio.file.Path
 
@@ -14,9 +15,11 @@ import java.nio.file.Path
 sealed class EngineInstallationFailure(
     message: String,
     /** 사람이 지금 할 수 있는 일. 화면이 오류 문구 아래에 그대로 보여준다. */
-    val guidance: String,
+    override val guidance: String,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(message, cause), GuidedFailure {
+
+    final override val failureFamily: String get() = "EngineInstallationFailure"
 
     /**
      * 윈도우 네이티브 JVM 에서 눌렀다.

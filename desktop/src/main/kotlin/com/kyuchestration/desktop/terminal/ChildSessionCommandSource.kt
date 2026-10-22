@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal
 
 import java.nio.file.Path
+import kotlinx.serialization.Serializable
 
 /**
  * 하위 세션 하나가 무엇을 띄울지 엔진에게 묻는 자리(session-tree-design.md 7 절 3 단계의 `--child`).
@@ -71,6 +72,7 @@ data class AssignedChildSession(
  *
  * 승인은 자리가 아니라 [fingerprint] 에 대한 것이다 — 사람이 본 뒤 파일이 바뀌면 엔진이 지금 내용으로 다시 묻는다.
  */
+@Serializable
 data class ChildSessionGate(
     val relativeCwd: String,
     val fingerprint: String,
@@ -78,6 +80,7 @@ data class ChildSessionGate(
 )
 
 /** 걸린 설정 파일 하나. 무엇을 승인하는지 모르는 승인은 관문이 아니라 내용을 통째로 든다. */
+@Serializable
 data class GatedExecutionConfig(
     val relativePath: String,
     val absolutePath: String,

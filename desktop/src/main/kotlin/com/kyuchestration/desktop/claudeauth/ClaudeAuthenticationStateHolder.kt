@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.claudeauth
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.protocol.toFailureView
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -204,14 +205,14 @@ class ClaudeAuthenticationStateHolder(
     private fun stateFor(failure: ClaudeAuthenticationFailure): ClaudeAuthenticationState {
         if (failure is ClaudeAuthenticationFailure.ClaudeCliCouldNotRun) {
             diagnosticLog.record(DiagnosticLogEntry.ClaudeCliCouldNotRun(failure.message.orEmpty()))
-            return ClaudeAuthenticationState.ClaudeCliMissing(failure)
+            return ClaudeAuthenticationState.ClaudeCliMissing(failure.toFailureView())
         }
         return credentialsMissing(failure)
     }
 
     private fun credentialsMissing(lastFailure: ClaudeAuthenticationFailure?) =
         ClaudeAuthenticationState.CredentialsMissing(
-            lastFailure = lastFailure,
+            lastFailure = lastFailure?.toFailureView(),
             tokenWouldBeStoredInPlaintext = tokenWouldBeStoredInPlaintext,
         )
 

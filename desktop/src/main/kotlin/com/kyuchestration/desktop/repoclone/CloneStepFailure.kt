@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.repoclone
 
+import com.kyuchestration.desktop.protocol.GuidedFailure
+
 /**
  * 레포를 골라 받아 오는 걸음 하나가 성립하지 않은 이유.
  *
@@ -18,9 +20,11 @@ package com.kyuchestration.desktop.repoclone
 sealed class CloneStepFailure(
     message: String,
     /** 사람이 지금 할 수 있는 일. 화면이 오류 문구 아래에 그대로 보여준다. */
-    val guidance: String,
+    override val guidance: String,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(message, cause), GuidedFailure {
+
+    final override val failureFamily: String get() = "CloneStepFailure"
 
     class KyuExecutableNotFound : CloneStepFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",

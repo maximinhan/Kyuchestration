@@ -1,5 +1,8 @@
 package com.kyuchestration.desktop.workdir
 
+import com.kyuchestration.desktop.protocol.RawValueSerializer
+import kotlinx.serialization.Serializable
+
 /**
  * 워크디렉토리 한 곳을 한 번 관찰한 결과.
  *
@@ -7,6 +10,7 @@ package com.kyuchestration.desktop.workdir
  * 화면과 상태 홀더는 이 타입만 알고, JSON 의 필드 이름은 어댑터(workdir.kyucli) 안에서 끝난다.
  * 그래야 계약이 판을 올릴 때 고쳐야 할 곳이 어댑터 한 군데로 남는다.
  */
+@Serializable
 data class WorkDirSnapshot(
     val name: String,
     val absolutePath: String,
@@ -24,6 +28,7 @@ data class WorkDirSnapshot(
     val planWarnings: List<String>,
 )
 
+@Serializable
 data class RepoSnapshot(
     val name: String,
     val absolutePath: String,
@@ -41,6 +46,7 @@ data class RepoSnapshot(
     val hasRecordedConversation: Boolean,
 )
 
+@Serializable
 data class RepoTask(
     val id: String,
     /**
@@ -68,6 +74,7 @@ data class RepoTask(
  * 낯선 낱말 하나를 회색으로 보여주는 편이 낫다. 낡은 kyu 가 PATH 에 남아 RUNNING 을 답하는
  * 머신도 같은 길로 지나간다 — 회색 칩 하나로 뜨고 목록은 그대로 산다.
  */
+@Serializable(with = RepoStateAsRawValueSerializer::class)
 sealed interface RepoState {
 
     /** kyu 문서에 실려 온 낱말. 화면도 같은 낱말을 쓴다. */
@@ -96,3 +103,6 @@ sealed interface RepoState {
         }
     }
 }
+
+internal object RepoStateAsRawValueSerializer :
+    RawValueSerializer<RepoState>("RepoState", RepoState::rawValue, RepoState::ofRawValue)

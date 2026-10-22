@@ -1,6 +1,7 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import java.time.Instant
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -314,6 +315,7 @@ enum class TurnOutcome {
  * 캐시 적중을 따로 들고 있는다. 비용의 대부분이 그 둘로 갈리는데, 합계 하나로 접으면 화면이
  * "왜 이 턴이 쌌는가" 를 말할 수 없다.
  */
+@Serializable
 data class TurnUsage(
     val inputTokens: Long,
     val outputTokens: Long,
@@ -331,6 +333,7 @@ data class TurnUsage(
  * @param toolUseId 이 값이 전사의 카드와 이 항목을 잇는다. 사용자가 승인 카드에서 직접 거부한
  *   호출은 그 카드가 이미 말하고 있으므로, 화면은 이 값으로 그것을 가려낸다.
  */
+@Serializable
 data class PermissionDenial(val toolName: String, val toolUseId: String, val input: JsonObject)
 
 /**
@@ -341,6 +344,7 @@ data class PermissionDenial(val toolName: String, val toolUseId: String, val inp
  *   편이 낫다.
  * @param resetsAtEpochSeconds 이 창이 다시 차는 시각(유닉스 초).
  */
+@Serializable
 data class RateLimitWindow(
     val windowName: String,
     val utilization: Double,

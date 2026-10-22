@@ -2,7 +2,7 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.resumeFailureSuspected
-import java.nio.file.Path
+import kotlinx.serialization.Serializable
 
 /**
  * 세션 하나의 대화 전부 — 화면이 그릴 것과, 그리는 데 필요한 사실들(chat-ui-design.md 5.5).
@@ -38,9 +38,10 @@ import java.nio.file.Path
  *   앞 블록의 글자가 새 블록에 이어 붙는다.
  * @param endedExitCode 프로세스가 끝났으면 그 종료 코드. 살아 있으면 null.
  */
+@Serializable
 data class ChatConversation(
     val target: SessionTarget,
-    val workingDirectory: Path? = null,
+    val workingDirectory: String? = null,
     val conversationId: String? = null,
     val modelName: String? = null,
     val resumedConversationId: String? = null,
