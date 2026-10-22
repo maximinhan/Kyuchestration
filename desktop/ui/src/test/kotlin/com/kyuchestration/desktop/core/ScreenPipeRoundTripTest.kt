@@ -2,6 +2,8 @@ package com.kyuchestration.desktop.core
 
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
@@ -216,7 +218,7 @@ class ScreenPipeRoundTripTest {
         val pipe = FramePipe(this)
         val stalledScreen = ScreenFrameOutbox()
         backgroundScope.launch {
-            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = stalledScreen, screenBacklogLimitBytes = 1)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = stalledScreen, diagnosticLog = DiagnosticLog.Discarding, screenBacklogLimitBytes = 1)
         }
         pipe.screenSends(TEST_SCREEN_HELLO)
         runCurrent()
@@ -276,7 +278,7 @@ class ScreenPipeRoundTripTest {
         // 실패를 시험이 받아 보도록 Deferred 에 담는다 — 감독 Job 아래의 async 는 실패를 부모로 올리지 않는다.
         val servingScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob())
         val serving = servingScope.async {
-            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox, diagnosticLog = DiagnosticLog.Discarding)
         }
 
         pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
@@ -289,12 +291,36 @@ class ScreenPipeRoundTripTest {
         assertEquals(holderFailure.message, assertFailsWith<IllegalStateException> { pipe.coreToScreen.receive() }.message)
     }
 
+    /** 윈도우 화면과 WSLg 화면이 같은 코어에 붙는 날, 받은 코어 기록만으로 어느 화면이었는지를 가른다. */
+    @Test
+    fun `인사한 화면의 판과 OS 를 코어의 진단 기록에 남기고 인사 답에 코어의 OS 와 배포판을 싣는다`() = runTest {
+        val coreDiagnosticLog = RecordingDiagnosticLog()
+        val pipe = FramePipe(this)
+        backgroundScope.launch {
+            serveScreen(
+                RecordingScreenFacingCore(),
+                TEST_CORE_IDENTITY,
+                framesFromScreen = pipe.screenToCore,
+                framesToScreen = pipe.coreOutbox,
+                diagnosticLog = coreDiagnosticLog,
+            )
+        }
+
+        pipe.screenSends(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v0.15.0", screenOs = "windows"))
+        runCurrent()
+
+        assertEquals(listOf<DiagnosticLogEntry>(DiagnosticLogEntry.ScreenGreeted("v0.15.0", "windows")), coreDiagnosticLog.recordedEntries)
+        val welcome = assertIs<FrameToScreen.Welcome>(pipe.framesReceivedByScreen().first())
+        assertEquals(TEST_CORE_IDENTITY.operatingSystem, welcome.coreOs)
+        assertEquals(TEST_CORE_IDENTITY.wslDistributionName, welcome.wslDistro)
+    }
+
     @Test
     fun `코어 스코프가 취소돼도 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
         val core = RecordingScreenFacingCore()
         val pipe = FramePipe(this)
         val serving = backgroundScope.launch {
-            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox, diagnosticLog = DiagnosticLog.Discarding)
         }
         runCurrent()
 
@@ -321,7 +347,7 @@ class ScreenPipeRoundTripTest {
 
     private fun TestScope.startPipe(core: ScreenServingCore): FramePipe {
         val pipe = FramePipe(this)
-        backgroundScope.launch { serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox) }
+        backgroundScope.launch { serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox, diagnosticLog = DiagnosticLog.Discarding) }
         runCurrent()
         return pipe
     }

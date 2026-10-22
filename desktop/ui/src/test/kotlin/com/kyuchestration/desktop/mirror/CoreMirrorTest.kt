@@ -8,6 +8,7 @@ import com.kyuchestration.desktop.core.TEST_SCREEN_VERSION_LABEL
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.protocol.ByeReason
@@ -83,6 +84,22 @@ class CoreMirrorTest {
         val mirror = pipe.connect(this)
 
         assertEquals("/home/yawn/.local/state/kyuchestration/core.log", mirror.coreDiagnosticLogPath)
+    }
+
+    @Test
+    fun `코어의 OS 와 WSL 배포판을 인사 답에서 받아 두고 화면의 진단 기록에 남긴다`() = runTest {
+        val screenDiagnosticLog = RecordingDiagnosticLog()
+        val pipe = MirrorTestPipe(screenDiagnosticLog)
+        pipe.coreSends(welcome(coreOs = "linux", wslDistro = "Ubuntu-24.04"))
+        pipe.coreSendsSnapshot(seq = 1, SMALL_STATES)
+
+        val mirror = pipe.connect(this)
+
+        assertEquals("Ubuntu-24.04", mirror.coreWslDistributionName)
+        assertEquals(
+            DiagnosticLogEntry.CoreGreeted(coreVersion = "v0.15.0", coreOs = "linux", wslDistro = "Ubuntu-24.04"),
+            screenDiagnosticLog.recordedEntries.first(),
+        )
     }
 
     @Test
@@ -286,8 +303,11 @@ class CoreMirrorTest {
         pipe.coreSends(FrameToScreen.Reply(refreshCommand.id, CommandOutcome.Accepted))
         runCurrent()
 
-        assertEquals(listOf<DiagnosticLogEntry>(DiagnosticLogEntry.CoreRejectedScreenCommand("UseClaudeToken", "unreadable_command")), recordedEntries)
-        assertFalse(recordedEntries.single().summary.contains("sk-ant"))
+        assertEquals(
+            listOf(DiagnosticLogEntry.CoreRejectedScreenCommand("UseClaudeToken", "unreadable_command")),
+            recordedEntries.filterIsInstance<DiagnosticLogEntry.CoreRejectedScreenCommand>(),
+        )
+        assertFalse(recordedEntries.any { it.summary.contains("sk-ant") })
     }
 
     @Test
@@ -402,9 +422,13 @@ class CoreMirrorTest {
             engineDirectory: String = "/e",
             protocol: Int = SCREEN_PROTOCOL_VERSION,
             coreVersion: String = "v0.15.0",
+            coreOs: String? = "linux",
+            wslDistro: String? = null,
         ) = FrameToScreen.Welcome(
             protocol = protocol,
             coreVersion = coreVersion,
+            coreOs = coreOs,
+            wslDistro = wslDistro,
             coreDiagnosticLog = "/home/yawn/.local/state/kyuchestration/core.log",
             engineDirectory = engineDirectory,
         )

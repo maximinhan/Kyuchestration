@@ -67,7 +67,7 @@ private fun serveScreenOverStandardStreams(): Int {
     val coreRun = startCore(
         framesFromScreen = framesFromScreen,
         framesToScreen = framesToScreen,
-        coreIdentity = CoreIdentity(versionLabel = versionLabel, diagnosticLogPath = diagnosticLogPath.toString()),
+        coreIdentity = coreIdentityOf(versionLabel = versionLabel, diagnosticLogPath = diagnosticLogPath.toString()),
         diagnosticLog = diagnosticLog,
     )
 

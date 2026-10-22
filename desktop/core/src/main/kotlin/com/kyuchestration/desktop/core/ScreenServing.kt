@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.core
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.protocol.ByeReason
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.FrameToCore
@@ -42,6 +44,7 @@ suspend fun serveScreen(
     coreIdentity: CoreIdentity,
     framesFromScreen: ReceiveChannel<String>,
     framesToScreen: ScreenFrameOutbox,
+    diagnosticLog: DiagnosticLog,
     screenBacklogLimitBytes: Long = SCREEN_BACKLOG_LIMIT_BYTES,
 ) {
     val publisher = ScreenChangePublisher(core)
@@ -106,10 +109,13 @@ suspend fun serveScreen(
                 }
                 when (frame) {
                     is FrameToCore.Hello -> {
+                        diagnosticLog.record(DiagnosticLogEntry.ScreenGreeted(frame.screenVersion, frame.screenOs))
                         write(
                             FrameToScreen.Welcome(
                                 protocol = SCREEN_PROTOCOL_VERSION,
                                 coreVersion = coreIdentity.versionLabel,
+                                coreOs = coreIdentity.operatingSystem,
+                                wslDistro = coreIdentity.wslDistributionName,
                                 coreDiagnosticLog = coreIdentity.diagnosticLogPath,
                                 engineDirectory = core.engineDirectoryLabel,
                             ),

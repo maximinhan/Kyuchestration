@@ -204,6 +204,26 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 화면이 코어에 인사했다. 코어의 기록에 남는다 — 윈도우 화면과 WSLg 화면이 같은 코어에 붙는 날, 받은 기록만으로 어느 화면이었는지
+     * 가른다.
+     *
+     * @param screenOs 화면이 실은 OS 낱말. 옛 화면은 싣지 않는다(null).
+     */
+    data class ScreenGreeted(val screenVersion: String, val screenOs: String?) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "화면이 인사함 — $screenVersion · ${screenOs ?: "OS 를 알리지 않음"}"
+    }
+
+    /**
+     * 화면이 코어의 인사 답을 받았다. 화면의 기록에 남는다 — 화면의 기록만 받은 사람이 그 화면이 어느 코어(판 · OS · WSL 배포판)에
+     * 붙어 있었는지 안다.
+     */
+    data class CoreGreeted(val coreVersion: String, val coreOs: String?, val wslDistro: String?) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "코어가 인사에 답함 — $coreVersion · ${coreOs ?: "OS 를 알리지 않음"}" + (wslDistro?.let { " · WSL $it" } ?: "")
+    }
+
+    /**
      * 코어가 화면으로 가는 줄(stdout)에 쓰지 못했다 — 화면이 사라졌다. 코어의 기록에 남는다.
      *
      * @param reason 쓰기가 실패한 까닭(예외 문구). 틀의 내용은 싣지 않는다 — 틀에는 대화가 실려 있다.

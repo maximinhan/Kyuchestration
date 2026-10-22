@@ -49,12 +49,15 @@ sealed interface FrameToCore {
      *
      * @param protocol 화면이 말하는 틀 규약의 판. 코어의 것과 다르면 코어는 인사 답 뒤에 [FrameToScreen.Bye] 로 닫는다.
      * @param screenVersion 화면의 판 라벨("v0.15.0" · "개발 빌드"). 판이 갈렸을 때 어느 쪽이 낡았는지 사람에게 보이려고 싣는다.
+     * @param screenOs 화면이 도는 OS 의 낱말([operatingSystemWordOf]). 코어가 어느 화면이 붙었는지를 자기 진단 기록에 남긴다 —
+     *   윈도우 화면과 WSLg 화면이 같은 코어에 붙는 날, 받은 기록만으로 둘을 가른다. 옛 화면은 싣지 않는다(null).
      */
     @Serializable
     @SerialName("hello")
     data class Hello(
         val protocol: Int = PROTOCOL_VERSION_BEFORE_NEGOTIATION,
         val screenVersion: String = UNKNOWN_VERSION_LABEL,
+        val screenOs: String? = null,
     ) : FrameToCore
 
     /** @param id 화면이 지은 이름. 코어가 같은 id 로 답한다. */
@@ -73,6 +76,10 @@ sealed interface FrameToScreen {
      *
      * @param protocol 코어가 말하는 틀 규약의 판.
      * @param coreVersion 코어의 판 라벨. 화면과 코어는 같은 태그에서 같은 판으로 나가지만(6.14) 따로 깔리는 날이 온다.
+     * @param coreOs 코어가 도는 OS 의 낱말([operatingSystemWordOf]). 화면이 자기 진단 기록에 남긴다.
+     * @param wslDistro 코어가 WSL 안에서 돌면 그 배포판 이름(`WSL_DISTRO_NAME`), 아니면 null. 윈도우 화면이 자기 경로와 코어 경로를
+     *   서로 옮기는 근거다 — `\\wsl.localhost\<배포판>\…` 는 이 배포판의 것만 코어 경로가 된다(6.9). 화면이 `-d` 로 고른 이름이
+     *   아니라 코어가 말한 이름을 쓰는 것은 경로를 푸는 규칙이 코어 쪽의 사실이라서다.
      * @param coreDiagnosticLog 코어가 진단을 적는 파일. 화면의 것과 다른 프로세스의 파일이라, 오류 자리에서 둘을 함께 알린다(6.2 (다)).
      * @param engineDirectory 엔진을 받아 두는 자리. 엔진은 코어 옆에 놓이므로 코어 OS 의 사실이다(6.2 (다)).
      */
@@ -81,6 +88,8 @@ sealed interface FrameToScreen {
     data class Welcome(
         val protocol: Int = PROTOCOL_VERSION_BEFORE_NEGOTIATION,
         val coreVersion: String = UNKNOWN_VERSION_LABEL,
+        val coreOs: String? = null,
+        val wslDistro: String? = null,
         val coreDiagnosticLog: String = "",
         val engineDirectory: String,
     ) : FrameToScreen
@@ -115,6 +124,19 @@ sealed interface FrameToScreen {
     @Serializable
     @SerialName("bye")
     data class Bye(val reason: ByeReason) : FrameToScreen
+}
+
+/**
+ * JVM 의 `os.name` 을 틀이 싣는 OS 낱말(`windows` · `macos` · `linux`)로 옮긴다. 이 셋 밖이면 null — 이 앱이 패키지를 내지 않는 OS 다.
+ *
+ * 틀에는 열거형이 아니라 낱말로 싣는다. 새 판의 상대가 모르는 낱말을 보내도 인사 틀 전체를 읽지 못하는 틀로 만들지 않으려는 것이다
+ * (필드를 더하는 변경은 판을 올리지 않는다 — 6.14).
+ */
+fun operatingSystemWordOf(osName: String): String? = when {
+    osName.startsWith("Windows", ignoreCase = true) -> "windows"
+    osName.startsWith("Mac", ignoreCase = true) -> "macos"
+    osName.startsWith("Linux", ignoreCase = true) -> "linux"
+    else -> null
 }
 
 /**
