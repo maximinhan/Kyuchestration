@@ -52,4 +52,23 @@ class CorePlaceTest {
 
         assertEquals("1", place.coreProcessBuilder().environment()[WSL_UTF8_VARIABLE])
     }
+
+    /**
+     * 화면의 경로를 코어의 것으로 옮길지는 코어를 WSL 너머에 띄웠는가로 정한다. 옮길 배포판은 코어가 말한 것이 먼저다 — 코어가 사는
+     * 자리의 사실이다. 코어가 말하지 않으면(배포판에 WSL_DISTRO_NAME 이 없다) 화면이 고른 배포판으로 옮긴다. 비워 두면 고른
+     * UNC 경로가 그대로 코어에 가서 거절도 변환도 지나지 않는다.
+     */
+    @Test
+    fun `WSL 너머의 코어면 코어가 말한 배포판으로 경로를 옮기고 말하지 않으면 고른 배포판으로 옮긴다`() {
+        val place = CorePlace.WslDistribution(Path.of("C:\\Windows\\System32\\wsl.exe"), "Ubuntu-24.04")
+
+        assertEquals("Ubuntu-24.04", place.wslDistributionAcrossScreen(coreSaidWslDistribution = null))
+        assertEquals("Ubuntu-24.04-dev", place.wslDistributionAcrossScreen(coreSaidWslDistribution = "Ubuntu-24.04-dev"))
+    }
+
+    /** WSLg 의 화면도 코어에게서 WSL_DISTRO_NAME 을 듣지만 코어와 같은 리눅스를 본다 — 옮길 것이 없다. */
+    @Test
+    fun `같은 머신의 코어면 코어가 배포판을 말해도 경로를 옮기지 않는다`() {
+        assertEquals(null, CorePlace.SameMachine(listOf("core")).wslDistributionAcrossScreen(coreSaidWslDistribution = "Ubuntu-24.04"))
+    }
 }

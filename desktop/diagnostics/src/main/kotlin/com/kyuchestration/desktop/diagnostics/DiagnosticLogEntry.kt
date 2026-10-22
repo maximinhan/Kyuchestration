@@ -204,6 +204,16 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 윈도우 화면이 지난번에 고른 WSL 배포판을 적어 둔 파일을 읽지 못했다. 화면은 기억이 없는 것으로 보고 다시 고르게 한다.
+     *
+     * @param reason 읽기가 실패한 까닭(예외). 파일에는 배포판 이름만 있다.
+     */
+    data class ChosenWslDistributionUnreadable(val file: String, val reason: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "고른 WSL 배포판을 적은 파일을 읽지 못함 — $file: $reason"
+    }
+
+    /**
      * 화면이 코어에 인사했다. 코어의 기록에 남는다 — 윈도우 화면과 WSLg 화면이 같은 코어에 붙는 날, 받은 기록만으로 어느 화면이었는지
      * 가른다.
      *

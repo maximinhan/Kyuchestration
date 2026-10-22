@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
@@ -21,6 +22,8 @@ import com.kyuchestration.desktop.mirror.CoreChildProcess
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.mirror.CorePlace
+import com.kyuchestration.desktop.mirror.wslDistributionAcrossScreen
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
 import com.kyuchestration.desktop.platform.runningOnWindows
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -67,14 +70,14 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
     diagnosticLog.record(
         DiagnosticLogEntry.ApplicationStarted(
             versionLabel = DesktopBuildVersion.label,
-            operatingSystemName = System.getProperty("os.name").orEmpty(),
+            operatingSystemName = currentOperatingSystemName(),
             javaRuntimeVersion = System.getProperty("java.version").orEmpty(),
         ),
     )
 
     try {
         val corePlace = if (runningOnWindows()) {
-            prepareWslCorePlace(diagnosticLogPath.toString()) ?: return
+            prepareWslCorePlace(diagnosticLog, diagnosticLogPath.toString()) ?: return
         } else {
             CorePlace.SameMachine(sameMachineCoreLaunchCommand())
         }
@@ -90,8 +93,7 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
         }
         when (connection) {
             is CoreConnection.Connected -> {
-                // 화면이 윈도우이고 코어가 WSL 안이면 두 쪽의 경로가 다르다. WSLg 화면은 코어와 같은 리눅스를 보므로 옮기지 않는다.
-                val coreWslDistributionAcrossScreen = connection.mirror.coreWslDistributionName.takeIf { runningOnWindows() }
+                val coreWslDistributionAcrossScreen = corePlace.wslDistributionAcrossScreen(connection.mirror.coreWslDistributionName)
                 runDesktopApplication(
                     screenFacingCore = connection.mirror,
                     coreProcess = coreProcess,
@@ -120,10 +122,11 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
 /**
  * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null.
  *
- * 지난번에 고른 배포판에 코어가 있으면 창 없이 곧바로 간다 — 맥 · 리눅스가 코어에 붙은 뒤에야 창을 띄우는 것과 같은 박자다. 물어야
- * 할 때만 고르는 창을 띄우고, 정해지면 그 창을 닫고 본 창으로 넘어간다.
+ * 준비 창을 먼저 띄우고 그 안에서 목록을 묻고 코어를 본다. 지난번에 고른 배포판이 멈춰 있으면 `wsl.exe -d … -e test` 가 VM 을
+ * 깨우느라 몇 초에서 이십 초까지 걸린다 — 창 없이 그것을 기다리면 사람은 앱이 뜨지 않은 줄 안다. 정해지면 준비 창을 닫고 본 창으로
+ * 넘어간다.
  */
-private fun prepareWslCorePlace(diagnosticLogPathLabel: String): CorePlace.WslDistribution? {
+private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathLabel: String): CorePlace.WslDistribution? {
     val wslExecutable = wslExecutablePath()
     if (!wslExecutable.isRegularFile()) {
         application {
@@ -134,32 +137,31 @@ private fun prepareWslCorePlace(diagnosticLogPathLabel: String): CorePlace.WslDi
         return null
     }
     val wslCommandLine = WslCommandLine(wslExecutable)
-    val chosenDistribution = ChosenWslDistributionFile(chosenWslDistributionFilePath())
+    val chosenDistribution = ChosenWslDistributionFile(chosenWslDistributionFilePath(), diagnosticLog)
     val preparation = WslCorePlacePreparation(
         listDistributions = wslCommandLine::listDistributions,
         checkCore = wslCommandLine::checkCore,
         rememberedDistribution = chosenDistribution::read,
         rememberDistribution = chosenDistribution::write,
     )
-    runBlocking { preparation.lookAround() }
-    if (preparation.state.value !is WslCorePlacePreparationState.Ready) {
-        // 본 창을 이어서 띄워야 하므로 이 창이 닫혀도 프로세스를 끝내지 않는다.
-        application(exitProcessOnExit = false) {
-            val state by preparation.state.collectAsState()
-            val preparationScope = rememberCoroutineScope()
-            LaunchedEffect(state) {
-                if (state is WslCorePlacePreparationState.Ready) {
-                    exitApplication()
-                }
+    // 본 창을 이어서 띄워야 하므로 이 창이 닫혀도 프로세스를 끝내지 않는다.
+    application(exitProcessOnExit = false) {
+        val state by preparation.state.collectAsState()
+        val preparationScope = rememberCoroutineScope()
+        // wsl.exe 를 기다리는 일은 WslCommandLine 이 IO 스레드에서 한다 — 창을 그리는 스레드는 막히지 않는다.
+        LaunchedEffect(Unit) { preparation.lookAround() }
+        LaunchedEffect(state) {
+            if (state is WslCorePlacePreparationState.Ready) {
+                exitApplication()
             }
-            Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 480.dp))) {
-                WslCorePlaceScreen(
-                    state = state,
-                    diagnosticLogPathLabel = diagnosticLogPathLabel,
-                    onLookAroundAgainRequested = { preparationScope.launch { preparation.lookAround() } },
-                    onDistributionChosen = { distributionName -> preparationScope.launch { preparation.choose(distributionName) } },
-                )
-            }
+        }
+        Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 480.dp))) {
+            WslCorePlaceScreen(
+                state = state,
+                diagnosticLogPathLabel = diagnosticLogPathLabel,
+                onLookAroundAgainRequested = { preparationScope.launch { preparation.lookAround() } },
+                onDistributionChosen = { distributionName -> preparationScope.launch { preparation.choose(distributionName) } },
+            )
         }
     }
     val ready = preparation.state.value as? WslCorePlacePreparationState.Ready ?: return null

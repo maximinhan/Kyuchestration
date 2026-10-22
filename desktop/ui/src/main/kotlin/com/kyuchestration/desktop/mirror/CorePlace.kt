@@ -28,6 +28,18 @@ sealed interface CorePlace {
 }
 
 /**
+ * 화면의 경로를 코어의 경로로 옮길 때 쓸 WSL 배포판. 코어를 WSL 너머에 띄웠을 때만 있다(core-ui-split-design.md 6.9 의 3 단계 정정).
+ *
+ * 코어가 인사 답에 말한 배포판이 먼저다 — 코어가 사는 자리의 사실이다. 말하지 않으면(그 배포판에 `WSL_DISTRO_NAME` 이 없다) 화면이
+ * `-d` 로 고른 배포판이다. 비워 두면 고른 `\\wsl.localhost\…` 가 옮겨지지도 거절되지도 않고 그대로 코어에 간다. 같은 머신의
+ * 코어(맥 · 리눅스 · WSLg 화면)는 화면과 같은 OS 를 보므로 옮길 것이 없다 — WSLg 화면도 코어에게서 배포판 이름을 듣지만 그렇다.
+ */
+fun CorePlace.wslDistributionAcrossScreen(coreSaidWslDistribution: String?): String? = when (this) {
+    is CorePlace.SameMachine -> null
+    is CorePlace.WslDistribution -> coreSaidWslDistribution ?: distributionName
+}
+
+/**
  * [CorePlace] 의 코어를 띄울 프로세스.
  *
  * 셸을 거치지 않는다. PowerShell · `cmd.exe` 는 그 사이에서 인코딩과 줄 끝을 고친다(설계 3.1 (나) — 한국어가 `?` 로, 줄 끝에 `\r`).
