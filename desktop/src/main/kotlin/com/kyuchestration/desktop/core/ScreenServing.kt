@@ -60,11 +60,13 @@ suspend fun serveScreen(
                 val frame = try {
                     decodeFrameToCore(line)
                 } catch (unreadable: SerializationException) {
-                    // 화면이 이 코어보다 새 판이면 모르는 명령이 온다(6.14). 답할 id 가 있으면 거절로 알린다 — 조용히 버리면
-                    // 화면은 그 명령이 갔다고 안다. 사유에 예외 문구를 싣지 않는 것은 그 문구가 줄의 일부(토큰일 수 있다)를
-                    // 인용하기 때문이다.
-                    val commandId = commandIdOfUnreadableFrame(line) ?: throw unreadable
-                    write(FrameToScreen.Reply(commandId, CommandOutcome.Rejected, reason = UNREADABLE_COMMAND))
+                    // 화면이 이 코어보다 새 판이면 모르는 틀 · 모르는 명령이 온다(6.14). 코어는 그것을 견딘다 — 줄 하나로 코어가
+                    // 끝나면 세션이 모두 끊긴다. 명령이면 그 id 로 거절을 알린다 — 조용히 버리면 화면은 그 명령이 갔다고 안다.
+                    // 답을 기다리지 않는 틀(새 판의 bye 같은 것)은 건너뛴다. 사유에 예외 문구를 싣지 않는 것은 그 문구가 줄의
+                    // 일부(토큰일 수 있다)를 인용하기 때문이다.
+                    commandIdOfUnreadableFrame(line)?.let { commandId ->
+                        write(FrameToScreen.Reply(commandId, CommandOutcome.Rejected, reason = UNREADABLE_COMMAND))
+                    }
                     continue
                 }
                 when (frame) {

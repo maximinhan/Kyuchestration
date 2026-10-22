@@ -113,6 +113,25 @@ class ScreenPipeRoundTripTest {
     }
 
     @Test
+    fun `모르는 틀과 읽지 못할 줄을 건너뛰고 코어는 계속 화면을 받는다`() = runTest {
+        // 화면이 코어보다 새 판이면 코어가 모르는 틀(bye 같은 것)이 온다(설계 6.14). 그것 하나로 코어가 끝나면 세션이 모두 끊긴다.
+        val core = RecordingScreenFacingCore()
+        val pipe = startPipe(core)
+
+        pipe.screenSendsLine("""{"frame":"bye","reason":"replaced_by_another_screen"}""")
+        pipe.screenSendsLine("JSON 이 아닌 줄")
+        pipe.screenSends(FrameToCore.Hello)
+        pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
+        runCurrent()
+
+        val frames = pipe.framesReceivedByScreen()
+        assertEquals(FrameToScreen.Welcome(core.engineDirectoryLabel), frames.first())
+        assertEquals(FrameToScreen.Reply("c-1", CommandOutcome.Accepted), frames.last())
+        assertEquals(listOf<ScreenCommand>(ScreenCommand.RefreshWorkDir), core.receivedCommands)
+        assertEquals(0, core.endAllSessionsCount)
+    }
+
+    @Test
     fun `화면이 줄을 닫으면 코어는 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
         val core = RecordingScreenFacingCore()
         val pipe = startPipe(core)
