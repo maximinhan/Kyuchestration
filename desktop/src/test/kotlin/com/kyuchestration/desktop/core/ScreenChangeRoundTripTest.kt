@@ -80,7 +80,7 @@ class ScreenChangeRoundTripTest {
     }
 
     private fun imageFromSnapshot(): CoreStateImage {
-        val parts = publisher.snapshotFrames().map { throughTheWire(it).part }
+        val parts = publisher.snapshotLines().map { (decodeFrameToScreen(it) as FrameToScreen.Snapshot).part }
         val first = parts.first() as ScreenChange.SmallStatesReplaced
         return parts.drop(1).fold(CoreStateImage.of(first.states)) { image, part -> image.after(part) }
     }

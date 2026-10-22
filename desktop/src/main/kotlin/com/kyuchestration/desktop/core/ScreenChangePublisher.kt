@@ -1,10 +1,13 @@
 package com.kyuchestration.desktop.core
 
 import com.kyuchestration.desktop.protocol.CoreStateImage
+import com.kyuchestration.desktop.protocol.EncodedChatEntry
 import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenChange.ConversationChange
-import com.kyuchestration.desktop.protocol.encodedByteCount
+import com.kyuchestration.desktop.protocol.encodeChatEntry
+import com.kyuchestration.desktop.protocol.encodeFrameToScreen
+import com.kyuchestration.desktop.protocol.encodeSnapshotTailLine
 import com.kyuchestration.desktop.protocol.header
 import com.kyuchestration.desktop.protocol.toWire
 import com.kyuchestration.desktop.terminal.SessionTarget
@@ -37,19 +40,23 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
      * 첫 조각은 작은 상태 전부다. 그다음 대화마다 머리 하나, 1 MiB 안쪽으로 나눈 꼬리 여럿, 흐르는 글이 있으면 그것. 줄 하나가
      * 1 MiB 를 넘으면 그 조각만 크다 — 쪼개면 반쪽짜리 카드를 그리는 길이 생긴다.
      */
-    fun snapshotFrames(): List<FrameToScreen.Snapshot> {
+    fun snapshotLines(): List<String> {
         val now = core.currentStateImage()
         lastSent = now
-        val parts = buildList {
-            add(ScreenChange.SmallStatesReplaced(now.smallStates()))
+        val pieces = buildList {
+            add(SnapshotPiece.Whole(ScreenChange.SmallStatesReplaced(now.smallStates())))
             now.conversations.forEach { (target, conversation) ->
-                add(ScreenChange.ConversationHeaderChanged(target, conversation.header))
+                add(SnapshotPiece.Whole(ScreenChange.ConversationHeaderChanged(target, conversation.header)))
                 addAll(tailInPieces(target, conversation.entries))
-                streamingChange(target, previous = null, current = conversation)?.let(::add)
+                streamingChange(target, previous = null, current = conversation)?.let { add(SnapshotPiece.Whole(it)) }
             }
         }
-        return parts.mapIndexed { index, part ->
-            FrameToScreen.Snapshot(seq = lastSequence, part = part, last = index == parts.lastIndex)
+        return pieces.mapIndexed { index, piece ->
+            val last = index == pieces.lastIndex
+            when (piece) {
+                is SnapshotPiece.Whole -> encodeFrameToScreen(FrameToScreen.Snapshot(lastSequence, piece.part, last))
+                is SnapshotPiece.Tail -> encodeSnapshotTailLine(lastSequence, piece.target, piece.fromIndex, piece.entries, last)
+            }
         }
     }
 
@@ -103,33 +110,40 @@ class ScreenChangePublisher(private val core: ScreenFacingCore) {
         return changes.map { change -> FrameToScreen.Change(seq = ++lastSequence, change = change) }
     }
 
-
-    private fun tailInPieces(target: SessionTarget, entries: List<ChatEntry>): List<ScreenChange.ConversationTailChanged> {
-        val pieces = mutableListOf<ScreenChange.ConversationTailChanged>()
+    private fun tailInPieces(target: SessionTarget, entries: List<ChatEntry>): List<SnapshotPiece.Tail> {
+        val pieces = mutableListOf<SnapshotPiece.Tail>()
+        var piece = mutableListOf<EncodedChatEntry>()
         var pieceStart = 0
         var pieceByteCount = 0
         entries.forEachIndexed { index, entry ->
-            val entryByteCount = entry.encodedByteCount()
-            if (index > pieceStart && pieceByteCount + entryByteCount > SNAPSHOT_PIECE_BYTE_LIMIT) {
-                pieces += ScreenChange.ConversationTailChanged(target, pieceStart, entries.subList(pieceStart, index).toList())
+            val encoded = encodeChatEntry(entry)
+            if (piece.isNotEmpty() && pieceByteCount + encoded.byteCount > SNAPSHOT_PIECE_BYTE_LIMIT) {
+                pieces += SnapshotPiece.Tail(target, pieceStart, piece)
+                piece = mutableListOf()
                 pieceStart = index
                 pieceByteCount = 0
             }
-            pieceByteCount += entryByteCount
+            piece += encoded
+            pieceByteCount += encoded.byteCount
         }
-        if (pieceStart < entries.size) {
-            pieces += ScreenChange.ConversationTailChanged(target, pieceStart, entries.subList(pieceStart, entries.size).toList())
+        if (piece.isNotEmpty()) {
+            pieces += SnapshotPiece.Tail(target, pieceStart, piece)
         }
         return pieces
     }
 
+    /** 스냅샷 한 줄이 될 것. 꼬리 조각만 줄을 미리 써 둔 채로 든다 — 크기를 잰 그 문자열을 줄에 그대로 잇는다. */
+    private sealed interface SnapshotPiece {
+        class Whole(val part: ScreenChange) : SnapshotPiece
+
+        class Tail(val target: SessionTarget, val fromIndex: Int, val entries: List<EncodedChatEntry>) : SnapshotPiece
+    }
 
     private companion object {
         /** 스냅샷 꼬리 조각 하나의 한도. 1.26 MB 한 줄 왕복이 65 ms 였다(설계 3.1) — 조각 하나가 화면을 그만큼만 붙잡는다. */
         const val SNAPSHOT_PIECE_BYTE_LIMIT = 1024 * 1024
     }
 }
-
 
 /** 코어의 흐름 열 개의 지금 값. 게시자가 견주는 기준이자, 거울이 다시 세우는 것과 같은 타입이다. */
 internal fun ScreenFacingCore.currentStateImage() = CoreStateImage(

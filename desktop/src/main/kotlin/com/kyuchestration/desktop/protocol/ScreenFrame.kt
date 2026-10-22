@@ -2,6 +2,7 @@
 
 package com.kyuchestration.desktop.protocol
 
+import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
@@ -122,6 +123,41 @@ fun commandIdOfUnreadableFrame(line: String): String? {
     return (frame["id"] as? JsonPrimitive)?.contentOrNull
 }
 
-/** 줄 하나가 틀 위에서 차지하는 바이트. 스냅샷을 1 MiB 안쪽 조각으로 나눌 때 잰다(6.6). */
-fun ChatEntry.encodedByteCount(): Int =
-    screenProtocolJson.encodeToString(ChatEntry.serializer(), this).toByteArray(Charsets.UTF_8).size
+/**
+ * 틀 위의 모양으로 한 번 써 둔 대화 줄. 스냅샷은 줄마다 크기를 재어 1 MiB 안쪽 조각으로 나누는데(6.6), 잴 때 쓴 문자열을
+ * 조각의 줄에 그대로 잇는다 — 재려고 한 번, 틀을 쓰며 또 한 번 쓰면 큰 대화의 스냅샷마다 직렬화가 두 배가 된다.
+ */
+class EncodedChatEntry(val json: String) {
+    val byteCount: Int = json.toByteArray(Charsets.UTF_8).size
+}
+
+fun encodeChatEntry(entry: ChatEntry): EncodedChatEntry =
+    EncodedChatEntry(screenProtocolJson.encodeToString(ChatEntry.serializer(), entry))
+
+/**
+ * 스냅샷의 꼬리 조각 한 줄. 줄이 빈 틀을 써 두고 그 빈 자리에 미리 써 둔 줄들을 잇는다 — [encodeFrameToScreen] 으로 같은
+ * 틀을 통째로 쓴 것과 바이트까지 같다.
+ *
+ * 빈 자리(`"entries":[]`)는 틀에 꼭 한 번 나온다. 문자열 값 안의 따옴표는 `\"` 로 쓰이므로 대상 이름이 같은 글자를 담아도
+ * 그 모양이 되지 않는다.
+ */
+fun encodeSnapshotTailLine(
+    seq: Long,
+    target: SessionTarget,
+    fromIndex: Int,
+    entries: List<EncodedChatEntry>,
+    last: Boolean,
+): String {
+    val emptyTail = encodeFrameToScreen(
+        FrameToScreen.Snapshot(seq, ScreenChange.ConversationTailChanged(target, fromIndex, emptyList()), last),
+    )
+    val emptyEntriesAt = emptyTail.indexOf(EMPTY_ENTRIES)
+    check(emptyEntriesAt >= 0 && emptyTail.indexOf(EMPTY_ENTRIES, emptyEntriesAt + 1) < 0) {
+        "꼬리 조각의 빈 틀에서 줄 자리를 하나로 찾지 못했다: $emptyTail"
+    }
+    return emptyTail.substring(0, emptyEntriesAt) +
+        entries.joinToString(separator = ",", prefix = "\"entries\":[", postfix = "]") { it.json } +
+        emptyTail.substring(emptyEntriesAt + EMPTY_ENTRIES.length)
+}
+
+private const val EMPTY_ENTRIES = "\"entries\":[]"

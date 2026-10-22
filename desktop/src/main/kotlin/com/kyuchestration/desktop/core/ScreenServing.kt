@@ -34,9 +34,10 @@ suspend fun serveScreen(
     framesToScreen: SendChannel<String>,
 ) {
     val publisher = ScreenChangePublisher(core)
-    fun write(frame: FrameToScreen) {
-        framesToScreen.trySend(encodeFrameToScreen(frame)).getOrThrow()
+    fun writeLine(line: String) {
+        framesToScreen.trySend(line).getOrThrow()
     }
+    fun write(frame: FrameToScreen) = writeLine(encodeFrameToScreen(frame))
     fun publishPendingChanges() = publisher.pendingChangeFrames().forEach(::write)
 
     try {
@@ -69,7 +70,7 @@ suspend fun serveScreen(
                 when (frame) {
                     FrameToCore.Hello -> {
                         write(FrameToScreen.Welcome(engineDirectory = core.engineDirectoryLabel))
-                        publisher.snapshotFrames().forEach(::write)
+                        publisher.snapshotLines().forEach(::writeLine)
                     }
                     is FrameToCore.Command -> {
                         frame.command.applyTo(core)

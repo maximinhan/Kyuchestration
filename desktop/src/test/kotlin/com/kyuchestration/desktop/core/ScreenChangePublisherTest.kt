@@ -6,6 +6,7 @@ import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.SessionEntryOfTarget
 import com.kyuchestration.desktop.protocol.SmallStates
+import com.kyuchestration.desktop.protocol.decodeFrameToScreen
 import com.kyuchestration.desktop.protocol.encodeFrameToScreen
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
@@ -40,7 +41,7 @@ class ScreenChangePublisherTest {
         core.heldChatSessionTargets.value = setOf(SessionTarget.Main)
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN.copy(streamingText = "흐르는", streamingBlockOrdinal = 2))
 
-        val frames = publisher.snapshotFrames()
+        val frames = publisher.snapshotFramesThroughTheWire()
 
         assertEquals(
             listOf(
@@ -69,7 +70,7 @@ class ScreenChangePublisherTest {
 
     @Test
     fun `스냅샷 뒤에 바뀐 작은 상태는 통째로 하나의 변화가 되고 seq 가 하나씩 는다`() {
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         core.engineInstallationState.value = EngineInstallationState.InstallationRunning
         val first = publisher.pendingChangeFrames()
@@ -90,7 +91,7 @@ class ScreenChangePublisherTest {
     @Test
     fun `대화 끝에 붙은 줄은 그 줄만 꼬리로 나간다`() {
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN)
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         val said = ChatEntry.AssistantSaid("새 답")
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN.copy(entries = MAIN.entries + said))
@@ -104,7 +105,7 @@ class ScreenChangePublisherTest {
     @Test
     fun `가운데 줄이 바뀌면 그 자리부터 끝까지가 나간다`() {
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN)
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         val answered = TOOL_CALL.copy(answer = ToolCallAnswer(failed = false, modelVisibleText = "ok"))
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN.copy(entries = listOf(MAIN.entries[0], answered)))
@@ -118,7 +119,7 @@ class ScreenChangePublisherTest {
     @Test
     fun `머리만 바뀌면 줄은 보내지 않는다`() {
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN)
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN.copy(turnState = TurnState.Running))
 
@@ -131,7 +132,7 @@ class ScreenChangePublisherTest {
     @Test
     fun `같은 블록에서 흐르는 글은 덧붙인 만큼만 나가고 블록이 바뀌거나 비면 통째로 나간다`() {
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN.copy(streamingText = "안녕", streamingBlockOrdinal = 1))
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN.copy(streamingText = "안녕하세요", streamingBlockOrdinal = 1))
         val appended = publisher.pendingChangeFrames().map { it.change }
@@ -148,7 +149,7 @@ class ScreenChangePublisherTest {
     @Test
     fun `사라진 대화는 사라졌다고 나간다`() {
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN)
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         core.chatConversations.value = emptyMap()
 
@@ -159,7 +160,7 @@ class ScreenChangePublisherTest {
     fun `진입이 끝나 대화가 서는 묶음에서 대화가 진입 상태보다 먼저 나간다`() {
         // 거꾸로 나가면 거울이 그 사이 한 번 "그 세션이 어디에도 없다" 를 들고, 화면은 보던 세션을 놓는다(ChatViewing).
         core.chatSessionEntries.value = mapOf(SessionTarget.Main to SessionEntryState.Running)
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
 
         core.chatConversations.value = mapOf(SessionTarget.Main to MAIN)
         core.chatSessionEntries.value = emptyMap()
@@ -173,7 +174,7 @@ class ScreenChangePublisherTest {
         val bigEntries = List(5) { ChatEntry.AssistantSaid("가".repeat(150_000)) } + ChatEntry.AssistantSaid("나".repeat(400_000))
         core.chatConversations.value = mapOf(SessionTarget.Main to ChatConversation(SessionTarget.Main, entries = bigEntries))
 
-        val tails = publisher.snapshotFrames().map { it.part }.filterIsInstance<ScreenChange.ConversationTailChanged>()
+        val tails = publisher.snapshotFramesThroughTheWire().map { it.part }.filterIsInstance<ScreenChange.ConversationTailChanged>()
 
         assertEquals(bigEntries, tails.flatMap { it.entries })
         assertEquals(tails.runningFold(0) { index, tail -> index + tail.entries.size }.dropLast(1), tails.map { it.fromIndex })
@@ -185,16 +186,34 @@ class ScreenChangePublisherTest {
 
     @Test
     fun `다시 스냅샷을 내면 기준선이 지금으로 옮겨 그 사이의 변화를 따로 내지 않고 seq 는 이어진다`() {
-        publisher.snapshotFrames()
+        publisher.snapshotFramesThroughTheWire()
         core.engineInstallationState.value = EngineInstallationState.InstallationRunning
         publisher.pendingChangeFrames()
 
         core.engineInstallationState.value = EngineInstallationState.EngineReady
-        val again = publisher.snapshotFrames()
+        val again = publisher.snapshotFramesThroughTheWire()
 
         assertEquals(setOf(1L), again.map { it.seq }.toSet())
         assertEquals(emptyList(), publisher.pendingChangeFrames())
     }
+
+    @Test
+    fun `스냅샷의 꼬리 조각 줄은 줄마다 한 번 써 둔 것을 이어 붙여도 틀을 통째로 쓴 줄과 바이트까지 같다`() {
+        val entries = listOf(ChatEntry.UserSaid("안녕 \"따옴표\" \n 줄바꿈"), TOOL_CALL, ChatEntry.AssistantSaid("entries:[] 를 담은 글"))
+        core.chatConversations.value = mapOf(SessionTarget.Repo("entries") to ChatConversation(SessionTarget.Repo("entries"), entries = entries))
+
+        val lines = publisher.snapshotLines()
+
+        assertEquals(
+            encodeFrameToScreen(
+                FrameToScreen.Snapshot(0, ScreenChange.ConversationTailChanged(SessionTarget.Repo("entries"), 0, entries), last = true),
+            ),
+            lines.last(),
+        )
+    }
+
+    private fun ScreenChangePublisher.snapshotFramesThroughTheWire(): List<FrameToScreen.Snapshot> =
+        snapshotLines().map { decodeFrameToScreen(it) as FrameToScreen.Snapshot }
 
     private companion object {
         val TOOL_CALL = ChatEntry.ToolCall(toolUseId = "toolu_01", toolName = "Bash", input = JsonObject(emptyMap()))
