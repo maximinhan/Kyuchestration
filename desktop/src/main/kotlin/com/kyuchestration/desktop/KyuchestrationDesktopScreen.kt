@@ -2,7 +2,6 @@ package com.kyuchestration.desktop
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,16 +24,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
+import com.kyuchestration.desktop.core.ScreenFacingCore
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
-import com.kyuchestration.desktop.repoclone.RepositoryCloneStateHolder
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.SessionTree
-import com.kyuchestration.desktop.terminal.chat.ChatScreenState
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.theme.ThemePreference
@@ -82,11 +80,11 @@ fun KyuchestrationDesktopScreen(
      */
     heldChatSessionTargets: Set<SessionTarget>,
     /**
-     * 레포를 골라 받아 오는 대화상자가 자기 상태를 직접 구독한다. 다른 상태들처럼 위에서 받아
+     * 레포를 골라 받아 오는 대화상자가 코어에서 자기 상태를 직접 구독한다. 다른 상태들처럼 위에서 받아
      * 내려보내지 않는 이유는, 그 상태를 보는 곳이 대화상자 하나뿐이기 때문이다 — 여기서
      * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 대화 자리까지 다시 그려진다.
      */
-    repositoryCloneStateHolder: RepositoryCloneStateHolder,
+    screenFacingCore: ScreenFacingCore,
     /**
      * 사용자가 테마에 대해 고른 것. 앱을 띄우는 자리가 들고 있다.
      *
@@ -118,7 +116,7 @@ fun KyuchestrationDesktopScreen(
     /** 사람에게 물을 관문들(6.9). 맨 앞의 것이 대화 상자로 선다. */
     childSessionGateQuestions: List<ChildSessionGateQuestion>,
     onChildSessionChosen: (String) -> Unit,
-    onChildSessionGateAnswered: (question: ChildSessionGateQuestion, approved: Boolean) -> Unit,
+    onChildSessionGateAnswered: (gateQuestionId: String, approved: Boolean) -> Unit,
 ) {
     KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -184,13 +182,13 @@ fun KyuchestrationDesktopScreen(
                         // 한 번에 하나씩 묻는다. 답하면 다음 물음이 맨 앞으로 온다.
                         childSessionGateQuestions.firstOrNull()?.let { question ->
                             ChildSessionGateDialog(question) { approved ->
-                                onChildSessionGateAnswered(question, approved)
+                                onChildSessionGateAnswered(question.gateQuestionId, approved)
                             }
                         }
 
                         // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
                         RepositoryCloneDialog(
-                            repositoryCloneStateHolder = repositoryCloneStateHolder,
+                            screenFacingCore = screenFacingCore,
                             diagnosticLogPathLabel = diagnosticLogPathLabel,
                             mainSessionHeld = SessionTarget.Main in heldChatSessionTargets,
                         )

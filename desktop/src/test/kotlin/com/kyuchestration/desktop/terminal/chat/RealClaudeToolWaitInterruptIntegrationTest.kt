@@ -12,7 +12,6 @@ import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -72,6 +71,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
         waitUntil(holder) { true }
 
         holder.sendUserMessage(
+            SessionTarget.Main,
             "Call the mcp__probe__slow tool once with label \"$PROBE_LABEL\" and seconds $PROBE_SECONDS. " +
                 "After it returns, reply with exactly: TURN1-DONE",
         )
@@ -80,10 +80,10 @@ class RealClaudeToolWaitInterruptIntegrationTest {
         // 끊으면 이 시험이 재는 것이 "도구 대기 중" 이 아니게 된다.
         delay(TOOL_CALL_SETTLE_MILLIS)
 
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         waitUntil(holder) { conversation -> conversation.finishedTurns().size == 1 }
 
-        val afterInterrupt = onScreenConversation(holder)
+        val afterInterrupt = mainConversation(holder)
         assertEquals(listOf(TurnOutcome.InterruptedDuringToolWait), afterInterrupt.finishedTurns())
         assertEquals(TurnState.Idle, afterInterrupt.turnState)
         assertTrue(afterInterrupt.alive, "중단이 프로세스를 죽였습니다")
@@ -93,11 +93,11 @@ class RealClaudeToolWaitInterruptIntegrationTest {
             "끊긴 도구 호출은 거절된 결과로 닫혀야 한다(3.2)",
         )
 
-        holder.sendUserMessage("Did the slow tool finish? Reply with exactly: NOT-FINISHED or FINISHED")
+        holder.sendUserMessage(SessionTarget.Main, "Did the slow tool finish? Reply with exactly: NOT-FINISHED or FINISHED")
         waitUntil(holder) { conversation -> conversation.finishedTurns().size == 2 }
 
-        val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        val conversation = mainConversation(holder)
+        holder.endSession(SessionTarget.Main)
 
         assertEquals(
             listOf(TurnOutcome.InterruptedDuringToolWait, TurnOutcome.Completed),
@@ -147,16 +147,16 @@ class RealClaudeToolWaitInterruptIntegrationTest {
     private suspend fun waitUntil(holder: ChatSessionStateHolder, condition: (ChatConversation) -> Boolean) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
             while (true) {
-                val onScreen = holder.state.value
-                if (onScreen is ChatScreenState.ChatOnScreen && condition(onScreen.conversation)) {
+                val conversation = holder.conversations.value[SessionTarget.Main]
+                if (conversation != null && condition(conversation)) {
                     break
                 }
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+    private fun mainConversation(holder: ChatSessionStateHolder): ChatConversation =
+        holder.conversations.value.getValue(SessionTarget.Main)
 
     private fun ChatConversation.slowCallWaiting(): Boolean = turnState == TurnState.Running &&
         entries.any { it is ChatEntry.ToolCall && it.toolName == SLOW_TOOL && it.answer == null }

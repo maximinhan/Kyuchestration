@@ -16,7 +16,6 @@ import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -71,16 +70,17 @@ class RealClaudeDelegationIntegrationTest {
         temporaryDirectory.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        waitUntilChatIsOnScreen(holder)
+        waitUntilMainChatIsHeld(holder)
 
         holder.sendUserMessage(
+            SessionTarget.Main,
             "서브에이전트를 하나 띄워서 이 디렉토리의 $NOTE_FILE_NAME 을 읽고 그 안의 지문 문자열을 " +
                 "그대로 보고하게 해라. 네가 직접 읽지 말고 반드시 서브에이전트에게 시켜라.",
         )
         waitForFinishedTurns(holder, turnCount = 1)
 
-        val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        val conversation = mainConversation(holder)
+        holder.endSession(SessionTarget.Main)
 
         val subagentCard = conversation.entries
             .filterIsInstance<ChatEntry.ToolCall>()
@@ -119,16 +119,17 @@ class RealClaudeDelegationIntegrationTest {
         repositoryPath.resolve(NOTE_FILE_NAME).writeText("지문: $DELEGATION_PASSPHRASE\n")
 
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
-        waitUntilChatIsOnScreen(holder)
+        waitUntilMainChatIsHeld(holder)
 
         holder.sendUserMessage(
+            SessionTarget.Main,
             "$DELEGATED_REPO_NAME 레포에 일을 시켜라 — 그 레포의 $NOTE_FILE_NAME 을 읽고 그 안의 지문 " +
                 "문자열을 그대로 답하라고. 파일은 고치지 말라고 함께 적어라. 네가 직접 읽지 마라.",
         )
         waitForFinishedTurns(holder, turnCount = 1, timeoutMillis = DELEGATION_TIMEOUT_MILLIS)
 
-        val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        val conversation = mainConversation(holder)
+        holder.endSession(SessionTarget.Main)
 
         val delegationCard = conversation.entries
             .filterIsInstance<ChatEntry.ToolCall>()
@@ -193,9 +194,9 @@ class RealClaudeDelegationIntegrationTest {
         }
     }
 
-    private suspend fun waitUntilChatIsOnScreen(holder: ChatSessionStateHolder) =
+    private suspend fun waitUntilMainChatIsHeld(holder: ChatSessionStateHolder) =
         withTimeout(TURN_TIMEOUT_MILLIS) {
-            while (holder.state.value !is ChatScreenState.ChatOnScreen) {
+            while (SessionTarget.Main !in holder.conversations.value) {
                 delay(POLL_INTERVAL_MILLIS)
             }
         }
@@ -211,21 +212,21 @@ class RealClaudeDelegationIntegrationTest {
         turnCount: Int,
         timeoutMillis: Long = TURN_TIMEOUT_MILLIS,
     ) = withTimeout(timeoutMillis) {
-        while (onScreenConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
+        while (mainConversation(holder).entries.filterIsInstance<ChatEntry.TurnEnded>().size < turnCount) {
             allowAnyPendingPermission(holder)
             delay(POLL_INTERVAL_MILLIS)
         }
     }
 
     private fun allowAnyPendingPermission(holder: ChatSessionStateHolder) {
-        onScreenConversation(holder).entries
+        mainConversation(holder).entries
             .filterIsInstance<ChatEntry.PermissionAsked>()
             .filter { it.answer == null }
-            .forEach { holder.answerOnScreenPermission(it.toolUseId, PermissionCardChoice.AllowOnce(it.input)) }
+            .forEach { holder.answerPermission(SessionTarget.Main, it.toolUseId, PermissionCardChoice.AllowOnce(it.input)) }
     }
 
-    private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =
-        assertIs<ChatScreenState.ChatOnScreen>(holder.state.value).conversation
+    private fun mainConversation(holder: ChatSessionStateHolder): ChatConversation =
+        holder.conversations.value.getValue(SessionTarget.Main)
 
     private fun gitRepositoryIn(repositoryPath: Path): Path {
         repositoryPath.createDirectories()

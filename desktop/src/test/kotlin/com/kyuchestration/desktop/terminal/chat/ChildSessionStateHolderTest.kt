@@ -48,16 +48,6 @@ class ChildSessionStateHolderTest {
     }
 
     @Test
-    fun `하위를 띄워도 화면은 사람이 보던 세션에 그대로 있다`() = runTest {
-        val tree = sessionTreeTestBed()
-
-        tree.mainChannel().askSessionTree(spawn("일해", cwd = "proj-a"))
-        runCurrent()
-
-        assertEquals(SessionTarget.Main, tree.holder.state.value.target)
-    }
-
-    @Test
     fun `첫 프롬프트를 상위 세션의 말로 하위에게 넣는다`() = runTest {
         // 하위의 규약 문구가 '[상위 세션]' 으로 시작하는 말을 상위의 것으로 읽는다(session_command_child.go).
         val tree = sessionTreeTestBed()
@@ -130,9 +120,8 @@ class ChildSessionStateHolderTest {
 
         tree.mainChannel().askSessionTree(spawn("일해", cwd = "proj-a"))
         runCurrent()
-        tree.holder.showChildSession("child-1")
 
-        val conversation = assertIs<ChatScreenState.ChatOnScreen>(tree.holder.state.value).conversation
+        val conversation = tree.holder.conversations.value.getValue(SessionTarget.Child("child-1"))
         assertEquals(listOf<ChatEntry>(ChatEntry.EngineNotice("하위 기록 하나를 버렸습니다")), conversation.entries)
     }
 

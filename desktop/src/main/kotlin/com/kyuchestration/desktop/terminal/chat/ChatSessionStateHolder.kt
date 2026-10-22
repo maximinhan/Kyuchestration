@@ -39,8 +39,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * 앱이 보유한 챗 세션들과, 그중 화면에 보이는 대화 하나를 쥐고 있는 자리. Compose 를 모른다
- * (chat-ui-design.md 5.5).
+ * 앱이 보유한 챗 세션들과 그 대화들을 쥐고 있는 자리. Compose 를 모른다(chat-ui-design.md 5.5).
+ *
+ * **어느 세션을 보고 있는지는 모른다.** 그것은 화면의 것이다(core-ui-split-design.md 6.8 (가) · 원칙 21) —
+ * 이 자리는 모든 대화를 세션별로 내놓고, 명령은 대상 세션을 실어 받는다. 화면과 이 자리가 다른 프로세스로
+ * 갈라져도 "지금 보는 세션" 을 맞출 왕복이 생기지 않는다.
  *
  * `EmbeddedTerminalStateHolder` 가 앉은 자리에 선다. 쥐는 것이 늘었다 — 그쪽은 통로 하나였고
  * 이쪽은 **대화 전체**다. 그 대신 화면이 없어도 잃는 것이 없다: 터미널 시절에는 보이지 않는
@@ -98,11 +101,6 @@ class ChatSessionStateHolder(
     private val clock: Clock = Clock.systemUTC(),
 ) {
 
-    private val mutableState = MutableStateFlow<ChatScreenState>(ChatScreenState.NoChatOpen)
-
-    /** 대화 자리가 지금 보여줄 것. */
-    val state: StateFlow<ChatScreenState> = mutableState.asStateFlow()
-
     private val mutableHeldSessions = MutableStateFlow<List<HeldChatSession>>(emptyList())
 
     /**
@@ -113,19 +111,40 @@ class ChatSessionStateHolder(
      */
     val heldSessions: StateFlow<List<HeldChatSession>> = mutableHeldSessions.asStateFlow()
 
+    private val mutableHeldSessionTargets = MutableStateFlow<Set<SessionTarget>>(emptySet())
+
     /**
-     * 세션마다의 대화. 화면에 보이지 않는 것도 여기 쌓인다.
+     * 보유 중인 세션의 대상만. 화면이 읽는 것은 이것이다 — 세션 자체(프로세스 · 소켓)는 화면에 건너가지 못한다(core-ui-split 6.2 (가)).
      *
-     * 흐름이 아니라 보통의 맵인 것이 뜻이다 — 이 값을 구독하는 화면이 없다. 화면이 보는 것은
-     * [state] 하나이고, 이 맵은 그 뒤에서 "돌아왔을 때 두고 온 전사가 그대로인" 근거일 뿐이다.
-     * 고치는 자리가 [updateConversation] 하나뿐이라 흐름 둘이 어긋날 자리도 없다.
+     * [heldSessions] 와 같은 자리([replaceHeldSessions])에서 함께 고친다. 흐름으로 파생하면 한 바퀴 늦어, 그 사이 화면이 이미
+     * 끝낸 세션을 보유 중으로 그린다.
+     */
+    val heldSessionTargets: StateFlow<Set<SessionTarget>> = mutableHeldSessionTargets.asStateFlow()
+
+    private val mutableConversations = MutableStateFlow<Map<SessionTarget, ChatConversation>>(emptyMap())
+
+    /**
+     * 세션마다의 대화. 보유한 세션의 것과, 끝났지만 전사를 남겨 둔 세션의 것이 함께 있다.
+     *
+     * 화면은 이 맵에서 자기가 보는 세션의 대화를 꺼내 그린다. 대화 하나만 내놓던 때는 화면을 옮길 때마다 이
+     * 자리가 그 대화를 바꿔 끼웠는데, 그러면 "어느 세션을 보는가" 를 이 자리가 알아야 했다(6.8).
      *
      * **한 번에 한 코루틴만 이것을 만진다는 전제 위에 있다.** 이 홀더의 상태를 고치는 일은 전부
      * [coroutineScope] 안에서 일어나고, 앱이 넘기는 그 스코프는 화면을 그리는 단일 스레드다
      * (Main.kt 의 rememberCoroutineScope). 여러 스레드가 도는 스코프를 넘기면 세션 하나의 전사가
      * 조용히 샌다 — 터미널 홀더가 보유 목록에 대해 두는 전제와 같다.
      */
-    private val conversations = mutableMapOf<SessionTarget, ChatConversation>()
+    val conversations: StateFlow<Map<SessionTarget, ChatConversation>> = mutableConversations.asStateFlow()
+
+    private val mutableSessionEntries = MutableStateFlow<Map<PersonOpenedSessionTarget, SessionEntryState>>(emptyMap())
+
+    /**
+     * 사람이 띄우라고 한 세션 중 아직 보유하지 못한 것 — 띄우는 중이거나 띄우지 못했다. 보유하면 빠진다.
+     *
+     * 세션마다 따로 든다. 화면이 진입을 기다리는 사이 다른 세션으로 옮겨도 이 자리는 그것을 모르므로(6.8), 진입은
+     * 누가 보든 끝까지 가고 그 결과가 그 세션의 몫으로 남는다.
+     */
+    val sessionEntries: StateFlow<Map<PersonOpenedSessionTarget, SessionEntryState>> = mutableSessionEntries.asStateFlow()
 
     /**
      * 아직 답하지 않은 승인 물음들 — 화면의 버튼과 소켓 너머의 자식을 잇는 자리.
@@ -149,12 +168,24 @@ class ChatSessionStateHolder(
     private val toolsAllowedForSession = mutableMapOf<SessionTarget, MutableSet<String>>()
 
     /**
-     * 지금 화면이 기다리고 있는 진입이 몇 번째인가.
+     * 세션마다 지금 기다리고 있는 진입이 몇 번째인가. 기다리는 진입이 없으면 그 세션의 열쇠가 없다.
      *
      * 진행 중인 코루틴을 취소하지 않고 이 번호로 가른다 — 취소해도 이미 시작된 프로세스는 멈추지
-     * 않으므로, 취소는 "아무도 읽지 않는 `claude` 가 하나 남는" 상태를 만든다.
+     * 않으므로, 취소는 "아무도 읽지 않는 `claude` 가 하나 남는" 상태를 만든다. 진입이 끝났을 때 번호가
+     * 다르면(그 사이 그 세션을 끝냈거나 워크디렉토리를 닫았다) 막 뜬 프로세스를 끝낸다.
      */
-    private var latestSessionEntryRequestId = 0L
+    private val pendingEntryRequestIds = mutableMapOf<PersonOpenedSessionTarget, Long>()
+
+    private var lastEntryRequestId = 0L
+
+    /**
+     * 사람이 시킨 끝내기(세션 하나 · 전부)가 아직 프로세스를 기다리는 중이면 그 끝. 새 진입은 이것을 기다린 뒤 띄운다.
+     *
+     * 끝내기는 보유 목록과 전사를 **시작하는 순간** 놓는다 — 그래야 그 사이 들어온 진입이 "이미 보유 중" 으로 버려지지
+     * 않는다. 대신 프로세스는 아직 살아 있으므로, 같은 대화를 곧바로 다시 띄우면 두 프로세스가 한 대화를 연다
+     * (5.6 의 `--session-id already in use`). 진입이 이 끝을 기다리는 것이 그 둘을 함께 지키는 자리다.
+     */
+    private var sessionsEnding: Job? = null
 
     private val mutableSessionTree = MutableStateFlow(SessionTree())
 
@@ -184,11 +215,14 @@ class ChatSessionStateHolder(
     val gateQuestions: StateFlow<List<ChildSessionGateQuestion>> = mutableGateQuestions.asStateFlow()
 
     /**
-     * 아직 답하지 않은 관문 물음의 답 자리. 물음 그 자체가 열쇠다 — 관문에 걸린 하위에게는 아직 이름이 없다(이름은
-     * 엔진이 띄울 수 있다고 답할 때 짓는다). [ChildSessionGateQuestion] 은 같음을 정체로 가르는 클래스라, 내용이 같은
-     * 다음 물음이 앞 물음의 늦은 답을 받지 않는다.
+     * 아직 답하지 않은 관문 물음의 답 자리. 이 자리가 지은 물음의 id 가 열쇠다 — 관문에 걸린 하위에게는 아직 이름이
+     * 없다(이름은 엔진이 띄울 수 있다고 답할 때 짓는다). 물음마다 새 id 라, 내용이 같은 다음 물음이 앞 물음의 늦은
+     * 답을 받지 않는다.
      */
-    private val gateDecisions = mutableMapOf<ChildSessionGateQuestion, CompletableDeferred<GateAnswer>>()
+    private val gateDecisions = mutableMapOf<String, CompletableDeferred<GateAnswer>>()
+
+    /** 이번 실행에서 지은 관문 물음의 수. 물음의 id 가 이것으로 갈린다. */
+    private var lastGateQuestionOrdinal = 0
 
     /**
      * 상위가 `await_session` 으로 기다리는 중이면 그 기다림(6.11 의 `pendingAwait`). **원칙 18 의 갈림길이 이 값 하나다** —
@@ -218,24 +252,20 @@ class ChatSessionStateHolder(
     private var lastAskOrdinal = 0
 
     /**
-     * 그 세션의 챗을 연다. 이미 보유 중이면 다시 띄우지 않고 화면만 그쪽으로 옮긴다.
+     * 그 세션의 챗을 연다. 이미 보유 중이거나 띄우는 중이면 아무것도 하지 않는다 — 다시 띄우면 돌고 있던
+     * 턴이 끊기고 전사를 잃는다. 화면을 그쪽으로 옮기는 것은 화면의 일이다(6.8).
      *
      * @param conversationChoice 이 세션이 쓸 대화를 어느 쪽으로 정할지. 여기를 지나 엔진에게 닿고,
      *   엔진이 그 뜻대로 명령을 조립한다(설계 원칙 11).
      */
     fun enterSession(workDirPath: Path, target: PersonOpenedSessionTarget, conversationChoice: SessionConversationChoice) {
-        latestSessionEntryRequestId++
-
-        // 보유 중인 대화로 돌아가는 길이다. 다시 띄우면 돌고 있던 턴이 끊기고 전사를 잃는다.
-        val alreadyHeld = mutableHeldSessions.value.firstOrNull { it.target == target }
-        if (alreadyHeld != null) {
-            conversations[target]?.let { mutableState.value = ChatScreenState.ChatOnScreen(target, it) }
+        if (mutableHeldSessions.value.any { it.target == target } || target in pendingEntryRequestIds) {
             return
         }
 
         // 앞서 스스로 끝난 세션의 전사가 남아 있는 자리다. 새로 띄우는 것이므로 그 전사도 함께
         // 놓는다 — 남겨 두면 새 대화의 위에 지난 대화가 이어 붙는다.
-        conversations.remove(target)
+        mutableConversations.value -= target
 
         // 메인을 새로 띄우면 앞 메인의 하위들도 함께 놓는다. 트리는 그 메인 프로세스의 것이고, 새 메인은 그
         // 하위들을 띄운 적이 없다(6.15 — 하위는 이어가지 않는다).
@@ -243,29 +273,50 @@ class ChatSessionStateHolder(
             forgetChildren()
         }
 
-        val requestId = latestSessionEntryRequestId
-        mutableState.value = ChatScreenState.ChatSessionEntryRunning(target)
+        lastEntryRequestId++
+        val requestId = lastEntryRequestId
+        pendingEntryRequestIds[target] = requestId
+        mutableSessionEntries.value += target to SessionEntryState.Running
+        val endingBeforeEntry = sessionsEnding
 
         coroutineScope.launch {
+            endingBeforeEntry?.join()
             val opened = withContext(sessionEntryDispatcher) {
                 runCatching { openChatSession(workDirPath, target, conversationChoice) }
             }
 
-            // 기다리는 동안 사용자가 다른 세션을 골랐거나 챗을 닫았다.
-            if (requestId != latestSessionEntryRequestId) {
+            // 기다리는 동안 사람이 그 세션을 끝냈거나 워크디렉토리를 닫았다.
+            if (pendingEntryRequestIds[target] != requestId) {
                 opened.getOrNull()?.let { endSessionProcess(it) }
                 return@launch
             }
+            pendingEntryRequestIds.remove(target)
 
             opened.fold(
-                onSuccess = ::holdAndShow,
-                onFailure = { failure -> recordAndShowEntryFailure(target, failure.asTerminalSessionFailure()) },
+                onSuccess = { held ->
+                    // 대화를 먼저 세우고 진입 줄을 뺀다. 거꾸로면 그 사이 화면은 둘 다 없는 세션을 본다.
+                    hold(held)
+                    mutableSessionEntries.value -= target
+                },
+                onFailure = { failure -> recordEntryFailure(target, failure.asTerminalSessionFailure()) },
             )
         }
     }
 
     /**
-     * 화면에 떠 있는 대화에 사용자의 말 한 줄을 보낸다. 이것이 한 턴의 시작이다.
+     * 띄우지 못한 진입의 실패를 닫는다. 띄우는 중이거나 실패가 아니면 아무것도 하지 않는다.
+     *
+     * 실패는 그 세션의 진입 상태라(core-ui-split 6.8 (가)) 다시 띄우거나 끝낼 때까지 남는다. 언제 그것을 더 볼 필요가
+     * 없는지는 이 자리가 모른다 — 사람이 어디를 보는지는 화면의 것이다. 그래서 화면이 그 세션을 떠날 때 닫는다.
+     */
+    fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget) {
+        if (mutableSessionEntries.value[target] is SessionEntryState.Failed) {
+            mutableSessionEntries.value -= target
+        }
+    }
+
+    /**
+     * 그 세션에 사람의 말 한 줄을 보낸다. 이것이 한 턴의 시작이다.
      *
      * **보낸 말을 전사에 직접 넣지 않는다.** 스트림을 한 바퀴 돌아 `UserMessageEchoed` 로
      * 돌아오고 전사는 그것으로 그린다(3.14) — 앱이 직접 넣으면 큐잉이나 중단이 끼는 순간
@@ -275,8 +326,7 @@ class ChatSessionStateHolder(
      * 중단 뒤에도 살아남아 다음 턴으로 돌았다. 다만 되돌아오는 것은 그 턴이 시작할 때라,
      * 그 사이의 공백을 [ChatConversation.pendingUserMessages] 가 메운다.
      */
-    fun sendUserMessage(text: String) {
-        val target = mutableState.value.target ?: return
+    fun sendUserMessage(target: SessionTarget, text: String) {
         val written = sendUserMessageTo(target, text, UserMessageSender.Human) ?: return
 
         // 사람이 기다리는 상위에게 말했다(session-tree 6.5 의 셋째 줄). 기다림을 user_spoke 로 깨운다 — stdin 에 쓴
@@ -312,7 +362,7 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 화면에 떠 있는 대화의 도는 턴을 끊는다. **대화도 프로세스도 죽지 않는다**(3.8).
+     * 그 세션의 도는 턴을 끊는다. **대화도 프로세스도 죽지 않는다**(3.8).
      *
      * 실측: 긴 글을 쓰던 중에 끊고 다음 말을 걸었더니 앞 맥락을 기억한 채로 답했다. 그래서 이
      * 자리가 "세션 끝내기" 옆에 따로 설 수 있다 — 끊는 것과 끝내는 것은 다른 일이다.
@@ -320,9 +370,8 @@ class ChatSessionStateHolder(
      * **도는 턴이 없으면 아무 말도 하지 않는다.** 제어 요청은 프로세스가 언제든 받는 줄이라,
      * 턴이 없을 때 보내면 그다음에 시작하는 턴이 첫 낱말에서 끊긴다.
      */
-    fun interruptOnScreenTurn() {
-        val target = mutableState.value.target ?: return
-        if (conversations[target]?.turnState != TurnState.Running) {
+    fun interruptTurn(target: SessionTarget) {
+        if (mutableConversations.value[target]?.turnState != TurnState.Running) {
             return
         }
         val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
@@ -371,59 +420,66 @@ class ChatSessionStateHolder(
         }
 
     /**
-     * 보고 있는 챗을 끝낸다. 보유한 다른 세션은 그대로 둔다.
+     * 그 세션을 끝낸다. 보유한 다른 세션은 그대로 둔다.
      *
      * 프로세스가 실제로 끝난 뒤에 돌아온다. 부르는 쪽이 그것을 기다릴 수 있어야 같은 대화를
      * 곧바로 다른 화면으로 열 수 있다 — 대화 하나를 두 프로세스가 동시에 열면 엔진이 거절한다
      * (5.6 의 `--session-id already in use`).
      */
-    suspend fun endOnScreenSession() {
-        val target = mutableState.value.target ?: return
-        if (target is SessionTarget.Child) {
-            endChildSessionByHuman(target)
-            return
+    suspend fun endSession(target: SessionTarget) {
+        when (target) {
+            is SessionTarget.Child -> endChildSessionByHuman(target)
+            is PersonOpenedSessionTarget -> endPersonOpenedSession(target)
         }
+    }
 
-        latestSessionEntryRequestId++
-        mutableState.value = ChatScreenState.NoChatOpen
-        conversations.remove(target)
+    private suspend fun endPersonOpenedSession(target: PersonOpenedSessionTarget) {
+        // 띄우는 중이었으면 그 진입을 버린다 — 뜨는 순간 끝낸다.
+        pendingEntryRequestIds.remove(target)
+        mutableSessionEntries.value -= target
+        mutableConversations.value -= target
 
-        // 원칙 17 — 메인이 끝나면 하위가 끝난다. 하위 먼저다: 메인이 먼저 끝나면 하위의 물음이 답 없이 끊긴다.
-        if (target == SessionTarget.Main) {
-            endChildrenOfMain()
-            forgetChildren()
+        // 하위를 기다리기 전에 목록에서 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가르고,
+        // 그 사이 다시 들어온 진입이 "이미 보유 중" 으로 버려지지 않는다([sessionsEnding]).
+        val held = mutableHeldSessions.value.firstOrNull { it.target == target }
+        held?.let { replaceHeldSessions(mutableHeldSessions.value - it) }
+
+        endingSessions {
+            // 원칙 17 — 메인이 끝나면 하위가 끝난다. 하위 먼저다: 메인이 먼저 끝나면 하위의 물음이 답 없이 끊긴다.
+            if (target == SessionTarget.Main) {
+                endChildrenOfMain()
+                forgetChildren()
+            }
+            held?.let { endSessionProcess(it) }
         }
-
-        val held = mutableHeldSessions.value.firstOrNull { it.target == target } ?: return
-        // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
-        mutableHeldSessions.value = mutableHeldSessions.value - held
-        endSessionProcess(held)
     }
 
     /**
-     * 하위 하나를 화면에 세운다. 끝난 하위도 전사가 남아 있으면 선다 — 왜 끝났는지 읽을 자리다.
+     * 끝내기 하나를 [sessionsEnding] 으로 걸어 두고 돈다. 앞서 걸린 끝내기가 아직 돌면 그것까지 기다린 뒤 풀린다 —
+     * 그 뒤의 진입은 앞의 모든 끝내기를 지난다.
      *
-     * 패널의 하위 줄과 상위 챗의 spawn 카드 · 승인 띠가 이 길로 온다(6.12).
+     * 새 코루틴을 띄우지 않고 부른 쪽에서 돈다. 창을 닫는 자리는 화면 스레드를 runBlocking 으로 붙잡고 이것을 기다리는데,
+     * 그 스레드의 스코프로 띄우면 영영 돌 차례가 오지 않는다.
      */
-    fun showChildSession(childId: String) {
-        val target = SessionTarget.Child(childId)
-        val conversation = conversations[target] ?: return
-        // 화면이 다른 곳으로 옮겼으니 기다리던 진입은 버린다 — enterSession 이 다른 세션을 고를 때와 같다.
-        latestSessionEntryRequestId++
-        mutableState.value = ChatScreenState.ChatOnScreen(target, conversation)
+    private suspend fun endingSessions(end: suspend () -> Unit) {
+        val earlierEnding = sessionsEnding
+        val ending = Job()
+        sessionsEnding = ending
+        try {
+            end()
+            earlierEnding?.join()
+        } finally {
+            ending.complete()
+        }
     }
 
     /**
      * 사람이 하위 화면에서 "세션 끝내기" 를 눌렀다(6.13). 그 하위만 끝나고 상위는 그대로다.
      *
-     * 화면은 메인으로 돌아간다. 하위의 전사는 남긴다 — 하위는 패널의 줄을 눌러 다시 띄우는 길이 없어서,
-     * 전사가 그 하위가 한 일의 유일한 화면이다.
+     * 하위의 전사는 남긴다 — 하위는 패널의 줄을 눌러 다시 띄우는 길이 없어서, 전사가 그 하위가 한 일의
+     * 유일한 화면이다.
      */
     private suspend fun endChildSessionByHuman(target: SessionTarget.Child) {
-        mutableState.value = conversations[SessionTarget.Main]
-            ?.let { ChatScreenState.ChatOnScreen(SessionTarget.Main, it) }
-            ?: ChatScreenState.NoChatOpen
-
         val node = mutableSessionTree.value.child(target.childId) ?: return
         if (node.lifecycle == ChildLifecycle.Running) {
             endChildSession(node, ChildEndReason.EndedByHuman)
@@ -448,7 +504,7 @@ class ChatSessionStateHolder(
     /** 트리와 하위들의 전사를 놓는다. 그 하위들은 이미 끝났다. */
     private fun forgetChildren() {
         pendingParentQuestions.clear()
-        mutableSessionTree.value.children.forEach { conversations.remove(it.target) }
+        mutableConversations.value -= mutableSessionTree.value.children.map { it.target }.toSet()
         mutableSessionTree.value = SessionTree()
     }
 
@@ -469,18 +525,24 @@ class ChatSessionStateHolder(
      * 한꺼번에 끝낸다. 하나씩 기다리면 세션 수만큼의 종료 대기가 줄줄이 붙어 창이 늦게 닫힌다.
      */
     suspend fun endAllSessions() {
-        latestSessionEntryRequestId++
-        mutableState.value = ChatScreenState.NoChatOpen
+        // 띄우는 중인 진입도 전부 버린다 — 뜨는 순간 끝낸다.
+        pendingEntryRequestIds.clear()
+        mutableSessionEntries.value = emptyMap()
 
-        // 하위 먼저, 상위 나중(6.13). 하위끼리는 한꺼번에 끝낸다.
-        endChildrenOfMain()
-        forgetChildren()
-        conversations.clear()
+        // 사람이 연 세션과 전사는 기다리기 전에 놓는다. 하위를 끝내는 사이 메인이 보유 목록에 남아 있으면, 그 사이 새
+        // 워크디렉토리에서 들어온 진입이 "이미 보유 중" 으로 버려지고 옛 전사가 화면에 선다. 하위는 목록에 남긴다 —
+        // 하위를 끝내는 걸음(endChildSession)이 그 목록에서 하위를 찾아 끝낸다.
+        val personOpenedSessions = mutableHeldSessions.value.filter { it.target is PersonOpenedSessionTarget }
+        replaceHeldSessions(mutableHeldSessions.value - personOpenedSessions.toSet())
+        mutableConversations.value = emptyMap()
 
-        val endingSessions = mutableHeldSessions.value
-        mutableHeldSessions.value = emptyList()
-        coroutineScope {
-            endingSessions.map { async { endSessionProcess(it) } }.awaitAll()
+        endingSessions {
+            // 하위 먼저, 상위 나중(6.13). 하위끼리는 한꺼번에 끝낸다.
+            endChildrenOfMain()
+            forgetChildren()
+            coroutineScope {
+                personOpenedSessions.map { async { endSessionProcess(it) } }.awaitAll()
+            }
         }
     }
 
@@ -538,25 +600,20 @@ class ChatSessionStateHolder(
         }
     }
 
-    private fun holdAndShow(held: HeldChatSession) {
-        hold(held)
-        conversations[held.target]?.let { mutableState.value = ChatScreenState.ChatOnScreen(held.target, it) }
-    }
-
     /**
-     * 세션을 보유하고 그 세션이 말하는 것을 받기 시작한다. 화면은 옮기지 않는다.
+     * 세션을 보유하고 그 세션이 말하는 것을 받기 시작한다.
      *
-     * 하위 세션이 이 길로만 선다 — 상위가 띄운 하위가 사람이 보던 화면을 빼앗으면, 사람은 자기가 무엇을
-     * 하다 이 화면에 왔는지 잃는다.
+     * 사람이 연 세션과 하위가 같은 길로 선다. 화면을 옮기는 것은 이 자리의 일이 아니다 — 상위가 띄운 하위가
+     * 사람이 보던 화면을 빼앗지 않는 것도 그래서 저절로 지켜진다.
      */
     private fun hold(held: HeldChatSession) {
-        conversations[held.target] = ChatConversation(
+        mutableConversations.value += held.target to ChatConversation(
             target = held.target,
             workingDirectory = held.workingDirectory,
             resumedConversationId = held.resumedConversationId,
             entries = held.engineWarnings.map(ChatEntry::EngineNotice),
         )
-        mutableHeldSessions.value = mutableHeldSessions.value + held
+        replaceHeldSessions(mutableHeldSessions.value + held)
 
         // 이어간 대화의 ID 자체는 남기지 않는다. 뒤에 오는 종료를 읽는 근거는 "이어갔는가" 이고,
         // ID 는 그 판단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다.
@@ -724,7 +781,8 @@ class ChatSessionStateHolder(
                 }
 
                 is ChildSessionOpening.GateRequired -> {
-                    val question = ChildSessionGateQuestion(request.prompt, opening.gate)
+                    lastGateQuestionOrdinal++
+                    val question = ChildSessionGateQuestion("gate-$lastGateQuestionOrdinal", request.prompt, opening.gate)
                     val gateAnswer = askPersonAboutGate(question, asked)
                     if (parent !in mutableHeldSessions.value) {
                         return SessionTreeAnswer.Refused("상위 세션이 끝나 하위를 띄우지 않았습니다")
@@ -805,7 +863,7 @@ class ChatSessionStateHolder(
      */
     private suspend fun askPersonAboutGate(question: ChildSessionGateQuestion, asked: AskedSessionTreeRequest): GateAnswer {
         val decision = CompletableDeferred<GateAnswer>()
-        gateDecisions[question] = decision
+        gateDecisions[question.gateQuestionId] = decision
         mutableGateQuestions.value = mutableGateQuestions.value + question
 
         val watchingConnection = coroutineScope.launch {
@@ -818,19 +876,20 @@ class ChatSessionStateHolder(
 
     /** 관문 물음 하나를 거두고 대화 상자를 내린다. 이미 답한 물음이면 아무 일도 하지 않는다. */
     private fun withdrawGateQuestion(question: ChildSessionGateQuestion) {
-        val decision = gateDecisions.remove(question) ?: return
-        mutableGateQuestions.value = mutableGateQuestions.value - question
+        val decision = gateDecisions.remove(question.gateQuestionId) ?: return
+        mutableGateQuestions.value -= question
         decision.complete(GateAnswer.Withdrawn)
     }
 
     /**
-     * 관문 대화 상자에 사람이 답했다.
+     * 관문 대화 상자에 사람이 답했다. 물음은 객체가 아니라 이 자리가 지은 id 로 가리킨다(core-ui-split 6.7 · 원칙 22) —
+     * 화면이 다른 프로세스가 되면 객체의 정체는 경계를 건너지 못한다.
      *
-     * 이미 답한 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
+     * 이미 답한(또는 거둬진) 물음에는 아무 일도 하지 않는다 — 버튼을 두 번 누른 것이 두 답이 되지 않는다.
      */
-    fun answerGateQuestion(question: ChildSessionGateQuestion, approved: Boolean) {
-        val decision = gateDecisions.remove(question) ?: return
-        mutableGateQuestions.value = mutableGateQuestions.value - question
+    fun answerGateQuestion(gateQuestionId: String, approved: Boolean) {
+        val decision = gateDecisions.remove(gateQuestionId) ?: return
+        mutableGateQuestions.value = mutableGateQuestions.value.filterNot { it.gateQuestionId == gateQuestionId }
         decision.complete(if (approved) GateAnswer.Approved else GateAnswer.Declined)
     }
 
@@ -1040,7 +1099,7 @@ class ChatSessionStateHolder(
             return
         }
 
-        if (conversations[SessionTarget.Main]?.turnState != TurnState.Idle) {
+        if (mutableConversations.value[SessionTarget.Main]?.turnState != TurnState.Idle) {
             return
         }
         val idleParentEvents = undeliveredParentEvents.toList()
@@ -1106,8 +1165,13 @@ class ChatSessionStateHolder(
 
         val held = mutableHeldSessions.value.firstOrNull { it.target == node.target } ?: return
         // 목록에서 먼저 뺀다. 끝나는 것을 지켜보던 자리가 이 목록으로 "우리가 끝낸 것인가" 를 가른다.
-        mutableHeldSessions.value = mutableHeldSessions.value - held
+        replaceHeldSessions(mutableHeldSessions.value - held)
         endSessionProcess(held)
+    }
+
+    private fun replaceHeldSessions(heldSessions: List<HeldChatSession>) {
+        mutableHeldSessions.value = heldSessions
+        mutableHeldSessionTargets.value = heldSessions.map { it.target }.toSet()
     }
 
     private fun updateChild(childId: String, change: (ChildSessionNode) -> ChildSessionNode) {
@@ -1149,7 +1213,7 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 화면에 떠 있는 대화의 승인 카드에 답한다(6.4).
+     * 그 세션의 승인 카드에 답한다(6.4).
      *
      * 답을 두 곳으로 보낸다 — 소켓 너머의 자식에게는 결정을, 전사에는 그 결정이 무엇이었는지를.
      * 둘을 한 함수에서만 하는 것이 규율이다. 나눠 두면 소켓에는 갔는데 화면에는 남지 않은 승인이
@@ -1158,8 +1222,7 @@ class ChatSessionStateHolder(
      * **이미 답한 물음에는 아무 일도 하지 않는다.** 버튼을 두 번 누르거나, 세션이 끝나 물음이
      * 닫힌 뒤에 누른 자리가 그렇다.
      */
-    fun answerOnScreenPermission(toolUseId: String, choice: PermissionCardChoice) {
-        val target = mutableState.value.target ?: return
+    fun answerPermission(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice) {
         val asked = askedPermissions.remove(AskedPermissionKey(target, toolUseId)) ?: return
 
         val decision = when (choice) {
@@ -1192,7 +1255,7 @@ class ChatSessionStateHolder(
     }
 
     private fun receive(target: SessionTarget, event: ChatSessionEvent) {
-        val entriesBefore = conversations[target]?.entries.orEmpty()
+        val entriesBefore = mutableConversations.value[target]?.entries.orEmpty()
         updateConversation(target) { it.after(event) }
 
         if (target is SessionTarget.Child && event is ChatSessionEvent.TurnFinished) {
@@ -1285,7 +1348,7 @@ class ChatSessionStateHolder(
         val held = mutableHeldSessions.value.firstOrNull { it.target == target }
             // 우리가 끝낸 세션이다. 끝내는 자리에서 이미 목록에서 뺐다.
             ?: return
-        mutableHeldSessions.value = mutableHeldSessions.value - held
+        replaceHeldSessions(mutableHeldSessions.value - held)
 
         // 메인이 스스로 끝났다(크래시 · 대화 안에서 끝냄). 원칙 17 — 하위도 끝낸다. 트리는 남겨 무엇이
         // 끝났는지 사람이 읽게 한다.
@@ -1311,7 +1374,7 @@ class ChatSessionStateHolder(
         }
     }
 
-    private fun recordAndShowEntryFailure(target: SessionTarget, failure: TerminalSessionFailure) {
+    private fun recordEntryFailure(target: PersonOpenedSessionTarget, failure: TerminalSessionFailure) {
         diagnosticLog.record(
             DiagnosticLogEntry.SessionEntryFailed(
                 targetLabel = target.label,
@@ -1319,24 +1382,13 @@ class ChatSessionStateHolder(
                 guidance = failure.guidance,
             ),
         )
-        mutableState.value = ChatScreenState.ChatSessionEntryFailed(target, failure)
+        mutableSessionEntries.value += target to SessionEntryState.Failed(failure)
     }
 
-    /**
-     * 그 세션의 대화를 고친다. 화면이 그 세션을 보고 있으면 화면도 함께 바뀐다.
-     *
-     * 두 자리를 한 함수에서만 고치는 것이 이 홀더의 규율이다. 나눠 고치면 화면이 들고 있는
-     * 대화와 맵에 있는 대화가 갈리고, 그 어긋남은 세션을 옮겼다 돌아왔을 때 드러난다.
-     */
+    /** 그 세션의 대화를 고친다. 대화가 없는 세션(이미 놓았다)이면 아무 일도 하지 않는다. */
     private fun updateConversation(target: SessionTarget, change: (ChatConversation) -> ChatConversation) {
-        val conversation = conversations[target] ?: return
-        val changed = change(conversation)
-        conversations[target] = changed
-
-        val onScreen = mutableState.value
-        if (onScreen is ChatScreenState.ChatOnScreen && onScreen.target == target) {
-            mutableState.value = ChatScreenState.ChatOnScreen(target, changed)
-        }
+        val conversation = mutableConversations.value[target] ?: return
+        mutableConversations.value += target to change(conversation)
 
         // 하위의 대화가 바뀌면 그 하위가 기다리는 것도 바뀐다 — 패널의 표시와 list_sessions 가 이 값을 본다.
         refreshChildWaitingFor(target)
@@ -1351,7 +1403,7 @@ class ChatSessionStateHolder(
         if (target !is SessionTarget.Child) {
             return
         }
-        val conversation = conversations[target] ?: return
+        val conversation = mutableConversations.value[target] ?: return
         val approvalPending = askedPermissions.keys.any { it.target == target }
         val parentQuestionPending = target.childId in pendingParentQuestions
         updateChild(target.childId) { node ->
@@ -1392,12 +1444,12 @@ class ChatSessionStateHolder(
  *
  * 하위의 이름은 없다. 엔진은 띄울 수 있다고 답할 때 이름을 지어 기록에 적고, 관문에 걸린 하위는 아직 그 앞이다.
  *
- * **data class 가 아니다.** 같음이 곧 정체다 — 답 자리(`gateDecisions`)의 열쇠가 이 물음이라, 내용으로 같음을 가르면
- * 같은 자리 같은 일을 다시 물은 다음 물음이 앞 물음에 늦게 누른 답을 받는다.
- *
+ * @param gateQuestionId 챗 홀더가 물음마다 새로 짓는 이름. 답은 이것으로 물음을 가리킨다 — 같은 자리 같은 일을 다시
+ *   물은 다음 물음은 내용이 같아도 id 가 달라, 앞 물음에 늦게 누른 답을 받지 않는다.
  * @param prompt 상위가 그 하위에게 시키려던 일. 사람이 "이 설정으로 무엇이 돌게 되는가" 를 판단할 재료다.
  */
-class ChildSessionGateQuestion(
+data class ChildSessionGateQuestion(
+    val gateQuestionId: String,
     val prompt: String,
     val gate: ChildSessionGate,
 )

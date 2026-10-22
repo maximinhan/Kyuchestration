@@ -35,7 +35,6 @@ import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
-import com.kyuchestration.desktop.terminal.chat.ChatScreenState
 import com.kyuchestration.desktop.terminal.chat.ChildLifecycle
 import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
