@@ -50,7 +50,7 @@ jobs:
           # 태운 끝에 영어 오류 한 줄로 죽는다.
           #
           # 앞자리가 0 이어도 받는다. 맥 jpackage 가 --app-version 의 첫 숫자 0 을 거절하는 것은
-          # 그대로지만, 그 값은 desktop/build.gradle.kts 가 앞자리만 올려 따로 넘긴다 — 제품
+          # 그대로지만, 그 값은 desktop/ui/build.gradle.kts 가 앞자리만 올려 따로 넘긴다 — 제품
           # 버전을 도구 제약에 맞춰 올리지 않기 위해서다. 1.0.0 은 기능 · 테스트 · 지원 플랫폼이
           # 기준을 충족했을 때 선언한다.
           if ! printf '%s' "$desktop_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -143,7 +143,7 @@ jobs:
             desktop/gradle/wrapper/gradle-wrapper.properties
 
       # 설치 패키지 안에 넣을 엔진을 여기서 만든다. 앱만 설치하면 끝나야 하므로, 데스크톱
-      # 자산에는 kyu 가 함께 들어간다(desktop/build.gradle.kts 의 buildBundledEngine).
+      # 자산에는 kyu 가 함께 들어간다(desktop/ui/build.gradle.kts 의 buildBundledEngine).
       #
       # kyu-binaries 잡의 산출물을 가져다 쓰지 않는다. 아티팩트는 실행 권한을 지키지 않아 내려받은
       # 자리에서 chmod 를 한 번 더 해야 하고, 그러면 이 잡이 "받아서 · 권한을 고쳐서 · 옮기는"
@@ -182,7 +182,7 @@ jobs:
           #
           # 경로를 박지 않고 찾는다 — 이름 규칙은 jpackage 와 Compose 플러그인의 것이라 판이 바뀌면
           # 같이 바뀐다. 하나가 아니면 그것이 오류다.
-          built=$(find build/compose/binaries/main/deb -maxdepth 1 -name '*.deb')
+          built=$(find ui/build/compose/binaries/main/deb -maxdepth 1 -name '*.deb')
           if [ "$(printf '%s\n' "$built" | grep -c .)" -ne 1 ]; then
             echo "::error::deb 가 하나만 나와야 하는데 이렇게 나왔다: ${built:-없음}"
             exit 1
@@ -272,7 +272,7 @@ jobs:
           DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
           ASSET_ARCH: ${{ matrix.arch }}
         run: |
-          built=$(find build/compose/binaries/main/dmg -maxdepth 1 -name '*.dmg')
+          built=$(find ui/build/compose/binaries/main/dmg -maxdepth 1 -name '*.dmg')
           if [ "$(printf '%s\n' "$built" | grep -c .)" -ne 1 ]; then
             echo "::error::dmg 가 하나만 나와야 하는데 이렇게 나왔다: ${built:-없음}"
             exit 1
