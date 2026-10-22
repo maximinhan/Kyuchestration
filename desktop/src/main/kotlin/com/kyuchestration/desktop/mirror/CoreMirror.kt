@@ -42,8 +42,14 @@ import kotlinx.coroutines.launch
  * **`seq` 가 하나라도 건너뛰면 다시 인사한다**(6.4). 건너뛴 변화를 모른 채 다음 변화를 얹으면 거울이 코어와 조용히 어긋난다.
  * 다시 받은 스냅샷의 마지막 조각이 올 때까지는 거울을 그대로 둔다 — 반쯤 온 스냅샷을 그리면 대화가 잘려 보인다(6.6).
  *
- * 거울의 상태(받은 상태 · 다음 `seq` · 모으는 중인 스냅샷)는 틀을 읽는 코루틴 하나만 만진다. 명령은 화면 스레드에서 오고,
- * 그쪽이 만지는 것은 답을 기다리는 명령의 표뿐이다.
+ * **진입을 보낸 세션은 답이 올 때까지 띄우는 중으로 센다.** 화면은 진입을 보내자마자 그 세션을 본다(ChatViewing). 같은
+ * JVM 의 코어는 진입 상태를 그 호출 안에서 세웠지만, 거울에는 그 변화가 한 박자 뒤에 온다. 그 사이 세션이 대화에도 진입
+ * 상태에도 없으면 보는 세션이 null 로 접히고 사람이 고른 것까지 놓친다. 코어는 명령이 남긴 변화를 답보다 먼저 보내므로
+ * (serveScreen), 답이 온 뒤에는 코어가 보낸 진입 상태가 그대로 사실이다. 이미 대화가 선 세션(코어가 아무것도 하지 않는다)과
+ * 코어가 진입 상태를 이미 보낸 세션은 짐작하지 않는다.
+ *
+ * 거울의 상태(받은 상태 · 다음 `seq` · 모으는 중인 스냅샷)는 틀을 읽는 코루틴 하나만 바꾼다. 명령은 화면 스레드에서 오고,
+ * 그쪽이 바꾸는 것은 답을 기다리는 명령의 표뿐이다. 진입 상태 흐름은 두 쪽이 함께 다시 짓는 자리라 자물쇠 하나로 묶는다.
  */
 class CoreMirror private constructor(
     private val framesToCore: SendChannel<String>,
@@ -52,6 +58,7 @@ class CoreMirror private constructor(
     private val diagnosticLog: DiagnosticLog,
 ) : ScreenFacingCore {
 
+    @Volatile
     private var image: CoreStateImage = initialImage
 
     private val mutableEngineInstallationState = MutableStateFlow(initialImage.engineInstallation)
@@ -87,6 +94,8 @@ class CoreMirror private constructor(
     private val commandsAwaitingReply = ConcurrentHashMap<String, ScreenCommand>()
 
     private val coreClosedItsFrames = CompletableDeferred<Unit>()
+
+    private val sessionEntriesShownLock = Any()
 
     private fun startReading(framesFromCore: ReceiveChannel<String>, readingScope: CoroutineScope) {
         readingScope.launch {
@@ -129,6 +138,9 @@ class CoreMirror private constructor(
 
     private fun receiveReply(reply: FrameToScreen.Reply) {
         val command = commandsAwaitingReply.remove(reply.id) ?: return
+        if (command is ScreenCommand.EnterSession) {
+            showSessionEntries()
+        }
         if (reply.outcome == CommandOutcome.Rejected) {
             diagnosticLog.record(
                 DiagnosticLogEntry.CoreRejectedScreenCommand(
@@ -146,16 +158,30 @@ class CoreMirror private constructor(
         mutableWorkDirDashboardState.value = nextImage.workDirDashboard
         mutableWorkDirInitializationState.value = nextImage.workDirInitialization
         mutableChatConversations.value = nextImage.conversations
-        mutableChatSessionEntries.value = nextImage.sessionEntries
+        showSessionEntries()
         mutableHeldChatSessionTargets.value = nextImage.heldSessions
         mutableSessionTree.value = nextImage.sessionTree
         mutableChildSessionGateQuestions.value = nextImage.gateQuestions
         mutableRepositoryCloneState.value = nextImage.repositoryClone
     }
 
+    private fun showSessionEntries() {
+        synchronized(sessionEntriesShownLock) {
+            val shownImage = image
+            val sessionsBeingEntered = commandsAwaitingReply.values
+                .filterIsInstance<ScreenCommand.EnterSession>()
+                .map { it.target }
+                .filter { it !in shownImage.sessionEntries && it !in shownImage.conversations }
+            mutableChatSessionEntries.value = shownImage.sessionEntries + sessionsBeingEntered.associateWith { SessionEntryState.Running }
+        }
+    }
+
     private fun send(command: ScreenCommand) {
         val commandId = "c-${lastCommandNumber.incrementAndGet()}"
         commandsAwaitingReply[commandId] = command
+        if (command is ScreenCommand.EnterSession) {
+            showSessionEntries()
+        }
         sendFrame(FrameToCore.Command(commandId, command))
     }
 

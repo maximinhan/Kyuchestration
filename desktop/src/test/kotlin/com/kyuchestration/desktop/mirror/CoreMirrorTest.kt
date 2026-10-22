@@ -11,6 +11,7 @@ import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.ConversationHeader
+import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.protocol.FrameToCore
 import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.ScreenChange
@@ -20,6 +21,7 @@ import com.kyuchestration.desktop.protocol.decodeFrameToCore
 import com.kyuchestration.desktop.protocol.encodeFrameToScreen
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
@@ -122,6 +124,66 @@ class CoreMirrorTest {
         val commandFrames = pipe.framesSentToCore().filterIsInstance<FrameToCore.Command>()
         assertEquals(inProcess.receivedCommands, commandFrames.map { it.command })
         assertEquals(33, commandFrames.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun `진입을 보낸 세션은 답이 올 때까지 띄우는 중으로 보이고 답이 오면 코어가 보낸 상태로 돌아간다`() = runTest {
+        // 화면은 진입을 보내자마자 그 세션을 본다(ChatViewing.moveTo). 거울이 코어의 답을 기다리는 동안 그 세션이 맵 어디에도
+        // 없으면 보는 세션이 null 로 접히고 고른 것까지 놓친다.
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSendsSnapshot(seq = 0, SMALL_STATES.copy(sessionEntries = emptyList()))
+        val mirror = pipe.connect(this)
+
+        mirror.enterSession(SessionTarget.Repo("proj-b"), SessionConversationChoice.ContinueRecordedConversation)
+
+        assertEquals(
+            mapOf<PersonOpenedSessionTarget, SessionEntryState>(SessionTarget.Repo("proj-b") to SessionEntryState.Running),
+            mirror.chatSessionEntries.value,
+        )
+
+        // 코어가 아무것도 띄우지 않고 받기만 했다(열린 워크디렉토리가 없었다).
+        val enter = pipe.framesSentToCore().filterIsInstance<FrameToCore.Command>().single()
+        pipe.coreSends(FrameToScreen.Reply(enter.id, CommandOutcome.Accepted))
+        runCurrent()
+
+        assertEquals(emptyMap(), mirror.chatSessionEntries.value)
+    }
+
+    @Test
+    fun `답을 기다리는 사이 코어가 보낸 그 세션의 진입 상태가 거울의 짐작보다 먼저다`() = runTest {
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSendsSnapshot(seq = 0, SMALL_STATES.copy(sessionEntries = emptyList()))
+        val mirror = pipe.connect(this)
+        val failure = FailureView("KyuExecutableNotFound", "kyu 실행 파일을 찾지 못했습니다.", "앱을 다시 띄우세요.")
+
+        mirror.enterSession(SessionTarget.Repo("proj-b"), SessionConversationChoice.ContinueRecordedConversation)
+        pipe.coreSends(
+            FrameToScreen.Change(
+                1,
+                ScreenChange.SessionEntriesChanged(listOf(SessionEntryOfTarget(SessionTarget.Repo("proj-b"), SessionEntryState.Failed(failure)))),
+            ),
+        )
+        runCurrent()
+
+        assertEquals(
+            mapOf<PersonOpenedSessionTarget, SessionEntryState>(SessionTarget.Repo("proj-b") to SessionEntryState.Failed(failure)),
+            mirror.chatSessionEntries.value,
+        )
+    }
+
+    @Test
+    fun `이미 대화가 선 세션에 다시 들어가면 띄우는 중으로 세지 않는다`() = runTest {
+        // 보유 중인 세션이면 코어는 아무것도 하지 않는다. 그 사이 띄우는 중을 들면 대화 대신 진행 표시가 한 번 번쩍인다.
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(FrameToScreen.Welcome("/e"))
+        pipe.coreSendsSnapshot(seq = 0, SMALL_STATES.copy(sessionEntries = emptyList()), MAIN_HEADER, MAIN_TAIL)
+        val mirror = pipe.connect(this)
+
+        mirror.enterSession(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+
+        assertEquals(emptyMap(), mirror.chatSessionEntries.value)
     }
 
     @Test
