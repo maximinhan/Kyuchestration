@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.core
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
+import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.decodeFrameToScreen
@@ -39,7 +41,12 @@ class CoreMainProcessTest {
             val fromCore = core.inputStream.bufferedReader(Charsets.UTF_8)
             val welcome = assertIs<FrameToScreen.Welcome>(decodeFrameToScreen(fromCore.readLine()))
             assertEquals(SCREEN_PROTOCOL_VERSION, welcome.protocol)
-            assertEquals(scratchDirectory.resolve("state/kyuchestration/core.log").toString(), welcome.coreDiagnosticLog)
+            // 맥은 XDG 를 보지 않고 ~/Library/Logs 에 둔다(DiagnosticLogLocation). 코어가 받은 환경으로 같은 규칙을 다시 짚는다.
+            val coreEnvironment = mapOf("XDG_STATE_HOME" to scratchDirectory.resolve("state").toString())
+            assertEquals(
+                diagnosticLogFile(DiagnosticLogOwner.Core, lookUpEnvironmentVariable = coreEnvironment::get).toString(),
+                welcome.coreDiagnosticLog,
+            )
             do {
                 val snapshot = assertIs<FrameToScreen.Snapshot>(decodeFrameToScreen(fromCore.readLine()))
             } while (!snapshot.last)
