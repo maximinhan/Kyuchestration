@@ -11,7 +11,8 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.kyuchestration.desktop.core.CoreIdentity
-import com.kyuchestration.desktop.core.startCoreInThisProcess
+import com.kyuchestration.desktop.core.ScreenFrameOutbox
+import com.kyuchestration.desktop.core.startCore
 import com.kyuchestration.desktop.diagnostics.BuildVersion
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
@@ -28,6 +29,7 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -80,13 +82,18 @@ fun main() {
  */
 private fun connectToCoreInThisProcess(diagnosticLog: DiagnosticLog, diagnosticLogPath: String): CoreConnection {
     val framesToCore = Channel<String>(Channel.UNLIMITED)
-    val framesToScreen = Channel<String>(Channel.UNLIMITED)
-    startCoreInThisProcess(
+    val coreOutbox = ScreenFrameOutbox()
+    startCore(
         framesFromScreen = framesToCore,
-        framesToScreen = framesToScreen,
+        framesToScreen = coreOutbox,
         coreIdentity = CoreIdentity(BuildVersion.labelOf(CoreIdentity::class.java), diagnosticLogPath),
         diagnosticLog = diagnosticLog,
     )
+    val framesToScreen = Channel<String>(Channel.UNLIMITED)
+    CoroutineScope(Dispatchers.Default).launch {
+        val coreFailure = runCatching { coreOutbox.deliverEach { framesToScreen.send(it) } }.exceptionOrNull()
+        framesToScreen.close(coreFailure)
+    }
     return runBlocking {
         CoreMirror.connect(
             framesFromCore = framesToScreen,

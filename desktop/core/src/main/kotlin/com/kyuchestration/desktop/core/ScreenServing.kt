@@ -13,7 +13,6 @@ import com.kyuchestration.desktop.terminal.chat.ChatEntry
 import com.kyuchestration.desktop.protocol.encodeFrameToScreen
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -28,9 +27,11 @@ import kotlinx.serialization.SerializationException
  * 변화를 그 명령의 답보다 먼저 보낼 수 있다 — 명령을 부른 바로 뒤에 견주면 그 명령이 그 자리에서 바꾼 것이 다 들어 있다.
  * 그래서 화면은 답을 받는 순간 그 명령의 즉각적인 결과(띄우는 중인 진입 같은 것)를 이미 거울에 들고 있다.
  *
- * [framesToScreen] 은 받는 쪽이 밀려도 쓰기가 멈추지 않는 줄이어야 한다. 쓰는 도중에 멈추면 그사이 다른 코루틴이 견준
- * 변화가 앞 변화보다 먼저 나가 `seq` 가 뒤섞인다. 화면이 밀릴 때 버리고 스냅샷부터 다시 보내는 한도(6.5 의 4 MiB)는
- * 코어가 프로세스로 갈라져 그 줄이 stdout 이 될 때 선다.
+ * **화면이 밀리면 다시 맞춘다**(6.5). 틀은 [framesToScreen] 에 쓰고, 쓰기는 멈추지 않는다. 화면이 읽지 못해 아직 건네지 못한
+ * 바이트가 마지막 스냅샷의 크기에 [screenBacklogLimitBytes] 를 더한 것을 넘으면, 그 뒤의 변화는 쓰지 않고 버린다. 밀린 것이 다
+ * 건네지면 그때의 상태로 스냅샷을 다시 보낸다 — 상태를 보내는 것이지 사건 기록을 보내는 것이 아니라 버린 변화로 잃는 것이 없다.
+ * 마지막 스냅샷의 크기를 더하는 것은 큰 대화의 스냅샷 자체가 한도를 넘어도 그 뒤의 변화가 곧바로 버려지지 않게다 — 그러지 않으면
+ * 스냅샷이 다 건네질 때마다 또 스냅샷을 보내는 일이 되풀이된다. 명령의 답은 버리지 않는다. 화면은 답을 기다린다.
  *
  * 화면이 줄을 닫으면(stdin EOF) 모든 세션을 끝내고 자기 줄을 닫는다 — 창을 닫든 화면이 죽든 같은 길이다(6.13 의 2~4 단계).
  * 명령 도중 코어가 실패하거나 코어 스코프가 취소돼도 같은 끝을 지난다. 실패는 그 뒤에 그대로 던진다.
@@ -42,14 +43,31 @@ suspend fun serveScreen(
     core: ScreenFacingCore,
     coreIdentity: CoreIdentity,
     framesFromScreen: ReceiveChannel<String>,
-    framesToScreen: SendChannel<String>,
+    framesToScreen: ScreenFrameOutbox,
+    screenBacklogLimitBytes: Long = SCREEN_BACKLOG_LIMIT_BYTES,
 ) {
     val publisher = ScreenChangePublisher(core)
-    fun writeLine(line: String) {
-        framesToScreen.trySend(line).getOrThrow()
+    var lastSnapshotBytes = 0L
+    var screenFellBehind = false
+
+    fun write(frame: FrameToScreen) = framesToScreen.write(encodeFrameToScreen(frame))
+    fun sendSnapshot() {
+        val snapshotLines = publisher.snapshotLines()
+        lastSnapshotBytes = snapshotLines.sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() }
+        screenFellBehind = false
+        snapshotLines.forEach(framesToScreen::write)
     }
-    fun write(frame: FrameToScreen) = writeLine(encodeFrameToScreen(frame))
-    fun publishPendingChanges() = publisher.pendingChangeFrames().forEach(::write)
+    fun publishPendingChanges() {
+        // 밀린 동안에도 견주기는 한다 — 게시자의 기준선이 지금 상태를 따라가야, 다시 맞출 때 보낼 스냅샷과 그 뒤의 변화가 이어진다.
+        val changeFrames = publisher.pendingChangeFrames()
+        if (screenFellBehind || changeFrames.isEmpty()) {
+            return
+        }
+        changeFrames.forEach(::write)
+        if (framesToScreen.pendingBytes.value > lastSnapshotBytes + screenBacklogLimitBytes) {
+            screenFellBehind = true
+        }
+    }
 
     try {
         coroutineScope {
@@ -66,6 +84,13 @@ suspend fun serveScreen(
                     core.childSessionGateQuestions,
                     core.repositoryCloneState,
                 ).collect { publishPendingChanges() }
+            }
+            val catchingUpScreen = launch {
+                framesToScreen.pendingBytes.collect { pendingBytes ->
+                    if (screenFellBehind && pendingBytes == 0L) {
+                        sendSnapshot()
+                    }
+                }
             }
             screenFrames@ for (line in framesFromScreen) {
                 val frame = try {
@@ -94,7 +119,7 @@ suspend fun serveScreen(
                             write(FrameToScreen.Bye(ByeReason.ProtocolMismatch))
                             break@screenFrames
                         }
-                        publisher.snapshotLines().forEach(::writeLine)
+                        sendSnapshot()
                     }
                     is FrameToCore.Command -> {
                         val staleness = frame.command.stalenessIn(core)
@@ -109,6 +134,7 @@ suspend fun serveScreen(
                 }
             }
             watchingCore.cancel()
+            catchingUpScreen.cancel()
         }
     } finally {
         // 화면이 떠났든(줄의 끝), 명령 도중 코어가 실패했든, 코어 스코프가 취소됐든 세션은 여기서 끝낸다. 건너뛰면 claude
@@ -117,6 +143,9 @@ suspend fun serveScreen(
         framesToScreen.close()
     }
 }
+
+/** 화면이 밀렸다고 볼 한도(설계 6.5 의 v1 값). 3.1 의 실측에서 1.26 MB 한 줄 왕복이 65 ms 라, 4 MiB 가 쌓였다면 화면이 멈춘 것이다. */
+const val SCREEN_BACKLOG_LIMIT_BYTES: Long = 4L * 1024 * 1024
 
 private const val UNREADABLE_COMMAND = "unreadable_command"
 

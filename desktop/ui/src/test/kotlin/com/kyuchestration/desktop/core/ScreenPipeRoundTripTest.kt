@@ -1,6 +1,8 @@
 package com.kyuchestration.desktop.core
 
+import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
 import com.kyuchestration.desktop.protocol.ByeReason
@@ -186,7 +188,7 @@ class ScreenPipeRoundTripTest {
         assertEquals(listOf(welcomeFrom(core), FrameToScreen.Bye(ByeReason.ProtocolMismatch)), pipe.framesReceivedByScreen())
         assertEquals(emptyList(), core.receivedCommands)
         assertEquals(1, core.endAllSessionsCount)
-        assertTrue(pipe.coreToScreen.isClosedForSend)
+        assertTrue(pipe.coreToScreen.isClosedForReceive)
     }
 
     @Test
@@ -269,6 +271,41 @@ class ScreenPipeRoundTripTest {
     }
 
     @Test
+    fun `화면이 밀리면 변화를 버리고 밀린 것이 다 건네진 뒤 그때의 상태로 스냅샷을 다시 보낸다`() = runTest {
+        // 화면이 읽지 못하는 동안 변화를 쌓아 두면 코어의 메모리가 한없이 는다(설계 6.5). 상태를 보내는 것이라 버려도 잃지 않는다.
+        val core = RecordingScreenFacingCore()
+        val pipe = FramePipe(this)
+        val stalledScreen = ScreenFrameOutbox()
+        backgroundScope.launch {
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = stalledScreen, screenBacklogLimitBytes = 1)
+        }
+        pipe.screenSends(TEST_SCREEN_HELLO)
+        runCurrent()
+
+        core.engineInstallationState.value = EngineInstallationState.InstallationRunning
+        runCurrent()
+        core.claudeAuthenticationState.value = ClaudeAuthenticationState.CheckingCredentials
+        runCurrent()
+
+        val delivered = stalledScreen.linesDeliveredIn(backgroundScope)
+        runCurrent()
+        val frames = buildList {
+            while (true) {
+                add(decodeFrameToScreen(delivered.tryReceive().getOrNull() ?: break))
+            }
+        }
+
+        assertEquals(welcomeFrom(core), frames.first())
+        val changes = frames.filterIsInstance<FrameToScreen.Change>()
+        assertEquals(listOf<ScreenChange>(ScreenChange.EngineInstallationChanged(EngineInstallationState.InstallationRunning)), changes.map { it.change })
+        val resentSnapshot = frames.dropWhile { it !is FrameToScreen.Change }.filterIsInstance<FrameToScreen.Snapshot>()
+        val resentStates = assertIs<ScreenChange.SmallStatesReplaced>(resentSnapshot.first().part).states
+        assertEquals(ClaudeAuthenticationState.CheckingCredentials, resentStates.claudeAuthentication)
+        assertTrue(resentSnapshot.last().last)
+        assertTrue(resentSnapshot.first().seq > changes.single().seq, "다시 보낸 스냅샷은 버린 변화까지 센 seq 를 단다")
+    }
+
+    @Test
     fun `화면이 줄을 닫으면 코어는 모든 세션을 끝내고 자기 줄을 닫는다`() = runTest {
         val core = RecordingScreenFacingCore()
         val pipe = startPipe(core)
@@ -277,7 +314,7 @@ class ScreenPipeRoundTripTest {
         runCurrent()
 
         assertEquals(1, core.endAllSessionsCount)
-        assertTrue(pipe.coreToScreen.isClosedForSend)
+        assertTrue(pipe.coreToScreen.isClosedForReceive)
     }
 
     @Test
@@ -288,7 +325,7 @@ class ScreenPipeRoundTripTest {
         // 실패를 시험이 받아 보도록 Deferred 에 담는다 — 감독 Job 아래의 async 는 실패를 부모로 올리지 않는다.
         val servingScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob())
         val serving = servingScope.async {
-            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox)
         }
 
         pipe.screenSends(FrameToCore.Command("c-1", ScreenCommand.RefreshWorkDir))
@@ -296,7 +333,7 @@ class ScreenPipeRoundTripTest {
 
         assertFailsWith<IllegalStateException> { serving.await() }
         assertEquals(1, core.endAllSessionsCount)
-        assertTrue(pipe.coreToScreen.isClosedForSend)
+        assertTrue(pipe.coreToScreen.isClosedForReceive)
     }
 
     @Test
@@ -304,7 +341,7 @@ class ScreenPipeRoundTripTest {
         val core = RecordingScreenFacingCore()
         val pipe = FramePipe(this)
         val serving = backgroundScope.launch {
-            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen)
+            serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox)
         }
         runCurrent()
 
@@ -312,7 +349,7 @@ class ScreenPipeRoundTripTest {
         runCurrent()
 
         assertEquals(1, core.endAllSessionsCount)
-        assertTrue(pipe.coreToScreen.isClosedForSend)
+        assertTrue(pipe.coreToScreen.isClosedForReceive)
     }
 
     private fun assertMirrorShowsCore(core: ScreenFacingCore, mirror: ScreenFacingCore) {
@@ -331,14 +368,15 @@ class ScreenPipeRoundTripTest {
 
     private fun TestScope.startPipe(core: ScreenFacingCore): FramePipe {
         val pipe = FramePipe(this)
-        backgroundScope.launch { serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreToScreen) }
+        backgroundScope.launch { serveScreen(core, TEST_CORE_IDENTITY, framesFromScreen = pipe.screenToCore, framesToScreen = pipe.coreOutbox) }
         runCurrent()
         return pipe
     }
 
     private class FramePipe(private val testScope: TestScope) {
         val screenToCore = Channel<String>(Channel.UNLIMITED)
-        val coreToScreen = Channel<String>(Channel.UNLIMITED)
+        val coreOutbox = ScreenFrameOutbox()
+        val coreToScreen = coreOutbox.linesDeliveredIn(testScope.backgroundScope)
 
         suspend fun connectMirror(): CoreMirror = assertIs<CoreConnection.Connected>(
             CoreMirror.connect(

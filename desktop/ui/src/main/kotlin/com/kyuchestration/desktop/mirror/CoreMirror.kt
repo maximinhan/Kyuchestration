@@ -91,7 +91,7 @@ class CoreMirror private constructor(
 
     private var nextChangeSequence: Long = 0
 
-    /** 다시 인사한 뒤 모으는 중인 스냅샷. 인사하지 않았으면 null 이다. */
+    /** 모으는 중인 스냅샷 — 다시 인사했거나 코어가 밀린 화면을 다시 맞추는 중이다. 아니면 null 이다. */
     private var snapshotBeingAssembled: SnapshotAssembly? = null
 
     private val lastCommandNumber = AtomicLong(0)
@@ -138,7 +138,9 @@ class CoreMirror private constructor(
             is FrameToScreen.Welcome -> Unit
             // 작별 뒤에는 코어가 줄을 닫는다. 연결이 끊긴 것을 화면에 세우는 일은 그 줄의 끝(startReading)이 맡는다.
             is FrameToScreen.Bye -> Unit
-            is FrameToScreen.Snapshot -> snapshotBeingAssembled?.let { assembly ->
+            // 다시 인사하지 않았는데 온 스냅샷은 코어가 밀린 화면을 다시 맞추는 것이다(설계 6.5) — 그사이 버린 변화를 이것이 담는다.
+            is FrameToScreen.Snapshot -> {
+                val assembly = snapshotBeingAssembled ?: SnapshotAssembly().also { snapshotBeingAssembled = it }
                 assembly.add(frame)?.let { assembled ->
                     snapshotBeingAssembled = null
                     nextChangeSequence = frame.seq + 1

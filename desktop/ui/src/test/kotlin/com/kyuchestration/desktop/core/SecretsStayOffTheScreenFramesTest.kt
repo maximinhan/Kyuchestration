@@ -48,10 +48,11 @@ class SecretsStayOffTheScreenFramesTest {
         val profileRegistry = MemoryTokenProfileRegistry()
         val bed = inProcessCoreTestBed(claudeTokenStore = tokenStore, tokenProfileRegistry = profileRegistry)
         val screenToCore = Channel<String>(Channel.UNLIMITED)
-        val coreToTap = Channel<String>(Channel.UNLIMITED)
+        val coreOutbox = ScreenFrameOutbox()
+        val coreToTap = coreOutbox.linesDeliveredIn(backgroundScope)
         val tapToMirror = Channel<String>(Channel.UNLIMITED)
         val linesSentToScreen = mutableListOf<String>()
-        backgroundScope.launch { serveScreen(bed.core, TEST_CORE_IDENTITY, framesFromScreen = screenToCore, framesToScreen = coreToTap) }
+        backgroundScope.launch { serveScreen(bed.core, TEST_CORE_IDENTITY, framesFromScreen = screenToCore, framesToScreen = coreOutbox) }
         backgroundScope.launch {
             for (line in coreToTap) {
                 linesSentToScreen += line

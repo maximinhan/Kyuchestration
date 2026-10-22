@@ -105,6 +105,23 @@ class CoreMirrorTest {
     }
 
     @Test
+    fun `묻지 않았는데 온 스냅샷은 코어가 다시 맞추는 것이라 그것으로 거울을 새로 세운다`() = runTest {
+        // 화면이 밀리면 코어는 변화를 버리고 스냅샷부터 다시 보낸다(설계 6.5). 그 스냅샷을 버리면 거울은 버려진 변화를 영영 모른다.
+        val pipe = MirrorTestPipe()
+        pipe.coreSends(welcome())
+        pipe.coreSendsSnapshot(seq = 4, SMALL_STATES)
+        val mirror = pipe.connect(this)
+
+        pipe.coreSendsSnapshot(seq = 9, SMALL_STATES.copy(engineInstallation = EngineInstallationState.InstallationRunning))
+        pipe.coreSends(FrameToScreen.Change(10, ScreenChange.ClaudeAuthenticationChanged(ClaudeAuthenticationState.CheckingCredentials)))
+        runCurrent()
+
+        assertEquals(EngineInstallationState.InstallationRunning, mirror.engineInstallationState.value)
+        assertEquals(ClaudeAuthenticationState.CheckingCredentials, mirror.claudeAuthenticationState.value)
+        assertEquals(listOf<FrameToCore>(TEST_SCREEN_HELLO), pipe.framesSentToCore(), "다시 인사하지 않는다")
+    }
+
+    @Test
     fun `이어지는 변화를 그 흐름에 얹는다`() = runTest {
         val pipe = MirrorTestPipe()
         pipe.coreSends(welcome())
