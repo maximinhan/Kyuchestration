@@ -72,6 +72,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
         waitUntil(holder) { true }
 
         holder.sendUserMessage(
+            SessionTarget.Main,
             "Call the mcp__probe__slow tool once with label \"$PROBE_LABEL\" and seconds $PROBE_SECONDS. " +
                 "After it returns, reply with exactly: TURN1-DONE",
         )
@@ -80,7 +81,7 @@ class RealClaudeToolWaitInterruptIntegrationTest {
         // 끊으면 이 시험이 재는 것이 "도구 대기 중" 이 아니게 된다.
         delay(TOOL_CALL_SETTLE_MILLIS)
 
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         waitUntil(holder) { conversation -> conversation.finishedTurns().size == 1 }
 
         val afterInterrupt = onScreenConversation(holder)
@@ -93,11 +94,11 @@ class RealClaudeToolWaitInterruptIntegrationTest {
             "끊긴 도구 호출은 거절된 결과로 닫혀야 한다(3.2)",
         )
 
-        holder.sendUserMessage("Did the slow tool finish? Reply with exactly: NOT-FINISHED or FINISHED")
+        holder.sendUserMessage(SessionTarget.Main, "Did the slow tool finish? Reply with exactly: NOT-FINISHED or FINISHED")
         waitUntil(holder) { conversation -> conversation.finishedTurns().size == 2 }
 
         val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
 
         assertEquals(
             listOf(TurnOutcome.InterruptedDuringToolWait, TurnOutcome.Completed),

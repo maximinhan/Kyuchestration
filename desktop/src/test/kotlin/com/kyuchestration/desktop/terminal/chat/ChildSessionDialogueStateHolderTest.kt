@@ -77,7 +77,7 @@ class ChildSessionDialogueStateHolderTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
         bed.holder.showChildSession("child-1")
 
-        bed.holder.sendUserMessage("내가 직접 묻는다")
+        bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "내가 직접 묻는다")
         runCurrent()
 
         assertEquals(UserMessageSender.Human, bed.child(1).sentMessages.last().sender)
@@ -218,7 +218,7 @@ class ChildSessionDialogueStateHolderTest {
         runCurrent()
         bed.holder.showChildSession("child-1")
 
-        bed.holder.endOnScreenSession()
+        bed.holder.endSession(SessionTarget.Child("child-1"))
         runCurrent()
 
         assertEquals(
@@ -246,7 +246,7 @@ class ChildSessionDialogueStateHolderTest {
         startMainTurn(bed)
         bed.child(1).finishTurnOnLastSentMessage(result = "첫 일")
         bed.holder.showChildSession("child-1")
-        bed.holder.sendUserMessage("이것도 해 줘")
+        bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "이것도 해 줘")
         runCurrent()
         bed.child(1).finishTurnOnLastSentMessage(result = "사람의 일", outcome = TurnOutcome.Failed)
         runCurrent()
@@ -339,7 +339,7 @@ class ChildSessionDialogueStateHolderTest {
     fun `사람이 시킨 턴의 끝과 실패한 턴의 끝은 접두가 그 사실을 말한다`() = runTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
         bed.holder.showChildSession("child-1")
-        bed.holder.sendUserMessage("이것도 해 줘")
+        bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "이것도 해 줘")
         runCurrent()
 
         bed.child(1).finishTurnOnLastSentMessage(result = "못 했다", outcome = TurnOutcome.Failed)
@@ -357,7 +357,7 @@ class ChildSessionDialogueStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(awaitRequest())
         runCurrent()
 
-        bed.holder.sendUserMessage("그만 기다리고 지금까지 상황을 말해")
+        bed.holder.sendUserMessage(SessionTarget.Main, "그만 기다리고 지금까지 상황을 말해")
         runCurrent()
 
         assertEquals(
@@ -378,7 +378,7 @@ class ChildSessionDialogueStateHolderTest {
         bed.child(1).finishTurnOnLastSentMessage(result = "고르지 않은 하위의 일")
         runCurrent()
 
-        bed.holder.sendUserMessage("어떻게 돼 가?")
+        bed.holder.sendUserMessage(SessionTarget.Main, "어떻게 돼 가?")
         runCurrent()
 
         assertEquals(listOf<SessionTreeEvent>(SessionTreeEvent.UserSpoke), assertIs<SessionTreeAnswer.Awaited>(asked.answerSoFar()).events)
@@ -397,7 +397,7 @@ class ChildSessionDialogueStateHolderTest {
         val bed = mainWithChildrenTestBed(childCount = 1)
         startMainTurn(bed)
 
-        bed.holder.sendUserMessage("참고로 테스트 DB 는 5433 이야")
+        bed.holder.sendUserMessage(SessionTarget.Main, "참고로 테스트 DB 는 5433 이야")
         runCurrent()
         val asked = bed.mainChannel.askSessionTree(awaitRequest())
         runCurrent()
@@ -413,7 +413,7 @@ class ChildSessionDialogueStateHolderTest {
         runCurrent()
         bed.holder.showChildSession("child-1")
 
-        bed.holder.sendUserMessage("하위에게 직접")
+        bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "하위에게 직접")
         runCurrent()
 
         assertNull(asked.answerSoFar())
@@ -603,7 +603,7 @@ class ChildSessionDialogueStateHolderTest {
         val question = bed.childChannel(1).askSessionTree(SessionTreeRequest.AskParent("포트는?"))
         runCurrent()
 
-        bed.holder.endOnScreenSession()
+        bed.holder.endSession(SessionTarget.Main)
         runCurrent()
 
         assertEquals(SessionTreeAnswer.AskEnded(AskEndReason.ParentEnded), question.answerSoFar())
@@ -617,7 +617,7 @@ class ChildSessionDialogueStateHolderTest {
         runCurrent()
         bed.holder.showChildSession("child-1")
 
-        bed.holder.sendUserMessage("5433 이야")
+        bed.holder.sendUserMessage(SessionTarget.Child("child-1"), "5433 이야")
         runCurrent()
 
         assertNull(question.answerSoFar())
@@ -718,7 +718,7 @@ class ChildSessionDialogueStateHolderTest {
         runCurrent()
         bed.main.failWrites()
 
-        bed.holder.sendUserMessage("이 말은 가지 못한다")
+        bed.holder.sendUserMessage(SessionTarget.Main, "이 말은 가지 못한다")
         runCurrent()
 
         assertNull(asked.answerSoFar(), "쓰지 못한 말로 기다림을 깨웠습니다")

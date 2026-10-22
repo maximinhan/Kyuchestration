@@ -269,11 +269,19 @@ private fun runDesktopApplication(
                     chatSessionStateHolder.enterSession(workDirPath, target, conversationChoice)
                 }
             },
-            onSendUserMessageRequested = chatSessionStateHolder::sendUserMessage,
-            onInterruptTurnRequested = chatSessionStateHolder::interruptOnScreenTurn,
-            onPermissionChoiceMade = chatSessionStateHolder::answerOnScreenPermission,
+            onSendUserMessageRequested = { text ->
+                chatScreenState.target?.let { target -> chatSessionStateHolder.sendUserMessage(target, text) }
+            },
+            onInterruptTurnRequested = {
+                chatScreenState.target?.let(chatSessionStateHolder::interruptTurn)
+            },
+            onPermissionChoiceMade = { toolUseId, choice ->
+                chatScreenState.target?.let { target -> chatSessionStateHolder.answerPermission(target, toolUseId, choice) }
+            },
             onEndChatSessionRequested = {
-                applicationCoroutineScope.launch { chatSessionStateHolder.endOnScreenSession() }
+                chatScreenState.target?.let { target ->
+                    applicationCoroutineScope.launch { chatSessionStateHolder.endSession(target) }
+                }
             },
             sessionTree = sessionTree,
             childSessionGateQuestions = childSessionGateQuestions,

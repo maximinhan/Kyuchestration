@@ -66,14 +66,14 @@ class RealClaudeChatConversationIntegrationTest {
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
         waitUntilChatIsOnScreen(holder)
 
-        holder.sendUserMessage("이 대화의 암호는 $CONVERSATION_PASSPHRASE 다. 알겠다고만 답해.")
+        holder.sendUserMessage(SessionTarget.Main, "이 대화의 암호는 $CONVERSATION_PASSPHRASE 다. 알겠다고만 답해.")
         waitForFinishedTurns(holder, turnCount = 1)
 
-        holder.sendUserMessage("이 대화의 암호가 뭐였지? 암호만 답해.")
+        holder.sendUserMessage(SessionTarget.Main, "이 대화의 암호가 뭐였지? 암호만 답해.")
         waitForFinishedTurns(holder, turnCount = 2)
 
         val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
 
         // 사용자의 말 둘이 그대로 남아 있다. 턴마다 오는 system/init 이 전사를 비웠다면 여기서
         // 첫 말이 사라진다 — 이 앱이 가장 쉽게 저지를 수 있었던 결함이다(3.1).
@@ -119,12 +119,12 @@ class RealClaudeChatConversationIntegrationTest {
         holder.enterSession(temporaryDirectory, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
         waitUntilChatIsOnScreen(holder)
 
-        holder.sendUserMessage("$INTERRUPTED_TOPIC 에 대해 아주 길게, 열 문단으로 설명해라.")
+        holder.sendUserMessage(SessionTarget.Main, "$INTERRUPTED_TOPIC 에 대해 아주 길게, 열 문단으로 설명해라.")
         // 글자가 흐르기 시작한 뒤에 끊는다. 그 전에 보내면 아직 시작하지 않은 턴에 대고 말하는
         // 것이라, 이 검증이 무엇을 쟀는지가 흐려진다.
         waitUntilTheAnswerIsFlowing(holder)
 
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         waitForFinishedTurns(holder, turnCount = 1)
 
         val afterInterrupt = onScreenConversation(holder)
@@ -137,11 +137,11 @@ class RealClaudeChatConversationIntegrationTest {
         assertEquals(TurnState.Idle, afterInterrupt.turnState)
         assertTrue(afterInterrupt.alive, "중단이 프로세스를 죽였습니다 — 그러면 이것은 세션 끝내기 버튼이다")
 
-        holder.sendUserMessage("방금 무슨 주제를 쓰고 있었지? 그 낱말만 답해.")
+        holder.sendUserMessage(SessionTarget.Main, "방금 무슨 주제를 쓰고 있었지? 그 낱말만 답해.")
         waitForFinishedTurns(holder, turnCount = 2)
 
         val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
 
         val answerAfterInterrupt = conversation.entries
             .dropWhile { it !is ChatEntry.TurnEnded }

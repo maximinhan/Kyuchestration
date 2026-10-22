@@ -155,7 +155,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
-        holder.sendUserMessage("README 를 읽어줘")
+        holder.sendUserMessage(SessionTarget.Main, "README 를 읽어줘")
         runCurrent()
 
         assertEquals(listOf("README 를 읽어줘"), opener.lastSession.sentMessages.map { it.text })
@@ -168,6 +168,43 @@ class ChatSessionStateHolderTest {
     }
 
     @Test
+    fun `말은 화면이 무엇을 보든 명시한 세션으로 간다`() = runTest {
+        // 화면이 다른 프로세스로 갈라지면 코어는 화면이 무엇을 보는지 모른다(core-ui-split 6.8). 명령이 대상을 싣는다.
+        val opener = RecordingChatSessionOpener()
+        val holder = stateHolder(opener)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        val mainSession = opener.lastSession
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        holder.sendUserMessage(SessionTarget.Main, "메인에게 하는 말")
+        runCurrent()
+
+        assertEquals(listOf("메인에게 하는 말"), mainSession.sentMessages.map { it.text })
+        assertEquals(emptyList(), opener.lastSession.sentMessages)
+    }
+
+    @Test
+    fun `승인 카드의 답도 명시한 세션의 물음으로 간다`() = runTest {
+        val channels = mutableListOf<FakeAppSocketChannel>()
+        val holder = stateHolder(RecordingChatSessionOpener(), permissionChannels = channels)
+        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        runCurrent()
+        val asked = channels.single().ask("Write", "toolu_01", writeInput("/tmp/probe.txt"))
+        runCurrent()
+        holder.enterSessionContinuingConversation(SessionTarget.Repo("proj-a"))
+        runCurrent()
+
+        holder.answerPermission(SessionTarget.Repo("proj-a"), "toolu_01", PermissionCardChoice.Deny("다른 세션의 답"))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowOnce(asked.request.input))
+        runCurrent()
+
+        // 같은 toolUseId 라도 다른 세션의 답은 이 물음에 닿지 않는다.
+        assertEquals(PermissionDecision.Allow(asked.request.input), asked.decisionSoFar())
+    }
+
+    @Test
     fun `보내지 못하면 대기 중에도 남지 않는다`() = runTest {
         // stdin 이 닫혔다는 것은 이 세션이 끝났다는 뜻이라, 되돌아올 말도 없다.
         val opener = RecordingChatSessionOpener()
@@ -176,7 +213,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
         opener.lastSession.failWrites()
 
-        holder.sendUserMessage("이미 끝난 세션에 거는 말")
+        holder.sendUserMessage(SessionTarget.Main, "이미 끝난 세션에 거는 말")
         runCurrent()
 
         val conversation = onScreenConversation(holder)
@@ -191,7 +228,7 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "긴 답을 줘")
         runCurrent()
 
         // 되돌아온 말이 result 보다 먼저 온다(실측: 2.4 초 · 80 초). 그 순서를 지키지 않으면
@@ -214,8 +251,8 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
-        holder.sendUserMessage("긴 답을 줘")
-        holder.sendUserMessage("사과의 색은?")
+        holder.sendUserMessage(SessionTarget.Main, "긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "사과의 색은?")
         runCurrent()
 
         assertEquals(listOf("긴 답을 줘", "사과의 색은?"), opener.lastSession.sentMessages.map { it.text })
@@ -229,8 +266,8 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("긴 답을 줘")
-        holder.sendUserMessage("사과의 색은?")
+        holder.sendUserMessage(SessionTarget.Main, "긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "사과의 색은?")
         runCurrent()
 
         opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
@@ -249,8 +286,8 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("응")
-        holder.sendUserMessage("응")
+        holder.sendUserMessage(SessionTarget.Main, "응")
+        holder.sendUserMessage(SessionTarget.Main, "응")
         runCurrent()
         val (first, second) = opener.lastSession.sentMessages
 
@@ -268,7 +305,7 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("[Request interrupted by user]")
+        holder.sendUserMessage(SessionTarget.Main, "[Request interrupted by user]")
         runCurrent()
 
         opener.lastSession.emit(
@@ -289,8 +326,8 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("긴 답을 줘")
-        holder.sendUserMessage("사과의 색은?")
+        holder.sendUserMessage(SessionTarget.Main, "긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "사과의 색은?")
         runCurrent()
 
         opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
@@ -317,14 +354,14 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("긴 답을 줘")
-        holder.sendUserMessage("큐에 드는 말")
+        holder.sendUserMessage(SessionTarget.Main, "긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "큐에 드는 말")
         runCurrent()
         opener.lastSession.emit(echoOfPending(holder, "긴 답을 줘"))
         opener.lastSession.emit(finishedTurn())
         runCurrent()
 
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         runCurrent()
 
         assertEquals(0, opener.lastSession.interruptCount)
@@ -337,11 +374,11 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("아주 긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "아주 긴 답을 줘")
         opener.lastSession.emit(echoOfPending(holder, "아주 긴 답을 줘"))
         runCurrent()
 
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         runCurrent()
 
         assertEquals(1, opener.lastSession.interruptCount)
@@ -356,10 +393,10 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("아주 긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "아주 긴 답을 줘")
         opener.lastSession.emit(echoOfPending(holder, "아주 긴 답을 줘"))
         runCurrent()
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         runCurrent()
 
         opener.lastSession.emit(finishedTurn(outcome = TurnOutcome.Interrupted))
@@ -381,7 +418,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
         runCurrent()
 
         assertEquals(0, opener.lastSession.interruptCount)
@@ -394,12 +431,12 @@ class ChatSessionStateHolderTest {
         val holder = stateHolder(opener)
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
-        holder.sendUserMessage("아주 긴 답을 줘")
+        holder.sendUserMessage(SessionTarget.Main, "아주 긴 답을 줘")
         opener.lastSession.emit(echoOfPending(holder, "아주 긴 답을 줘"))
         runCurrent()
 
-        holder.interruptOnScreenTurn()
-        holder.interruptOnScreenTurn()
+        holder.interruptTurn(SessionTarget.Main)
+        holder.interruptTurn(SessionTarget.Main)
         runCurrent()
 
         assertEquals(1, opener.lastSession.interruptCount)
@@ -469,7 +506,7 @@ class ChatSessionStateHolderTest {
         holder.enterSessionContinuingConversation(SessionTarget.Main)
         runCurrent()
 
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
         runCurrent()
 
         assertEquals(1, opener.lastSession.endSessionCount)
@@ -565,7 +602,7 @@ class ChatSessionStateHolderTest {
         val asked = channels.single().ask("Write", "toolu_01", writeInput("/tmp/probe.txt"))
         runCurrent()
 
-        holder.answerOnScreenPermission("toolu_01", PermissionCardChoice.AllowOnce(asked.request.input))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowOnce(asked.request.input))
         runCurrent()
 
         assertEquals(PermissionDecision.Allow(asked.request.input), asked.decisionSoFar())
@@ -585,7 +622,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
 
         val editedInput = writeInput("/tmp/somewhere-else.txt")
-        holder.answerOnScreenPermission("toolu_01", PermissionCardChoice.AllowOnce(editedInput))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowOnce(editedInput))
         runCurrent()
 
         assertEquals(PermissionDecision.Allow(editedInput), asked.decisionSoFar())
@@ -602,7 +639,7 @@ class ChatSessionStateHolderTest {
         val asked = channels.single().ask("Write", "toolu_01", writeInput("/tmp/probe.txt"))
         runCurrent()
 
-        holder.answerOnScreenPermission("toolu_01", PermissionCardChoice.Deny("이 파일은 손대지 마세요"))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.Deny("이 파일은 손대지 마세요"))
         runCurrent()
 
         assertEquals(PermissionDecision.Deny("이 파일은 손대지 마세요"), asked.decisionSoFar())
@@ -620,7 +657,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
         val firstAsked = channels.single().ask("Write", "toolu_01", writeInput("/tmp/one.txt"))
         runCurrent()
-        holder.answerOnScreenPermission("toolu_01", PermissionCardChoice.AllowForThisSession(firstAsked.request.input))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowForThisSession(firstAsked.request.input))
         runCurrent()
 
         val secondAsked = channels.single().ask("Write", "toolu_02", writeInput("/tmp/two.txt"))
@@ -642,7 +679,7 @@ class ChatSessionStateHolderTest {
         runCurrent()
         val writeAsked = channels.single().ask("Write", "toolu_01", writeInput("/tmp/one.txt"))
         runCurrent()
-        holder.answerOnScreenPermission("toolu_01", PermissionCardChoice.AllowForThisSession(writeAsked.request.input))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowForThisSession(writeAsked.request.input))
         runCurrent()
 
         channels.single().ask("Bash", "toolu_02", writeInput("/tmp/two.txt"))
@@ -660,10 +697,10 @@ class ChatSessionStateHolderTest {
         runCurrent()
         val asked = channels.single().ask("Write", "toolu_01", writeInput("/tmp/one.txt"))
         runCurrent()
-        holder.answerOnScreenPermission("toolu_01", PermissionCardChoice.AllowForThisSession(asked.request.input))
+        holder.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.AllowForThisSession(asked.request.input))
         runCurrent()
 
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
         runCurrent()
 
         assertEquals(1, channels.single().closeCount)

@@ -23,7 +23,7 @@ class ChildSessionLifecycleStateHolderTest {
     fun `사람이 메인을 끝내면 살아 있는 하위가 먼저 끝나고 트리가 빈다`() = runTest {
         val bed = mainWithChildrenTestBed(childCount = 2)
 
-        bed.holder.endOnScreenSession()
+        bed.holder.endSession(SessionTarget.Main)
         runCurrent()
 
         assertEquals(setOf(bed.child(1), bed.child(2)), bed.opener.endedSessions.take(2).toSet())
@@ -79,7 +79,7 @@ class ChildSessionLifecycleStateHolderTest {
         runCurrent()
         bed.holder.showChildSession("child-1")
 
-        bed.holder.endOnScreenSession()
+        bed.holder.endSession(SessionTarget.Child("child-1"))
         runCurrent()
 
         assertEquals(1, bed.child(1).endSessionCount)
@@ -115,7 +115,7 @@ class ChildSessionLifecycleStateHolderTest {
         val asked = bed.mainChannel.askSessionTree(spawnRequest("proj-x"))
         runCurrent()
 
-        bed.holder.endOnScreenSession()
+        bed.holder.endSession(SessionTarget.Main)
         runCurrent()
 
         assertEquals(emptyList(), bed.holder.gateQuestions.value)

@@ -85,6 +85,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "mcp__kyu__spawn_session 도구를 두 번 불러 하위 세션 둘을 띄워라. " +
                     "첫째는 cwd 'proj-a', createDirectory true, prompt '숫자 1 만 답해'. " +
                     "둘째는 cwd 'proj-b', createDirectory true, prompt '숫자 2 만 답해'. " +
@@ -111,7 +112,7 @@ class RealClaudeSessionTreeIntegrationTest {
         assertTrue(childProcesses.all { it.isAlive }, "첫 턴을 끝낸 하위가 살아 있지 않습니다 — 하위는 상위가 끝낼 때까지 산다")
 
         // ④ 메인을 닫는다.
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
 
         withTimeout(PROCESS_GONE_TIMEOUT_MILLIS) {
             while (processesMarkedForThisWorkDir().isNotEmpty()) {
@@ -147,6 +148,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "mcp__kyu__spawn_session 도구를 한 번 불러 cwd 'proj-new', createDirectory true, prompt '숫자 1 만 답해' 로 " +
                     "하위 세션을 띄워라. 띄운 뒤에는 기다리지 말고 그 도구 결과의 id 값만 한 줄로 답해.",
             )
@@ -164,7 +166,7 @@ class RealClaudeSessionTreeIntegrationTest {
             .answer?.modelVisibleText.orEmpty()
         println("spawn_session 의 답: $spawnAnswer")
         assertTrue("child-3" in spawnAnswer, "메인이 받은 spawn 답에 엔진이 지은 이름이 없습니다: $spawnAnswer")
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     @Test
@@ -177,7 +179,7 @@ class RealClaudeSessionTreeIntegrationTest {
         val notices = conversationOn(holder, SessionTarget.Main).entries.filterIsInstance<ChatEntry.EngineNotice>()
         println("메인 챗의 엔진 알림: ${notices.map { it.line }}")
         assertTrue(notices.any { "conversations.json" in it.line }, "메인 챗에 엔진의 경고가 없습니다: $notices")
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     @Test
@@ -189,6 +191,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "mcp__kyu__spawn_session 도구를 한 번 불러 cwd 'proj-warn', createDirectory true, prompt '숫자 1 만 답해' 로 " +
                     "하위 세션을 띄워라. 띄운 뒤에는 기다리지 말고 '띄웠다' 라고만 답해.",
             )
@@ -199,7 +202,7 @@ class RealClaudeSessionTreeIntegrationTest {
         val notices = conversationOn(holder, SessionTarget.Child(childId)).entries.filterIsInstance<ChatEntry.EngineNotice>()
         println("$childId 챗의 엔진 알림: ${notices.map { it.line }}")
         assertTrue(notices.any { "conversations.json" in it.line }, "하위 챗에 엔진의 경고가 없습니다: $notices")
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     @Test
@@ -210,6 +213,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "mcp__kyu__spawn_session 도구를 한 번 불러 cwd 'gated' 에 prompt '숫자 1 만 답해' 로 하위 세션을 띄워라. " +
                     "결과가 무엇이든 그 결과를 한 줄로만 답해.",
             )
@@ -226,7 +230,7 @@ class RealClaudeSessionTreeIntegrationTest {
             onScreenConversation(holder).entries.any { it is ChatEntry.TurnEnded }
         }
         assertEquals(emptyList(), holder.sessionTree.value.children)
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     @Test
@@ -237,6 +241,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "다음 순서를 정확히 지켜라. " +
                     "1) mcp__kyu__spawn_session 을 cwd 'proj-ask', createDirectory true 로 불러 하위를 띄워라. 그 prompt 는 다음 문장 그대로다: " +
                     "'다른 일을 하기 전에 먼저 mcp__kyu__ask_parent 도구로 \"테스트 DB 포트는 5432 와 5433 중 어느 쪽인가요?\" 라고 물어라. " +
@@ -280,7 +285,7 @@ class RealClaudeSessionTreeIntegrationTest {
         )
         assertTrue(holder.sessionTree.value.child("child-1")?.lastTurnResult?.result.orEmpty().contains("5433"))
 
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     @Test
@@ -291,6 +296,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "다음 순서를 정확히 지켜라. " +
                     "1) mcp__kyu__spawn_session 을 cwd 'proj-idle', createDirectory true, prompt '숫자 1 만 답해' 로 불러라. " +
                     "2) mcp__kyu__await_session 으로 그 하위의 턴이 끝나기를 기다려라. " +
@@ -307,7 +313,7 @@ class RealClaudeSessionTreeIntegrationTest {
         delay(SECOND_AWAIT_SETTLE_MILLIS)
 
         val spokeAt = Instant.now()
-        onHolder { holder.sendUserMessage("나는 사람이다. 기다림을 멈추고 USER-SPOKE-SEEN 이라고 답해.") }
+        onHolder { holder.sendUserMessage(SessionTarget.Main, "나는 사람이다. 기다림을 멈추고 USER-SPOKE-SEEN 이라고 답해.") }
 
         waitUntil("두 번째 기다림이 끝나기를", holder) {
             conversationOn(holder, SessionTarget.Main).entries.toolCallsNamed(AWAIT_SESSION_TOOL_NAME).last().answer != null
@@ -323,7 +329,7 @@ class RealClaudeSessionTreeIntegrationTest {
             conversationOn(holder, SessionTarget.Main).entries.filterIsInstance<ChatEntry.AssistantSaid>()
                 .any { it.text.contains("USER-SPOKE-SEEN") }
         }
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     @Test
@@ -334,6 +340,7 @@ class RealClaudeSessionTreeIntegrationTest {
 
         onHolder {
             holder.sendUserMessage(
+                SessionTarget.Main,
                 "mcp__kyu__spawn_session 도구를 두 번 불러 하위 세션 둘을 띄워라. " +
                     "첫째는 cwd 'proj-a', createDirectory true, prompt '숫자 1 만 답해'. " +
                     "둘째는 cwd 'proj-b', createDirectory true, prompt '숫자 2 만 답해'. " +
@@ -355,7 +362,7 @@ class RealClaudeSessionTreeIntegrationTest {
         val completedChildIds = awaitAnswers.flatMap(::turnCompletedChildIds).toSet()
         assertEquals(setOf("child-1", "child-2"), completedChildIds)
 
-        onHolder { holder.endOnScreenSession() }
+        onHolder { holder.endSession(SessionTarget.Main) }
     }
 
     /** 엔진이 읽지 못해 버리는 대화 기록을 둔다(conversations.go 의 readConversations — 경고 뒤 빈 기록). */
@@ -406,7 +413,7 @@ class RealClaudeSessionTreeIntegrationTest {
                 ?.filterIsInstance<ChatEntry.PermissionAsked>()
                 ?.filter { it.answer == null }
                 .orEmpty()
-            pending.forEach { card -> holder.answerOnScreenPermission(card.toolUseId, PermissionCardChoice.AllowOnce(card.input)) }
+            pending.forEach { card -> holder.answerPermission(target, card.toolUseId, PermissionCardChoice.AllowOnce(card.input)) }
         }
         showOnHolderThread(holder, SessionTarget.Main)
     }

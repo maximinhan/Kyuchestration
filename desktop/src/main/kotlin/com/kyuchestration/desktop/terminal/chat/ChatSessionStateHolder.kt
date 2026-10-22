@@ -265,7 +265,7 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 화면에 떠 있는 대화에 사용자의 말 한 줄을 보낸다. 이것이 한 턴의 시작이다.
+     * 그 세션에 사람의 말 한 줄을 보낸다. 이것이 한 턴의 시작이다.
      *
      * **보낸 말을 전사에 직접 넣지 않는다.** 스트림을 한 바퀴 돌아 `UserMessageEchoed` 로
      * 돌아오고 전사는 그것으로 그린다(3.14) — 앱이 직접 넣으면 큐잉이나 중단이 끼는 순간
@@ -275,8 +275,7 @@ class ChatSessionStateHolder(
      * 중단 뒤에도 살아남아 다음 턴으로 돌았다. 다만 되돌아오는 것은 그 턴이 시작할 때라,
      * 그 사이의 공백을 [ChatConversation.pendingUserMessages] 가 메운다.
      */
-    fun sendUserMessage(text: String) {
-        val target = mutableState.value.target ?: return
+    fun sendUserMessage(target: SessionTarget, text: String) {
         val written = sendUserMessageTo(target, text, UserMessageSender.Human) ?: return
 
         // 사람이 기다리는 상위에게 말했다(session-tree 6.5 의 셋째 줄). 기다림을 user_spoke 로 깨운다 — stdin 에 쓴
@@ -312,7 +311,7 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 화면에 떠 있는 대화의 도는 턴을 끊는다. **대화도 프로세스도 죽지 않는다**(3.8).
+     * 그 세션의 도는 턴을 끊는다. **대화도 프로세스도 죽지 않는다**(3.8).
      *
      * 실측: 긴 글을 쓰던 중에 끊고 다음 말을 걸었더니 앞 맥락을 기억한 채로 답했다. 그래서 이
      * 자리가 "세션 끝내기" 옆에 따로 설 수 있다 — 끊는 것과 끝내는 것은 다른 일이다.
@@ -320,8 +319,7 @@ class ChatSessionStateHolder(
      * **도는 턴이 없으면 아무 말도 하지 않는다.** 제어 요청은 프로세스가 언제든 받는 줄이라,
      * 턴이 없을 때 보내면 그다음에 시작하는 턴이 첫 낱말에서 끊긴다.
      */
-    fun interruptOnScreenTurn() {
-        val target = mutableState.value.target ?: return
+    fun interruptTurn(target: SessionTarget) {
         if (conversations[target]?.turnState != TurnState.Running) {
             return
         }
@@ -371,21 +369,22 @@ class ChatSessionStateHolder(
         }
 
     /**
-     * 보고 있는 챗을 끝낸다. 보유한 다른 세션은 그대로 둔다.
+     * 그 세션을 끝낸다. 보유한 다른 세션은 그대로 둔다.
      *
      * 프로세스가 실제로 끝난 뒤에 돌아온다. 부르는 쪽이 그것을 기다릴 수 있어야 같은 대화를
      * 곧바로 다른 화면으로 열 수 있다 — 대화 하나를 두 프로세스가 동시에 열면 엔진이 거절한다
      * (5.6 의 `--session-id already in use`).
      */
-    suspend fun endOnScreenSession() {
-        val target = mutableState.value.target ?: return
+    suspend fun endSession(target: SessionTarget) {
         if (target is SessionTarget.Child) {
             endChildSessionByHuman(target)
             return
         }
 
-        latestSessionEntryRequestId++
-        mutableState.value = ChatScreenState.NoChatOpen
+        if (mutableState.value.target == target) {
+            latestSessionEntryRequestId++
+            mutableState.value = ChatScreenState.NoChatOpen
+        }
         conversations.remove(target)
 
         // 원칙 17 — 메인이 끝나면 하위가 끝난다. 하위 먼저다: 메인이 먼저 끝나면 하위의 물음이 답 없이 끊긴다.
@@ -420,9 +419,11 @@ class ChatSessionStateHolder(
      * 전사가 그 하위가 한 일의 유일한 화면이다.
      */
     private suspend fun endChildSessionByHuman(target: SessionTarget.Child) {
-        mutableState.value = conversations[SessionTarget.Main]
-            ?.let { ChatScreenState.ChatOnScreen(SessionTarget.Main, it) }
-            ?: ChatScreenState.NoChatOpen
+        if (mutableState.value.target == target) {
+            mutableState.value = conversations[SessionTarget.Main]
+                ?.let { ChatScreenState.ChatOnScreen(SessionTarget.Main, it) }
+                ?: ChatScreenState.NoChatOpen
+        }
 
         val node = mutableSessionTree.value.child(target.childId) ?: return
         if (node.lifecycle == ChildLifecycle.Running) {
@@ -1149,7 +1150,7 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 화면에 떠 있는 대화의 승인 카드에 답한다(6.4).
+     * 그 세션의 승인 카드에 답한다(6.4).
      *
      * 답을 두 곳으로 보낸다 — 소켓 너머의 자식에게는 결정을, 전사에는 그 결정이 무엇이었는지를.
      * 둘을 한 함수에서만 하는 것이 규율이다. 나눠 두면 소켓에는 갔는데 화면에는 남지 않은 승인이
@@ -1158,8 +1159,7 @@ class ChatSessionStateHolder(
      * **이미 답한 물음에는 아무 일도 하지 않는다.** 버튼을 두 번 누르거나, 세션이 끝나 물음이
      * 닫힌 뒤에 누른 자리가 그렇다.
      */
-    fun answerOnScreenPermission(toolUseId: String, choice: PermissionCardChoice) {
-        val target = mutableState.value.target ?: return
+    fun answerPermission(target: SessionTarget, toolUseId: String, choice: PermissionCardChoice) {
         val asked = askedPermissions.remove(AskedPermissionKey(target, toolUseId)) ?: return
 
         val decision = when (choice) {

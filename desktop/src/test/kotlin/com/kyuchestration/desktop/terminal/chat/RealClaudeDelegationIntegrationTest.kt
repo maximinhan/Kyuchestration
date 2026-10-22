@@ -74,13 +74,14 @@ class RealClaudeDelegationIntegrationTest {
         waitUntilChatIsOnScreen(holder)
 
         holder.sendUserMessage(
+            SessionTarget.Main,
             "서브에이전트를 하나 띄워서 이 디렉토리의 $NOTE_FILE_NAME 을 읽고 그 안의 지문 문자열을 " +
                 "그대로 보고하게 해라. 네가 직접 읽지 말고 반드시 서브에이전트에게 시켜라.",
         )
         waitForFinishedTurns(holder, turnCount = 1)
 
         val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
 
         val subagentCard = conversation.entries
             .filterIsInstance<ChatEntry.ToolCall>()
@@ -122,13 +123,14 @@ class RealClaudeDelegationIntegrationTest {
         waitUntilChatIsOnScreen(holder)
 
         holder.sendUserMessage(
+            SessionTarget.Main,
             "$DELEGATED_REPO_NAME 레포에 일을 시켜라 — 그 레포의 $NOTE_FILE_NAME 을 읽고 그 안의 지문 " +
                 "문자열을 그대로 답하라고. 파일은 고치지 말라고 함께 적어라. 네가 직접 읽지 마라.",
         )
         waitForFinishedTurns(holder, turnCount = 1, timeoutMillis = DELEGATION_TIMEOUT_MILLIS)
 
         val conversation = onScreenConversation(holder)
-        holder.endOnScreenSession()
+        holder.endSession(SessionTarget.Main)
 
         val delegationCard = conversation.entries
             .filterIsInstance<ChatEntry.ToolCall>()
@@ -221,7 +223,7 @@ class RealClaudeDelegationIntegrationTest {
         onScreenConversation(holder).entries
             .filterIsInstance<ChatEntry.PermissionAsked>()
             .filter { it.answer == null }
-            .forEach { holder.answerOnScreenPermission(it.toolUseId, PermissionCardChoice.AllowOnce(it.input)) }
+            .forEach { holder.answerPermission(SessionTarget.Main, it.toolUseId, PermissionCardChoice.AllowOnce(it.input)) }
     }
 
     private fun onScreenConversation(holder: ChatSessionStateHolder): ChatConversation =

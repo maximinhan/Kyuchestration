@@ -366,7 +366,7 @@ internal class MainWithChildrenTestBed(
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal fun TestScope.startMainTurn(bed: MainWithChildrenTestBed) {
     check(bed.holder.state.value.target == SessionTarget.Main) { "화면이 메인에 있어야 사람이 메인에게 말한다" }
-    bed.holder.sendUserMessage("하위들에게 일을 시켜")
+    bed.holder.sendUserMessage(SessionTarget.Main, "하위들에게 일을 시켜")
     runCurrent()
     bed.main.echoLastSentMessage()
     runCurrent()
