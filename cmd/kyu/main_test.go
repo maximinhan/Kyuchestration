@@ -77,7 +77,7 @@ func TestEveryBuildThatInjectsTheVersionUsesTheSymbolThisTestPins(t *testing.T) 
 	// dev 라고 답하는데, 그 사실은 설치한 사람이 kyu version 을 쳐 보기 전에는 드러나지 않는다.
 	buildFilePaths := []string{
 		filepath.Join("..", "..", ".github", "workflows", "release.yml"),
-		filepath.Join("..", "..", "desktop", "build.gradle.kts"),
+		filepath.Join("..", "..", "desktop", "ui", "build.gradle.kts"),
 	}
 
 	// 뒤의 = 까지 함께 본다. 경로만 찾으면 injectedVersionTYPO 처럼 뒤에 덧붙은 오타가

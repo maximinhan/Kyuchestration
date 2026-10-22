@@ -872,7 +872,7 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 윈도우에서 도는지 모른다던 걱정도 함께 사라졌다 — 앱은 이제 파이프에 문 프로세스로 세션을 연다
 ([챗 UI 설계](chat-ui-design.md) 7.4). 남은 것은 아무도 윈도우 네이티브를 만들어 돌려본 적이
 없다는 사실이다: 릴리스는 윈도우 바이너리를 내지 않고(`.github/workflows/release.yml` 의 크로스
-컴파일 목록), 설치 패키지에도 msi 가 없다(`desktop/build.gradle.kts` 의 `targetFormats`). 그 둘을
+컴파일 목록), 설치 패키지에도 msi 가 없다(`desktop/ui/build.gradle.kts` 의 `targetFormats`). 그 둘을
 치우는 것은 별도 작업이다([app-owned-sessions-design.md](app-owned-sessions-design.md) 5.7 —
 "윈도우는 별도 작업이고 이 문서의 네 단계에 들어 있지 않다").
 

@@ -324,7 +324,7 @@ install_app_from_dmg() {
     hdiutil attach -nobrowse -readonly "$dmg_path" -mountpoint "$MOUNT_POINT" > /dev/null \
         || fail "dmg 를 붙이지 못했습니다: ${dmg_path}"
 
-    # 앱 이름을 적어 두지 않고 찾는다 — 이름은 desktop/build.gradle.kts 의 packageName 에서
+    # 앱 이름을 적어 두지 않고 찾는다 — 이름은 desktop/ui/build.gradle.kts 의 packageName 에서
     # 오므로, 그것이 바뀌면 여기도 함께 바뀌어야 하는 자리를 만들지 않는다.
     source_app=$(find "$MOUNT_POINT" -maxdepth 1 -type d -name '*.app')
     if [ "$(printf '%s\n' "$source_app" | grep -c .)" -ne 1 ]; then

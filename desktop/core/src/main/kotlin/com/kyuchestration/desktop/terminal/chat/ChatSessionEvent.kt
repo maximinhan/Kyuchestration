@@ -1,0 +1,282 @@
+package com.kyuchestration.desktop.terminal.chat
+
+import java.time.Instant
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+
+/**
+ * 챗 세션 하나가 앱에게 말하는 것 전부.
+ *
+ * **스트림의 JSON 을 그대로 화면에 흘리지 않는다**(chat-ui-design.md 5.3.2). 화면이
+ * `subtype == "task_progress"` 같은 문자열을 알기 시작하면 `claude` 의 판이 바뀔 때 고칠 자리가
+ * 화면 곳곳이 된다. 그 문자열을 아는 자리는 [chatSessionEventsFrom] 하나뿐이다.
+ *
+ * 갈래는 실측이 정했다(3.2 의 일곱 가지 최상위 `type` 과 그 아래 `subtype`). 재지 못한 것에는
+ * 갈래를 두지 않는다 — 못 그리는 것을 그린 척하지 않는 것이 원칙 15 다.
+ */
+sealed interface ChatSessionEvent {
+
+    /**
+     * `system/init` — 이 세션이 무엇을 가지고 있는지.
+     *
+     * **턴마다 다시 온다.** 두 턴짜리 실측에서 `init` 이 두 번 왔고 `session_id` 는 같았다(3.1).
+     * 이것을 "새 세션이 시작됐다" 로 읽으면 매 턴 대화가 비워진다 — 세션의 시작은 프로세스의
+     * 시작이지 이 이벤트가 아니다.
+     */
+    data class SessionDescribed(
+        val conversationId: String,
+        val modelName: String,
+        val availableSlashCommands: List<String>,
+        val connectedMcpServers: List<McpServerStatus>,
+    ) : ChatSessionEvent
+
+    /**
+     * `--replay-user-messages` 가 되돌려준 사용자 메시지(3.14 · 원칙 14).
+     *
+     * 앱이 방금 보낸 말이 스트림을 한 바퀴 돌아 여기로 온다. 화면의 말풍선은 이것으로 그린다 —
+     * 앱이 자기가 보낸 것을 직접 넣으면 큐잉(3.11)이나 중단이 끼는 순간 순서가 어긋난다.
+     *
+     * **서브에이전트가 받은 프롬프트도 이 모양으로 온다.** 그때는 [parentToolUseId] 가 채워져
+     * 있고(2026-09-08 실측), 그것은 사용자가 한 말이 아니라 안쪽 대화의 첫 줄이다 — 이 값을
+     * 보지 않으면 메인 전사에 사용자가 쓴 적 없는 말풍선이 선다.
+     *
+     * **중단 표시도 이 모양으로 온다.** 턴을 끊으면 `[Request interrupted by user]` 가 `user`
+     * 이벤트의 텍스트로 온다(A.9). 그것을 사용자의 말과 가르는 것은 화면의 몫이다 — 어댑터가
+     * 문구를 알아보고 다른 갈래로 옮기면, 그 문구가 바뀌는 날 조용히 사용자 말풍선이 된다.
+     *
+     * @param messageUuid 그 줄의 `uuid`. **앱이 stdin 줄에 실어 보낸 `uuid` 가 그대로 돌아온다**
+     *   (session-tree 3.5 (다)) — 앱이 자기가 보낸 말을 알아보는 열쇠다. 앱이 보내지 않은 줄(중단
+     *   안내 · 서브에이전트의 프롬프트)에는 `claude` 가 지은 값이 붙어 오고, 그 값은 앱이 보낸 어떤
+     *   말과도 맞지 않는다. 없는 줄에서는 null 이다.
+     */
+    data class UserMessageEchoed(
+        val text: String,
+        val parentToolUseId: String?,
+        val messageUuid: String?,
+    ) : ChatSessionEvent
+
+    /**
+     * 모델이 텍스트 블록 하나를 **완성**했다.
+     *
+     * `assistant` 이벤트는 메시지 단위가 아니라 콘텐츠 블록 단위다(3.2). 한 턴에서 텍스트 하나와
+     * 도구 호출 하나가 나오면 이 이벤트와 [ToolCallRequested] 가 각각 하나씩이다.
+     *
+     * @param parentToolUseId 서브에이전트 안쪽의 말이면 그 바깥 도구 호출의 id(3.10). 값이 있는
+     *   이벤트는 그 도구 카드 안으로 접히고, null 인 것만 대화 본문에 놓인다.
+     */
+    data class AssistantTextArrived(val text: String, val parentToolUseId: String?) : ChatSessionEvent
+
+    /** 모델의 사고 블록 하나. 화면이 접어 두는 자리다. */
+    data class AssistantThinkingArrived(val text: String, val parentToolUseId: String?) : ChatSessionEvent
+
+    /**
+     * `stream_event` 의 글자 조각(3.3).
+     *
+     * **전사의 사실이 아니다.** 조각은 화면을 부드럽게 하려고 있고, 같은 내용의 완성본이 뒤이어
+     * [AssistantTextArrived] 로 온다. 상태 홀더는 조각을 임시 버퍼에 쌓다가 완성본이 오면 버퍼를
+     * 버린다 — 조각만으로 전사를 만들면 중단된 턴의 잘린 문장이 영구히 전사에 남는다.
+     */
+    data class AssistantTextStreaming(val chunk: String) : ChatSessionEvent
+
+    /**
+     * 모델이 도구 하나를 부르려 한다. 인자가 다 채워진 완성본이다(3.4).
+     *
+     * 조각(`input_json_delta`)은 이 이벤트로 오지 않는다. 잘린 JSON 이라 그 자체로 파싱되지 않고,
+     * 완성본이 곧 오기 때문이다(3.3).
+     *
+     * @param requestedAt 이 줄에 실려 온 시각(`timestamp`). 없는 줄에서는 null 이다.
+     *
+     *   **앱이 시계를 보지 않는다.** 도는 도구의 경과 시간을 그리려면 시작한 때가 필요한데, 그
+     *   값이 스트림에 이미 있다 — 앱이 자기 시계로 다시 재면 두 숫자가 갈리고, 갈린 것을 발견하는
+     *   자리는 사용자의 화면이다(TurnFinished 의 `duration_ms` 에 대해 정한 것과 같다).
+     */
+    data class ToolCallRequested(
+        val toolUseId: String,
+        val toolName: String,
+        val input: JsonObject,
+        val parentToolUseId: String?,
+        val requestedAt: Instant?,
+    ) : ChatSessionEvent
+
+    /**
+     * 그 도구 호출의 결과. [ToolCallRequested] 와 `toolUseId` 로 이어진다(3.4).
+     *
+     * @param failed 거절되었거나 실패했다(`is_error`). 거절된 호출의 문구가 여기로 온다(A.5).
+     * @param modelVisibleText 모델이 읽는 텍스트. Read 라면 줄 번호가 붙어 있다.
+     * @param typedResult `tool_use_result` 곁가지 — 그 도구가 실제로 한 일을 도구마다 다른 모양으로
+     *   담는다(3.4). **도구별 카드를 그리는 근거가 이것이다.** 모양이 도구마다 다르므로 여기서
+     *   갈래를 두지 않고 원래 값을 그대로 들고 간다 — 갈래는 카드를 그리는 4 단계가 정한다.
+     */
+    data class ToolCallAnswered(
+        val toolUseId: String,
+        val failed: Boolean,
+        val modelVisibleText: String,
+        val typedResult: JsonElement?,
+        val answeredAt: Instant?,
+    ) : ChatSessionEvent
+
+    /**
+     * 오래 도는 도구가 아직 살아 있다(`tool_progress` · `heartbeat: true` — session-tree 3.4).
+     *
+     * `claude` 가 스스로 약 28.5 초마다 낸다. **진행이 아니라 살아 있다는 신호다** — 경과 시간만
+     * 담고 서버가 무엇을 하는지는 담지 않는다. 그래서 화면이 새로 그릴 것은 없다: 도는 카드는 이미
+     * [ToolCallRequested.requestedAt] 으로 경과 시간을 그리고 있다. 이 갈래가 있는 것은 이 줄을
+     * [Unrecognized] 로 흘려 "판이 바뀌었다" 는 신호를 턴마다 덮지 않기 위해서다.
+     *
+     * @param toolUseId 기다리고 있는 도구 호출의 id. 줄의 `tool_use_id` 는 `<호출 id>-heartbeat-0`
+     *   처럼 지어낸 값이라 카드를 찾는 열쇠가 못 되고, 진짜 id 는 `parent_tool_use_id` 에 실려 온다.
+     *   서브에이전트의 [AssistantTextArrived.parentToolUseId] 와 같은 이름이지만 뜻이 다르다.
+     * @param elapsedSeconds 그 호출이 돈 시간(`elapsed_time_seconds`).
+     */
+    data class ToolCallHeartbeat(
+        val toolUseId: String,
+        val toolName: String,
+        val elapsedSeconds: Long,
+    ) : ChatSessionEvent
+
+    /**
+     * 앱이 `uuid` 를 실어 보낸 말 하나의 생애가 한 걸음 옮겨 갔다(`command_lifecycle` — session-tree 3.5 (다)).
+     *
+     * **`uuid` 를 실어 보낸 말에만 온다.** 실측에서 `uuid` 없이 보낸 말에는 이 줄이 없었다.
+     *
+     * @param commandUuid 앱이 보낸 줄의 `uuid` 그대로(`command_uuid`). 이 줄 자신의 `uuid` 는 따로
+     *   있지만 아무것과도 이어지지 않으므로 싣지 않는다.
+     */
+    data class UserCommandLifecycleChanged(val commandUuid: String, val state: UserCommandState) : ChatSessionEvent
+
+    /**
+     * 관문이 열렸다 — 이 도구 호출을 해도 되는지 사람에게 묻는다(3.5 · 5.4).
+     *
+     * **이 갈래만 스트림에서 오지 않는다.** `claude` 는 승인이 필요한 호출마다 MCP 도구를 부르고,
+     * 그 도구를 여는 `kyu mcp ask` 가 앱이 열어 둔 소켓으로 물어 온다([AppSocket]).
+     * 갈래를 여기에 두는 이유는 전사에 무엇이 쌓이는지를 아는 자리가 하나여야 해서다 — 화면에
+     * 이르는 길을 따로 내면 승인 카드만 다른 규칙으로 그려진다.
+     *
+     * **모든 도구 호출이 이 이벤트를 내지 않는다.** `claude` 가 자체 분류로 무해한 것을 먼저
+     * 거르므로(3.6: `default` 에서도 `echo` 는 그냥 돈다), 이 카드는 "도구를 부를 때마다" 가
+     * 아니라 "관문이 열릴 때만" 뜬다.
+     *
+     * 답을 되돌릴 자리는 이 이벤트에 없다. 그것은 값이 아니라 기다리고 있는 연결이라
+     * ([AskedPermission]), 전사를 접는 순수 함수가 들고 있을 것이 아니다 — 상태 홀더가 따로 쥔다.
+     */
+    data class PermissionRequested(val request: PermissionRequest) : ChatSessionEvent
+
+    /**
+     * 서브에이전트 하나가 떴다(`system/task_started` — 3.10).
+     *
+     * **이 갈래가 있는 이유는 "이 도구 호출이 서브에이전트다" 를 도구 이름 없이 아는 것이다.**
+     * 그 이름은 판마다 달라진다 — 설계 문서가 `Task` 라고 적어둔 자리를 이 판은 `Agent` 로
+     * 부른다(2026-09-08 실측). 이름으로만 갈래를 정하면 다음 판에서 서브에이전트 카드가 조용히
+     * 사라지고, 안쪽 대화가 접히지 않은 채로 메인 전사에 쏟아진다.
+     *
+     * @param subagentType 어떤 에이전트인가 — `general-purpose` 같은 것. 카드의 머리말이다.
+     */
+    data class SubagentStarted(val toolUseId: String, val subagentType: String) : ChatSessionEvent
+
+    /**
+     * 서브에이전트 하나의 진행(`system/task_progress` — 3.10).
+     *
+     * **MCP 도구의 진행은 오지 않는다.** 프로브 서버가 `notifications/progress` 를 세 번 보냈는데
+     * 스트림에는 0 개였다(3.10 가). 그래서 오케스트레이션 위임 카드는 "도는 중" 까지만 그린다.
+     *
+     * `task_id` 를 싣지 않는다. 화면이 이 진행을 붙일 자리는 바깥 도구 카드이고 그 열쇠는
+     * [toolUseId] 다 — 두 값을 다 들고 있으면 쓰지 않는 쪽이 무슨 뜻인지 모르는 채 굳는다.
+     */
+    data class SubagentProgressed(
+        val toolUseId: String,
+        val description: String,
+        val lastToolName: String?,
+    ) : ChatSessionEvent
+
+    /**
+     * 서브에이전트 하나가 끝났다(`system/task_notification` — 3.10).
+     *
+     * @param status 끝난 모양. 실측으로 본 것은 `completed` 하나다 — 열거형으로 굳히지 않는다.
+     * @param outputFilePath 그 실행의 원출력이 남은 자리. 카드가 이 경로를 그대로 보인다 —
+     *   위임 기록 자리를 화면에 안내하는 자세와 같다(orchestration 6.3 · DiagnosticLogPathNotice).
+     */
+    data class SubagentFinished(
+        val toolUseId: String,
+        val status: String,
+        val outputFilePath: String?,
+    ) : ChatSessionEvent
+
+    /**
+     * 턴 하나가 끝났다(`result`). 턴마다 정확히 하나 온다(3.1).
+     *
+     * 입력창의 잠금을 풀고 비용 배지를 그리는 자리다.
+     *
+     * @param durationMillis 그 턴이 걸린 시간(`duration_ms` — 3.12). 없는 줄에서는 0 이다.
+     *
+     *   **앱이 직접 재지 않는다.** 보낸 순간부터 재는 길도 있지만, 큐에 들어간 둘 이상이 한 턴으로
+     *   합쳐지면(3.11) 앱이 잡은 시작점은 그 턴의 시작이 아니다. 잰 값이 스트림에 있는데 앱이 다시
+     *   재면 두 숫자가 갈리고, 갈린 것을 발견하는 자리는 사용자의 화면이다.
+     * @param resultText 그 턴의 마지막 답 텍스트(`result`). 화면은 같은 글을 `assistant` 로 이미 그렸으므로 쓰지 않고,
+     *   하위의 턴이 끝났을 때 상위에게 가는 결과가 이것이다(session-tree 6.6). 없는 줄(실패한 턴)에서는 null 이다.
+     */
+    data class TurnFinished(
+        val outcome: TurnOutcome,
+        val costUsd: Double,
+        val usage: TurnUsage,
+        val permissionDenials: List<PermissionDenial>,
+        val durationMillis: Long,
+        val resultText: String?,
+    ) : ChatSessionEvent
+
+    /** `rate_limit_event` — 한도 사용률을 창 두 개로 준다(3.12). 턴마다 온다. */
+    data class UsageWindowsObserved(val windows: List<RateLimitWindow>) : ChatSessionEvent
+
+    /**
+     * `claude` 가 stderr 에 남긴 한 줄.
+     *
+     * 없는 대화를 이어가려 했을 때의 실패가 여기로 온다(3.9) — `No conversation found with
+     * session ID: …`. PTY 시절에는 앱이 보는 것이 닫힌 PTY 뿐이라 사용자의 `/exit` 과 구분할 수
+     * 없었던 자리다.
+     */
+    data class EngineSpoke(val line: String) : ChatSessionEvent
+
+    /**
+     * 이 어댑터가 **모르는** 줄. 원문 그대로다.
+     *
+     * **버리지 않는다.** `claude` 의 판이 올라 새 이벤트가 생기는 날, 버리는 어댑터는 아무 말도
+     * 하지 않고 화면만 조용히 비게 한다. 원문을 들고 있으면 그 줄이 진단 기록에 남는다.
+     *
+     * 실측으로 아는데 아직 화면이 쓰지 않는 갈래(`system/status`·`task_started` 따위)는 여기로
+     * 오지 않는다 — 그것들은 조용히 지나간다([chatSessionEventsFrom]). 둘을 섞으면 이 갈래가
+     * 턴마다 오는 것으로 덮여 "판이 바뀌었다" 는 신호로 못 쓰게 된다.
+     */
+    data class Unrecognized(val rawLine: String) : ChatSessionEvent
+
+    /**
+     * 프로세스가 끝났다. 이 흐름의 마지막 이벤트다.
+     *
+     * 없는 대화를 이어가려 한 실패는 종료 코드 1 로 온다(3.9). 사용자가 세션을 닫은 것과 가르는
+     * 근거는 앞서 온 [EngineSpoke] 와 [TurnFinished] 다.
+     */
+    data class SessionEnded(val exitCode: Int) : ChatSessionEvent
+}
+
+/** `system/init` 이 보고한 MCP 서버 하나 — 이름과 상태(실측: `{"name":"kyu","status":"connected"}`). */
+data class McpServerStatus(val name: String, val status: String)
+
+/**
+ * 앱이 보낸 말이 `claude` 안에서 어디까지 왔는가(`command_lifecycle.state`).
+ *
+ * 실측으로 본 넷만 둔다(2026-10-20, 2.1.304). **[Cancelled] 는 설계 3.5 가 재지 않은 것이다** — 도구
+ * 대기 중에 끊은 말이 `completed` 대신 이것으로 끝났다. 그 밖의 값은 갈래를 짓지 않고 원문째
+ * [ChatSessionEvent.Unrecognized] 로 들고 나간다.
+ */
+enum class UserCommandState {
+
+    /** 큐에 들었다. `system/init` 보다도 먼저 온다. */
+    Queued,
+
+    /** 그 말의 턴이 시작됐다. */
+    Started,
+
+    /** 그 말의 턴이 끝났다. `result` 뒤에 온다. */
+    Completed,
+
+    /** 그 말의 턴이 끊겼다. 끊긴 턴의 `result` 뒤에 온다. */
+    Cancelled,
+}
