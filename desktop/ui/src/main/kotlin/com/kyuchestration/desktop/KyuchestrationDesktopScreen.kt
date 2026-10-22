@@ -1,0 +1,418 @@
+package com.kyuchestration.desktop
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
+import com.kyuchestration.desktop.protocol.ScreenFacingCore
+import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
+import com.kyuchestration.desktop.engine.EngineInstallationState
+import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.protocol.FailureView
+import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
+import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
+import com.kyuchestration.desktop.terminal.chat.SessionTree
+import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
+import com.kyuchestration.desktop.theme.KyuTheme
+import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.theme.resolveDarkTheme
+
+/**
+ * 창 안의 모든 화면이 갈라지는 자리.
+ *
+ * 상태 홀더가 상태를 넷으로 좁혀 두었으므로 여기서 조합을 따질 것이 없다. when 이 남김없이
+ * 다 덮는지도 컴파일러가 봐 준다 — 갈래가 늘면 이 파일이 컴파일되지 않는다.
+ */
+@Composable
+fun KyuchestrationDesktopScreen(
+    versionLabel: String,
+    /**
+     * 진단 기록이 쌓이는 파일의 경로.
+     *
+     * 오류가 뜨는 자리마다 이 한 줄을 함께 보여준다. 실기기에서만 나는 오류를 원격으로 볼 때
+     * 사용자가 할 일이 "그 파일을 보내는 것" 하나로 정해져야, 진단이 화면 캡처 한 장에 걸리지 않는다.
+     */
+    diagnosticLogPathLabel: String,
+    /**
+     * 코어와의 연결이 깨졌으면 그 사실(CoreMirror.coreConnectionFailure). 서면 다른 모든 화면보다 앞선다 — 나머지 상태는
+     * 깨지기 직전의 모습에 멈춰 있어, 그것을 그대로 그리면 사람은 눌러도 아무 일이 없는 창을 본다.
+     */
+    coreConnectionFailure: FailureView?,
+    engineInstallationState: EngineInstallationState,
+    engineDirectoryLabel: String,
+    /**
+     * 이 머신의 claude 가 로그인돼 있는가. 엔진 다음 갈림길이다.
+     *
+     * 워크디렉토리보다 앞에 둔다. 세션을 여는 걸음이 전부 claude 를 띄우는 일이라, 로그인되지
+     * 않은 채로 대시보드를 보여주면 사용자는 카드를 누를 때마다 같은 실패를 만난다.
+     */
+    claudeAuthenticationState: ClaudeAuthenticationState,
+    dashboardState: WorkDirDashboardState,
+    initializationState: WorkDirInitializationState,
+    /** 대화 자리가 지금 보여줄 것. 이 앱의 기본 화면이다. */
+    chatScreenState: ChatScreenState,
+    /**
+     * 앱이 지금 보유 중인 세션의 대상 전부. 화면에 보이지 않는 것도 들어 있다.
+     *
+     * 엔진이 답한 목록에 얹을 앱 자신의 사실이다 — 세션을 띄우는 것이 앱뿐이라 엔진은 이것을
+     * 알지 못하고, 앱이 자기 것을 스스로 아는 것 말고는 알 길이 없다(설계 문서 5.4).
+     *
+     * 통로가 아니라 대상만 받는다 — 목록이 세션에 말을 걸 일은 없고, 통로를 넘기면 줄을 그리는
+     * 자리가 세션을 끝낼 수도 있는 자리가 된다.
+     */
+    heldChatSessionTargets: Set<SessionTarget>,
+    /**
+     * 레포를 골라 받아 오는 대화상자가 코어에서 자기 상태를 직접 구독한다. 다른 상태들처럼 위에서 받아
+     * 내려보내지 않는 이유는, 그 상태를 보는 곳이 대화상자 하나뿐이기 때문이다 — 여기서
+     * 구독하면 검색 칸에 한 글자 칠 때마다 목록과 대화 자리까지 다시 그려진다.
+     */
+    screenFacingCore: ScreenFacingCore,
+    /**
+     * 사용자가 테마에 대해 고른 것. 앱을 띄우는 자리가 들고 있다.
+     *
+     * 화면이 스스로 들지 않는 이유는 이 값이 창 전체에 걸리기 때문이다 — 여기서 remember 로
+     * 두면 셸이 다시 세워질 때(워크디렉토리를 바꿀 때) 함께 되돌아간다.
+     */
+    themePreference: ThemePreference,
+    onThemePreferenceChosen: (ThemePreference) -> Unit,
+    onRetryEngineInstallationRequested: () -> Unit,
+    onLookForEngineAgainRequested: () -> Unit,
+    onCheckClaudeCredentialsRequested: () -> Unit,
+    onClaudeBrowserLoginRequested: () -> Unit,
+    onClaudeBrowserLoginCodeSubmitted: (String) -> Unit,
+    onClaudeBrowserLoginCancelled: () -> Unit,
+    onClaudeTokenSubmitted: (String) -> Unit,
+    onOpenWorkDirRequested: () -> Unit,
+    onInitializeOpenedWorkDirRequested: () -> Unit,
+    onCloneRepositoriesRequested: () -> Unit,
+    onRefreshRequested: () -> Unit,
+    onCloseWorkDirRequested: () -> Unit,
+    onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    onSendUserMessageRequested: (String) -> Unit,
+    /** 도는 턴을 끊는 자리(3.8). 대화도 프로세스도 죽지 않는다 — 이번 턴만 끊긴다. */
+    onInterruptTurnRequested: () -> Unit,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    onEndChatSessionRequested: () -> Unit,
+    /** 메인 아래 하위 세션들(session-tree 6.11). 패널의 하위 줄과 메인 챗의 승인 띠가 이것을 그린다. */
+    sessionTree: SessionTree,
+    /** 사람에게 물을 관문들(6.9). 맨 앞의 것이 대화 상자로 선다. */
+    childSessionGateQuestions: List<ChildSessionGateQuestion>,
+    onChildSessionChosen: (String) -> Unit,
+    onChildSessionGateAnswered: (gateQuestionId: String, approved: Boolean) -> Unit,
+) {
+    KyuTheme(darkTheme = resolveDarkTheme(themePreference, systemReportsDark = isSystemInDarkTheme())) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            // 엔진이 없으면 다른 화면을 열지 않는다. 워크디렉토리를 열고 초기화하고 세션에
+            // 들어가는 걸음이 모두 kyu 를 부르는 일이라, 그 상태로 시작 화면을 보여주면 사용자는
+            // 무엇을 눌러도 같은 실패를 만난다. 갈림길을 여기 하나 두어 그 자리를 아예 만들지 않는다.
+            if (coreConnectionFailure != null) {
+                CoreConnectionLostScreen(coreConnectionFailure, diagnosticLogPathLabel)
+            } else if (engineInstallationState != EngineInstallationState.EngineReady) {
+                EngineInstallationScreen(
+                    versionLabel = versionLabel,
+                    engineDirectoryLabel = engineDirectoryLabel,
+                    engineInstallationState = engineInstallationState,
+                    onRetryEngineInstallationRequested = onRetryEngineInstallationRequested,
+                    onLookForEngineAgainRequested = onLookForEngineAgainRequested,
+                )
+            } else if (claudeAuthenticationState != ClaudeAuthenticationState.CredentialsReady) {
+                // 엔진과 같은 이유로 여기서 막는다. 워크디렉토리를 고르고 레포를 받아 온 뒤에
+                // 첫 대화에서야 "Not logged in" 을 만나면, 사용자는 그때까지 한 일이 헛일이었는지
+                // 부터 의심하게 된다(chat-ui-design.md 7.2).
+                ClaudeAuthenticationScreen(
+                    versionLabel = versionLabel,
+                    diagnosticLogPathLabel = diagnosticLogPathLabel,
+                    claudeAuthenticationState = claudeAuthenticationState,
+                    onCheckCredentialsRequested = onCheckClaudeCredentialsRequested,
+                    onBrowserLoginRequested = onClaudeBrowserLoginRequested,
+                    onBrowserLoginCodeSubmitted = onClaudeBrowserLoginCodeSubmitted,
+                    onBrowserLoginCancelled = onClaudeBrowserLoginCancelled,
+                    onTokenSubmitted = onClaudeTokenSubmitted,
+                )
+            } else {
+                when (dashboardState) {
+                    is WorkDirDashboardState.NoWorkDirOpened ->
+                        StartScreen(
+                            versionLabel = versionLabel,
+                            initializationState = initializationState,
+                            onOpenWorkDirRequested = onOpenWorkDirRequested,
+                        )
+
+                    is WorkDirDashboardState.FirstObservationRunning ->
+                        FirstObservationRunningScreen(dashboardState.workDirPath, onCloseWorkDirRequested)
+
+                    is WorkDirDashboardState.WorkDirObserved -> {
+                        OrchestrationShell(
+                            observed = dashboardState,
+                            heldSessionTargets = heldChatSessionTargets,
+                            initializationState = initializationState,
+                            chatScreenState = chatScreenState,
+                            diagnosticLogPathLabel = diagnosticLogPathLabel,
+                            onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
+                            onCloneRepositoriesRequested = onCloneRepositoriesRequested,
+                            onRefreshRequested = onRefreshRequested,
+                            onCloseWorkDirRequested = onCloseWorkDirRequested,
+                            onEnterSessionRequested = onEnterSessionRequested,
+                            onSendUserMessageRequested = onSendUserMessageRequested,
+                            onInterruptTurnRequested = onInterruptTurnRequested,
+                            onPermissionChoiceMade = onPermissionChoiceMade,
+                            onEndChatSessionRequested = onEndChatSessionRequested,
+                            themePreference = themePreference,
+                            onThemePreferenceChosen = onThemePreferenceChosen,
+                            sessionTree = sessionTree,
+                            onChildSessionChosen = onChildSessionChosen,
+                        )
+
+                        // 한 번에 하나씩 묻는다. 답하면 다음 물음이 맨 앞으로 온다.
+                        childSessionGateQuestions.firstOrNull()?.let { question ->
+                            ChildSessionGateDialog(question) { approved ->
+                                onChildSessionGateAnswered(question.gateQuestionId, approved)
+                            }
+                        }
+
+                        // 워크디렉토리를 연 자리에서만 뜬다. 받을 자리가 정해지지 않은 클론은 없다.
+                        RepositoryCloneDialog(
+                            screenFacingCore = screenFacingCore,
+                            diagnosticLogPathLabel = diagnosticLogPathLabel,
+                            mainSessionHeld = SessionTarget.Main in heldChatSessionTargets,
+                        )
+                    }
+
+                    is WorkDirDashboardState.FirstObservationFailed ->
+                        ObservationFailureScreen(
+                            workDirPath = dashboardState.workDirPath,
+                            failure = dashboardState.failure,
+                            diagnosticLogPathLabel = diagnosticLogPathLabel,
+                            onRetryRequested = onRefreshRequested,
+                            onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
+                        )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 셸이 좌우 셋으로 나뉜다 — 레일 · 세션 패널 · 대화 자리.
+ *
+ * **위아래였던 이유가 이제 사라졌다.** 예전 주석은 "터미널이 폭을 먹기 때문" 이라고 적었다:
+ * 세션 안의 화면은 80 칸을 기준으로 그려지는데 창을 반으로 갈라 오른쪽에 두면 그 폭이 나오지
+ * 않았다. 오른쪽에 서는 것이 챗이 되면서 그 제약이 없어졌다 — 챗은 폭에 맞춰 흐른다(설계 6.2).
+ */
+@Composable
+private fun OrchestrationShell(
+    observed: WorkDirDashboardState.WorkDirObserved,
+    heldSessionTargets: Set<SessionTarget>,
+    initializationState: WorkDirInitializationState,
+    chatScreenState: ChatScreenState,
+    diagnosticLogPathLabel: String,
+    onInitializeOpenedWorkDirRequested: () -> Unit,
+    onCloneRepositoriesRequested: () -> Unit,
+    onRefreshRequested: () -> Unit,
+    onCloseWorkDirRequested: () -> Unit,
+    onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    onSendUserMessageRequested: (String) -> Unit,
+    onInterruptTurnRequested: () -> Unit,
+    onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
+    onEndChatSessionRequested: () -> Unit,
+    themePreference: ThemePreference,
+    onThemePreferenceChosen: (ThemePreference) -> Unit,
+    sessionTree: SessionTree,
+    onChildSessionChosen: (String) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxSize()) {
+        SessionNavigationRail(
+            diagnosticLogPathLabel = diagnosticLogPathLabel,
+            themePreference = themePreference,
+            onThemePreferenceChosen = onThemePreferenceChosen,
+            onOpenAnotherWorkDirRequested = onCloseWorkDirRequested,
+            onCloneRepositoriesRequested = onCloneRepositoriesRequested,
+            onRefreshRequested = onRefreshRequested,
+        )
+        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        WorkDirSessionPanel(
+            observed = observed,
+            heldSessionTargets = heldSessionTargets,
+            onScreenTarget = chatScreenState.target,
+            initializationState = initializationState,
+            onInitializeOpenedWorkDirRequested = onInitializeOpenedWorkDirRequested,
+            onEnterSessionRequested = onEnterSessionRequested,
+            sessionTree = sessionTree,
+            onChildSessionChosen = onChildSessionChosen,
+            modifier = Modifier.width(SESSION_PANEL_WIDTH),
+        )
+        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        ChatConversationPane(
+            chatScreenState = chatScreenState,
+            diagnosticLogPathLabel = diagnosticLogPathLabel,
+            onSendUserMessageRequested = onSendUserMessageRequested,
+            onInterruptTurnRequested = onInterruptTurnRequested,
+            onPermissionChoiceMade = onPermissionChoiceMade,
+            onEndSessionRequested = onEndChatSessionRequested,
+            // 세션에 들어가는 통로는 하나다. 끝난 화면에서 새로 시작하는 것도 왼쪽 줄을 누르는
+            // 것과 같은 일이고, 다른 것은 어느 대화를 쓰라고 말하는가뿐이다.
+            onStartNewConversationRequested = { target ->
+                onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
+            },
+            sessionTree = sessionTree,
+            onOpenChildSessionRequested = onChildSessionChosen,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * 앱이 시작점이다 — 여기서 워크디렉토리를 고르는 것으로 모든 것이 시작된다.
+ *
+ * 고를 것이 하나다. 예전에는 "열기" 와 "새로 만들기" 가 나뉘어, 새로 시작하려면 만들 자리를
+ * 고르고 이름을 또 적어야 했다 — 디렉토리를 고르는 창에서 이미 새 폴더를 만들 수 있는데도
+ * 앱이 그 일을 한 번 더 물은 셈이다. 고른 자리가 곧 워크디렉토리라면 물을 것이 없다.
+ */
+@Composable
+private fun StartScreen(
+    versionLabel: String,
+    initializationState: WorkDirInitializationState,
+    onOpenWorkDirRequested: () -> Unit,
+) {
+    CenteredColumn {
+        Text("뀨케스트레이션", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            text = versionLabel,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Button(
+            onClick = onOpenWorkDirRequested,
+            enabled = initializationState != WorkDirInitializationState.Running,
+        ) {
+            Text("워크디렉토리 열기")
+        }
+
+        Text(
+            text = "고른 디렉토리가 곧 워크디렉토리입니다. 그 안의 레포를 카드로 보여주고, " +
+                "계획 파일(.coord/plan.md)이 없으면 그 자리에 만들어 둡니다. " +
+                "빈 자리에서 시작하려면 선택창의 새 폴더 버튼으로 만들어 고르세요.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+
+        InitializationProgressOrFailure(
+            initializationState = initializationState,
+            // 계획 파일을 보는 것부터 kyu init 까지가 다 여는 걸음이라, 그중 어디를 지나는
+            // 중인지로 문구를 가르지 않는다.
+            runningLabel = "고른 자리를 워크디렉토리로 여는 중입니다",
+        )
+    }
+}
+
+@Composable
+private fun FirstObservationRunningScreen(workDirPath: String, onCancelRequested: () -> Unit) {
+    CenteredColumn {
+        CircularProgressIndicator(modifier = Modifier.size(32.dp))
+        Text("kyu 에게 이 워크디렉토리를 묻는 중입니다", style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = workDirPath,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onCancelRequested) { Text("취소") }
+    }
+}
+
+@Composable
+private fun ObservationFailureScreen(
+    workDirPath: String,
+    failure: FailureView,
+    diagnosticLogPathLabel: String,
+    onRetryRequested: () -> Unit,
+    onOpenAnotherWorkDirRequested: () -> Unit,
+) {
+    CenteredColumn {
+        Text("워크디렉토리를 읽지 못했습니다", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            text = workDirPath,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = failure.message,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+        )
+        // 실패마다 사람이 할 일이 다르다. 그 문구는 실패 타입이 들고 있다.
+        Text(
+            text = failure.guidance,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onRetryRequested) { Text("다시 시도") }
+            TextButton(onClick = onOpenAnotherWorkDirRequested) { Text("다른 워크디렉토리") }
+        }
+    }
+}
+
+@Composable
+private fun CoreConnectionLostScreen(failure: FailureView, diagnosticLogPathLabel: String) {
+    CenteredColumn {
+        Text(failure.message, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+        Text(
+            text = failure.guidance,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun CenteredColumn(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        content()
+    }
+}
+
+/**
+ * 세션 패널의 폭.
+ *
+ * 고정 폭인 것이 뜻이다. 비율로 두면 창을 넓힐 때 목록도 함께 넓어지는데, 목록이 보여주는 것은
+ * 이름과 칩 몇 개라 그 폭이 남아돌고 정작 넓어져야 할 대화 자리가 덜 넓어진다. 320dp 는 레포
+ * 이름 대부분과 칩 둘이 한 줄에 드는 폭이다.
+ */
+private val SESSION_PANEL_WIDTH = 320.dp
