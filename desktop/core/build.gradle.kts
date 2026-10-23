@@ -108,6 +108,8 @@ val coreImageArchitecture: Provider<String> = providers.provider {
     }
 }
 
+val OWNER_WRITE_BIT = "200".toInt(radix = 8)
+
 val coreRuntimeClasspath = files(tasks.named("jar"), configurations.named("runtimeClasspath"))
 
 val linkCoreRuntime = tasks.register<LinkCoreRuntime>("linkCoreRuntime") {
@@ -120,6 +122,13 @@ val assembleCoreImage = tasks.register<Sync>("assembleCoreImage") {
     group = "distribution"
     description = "WSL 에 설치할 코어 이미지(런타임 · jar · 실행 파일)를 build/core-image 에 모은다"
     into(layout.buildDirectory.dir("core-image/kyuchestration-core"))
+    // jlink 는 legal/ 의 파일을 읽기 전용(0444)으로 둔다. 그대로 옮기면 다음 빌드의 Sync 가 그 파일을 덮지 못해 멈춘다
+    // (실측: Permission denied). 주인의 쓰기 권한만 더하고 나머지(실행 비트)는 그대로 둔다.
+    // permissions { user { write = true } } 는 기본값(0644)에서 시작해 실행 비트를 지운다(실측) — 원본의 모드에 쓰기 비트를 더한다.
+    eachFile {
+        val sourceMode = permissions.toUnixNumeric()
+        permissions { unix(sourceMode or OWNER_WRITE_BIT) }
+    }
     from(linkCoreRuntime) { into("runtime") }
     from(coreRuntimeClasspath) { into("lib") }
     from("src/coreImage")
