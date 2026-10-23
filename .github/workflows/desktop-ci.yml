@@ -75,12 +75,17 @@ jobs:
               if not reports:
                   print(f"{module}: 시험 결과 없음(건너뜀)")
                   continue
-              total = skipped = failed = 0
+              total = skipped = failed = unreadable = 0
               for report in reports:
                   head = open(report, encoding="utf-8").read(4000)
                   found = re.search(r'tests="(\d+)" skipped="(\d+)" failures="(\d+)" errors="(\d+)"', head)
+                  # 모양이 다른 보고서 하나 때문에 이 걸음이 죽으면 나머지 모듈의 수가 사라진다. 세지 못한 것은 따로 센다.
+                  if found is None:
+                      unreadable += 1
+                      print(f"{module}: 읽지 못한 보고서 {report}")
+                      continue
                   total += int(found[1]); skipped += int(found[2]); failed += int(found[3]) + int(found[4])
-              print(f"{module}: 시험 {total} · 건너뜀 {skipped} · 실패 {failed}")
+              print(f"{module}: 시험 {total} · 건너뜀 {skipped} · 실패 {failed}" + (f" · 읽지 못한 보고서 {unreadable}" if unreadable else ""))
           PY
 
       # 윈도우 사용자의 코어 이미지(WSL 에 푸는 tar.gz)가 나오고, 풀어서 띄우면 인사에 답하는지 본다. 릴리스 잡과 같은 태스크다.
@@ -92,6 +97,10 @@ jobs:
           work=$(mktemp -d)
           tar -xzf "$archive" -C "$work"
           ls -l "$archive"
+          # jspawnhelper 가 실행되지 않으면 코어가 claude · kyu 를 띄우지 못한다 — 인사만으로는 드러나지 않을 수 있다.
+          for executable in bin/kyuchestration-core runtime/bin/java runtime/lib/jspawnhelper; do
+            test -x "$work/kyuchestration-core/$executable" || { echo "::error::실행 권한이 없다: $executable"; exit 1; }
+          done
           printf '%s\n' '{"frame":"hello","protocol":2,"screenVersion":"ci","screenOs":"linux"}' \
             | XDG_STATE_HOME="$work/state" "$work/kyuchestration-core/bin/kyuchestration-core" serve --stdio > "$work/frames.txt"
           head -c 200 "$work/frames.txt"; echo
