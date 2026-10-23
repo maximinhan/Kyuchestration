@@ -20,10 +20,17 @@ class CoreInstallGuidanceTest {
         assertTrue("--with-core) with_core=\"yes\"" in installScript, "install.sh 가 --with-core 를 받지 않는다")
     }
 
+    /** 판이 낮은 쪽이 낡았다. WSL 에 따로 깐 코어가 낡았으면 그 설치 한 줄, 화면이 낡았으면 새 msi 다. */
     @Test
-    fun `코어의 규약 판이 화면보다 낮으면 코어가 낡은 쪽이다`() {
-        assertEquals(MismatchedSide.Core, olderSideOf(mismatch(screenProtocol = 2, coreProtocol = 1)))
-        assertEquals(MismatchedSide.Screen, olderSideOf(mismatch(screenProtocol = 2, coreProtocol = 3)))
+    fun `WSL 에 따로 깐 코어와 판이 갈리면 낡은 쪽을 새로 깔게 한다`() {
+        assertEquals(MismatchRemedy.UpdateWslCore, mismatchRemedyOf(mismatch(screenProtocol = 2, coreProtocol = 1), coreInstalledSeparatelyInWsl = true))
+        assertEquals(MismatchRemedy.UpdateScreen, mismatchRemedyOf(mismatch(screenProtocol = 2, coreProtocol = 3), coreInstalledSeparatelyInWsl = true))
+    }
+
+    /** 맥 · 리눅스의 코어는 화면과 한 패키지다 — 어느 쪽이 낡았든 패키지 하나를 다시 깐다. */
+    @Test
+    fun `같은 패키지의 코어와 판이 갈리면 함께 다시 깔게 한다`() {
+        assertEquals(MismatchRemedy.ReinstallTogether, mismatchRemedyOf(mismatch(screenProtocol = 2, coreProtocol = 1), coreInstalledSeparatelyInWsl = false))
     }
 
     private fun mismatch(screenProtocol: Int, coreProtocol: Int) = CoreConnection.ProtocolMismatch(

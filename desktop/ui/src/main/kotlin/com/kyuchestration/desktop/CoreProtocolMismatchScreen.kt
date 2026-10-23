@@ -47,17 +47,18 @@ internal fun CoreProtocolMismatchScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                 )
+                val remedy = mismatchRemedyOf(mismatch, coreInstalledSeparatelyInWsl)
                 Text(
-                    text = when {
-                        !coreInstalledSeparatelyInWsl -> "화면과 코어를 같은 판으로 다시 설치한 뒤 띄우세요."
-                        olderSideOf(mismatch) == MismatchedSide.Core -> "WSL 의 코어가 낡았습니다. 코어를 새로 설치한 뒤 다시 띄우세요."
-                        else -> "이 화면이 낡았습니다. 릴리스 페이지에서 새 설치 패키지(msi)를 받아 설치한 뒤 다시 띄우세요."
+                    text = when (remedy) {
+                        MismatchRemedy.ReinstallTogether -> "화면과 코어를 같은 판으로 다시 설치한 뒤 띄우세요."
+                        MismatchRemedy.UpdateWslCore -> "WSL 의 코어가 낡았습니다. 코어를 새로 설치한 뒤 다시 띄우세요."
+                        MismatchRemedy.UpdateScreen -> "이 화면이 낡았습니다. 릴리스 페이지에서 새 설치 패키지(msi)를 받아 설치한 뒤 다시 띄우세요."
                     } + " 세션은 열지 않았습니다.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
-                if (coreInstalledSeparatelyInWsl && olderSideOf(mismatch) == MismatchedSide.Core) {
+                if (remedy == MismatchRemedy.UpdateWslCore) {
                     WslCoreInstallCommand()
                 }
                 DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)

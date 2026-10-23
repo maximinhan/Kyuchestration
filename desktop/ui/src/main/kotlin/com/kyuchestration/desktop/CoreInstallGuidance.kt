@@ -19,12 +19,28 @@ import com.kyuchestration.desktop.mirror.CoreConnection
 internal const val WSL_CORE_INSTALL_COMMAND =
     "curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash -s -- --with-core"
 
-/** 규약 판이 갈렸을 때 어느 쪽을 새로 깔아야 하는가. */
-internal enum class MismatchedSide { Core, Screen }
+/** 규약 판이 갈렸을 때 사람이 할 일. */
+internal enum class MismatchRemedy {
+    /** 맥 · 리눅스 — 코어가 화면과 한 패키지다. */
+    ReinstallTogether,
 
-/** 판이 낮은 쪽이 낡았다. 같을 수는 없다 — 같으면 판 불일치가 아니다. */
-internal fun olderSideOf(mismatch: CoreConnection.ProtocolMismatch): MismatchedSide =
-    if (mismatch.coreProtocol < mismatch.screenProtocol) MismatchedSide.Core else MismatchedSide.Screen
+    /** 윈도우 — WSL 의 코어가 낡았다. 설치 한 줄을 보인다. */
+    UpdateWslCore,
+
+    /** 윈도우 — 화면이 낡았다. 새 msi 다. */
+    UpdateScreen,
+}
+
+/**
+ * 판이 낮은 쪽이 낡았다(같을 수는 없다 — 같으면 판 불일치가 아니다). 코어가 WSL 에 따로 깔려 있을 때만 어느 쪽인지가 할 일을 가른다.
+ *
+ * @param coreInstalledSeparatelyInWsl 코어를 WSL 너머에 띄웠는가.
+ */
+internal fun mismatchRemedyOf(mismatch: CoreConnection.ProtocolMismatch, coreInstalledSeparatelyInWsl: Boolean): MismatchRemedy = when {
+    !coreInstalledSeparatelyInWsl -> MismatchRemedy.ReinstallTogether
+    mismatch.coreProtocol < mismatch.screenProtocol -> MismatchRemedy.UpdateWslCore
+    else -> MismatchRemedy.UpdateScreen
+}
 
 /** 설치 한 줄과 복사 단추. */
 @Composable
