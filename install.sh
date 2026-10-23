@@ -12,7 +12,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash -s -- --with-core
 #
-# 코어 이미지는 ${XDG_DATA_HOME:-~/.local/share}/kyuchestration/core 에 풀고, 설치 위치에 kyuchestration-core 링크를 둔다.
+# 코어 이미지는 ${XDG_DATA_HOME:-~/.local/share}/kyuchestration/core 에 풀고, ~/.local/bin/kyuchestration-core 링크를 둔다
+# (KYU_INSTALL_DIR 과 무관하다 — 윈도우 화면이 부르는 자리다).
 # 다시 돌리면 최신 릴리스의 것으로 갈아 끼운다. KYU_CORE_ARCHIVE 에 tar.gz 경로를 주면 릴리스 대신 그 파일을 푼다 —
 # 소스에서 만든 코어(./gradlew :core:packageCoreArchive)를 윈도우 화면에 붙여 볼 때 쓴다.
 #
@@ -318,16 +319,16 @@ fetch_asset() {
 
 # install_core 는 코어 이미지를 데이터 자리에 풀고 설치 위치에 실행 파일 링크를 둔다.
 #
-# 옆에 풀어 두고 마지막에 자리를 바꾼다. 받다가 · 풀다가 끊겨도 쓰던 코어가 그대로 남는다. 링크는 늘 같은 자리
-# (…/core/bin/kyuchestration-core)를 가리키므로 다시 설치해도 고칠 필요가 없지만, 처음 설치이거나 누가 지운 경우를 위해
-# 매번 다시 건다(ln -sfn).
+# 옆에 풀어 **그 자리에서 띄워 본 뒤에** 자리를 바꾼다. 받다가 · 풀다가 · 띄워 보다가 어디서 끊겨도 쓰던 코어가 그대로
+# 남는다. 자리를 바꾸는 두 mv 사이에서 새 코어를 넣지 못하면 옛 코어를 되돌려 놓고 끝낸다.
 #
-# 윈도우 화면은 이 링크를 셸 없이 wsl.exe --cd ~ -e .local/bin/kyuchestration-core 로 부른다(설계 6.12). 그래서
-# KYU_INSTALL_DIR 을 바꿔도 화면이 찾는 자리는 ~/.local/bin 이다 — 다른 자리면 알린다.
+# 링크는 언제나 ~/.local/bin/kyuchestration-core 다 — KYU_INSTALL_DIR 을 따르지 않는다. 윈도우 화면이 셸 없이
+# wsl.exe --cd ~ -e .local/bin/kyuchestration-core 로 부르는 자리라(설계 6.12) 화면과의 약속이다. 옮기면 화면은 코어를
+# 못 찾고 같은 설치 명령을 되풀이해 안내한다. 링크는 늘 같은 자리(…/core/bin/kyuchestration-core)를 가리키므로 자리를
+# 바꾸기 전에 걸어도 된다.
 install_core() {
     local target_platform="$1"
-    local install_dir="$2"
-    local data_dir core_dir core_archive_path previous_core_dir asset_name asset_url release_tag
+    local data_dir core_dir core_link core_archive_path staged_core_dir previous_core_dir asset_name asset_url release_tag
 
     case "$target_platform" in
         linux_amd64) ;;
@@ -341,7 +342,8 @@ install_core() {
 
     data_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/kyuchestration"
     core_dir="${data_dir}/core"
-    mkdir -p "$data_dir"
+    core_link="${HOME}/.local/bin/kyuchestration-core"
+    mkdir -p "$data_dir" "${HOME}/.local/bin"
     # 풀 자리를 같은 디렉토리 안에 둔다. 마지막의 mv 가 복사가 아닌 이름 바꾸기여야 반쯤 바뀐 코어가 남지 않는다.
     CORE_STAGING_PATH=$(mktemp -d "${data_dir}/.core.staging.XXXXXX")
 
@@ -365,26 +367,30 @@ install_core() {
 
     tar -xzf "$core_archive_path" -C "$CORE_STAGING_PATH" \
         || fail "코어 묶음을 풀지 못했습니다: ${core_archive_path}"
-    [ -x "${CORE_STAGING_PATH}/kyuchestration-core/bin/kyuchestration-core" ] \
+    staged_core_dir="${CORE_STAGING_PATH}/kyuchestration-core"
+    [ -x "${staged_core_dir}/bin/kyuchestration-core" ] \
         || fail "코어 묶음에 실행 파일(kyuchestration-core/bin/kyuchestration-core)이 없습니다: ${core_archive_path}"
+
+    # 자리를 바꾸기 전에 풀린 자리에서 띄워 본다. 실행 파일은 자기 자리를 링크를 풀어 찾으므로 어디서 띄워도 자기 이미지를 쓴다.
+    # stdin 이 곧바로 끝나므로 코어는 화면이 떠난 것으로 알고 0 으로 나간다.
+    if ! "${staged_core_dir}/bin/kyuchestration-core" serve --stdio < /dev/null > /dev/null; then
+        fail "받은 코어를 띄우지 못해 설치하지 않았습니다 — 쓰던 코어가 있으면 그대로 둡니다: ${core_archive_path}"
+    fi
+
+    ln -sfn "${core_dir}/bin/kyuchestration-core" "$core_link" \
+        || fail "코어 링크를 걸지 못했습니다: ${core_link}"
 
     previous_core_dir=""
     if [ -e "$core_dir" ]; then
         previous_core_dir="${CORE_STAGING_PATH}/previous"
-        mv "$core_dir" "$previous_core_dir"
+        mv "$core_dir" "$previous_core_dir" || fail "쓰던 코어를 옮기지 못했습니다: ${core_dir}"
     fi
-    mv "${CORE_STAGING_PATH}/kyuchestration-core" "$core_dir"
-    ln -sfn "${core_dir}/bin/kyuchestration-core" "${install_dir}/kyuchestration-core"
-    report "코어 설치 완료: ${core_dir} (실행 파일 ${install_dir}/kyuchestration-core)"
-
-    if [ "$install_dir" != "${HOME}/.local/bin" ]; then
-        report "주의: 윈도우 화면은 ~/.local/bin/kyuchestration-core 를 부릅니다. 설치 위치가 ${install_dir} 이라 화면이 찾지 못합니다."
+    if ! mv "$staged_core_dir" "$core_dir"; then
+        # 옛 코어는 아직 임시 자리에 있다 — 끝내기 전에 되돌린다. 그러지 않으면 EXIT 의 뒷정리가 그것을 지운다.
+        [ -n "$previous_core_dir" ] && mv "$previous_core_dir" "$core_dir"
+        fail "새 코어를 자리에 넣지 못해 쓰던 코어를 되돌렸습니다: ${core_dir}"
     fi
-
-    # 화면 없이 띄워 본다 — stdin 이 곧바로 끝나므로 코어는 화면이 떠난 것으로 알고 0 으로 나간다.
-    if ! "${install_dir}/kyuchestration-core" serve --stdio < /dev/null > /dev/null; then
-        fail "설치한 코어를 띄우지 못했습니다: ${install_dir}/kyuchestration-core"
-    fi
+    report "코어 설치 완료: ${core_dir} (실행 파일 ${core_link})"
     report "코어가 뜨고 끝나는 것까지 확인했습니다."
 }
 
@@ -456,7 +462,7 @@ main() {
     fi
 
     if [ "$with_core" = "yes" ]; then
-        install_core "$target_platform" "$install_dir"
+        install_core "$target_platform"
     fi
 }
 
