@@ -32,8 +32,8 @@ dependencies {
 
 // 코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16). 시험도 셸 스크립트 · 가짜 kyu ·
 // POSIX 경로 위에 서 있다. 윈도우 CI 는 컴파일까지만 보고 시험은 건너뛴다 — 건너뛴 사실은 이 이유와 함께 빌드 로그에 남는다.
+val hostIsWindows: Boolean by rootProject.extra
 tasks.named<Test>("test") {
-    val hostIsWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
     onlyIf("코어는 윈도우에서 돌지 않는다(설계 6.16) — 윈도우에서는 코어 시험을 건너뛴다") { !hostIsWindows }
 }
 
@@ -60,15 +60,19 @@ abstract class LinkCoreRuntime @Inject constructor(
     @get:Classpath
     abstract val coreClasspath: ConfigurableFileCollection
 
-    @get:Internal
-    abstract val jdkHome: DirectoryProperty
+    /**
+     * jlink · jdeps 를 꺼내 쓸 툴체인. 입력이다 — JDK 판이 바뀌면 런타임을 다시 만든다. 경로만 Internal 로 두면 툴체인이 바뀌어도
+     * 태스크가 up-to-date 로 낡은 런타임을 묶는다. JavaLauncher 는 판 · 제공자를 입력으로 내놓는 Gradle 의 타입이다.
+     */
+    @get:Nested
+    abstract val javaLauncher: Property<JavaLauncher>
 
     @get:OutputDirectory
     abstract val runtimeDirectory: DirectoryProperty
 
     @TaskAction
     fun link() {
-        val jdk = jdkHome.get().asFile
+        val jdk = javaLauncher.get().metadata.installationPath.asFile
         val jars = coreClasspath.files.filter { it.name.endsWith(".jar") }.map { it.absolutePath }
         val moduleListing = ByteArrayOutputStream()
         execOperations.exec {
@@ -108,13 +112,29 @@ val coreImageArchitecture: Provider<String> = providers.provider {
     }
 }
 
-val OWNER_WRITE_BIT = "200".toInt(radix = 8)
+/**
+ * 이미지 안에서 실행되는 파일. 그 밖은 모두 읽기 · 쓰기 파일이다.
+ *
+ * 권한을 원본에서 물려받지 않고 여기서 정한다. 실행기(src/coreImage)의 실행 비트는 작업 트리의 파일 모드에 기대면 core.fileMode=false
+ * 이거나 /mnt/c 위의 체크아웃에서 0644 로 묶인다. jlink 는 legal/ 을 0444 로 두어 다음 빌드의 Sync 가 덮지 못하게 한다(실측).
+ * 런타임에서 실행되는 것은 실측으로 넷이다(bin/java · bin/keytool · lib/jspawnhelper · lib/jexec) — jspawnhelper 가 빠지면 코어가
+ * claude · kyu 를 띄우지 못한다.
+ */
+fun isExecutableInCoreImage(relativePath: String): Boolean =
+    relativePath.startsWith("bin/") ||
+        relativePath.startsWith("runtime/bin/") ||
+        relativePath == "runtime/lib/jspawnhelper" ||
+        relativePath == "runtime/lib/jexec"
+
+val EXECUTABLE_FILE_MODE = "755".toInt(radix = 8)
+
+val READ_WRITE_FILE_MODE = "644".toInt(radix = 8)
 
 val coreRuntimeClasspath = files(tasks.named("jar"), configurations.named("runtimeClasspath"))
 
 val linkCoreRuntime = tasks.register<LinkCoreRuntime>("linkCoreRuntime") {
     coreClasspath.from(coreRuntimeClasspath)
-    jdkHome.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }.map { it.metadata.installationPath })
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
     runtimeDirectory.set(layout.buildDirectory.dir("core-image-runtime"))
 }
 
@@ -122,12 +142,9 @@ val assembleCoreImage = tasks.register<Sync>("assembleCoreImage") {
     group = "distribution"
     description = "WSL 에 설치할 코어 이미지(런타임 · jar · 실행 파일)를 build/core-image 에 모은다"
     into(layout.buildDirectory.dir("core-image/kyuchestration-core"))
-    // jlink 는 legal/ 의 파일을 읽기 전용(0444)으로 둔다. 그대로 옮기면 다음 빌드의 Sync 가 그 파일을 덮지 못해 멈춘다
-    // (실측: Permission denied). 주인의 쓰기 권한만 더하고 나머지(실행 비트)는 그대로 둔다.
-    // permissions { user { write = true } } 는 기본값(0644)에서 시작해 실행 비트를 지운다(실측) — 원본의 모드에 쓰기 비트를 더한다.
     eachFile {
-        val sourceMode = permissions.toUnixNumeric()
-        permissions { unix(sourceMode or OWNER_WRITE_BIT) }
+        val mode = if (isExecutableInCoreImage(relativePath.pathString)) EXECUTABLE_FILE_MODE else READ_WRITE_FILE_MODE
+        permissions { unix(mode) }
     }
     from(linkCoreRuntime) { into("runtime") }
     from(coreRuntimeClasspath) { into("lib") }

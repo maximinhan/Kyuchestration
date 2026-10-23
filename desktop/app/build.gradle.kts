@@ -303,7 +303,7 @@ val checkBundledEngine = tasks.register("checkBundledEngine") {
 // 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
 //
 // 윈도우는 걸지 않는다. msi 는 화면만 담는다 — 코어와 엔진은 WSL 에 따로 놓는다(core-ui-split-design.md 6.16).
-val hostIsWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+val hostIsWindows: Boolean by rootProject.extra
 val hostPackagesBundledEngine = !hostIsWindows
 val packagingTaskNames = setOf("createDistributable", "packageDeb", "packageDmg")
 if (hostPackagesBundledEngine) {
