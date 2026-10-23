@@ -64,6 +64,9 @@ jobs:
       # 윈도우에서 무엇이 실제로 돌았는지가 여기서 보인다. 시험 결과가 없는 모듈(윈도우의 core)은 그 사실을 적는다.
       - name: 시험 결과 세기
         if: always()
+        env:
+          # 윈도우 러너의 파이썬은 파이프로 나가는 stdout 을 cp1252 로 써서 한국어에서 죽는다(실측). UTF-8 로 쓴다.
+          PYTHONUTF8: '1'
         run: |
           python3 - <<'PY'
           import glob, re
