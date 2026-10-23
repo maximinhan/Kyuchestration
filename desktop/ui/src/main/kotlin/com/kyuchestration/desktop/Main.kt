@@ -105,7 +105,11 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
                     ),
                 )
             }
-            is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(connection, diagnosticLogPath.toString())
+            is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(
+                mismatch = connection,
+                coreInstalledSeparatelyInWsl = corePlace is CorePlace.WslDistribution,
+                diagnosticLogPathLabel = diagnosticLogPath.toString(),
+            )
         }
     } catch (failure: Throwable) {
         // Compose 의 합성에서 빠져나온 예외가 닿는 자리다. 기본 미처리 예외 핸들러는 스레드가
@@ -180,13 +184,17 @@ private fun diagnosticLogPathsLabel(screenDiagnosticLogPath: String, coreDiagnos
     listOf(coreDiagnosticLogPath, screenDiagnosticLogPath).distinct().joinToString(" · ")
 
 /** 코어가 다른 틀 규약을 말하면 세션을 하나도 열지 않고 두 판만 보인다(6.14). 코어는 작별하고 스스로 끝난다. */
-private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch, diagnosticLogPathLabel: String) = application {
+private fun runProtocolMismatchWindow(
+    mismatch: CoreConnection.ProtocolMismatch,
+    coreInstalledSeparatelyInWsl: Boolean,
+    diagnosticLogPathLabel: String,
+) = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "뀨케스트레이션",
         state = rememberWindowState(size = DpSize(720.dp, 360.dp)),
     ) {
-        CoreProtocolMismatchScreen(mismatch, diagnosticLogPathLabel)
+        CoreProtocolMismatchScreen(mismatch, coreInstalledSeparatelyInWsl, diagnosticLogPathLabel)
     }
 }
 
