@@ -18,12 +18,15 @@ permissions:
   contents: read
 
 jobs:
-  # 우분투와 맥 양쪽에서 돈다.
+  # 우분투 · 맥 · 윈도우에서 돈다.
   #
   # 맥을 뒤늦게 들인 이유가 있다. 이 CI 가 우분투 하나였을 때, 맥에서만 깨지는 PTY 시험이
   # 릴리스 워크플로의 dmg 잡에서야 드러나 릴리스를 통째로 막았다(PR 28). 데스크톱 앱은 맥과
   # 리눅스 둘 다에 설치 패키지를 내는데, 검사가 한쪽에서만 돌면 나머지 한쪽은 태그를 미는
   # 순간에 처음 시험된다 — 가장 늦고 가장 비싼 자리다.
+  #
+  # 윈도우는 화면이 도는 자리다(코어 · 화면 분리 3 단계 — 코어는 WSL 안). 코어 시험과 코어를 띄우는
+  # 화면 시험은 윈도우에서 이유와 함께 건너뛴다. 건너뛴 수는 아래 "시험 결과 세기" 가 모듈마다 적는다.
   build-and-test:
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -31,10 +34,12 @@ jobs:
       # 초록인가" 가 그 자체로 단서다.
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-latest]
+        runner: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         working-directory: desktop
+        # 윈도우 러너의 기본 셸은 PowerShell 이다. ./gradlew 와 아래 스크립트가 세 OS 에서 같게 돌도록 bash 로 맞춘다.
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -54,3 +59,65 @@ jobs:
       # CI 도 gradle 이 아니라 ./gradlew 로 돈다. 실행 비트가 빠지면 여기서 먼저 걸린다.
       - name: Gradle wrapper 로 빌드와 테스트
         run: ./gradlew --no-daemon build
+
+      # 몇 개가 돌았고 몇 개를 건너뛰었는지 모듈마다 적는다. 건너뛴 시험이 조용히 늘면 초록이 무엇을 말하는지 흐려진다 —
+      # 윈도우에서 무엇이 실제로 돌았는지가 여기서 보인다. 시험 결과가 없는 모듈(윈도우의 core)은 그 사실을 적는다.
+      - name: 시험 결과 세기
+        if: always()
+        env:
+          # 윈도우 러너의 파이썬은 파이프로 나가는 stdout 을 cp1252 로 써서 한국어에서 죽는다(실측). UTF-8 로 쓴다.
+          PYTHONUTF8: '1'
+        run: |
+          python3 - <<'PY'
+          import glob, re
+          for module in ["protocol", "diagnostics", "core", "ui", "app"]:
+              reports = glob.glob(f"{module}/build/test-results/test/*.xml")
+              if not reports:
+                  print(f"{module}: 시험 결과 없음(건너뜀)")
+                  continue
+              total = skipped = failed = unreadable = 0
+              for report in reports:
+                  head = open(report, encoding="utf-8").read(4000)
+                  found = re.search(r'tests="(\d+)" skipped="(\d+)" failures="(\d+)" errors="(\d+)"', head)
+                  # 모양이 다른 보고서 하나 때문에 이 걸음이 죽으면 나머지 모듈의 수가 사라진다. 세지 못한 것은 따로 센다.
+                  if found is None:
+                      unreadable += 1
+                      print(f"{module}: 읽지 못한 보고서 {report}")
+                      continue
+                  total += int(found[1]); skipped += int(found[2]); failed += int(found[3]) + int(found[4])
+              print(f"{module}: 시험 {total} · 건너뜀 {skipped} · 실패 {failed}" + (f" · 읽지 못한 보고서 {unreadable}" if unreadable else ""))
+          PY
+
+      # 윈도우 사용자의 코어 이미지(WSL 에 푸는 tar.gz)가 나오고, 풀어서 띄우면 인사에 답하는지 본다. 릴리스 잡과 같은 태스크다.
+      - name: 코어 이미지 묶고 띄워 보기
+        if: runner.os == 'Linux'
+        run: |
+          ./gradlew --no-daemon :core:packageCoreArchive
+          archive=$(find core/build/core-archive -name 'kyuchestration-core_*_linux_amd64.tar.gz')
+          work=$(mktemp -d)
+          tar -xzf "$archive" -C "$work"
+          ls -l "$archive"
+          # jspawnhelper 가 실행되지 않으면 코어가 claude · kyu 를 띄우지 못한다 — 인사만으로는 드러나지 않을 수 있다.
+          for executable in bin/kyuchestration-core runtime/bin/java runtime/lib/jspawnhelper; do
+            test -x "$work/kyuchestration-core/$executable" || { echo "::error::실행 권한이 없다: $executable"; exit 1; }
+          done
+          printf '%s\n' '{"frame":"hello","protocol":2,"screenVersion":"ci","screenOs":"linux"}' \
+            | XDG_STATE_HOME="$work/state" "$work/kyuchestration-core/bin/kyuchestration-core" serve --stdio > "$work/frames.txt"
+          head -c 200 "$work/frames.txt"; echo
+          grep -q '"frame":"welcome"' "$work/frames.txt"
+
+      # 윈도우 설치 패키지가 나오는지 본다. WiX 는 Compose 플러그인이 받는다.
+      - name: msi 만들기
+        if: runner.os == 'Windows'
+        run: |
+          ./gradlew --no-daemon :app:packageMsi
+          find app/build/compose/binaries/main/msi -name '*.msi' -exec ls -l {} \;
+
+      # jpackage 가 실패하면 Gradle 은 로그 파일 자리만 알린다. 러너가 끝나면 그 파일은 사라지므로 여기서 펼친다.
+      - name: msi 를 만들지 못했으면 jpackage 기록 펼치기
+        if: failure() && runner.os == 'Windows'
+        run: |
+          for log in app/build/compose/logs/packageMsi/*; do
+            echo "== $log"
+            cat "$log"
+          done

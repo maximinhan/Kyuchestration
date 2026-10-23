@@ -669,6 +669,10 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 
 **단계 2~4 (데몬 없음)**: 화면이 `serve --stdio` 를 띄운다. 코어는 stdin EOF 에 모든 세션을 끝내고(지금 `endAllSessions` 의 순서 — 하위 먼저, 상위 나중, session-tree 6.13) 끝난다. 화면이 크래시해도 코어가 EOF 를 받는다(3.5 의 N1 — 중계 없이 직결이면 더 곧다). **세션은 화면과 생사를 같이한다** — 지금과 같다.
 
+**(3 단계 정정 · 실측)** 윈도우에서도 같은 끝이다. 화면이 띄운 것은 `wsl.exe` 이고, 화면이 stdin 을 닫으면 `wsl.exe` 가 그 끝을 WSL 안의 코어까지 나른다 — 창 닫기(stdin 닫기)는 코어 0 종료 · 코어와 claude 자손 0, 화면 JVM `Runtime.halt` 도 2 초 안에 코어와 자손 0. 한도 안에 나가지 않을 때의 강제 종료는 `wsl.exe` 만 끝내고 코어에는 닿지 않는다(3.2 B) — 그래서 끝내는 길은 stdin 의 끝 하나다.
+
+**(3 단계 정정) WSL 의 코어가 놓이는 자리.** `install.sh --with-core` 가 릴리스의 `kyuchestration-core_<판>_linux_amd64.tar.gz` 를 `${XDG_DATA_HOME:-~/.local/share}/kyuchestration/core` 에 풀고 `~/.local/bin/kyuchestration-core` 로 링크한다(6.16 정정). 화면이 띄우는 `wsl.exe --cd ~ -e .local/bin/kyuchestration-core` 가 그 링크이고, 실행 파일은 링크를 풀어 이미지 안의 런타임으로 뜬다.
+
 **5 단계 (데몬 + `attach`)**
 
 | 질문 | 답 | 근거 |
@@ -756,6 +760,10 @@ desktop/
 | 맥·리눅스 패키지 안의 코어 | 화면이 띄울 실행 파일이 패키지 안에 있어야 한다. `jpackage` 의 추가 실행기(`--add-launcher`)로 같은 런타임을 나눠 쓰는 길이 가장 작다. Compose 플러그인이 그것을 여는지는 확인하지 않았다 — 2 단계에서 정한다 |
 | **(2 단계 실측)** 맥·리눅스 패키지 안의 코어 | **앱의 실행기 하나를 화면과 코어가 함께 쓴다** — 화면이 `<앱>/bin/Kyuchestration core serve --stdio` 로 다시 띄운다. 다른 길이 막혔다: ① Compose 플러그인 1.12.0 은 `--add-launcher` 를 열지 않는다(`AbstractJPackageTask` 에 그 인자가 없다) ② Compose 가 런타임을 만들 때 `--strip-native-commands` 를 고정으로 넘겨(`createRuntimeImage.args.txt`) 런타임에 `bin/java` 가 없다 — 같은 런타임으로 `java -cp` 할 수 없다 ③ 앱 리소스로 넣은 파일은 deb 에서 `-rw-r--r--` 로 실행 권한을 잃는다 — 코어의 앱 이미지를 리소스로 담아도 그 실행기와 `jspawnhelper` 를 부를 수 없다. 대가: 코어의 클래스패스에 Compose jar 가 함께 실린다(읽히지 않아 RSS 차이는 몇 MB). 4 단계의 WSL 코어 이미지는 따로 만든다 |
 | 화면과 코어는 **같은 태그, 같은 판** | `release.yml` 의 `resolve-version` 이 이미 하나의 판을 모든 잡에 나눠 준다. 잡이 둘(윈도우 msi · 리눅스 코어 tar.gz) 는다 |
+| **(3 단계 정정)** WSL 의 코어 이미지 | `:core:packageCoreArchive` → `kyuchestration-core_<판>_linux_<아키텍처>.tar.gz` = `bin/kyuchestration-core`(링크를 풀어 자리를 찾는 sh) · `runtime/`(jlink) · `lib/*.jar`. **런타임을 품는다**(실측 40 MB, 묶음 27 MB) — WSL 의 Ubuntu 에는 자바가 없고 설치에 sudo 가 든다. 모듈은 jdeps 가 고르고(java.base · java.instrument · java.net.http · jdk.unsupported) TLS 의 `jdk.crypto.ec` 를 더한다 — 빼면 api.github.com 에 `handshake_failure`(실측). Gradle 9 의 묶음은 기본으로 모든 파일을 0644 로 실어 `useFileSystemPermissions()` 로 이미지의 권한을 싣는다(실측: 빼면 Permission denied). 이미지의 권한은 원본에서 물려받지 않고 자리로 정한다 — 실행되는 것(`bin/*` · `runtime/bin/*` · `runtime/lib/jspawnhelper` · `runtime/lib/jexec`)은 0755, 그 밖은 0644(작업 트리의 파일 모드 · jlink 의 0444 에 기대지 않는다). 엔진은 이미지에 넣지 않고 `~/.local/bin/kyu` 를 쓴다 — 같은 설치 명령이 같은 릴리스의 kyu 를 놓는다 |
+| **(3 단계 정정)** 설치 | `install.sh` 를 넓혔다(`install-core.sh` 를 따로 두지 않음 — 릴리스 조회 · 인증 순서 · 자산 받기를 두 벌 두지 않으려고). `--with-core` 는 kyu 를 놓은 뒤 코어를 같은 디렉토리 안에 풀어 **그 자리에서 화면 없이 띄워 0 으로 끝나는지 본 뒤에** 링크를 걸고 자리를 바꾼다 — 받다가 · 풀다가 · 띄워 보다가 어디서 끊겨도 쓰던 코어가 남고, 자리를 바꾸다 실패하면 옛 코어를 되돌린다. 링크는 `KYU_INSTALL_DIR` 과 무관하게 언제나 `~/.local/bin/kyuchestration-core` 다(화면과의 약속). 다시 돌리면 갈아 끼운다. `KYU_CORE_ARCHIVE` 로 소스에서 만든 묶음을 풀 수 있다(개발) |
+| **(3 단계 정정)** msi | Compose 의 `TargetFormat.Msi`, 사용자 단위 설치 · 고정 `upgradeUuid` · 시작 메뉴. 화면만 담는다 — 윈도우의 패키징 · run 은 동봉 엔진을 묻지 않는다. 자산 `kyuchestration-desktop_<판>_windows_amd64.msi`, 서명 없음. 코어의 jar 도 실행기 모듈(`app`)이 의존해 함께 실리지만 윈도우에서는 읽히지 않는다 |
+| **(3 단계 정정)** CI | Desktop CI 에 `windows-latest`. 코어 시험과 코어를 띄우는 화면 시험은 윈도우에서 이유와 함께 건너뛰고(core 는 `onlyIf`, ui · app 은 `@DisabledOnOs`), 모듈마다 시험 · 건너뜀 · 실패 수를 로그에 적는다. 우분투는 코어 묶음을 풀어 인사해 보고, 윈도우는 msi 를 만든다 — 태그 없이 PR 에서 릴리스 잡과 같은 태스크를 지난다 |
 
 ### 6.17 첫 실행 — 윈도우 화면이 코어를 찾기까지
 

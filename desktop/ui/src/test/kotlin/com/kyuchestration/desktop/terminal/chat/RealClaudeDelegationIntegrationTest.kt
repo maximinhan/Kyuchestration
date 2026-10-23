@@ -26,6 +26,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assumptions.abort
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 진짜 `claude` 를 띄워 6 단계의 완료 확인 둘을 그대로 해 본다(chat-ui-design.md 9 절).
@@ -46,6 +48,7 @@ import org.junit.jupiter.api.Assumptions.abort
  *   ./gradlew test --tests '*RealClaudeDelegationIntegrationTest*'
  * ```
  */
+@DisabledOnOs(OS.WINDOWS, disabledReason = "코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16)")
 class RealClaudeDelegationIntegrationTest {
 
     private val temporaryDirectory = createTempDirectory("kyu-real-delegation-test")

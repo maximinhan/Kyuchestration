@@ -85,8 +85,9 @@ data class BundledEngineTarget(
  * 이 머신이 만들 동봉 엔진의 대상. 설치 패키지를 내지 않는 호스트에서는 안내와 함께 멈춘다.
  *
  * Provider 로 감싸 늦게 편다. 구성 단계에서 곧바로 정하면 이 값을 쓰지도 않는
- * `./gradlew build` 까지 윈도우에서 통째로 끊긴다 — 윈도우 네이티브는 설치 패키지의 대상이
- * 아니지만(msi 를 내지 않는다), 그 머신에서 컴파일과 테스트까지 막을 이유는 없다.
+ * `./gradlew build` 까지 윈도우에서 통째로 끊긴다. 윈도우의 설치 패키지(msi)는 화면만 담고 엔진을
+ * 담지 않는다 — 엔진은 WSL 의 코어 옆에 있다(core-ui-split-design.md 6.16). 그래서 윈도우의 패키징은
+ * 이 값을 묻지 않는다(아래 hostPackagesBundledEngine).
  */
 val hostBundledEngineTarget: Provider<BundledEngineTarget> = providers.provider {
     val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
@@ -96,8 +97,8 @@ val hostBundledEngineTarget: Provider<BundledEngineTarget> = providers.provider 
         hostOperatingSystemName.startsWith("Mac", ignoreCase = true) -> "macos" to "darwin"
         hostOperatingSystemName.startsWith("Linux", ignoreCase = true) -> "linux" to "linux"
         else -> throw GradleException(
-            "이 호스트($hostOperatingSystemName)에서는 엔진을 동봉하지 않습니다. " +
-                "설치 패키지를 내는 것은 맥과 리눅스뿐이고, 윈도우 사용자는 WSL 안에서 리눅스 패키지를 씁니다.",
+            "이 호스트($hostOperatingSystemName)의 설치 패키지는 엔진을 담지 않습니다. " +
+                "윈도우의 msi 는 화면만 담고, 엔진은 WSL 에 코어와 함께 놓습니다(install.sh --with-core).",
         )
     }
     val (resourceArchitecture, goArchitecture) = when (hostArchitecture) {
@@ -300,9 +301,15 @@ val checkBundledEngine = tasks.register("checkBundledEngine") {
 //
 // named 가 아니라 matching 으로 잡는다 — 이 태스크들은 Compose 플러그인이 프로젝트 평가가
 // 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
+//
+// 윈도우는 걸지 않는다. msi 는 화면만 담는다 — 코어와 엔진은 WSL 에 따로 놓는다(core-ui-split-design.md 6.16).
+val hostIsWindows: Boolean by rootProject.extra
+val hostPackagesBundledEngine = !hostIsWindows
 val packagingTaskNames = setOf("createDistributable", "packageDeb", "packageDmg")
-tasks.matching { it.name in packagingTaskNames }.configureEach {
-    dependsOn(checkBundledEngine)
+if (hostPackagesBundledEngine) {
+    tasks.matching { it.name in packagingTaskNames }.configureEach {
+        dependsOn(checkBundledEngine)
+    }
 }
 
 // 한 번의 실행에서 둘 다 부를 때(./gradlew buildBundledEngine packageDeb) 리소스를 옮기는
@@ -336,13 +343,14 @@ val bundledEngineForRun = providers.gradleProperty("bundledEngineForRun")
  *
  * `build` · `test` 는 그대로 Go 와 무관하다 — 여기서 거는 것은 run 하나뿐이다.
  *
- * 윈도우 네이티브에서 Go 를 가진 채로 run 하면 buildBundledEngine 이 "이 호스트에서는 엔진을
- * 동봉하지 않습니다 — WSL 안에서 쓰세요" 로 멈춘다. 감수하는 쪽을 골랐다: 릴리스가 윈도우 엔진
- * 바이너리를 내지 않아 그 머신에서는 앱이 떠도 부를 kyu 가 없으므로(EngineInstallationFailure 의
- * WindowsNeedsWsl), 조용히 뜨는 것보다 그 자리에서 이유를 듣는 편이 낫다.
+ * 윈도우에서는 엔진을 만들지 않는다. 윈도우의 화면은 WSL 의 코어에 붙고, 엔진은 그 코어 옆에 있다.
  */
 tasks.matching { it.name == "run" }.configureEach {
     when {
+        !hostPackagesBundledEngine -> doFirst {
+            logger.lifecycle("윈도우 화면 — 엔진은 WSL 의 코어 옆에 있습니다(install.sh --with-core).")
+        }
+
         !bundledEngineForRun -> doFirst {
             logger.lifecycle(
                 "동봉 엔진 없이 실행 — -PbundledEngineForRun=false 로 껐습니다. " +
@@ -378,21 +386,27 @@ compose.desktop {
         // 띄워 봐야 드러나는 종류의 실패다. 재 보는 것은 별도 작업이다.
 
         nativeDistributions {
-            // 두 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
+            // 세 포맷 모두 jpackage 가 만들고, jpackage 는 자기가 도는 OS 용 패키지만 만들 수 있다.
             // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
             // 일어난다(.github/workflows/release.yml).
             //
-            // Msi 는 뺀다. 이 앱은 화면일 뿐이고 실제 일은 엔진인 kyu 가 하는데, 릴리스가 윈도우
-            // 엔진 바이너리를 내지 않아(release.yml 의 크로스 컴파일 목록) 설치는 되고 부를 것이
-            // 없는 패키지가 나온다. 윈도우 사용자는 WSL 안에서 리눅스 패키지를 쓴다.
-            targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
+            // Msi 는 화면만 담는다. 윈도우의 코어와 엔진은 WSL 안에 install.sh --with-core 로 놓고,
+            // 화면이 wsl.exe 로 그 코어를 띄운다(core-ui-split-design.md 6.12 · 6.16).
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi)
 
             // 설치 패키지 이름은 파일 이름과 설치 경로(/opt/kyuchestration · /Applications)에
             // 그대로 쓰인다. 한글이 섞이면 그 경로들이 깨지므로, 창 제목("뀨케스트레이션")과
             // 분리해 ASCII 로 둔다.
             packageName = "Kyuchestration"
             packageVersion = project.version.toString()
-            description = "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
+            // msi 는 한국어 설명을 실을 수 없다. jpackage 가 쓰는 WiX 3 는 MSI 데이터베이스를 코드 페이지 1252 로 짓고, 그 밖의
+            // 글자를 만나면 light.exe 가 LGHT0311 로 멈춘다(윈도우 러너 실측: exit 311). 설명은 윈도우의 "앱 및 기능" 에만
+            // 보이는 값이라 윈도우에서 만드는 패키지에만 로마자로 둔다 — deb · dmg 는 그대로 한국어다.
+            description = if (hostIsWindows) {
+                "Kyuchestration - multi-repo workdir orchestrator"
+            } else {
+                "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
+            }
             vendor = "maximinhan"
 
             // 엔진(kyu)을 앱 패키지 안에 함께 넣는 자리. Compose 는 이 디렉토리 아래에서 이
@@ -400,6 +414,16 @@ compose.desktop {
             // resources 로 옮기고, 앱은 실행 시점에 compose.application.resources.dir 시스템
             // 프로퍼티로 그 자리를 받는다.
             appResourcesRootDir.set(bundledEngineRootDirectory)
+
+            windows {
+                // 관리자 권한을 묻지 않는다(%LOCALAPPDATA% 아래에 깔린다). 이 앱이 만지는 것은 사용자의 것뿐이다.
+                perUserInstall = true
+                // 판을 올려 덮어 깔 수 있게 고정한다. 바뀌면 윈도우가 같은 앱의 새 판을 다른 앱으로 보고 둘 다 남긴다.
+                upgradeUuid = "A1051134-71F2-40BE-9BFF-F18CF43D87B7"
+                menu = true
+                menuGroup = "Kyuchestration"
+                shortcut = true
+            }
 
             macOS {
                 bundleID = "com.kyuchestration.desktop"

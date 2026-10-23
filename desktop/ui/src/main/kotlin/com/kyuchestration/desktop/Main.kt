@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * 화면이 뜨는 자리.
@@ -105,7 +106,11 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
                     ),
                 )
             }
-            is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(connection, diagnosticLogPath.toString())
+            is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(
+                mismatch = connection,
+                coreInstalledSeparatelyInWsl = corePlace is CorePlace.WslDistribution,
+                diagnosticLogPathLabel = diagnosticLogPath.toString(),
+            )
         }
     } catch (failure: Throwable) {
         // Compose 의 합성에서 빠져나온 예외가 닿는 자리다. 기본 미처리 예외 핸들러는 스레드가
@@ -180,13 +185,17 @@ private fun diagnosticLogPathsLabel(screenDiagnosticLogPath: String, coreDiagnos
     listOf(coreDiagnosticLogPath, screenDiagnosticLogPath).distinct().joinToString(" · ")
 
 /** 코어가 다른 틀 규약을 말하면 세션을 하나도 열지 않고 두 판만 보인다(6.14). 코어는 작별하고 스스로 끝난다. */
-private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch, diagnosticLogPathLabel: String) = application {
+private fun runProtocolMismatchWindow(
+    mismatch: CoreConnection.ProtocolMismatch,
+    coreInstalledSeparatelyInWsl: Boolean,
+    diagnosticLogPathLabel: String,
+) = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "뀨케스트레이션",
         state = rememberWindowState(size = DpSize(720.dp, 360.dp)),
     ) {
-        CoreProtocolMismatchScreen(mismatch, diagnosticLogPathLabel)
+        CoreProtocolMismatchScreen(mismatch, coreInstalledSeparatelyInWsl, diagnosticLogPathLabel)
     }
 }
 
@@ -213,6 +222,15 @@ private fun runDesktopApplication(
     val coreConnectionFailure by screenFacingCore.coreConnectionFailure.collectAsState()
     val engineInstallationState by screenFacingCore.engineInstallationState.collectAsState()
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
+    // 주소마다 한 번 연다 — 같은 상태가 다시 그려질 때마다 브라우저가 열리지 않게 주소를 열쇠로 둔다.
+    val authorizationUrlToOpen = authorizationUrlTheScreenOpens(claudeAuthenticationState, coreWslDistributionAcrossScreen)
+    // 열지 못한 까닭. 로그인 화면이 그것과 함께 주소를 복사하라고 안내한다. 브라우저를 띄우는 일은 창을 그리는 스레드 밖에서 한다.
+    var screenBrowserFailure by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(authorizationUrlToOpen) {
+        screenBrowserFailure = authorizationUrlToOpen
+            ?.let { url -> withContext(Dispatchers.IO) { openInScreenBrowser(url) } as? ScreenBrowserOpening.NotOpened }
+            ?.reason
+    }
     val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
     val initializationState by screenFacingCore.workDirInitializationState.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
@@ -263,6 +281,7 @@ private fun runDesktopApplication(
             engineInstallationState = engineInstallationState,
             engineDirectoryLabel = screenFacingCore.engineDirectoryLabel,
             claudeAuthenticationState = claudeAuthenticationState,
+            screenBrowserFailure = screenBrowserFailure,
             dashboardState = dashboardState,
             initializationState = initializationState,
             chatScreenState = chatViewing.screenState,

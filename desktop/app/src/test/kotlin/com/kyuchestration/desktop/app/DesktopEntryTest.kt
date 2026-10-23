@@ -2,7 +2,10 @@ package com.kyuchestration.desktop.app
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
+@DisabledOnOs(OS.WINDOWS, disabledReason = "같은 머신의 코어를 띄우는 명령은 맥 · 리눅스의 것이다 — 윈도우 화면은 WSL 의 코어를 띄운다")
 class DesktopEntryTest {
 
     @Test

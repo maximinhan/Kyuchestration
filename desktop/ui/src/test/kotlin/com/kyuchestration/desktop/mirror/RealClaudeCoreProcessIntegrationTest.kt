@@ -29,6 +29,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assumptions.abort
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 코어를 진짜 자식 프로세스로 띄우고 그 stdio 에 붙은 거울로 실 claude 세션을 부린다(core-ui-split-design.md 7 절 2 단계 완료 확인).
@@ -41,6 +43,7 @@ import org.junit.jupiter.api.Assumptions.abort
  *   ./gradlew :ui:test --tests '*RealClaudeCoreProcessIntegrationTest'
  * ```
  */
+@DisabledOnOs(OS.WINDOWS, disabledReason = "코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16)")
 class RealClaudeCoreProcessIntegrationTest {
 
     private val scratchDirectory: Path = createTempDirectory("kyu-real-core-process")

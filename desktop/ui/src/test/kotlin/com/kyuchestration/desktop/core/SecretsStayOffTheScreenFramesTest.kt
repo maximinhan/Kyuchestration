@@ -24,6 +24,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 비밀이 경계를 건너는 자리(core-ui-split-design.md 6.11).
@@ -33,6 +35,7 @@ import kotlinx.coroutines.test.runTest
  * (거절 사유 · 시험 실패 문구 · 디버거)에서는 토큰이 가려져야 한다.
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@DisabledOnOs(OS.WINDOWS, disabledReason = "코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16)")
 class SecretsStayOffTheScreenFramesTest {
 
     private val workDirPath: Path = createTempDirectory("kyu-secrets")

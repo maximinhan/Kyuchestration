@@ -27,6 +27,10 @@ require(Regex("""\d+\.\d+\.\d+""").matches(desktopVersion)) {
         "태그 이름이라면 앞의 v 를 떼고 넘긴다."
 }
 
+// 이 빌드가 윈도우에서 도는가. 윈도우에서 도는 것은 화면뿐이라(코어는 WSL 안 — core-ui-split-design.md 6.16) 모듈마다 갈림이
+// 있다 — core 는 시험을 건너뛰고, app 은 엔진을 동봉하지 않는다. 판정은 여기 하나이고 모듈은 rootProject.extra 로 읽는다.
+val hostIsWindows: Boolean by extra(System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
+
 // 화면과 코어는 같은 태그에서 같은 판으로 나간다(설계 6.14). 판을 모듈마다 따로 정하는 자리가 생기면 둘이 갈릴 수 있다.
 subprojects {
     group = "com.kyuchestration.desktop"

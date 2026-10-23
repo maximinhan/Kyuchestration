@@ -12,11 +12,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 코어를 이 JVM 의 자기 스레드에 세우는 자리. 세우다 실패하면 화면이 그것을 봐야 한다 — 거울은 첫 스냅샷을 기다리며 서므로,
  * 코어 쪽 줄이 닫히지 않으면 화면은 창 하나 없이 영원히 기다린다.
  */
+@DisabledOnOs(OS.WINDOWS, disabledReason = "코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16)")
 class CoreStartTest {
 
     @Test

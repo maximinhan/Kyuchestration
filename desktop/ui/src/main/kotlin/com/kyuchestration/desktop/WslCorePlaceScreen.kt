@@ -118,7 +118,8 @@ private fun ProblemWithChosenDistribution(problem: ChosenDistributionProblem) {
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center,
             )
-            Guidance("그 배포판의 터미널에서 코어를 설치한 뒤 이 배포판으로를 다시 누르세요.")
+            WslCoreInstallCommand()
+            Guidance("그 배포판의 터미널에서 설치한 뒤 '이 배포판으로' 를 다시 누르세요.")
         }
         is ChosenDistributionProblem.DistributionFailed -> {
             Text(
