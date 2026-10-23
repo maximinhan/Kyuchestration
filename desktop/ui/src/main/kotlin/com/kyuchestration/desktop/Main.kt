@@ -1,15 +1,18 @@
 package com.kyuchestration.desktop
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
@@ -18,13 +21,30 @@ import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
 import com.kyuchestration.desktop.mirror.CoreChildProcess
 import com.kyuchestration.desktop.mirror.CoreConnection
 import com.kyuchestration.desktop.mirror.CoreMirror
+import com.kyuchestration.desktop.mirror.CorePlace
+import com.kyuchestration.desktop.mirror.wslDistributionAcrossScreen
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
+import com.kyuchestration.desktop.platform.runningOnWindows
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.wsl.ChosenWslDistributionFile
+import com.kyuchestration.desktop.wsl.CoreWorkDirPath
+import com.kyuchestration.desktop.wsl.WslCommandLine
+import com.kyuchestration.desktop.wsl.WslCorePlacePreparation
+import com.kyuchestration.desktop.wsl.WslCorePlacePreparationState
+import com.kyuchestration.desktop.wsl.chosenWslDistributionFilePath
+import com.kyuchestration.desktop.wsl.coreWorkDirPathOf
+import com.kyuchestration.desktop.wsl.screenPathOfCorePath
+import com.kyuchestration.desktop.wsl.wslExecutablePath
+import java.nio.file.Path
+import javax.swing.JOptionPane
+import kotlin.io.path.isRegularFile
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -33,12 +53,15 @@ import kotlinx.coroutines.runBlocking
  * 화면은 코어를 [ScreenFacingCore] 하나로만 본다 — 상태 홀더도, 그 뒤의 kyu 도 모른다(core-ui-split-design.md 6.2). 그
  * [ScreenFacingCore] 는 거울([CoreMirror])이고, 거울은 화면이 자식으로 띄운 코어 프로세스의 stdio 위에 선다(7 절 2 단계).
  * 같은 머신이어도 언제나 이 길이다(원칙 20) — 화면 모듈은 코어의 클래스를 컴파일 시점에 볼 수조차 없다. 이 파일에 남은 것은 화면의
- * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기.
+ * 것뿐이다: 창, 테마, 지금 보는 세션, 파일 선택기, 윈도우에서 코어를 띄울 WSL 배포판.
  *
- * @param coreLaunchCommand 코어를 `serve --stdio` 로 띄우는 명령. 무엇으로 띄우는지는 이 프로그램을 띄운 쪽(app 모듈)이 안다 —
- *   설치 패키지에서는 앱의 실행기, 소스에서는 같은 클래스패스의 java 다.
+ * 코어를 어디서 띄우는지([CorePlace])만 OS 가 가른다. 맥 · 리눅스는 같은 머신에서, 윈도우는 사람이 고른 WSL 배포판 안에서
+ * 띄운다(core-ui-split-design.md 6.12 · 6.17). 띄운 뒤는 같은 길이다.
+ *
+ * @param sameMachineCoreLaunchCommand 같은 머신에서 코어를 `serve --stdio` 로 띄우는 명령. 무엇으로 띄우는지는 이 프로그램을 띄운
+ *   쪽(app 모듈)이 안다 — 설치 패키지에서는 앱의 실행기, 소스에서는 같은 클래스패스의 java 다. 윈도우에서는 묻지 않는다.
  */
-fun runScreen(coreLaunchCommand: List<String>) {
+fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
     val diagnosticLogPath = diagnosticLogFile(DiagnosticLogOwner.Screen)
     val diagnosticLog = FileDiagnosticLog(diagnosticLogPath)
 
@@ -47,13 +70,18 @@ fun runScreen(coreLaunchCommand: List<String>) {
     diagnosticLog.record(
         DiagnosticLogEntry.ApplicationStarted(
             versionLabel = DesktopBuildVersion.label,
-            operatingSystemName = System.getProperty("os.name").orEmpty(),
+            operatingSystemName = currentOperatingSystemName(),
             javaRuntimeVersion = System.getProperty("java.version").orEmpty(),
         ),
     )
 
     try {
-        val coreProcess = CoreChildProcess.start(coreLaunchCommand, diagnosticLog)
+        val corePlace = if (runningOnWindows()) {
+            prepareWslCorePlace(diagnosticLog, diagnosticLogPath.toString()) ?: return
+        } else {
+            CorePlace.SameMachine(sameMachineCoreLaunchCommand())
+        }
+        val coreProcess = CoreChildProcess.start(corePlace, diagnosticLog)
         val connection = runBlocking {
             coreProcess.connectMirror(
                 // 화면 스레드가 아니다. 창을 닫는 자리가 화면 스레드를 붙잡고 코어가 끝나기를 기다리는데, 그것을 알리는 틀을 읽는
@@ -64,11 +92,19 @@ fun runScreen(coreLaunchCommand: List<String>) {
             )
         }
         when (connection) {
-            is CoreConnection.Connected -> runDesktopApplication(
-                screenFacingCore = connection.mirror,
-                coreProcess = coreProcess,
-                diagnosticLogPathLabel = diagnosticLogPathsLabel(diagnosticLogPath.toString(), connection.mirror.coreDiagnosticLogPath),
-            )
+            is CoreConnection.Connected -> {
+                val coreWslDistributionAcrossScreen = corePlace.wslDistributionAcrossScreen(connection.mirror.coreWslDistributionName)
+                runDesktopApplication(
+                    screenFacingCore = connection.mirror,
+                    coreProcess = coreProcess,
+                    coreWslDistributionAcrossScreen = coreWslDistributionAcrossScreen,
+                    diagnosticLogPathLabel = diagnosticLogPathsLabel(
+                        screenDiagnosticLogPath = diagnosticLogPath.toString(),
+                        // 사람이 탐색기에 붙여 넣어 열 수 있는 모양으로 알린다(6.2 (다)).
+                        coreDiagnosticLogPath = screenPathOfCorePath(connection.mirror.coreDiagnosticLogPath, coreWslDistributionAcrossScreen),
+                    ),
+                )
+            }
             is CoreConnection.ProtocolMismatch -> runProtocolMismatchWindow(connection, diagnosticLogPath.toString())
         }
     } catch (failure: Throwable) {
@@ -82,6 +118,60 @@ fun runScreen(coreLaunchCommand: List<String>) {
         throw failure
     }
 }
+
+/**
+ * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null.
+ *
+ * 준비 창을 먼저 띄우고 그 안에서 목록을 묻고 코어를 본다. 지난번에 고른 배포판이 멈춰 있으면 `wsl.exe -d … -e test` 가 VM 을
+ * 깨우느라 몇 초에서 이십 초까지 걸린다 — 창 없이 그것을 기다리면 사람은 앱이 뜨지 않은 줄 안다. 정해지면 준비 창을 닫고 본 창으로
+ * 넘어간다.
+ */
+private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathLabel: String): CorePlace.WslDistribution? {
+    val wslExecutable = wslExecutablePath()
+    if (!wslExecutable.isRegularFile()) {
+        application {
+            Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 360.dp))) {
+                WslMissingScreen(wslExecutable.toString())
+            }
+        }
+        return null
+    }
+    val wslCommandLine = WslCommandLine(wslExecutable)
+    val chosenDistribution = ChosenWslDistributionFile(chosenWslDistributionFilePath(), diagnosticLog)
+    val preparation = WslCorePlacePreparation(
+        listDistributions = wslCommandLine::listDistributions,
+        checkCore = wslCommandLine::checkCore,
+        rememberedDistribution = chosenDistribution::read,
+        rememberDistribution = chosenDistribution::write,
+    )
+    // 본 창을 이어서 띄워야 하므로 이 창이 닫혀도 프로세스를 끝내지 않는다.
+    application(exitProcessOnExit = false) {
+        val state by preparation.state.collectAsState()
+        val preparationScope = rememberCoroutineScope()
+        // wsl.exe 를 기다리는 일은 WslCommandLine 이 IO 스레드에서 한다 — 창을 그리는 스레드는 막히지 않는다.
+        LaunchedEffect(Unit) { preparation.lookAround() }
+        LaunchedEffect(state) {
+            if (state is WslCorePlacePreparationState.Ready) {
+                exitApplication()
+            }
+        }
+        Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 480.dp))) {
+            WslCorePlaceScreen(
+                state = state,
+                diagnosticLogPathLabel = diagnosticLogPathLabel,
+                onLookAroundAgainRequested = { preparationScope.launch { preparation.lookAround() } },
+                onDistributionChosen = { distributionName -> preparationScope.launch { preparation.choose(distributionName) } },
+            )
+        }
+    }
+    val ready = preparation.state.value as? WslCorePlacePreparationState.Ready ?: return null
+    return CorePlace.WslDistribution(wslExecutable, ready.distributionName)
+}
+
+/**
+ * 윈도우 화면의 폴더 선택 창이 처음 여는 WSL 쪽 자리. 화면은 코어 사용자의 리눅스 홈을 모른다 — 그 한 칸 위다.
+ */
+private const val WSL_HOME_DIRECTORIES = "/home"
 
 /**
  * 오류 자리마다 알릴 기록 파일들. 화면과 코어가 각자 적으므로(core-ui-split-design.md 6.10) 둘 다 알린다.
@@ -109,12 +199,15 @@ private fun runProtocolMismatchWindow(mismatch: CoreConnection.ProtocolMismatch,
 private val CORE_LEAVE_TIMEOUT = 30.seconds
 
 /**
+ * @param coreWslDistributionAcrossScreen 화면이 윈도우이고 코어가 WSL 안이면 코어의 배포판. 화면의 경로와 코어의 경로를 옮기는
+ *   근거다(coreWorkDirPathOf). 맥 · 리눅스 · WSLg 에서는 null.
  * @param diagnosticLogPathLabel 화면이 오류 자리마다 알려 줄 기록 파일의 경로. 사용자가 무엇을
  *   보고할 때 건네면 되는지가 그 자리에 있어야, 원격에서 진단할 수 있는 것이 화면 문구를 넘어선다.
  */
 private fun runDesktopApplication(
     screenFacingCore: CoreMirror,
     coreProcess: CoreChildProcess,
+    coreWslDistributionAcrossScreen: String?,
     diagnosticLogPathLabel: String,
 ) = application {
     val coreConnectionFailure by screenFacingCore.coreConnectionFailure.collectAsState()
@@ -186,7 +279,21 @@ private fun runDesktopApplication(
             onClaudeTokenSubmitted = screenFacingCore::useClaudeToken,
             onOpenWorkDirRequested = {
                 // 고르는 창은 사람이 앉은 OS 의 것이라 화면에 남는다(원칙 19). 고른 경로만 코어에게 건넨다.
-                chooseWorkDirDirectory(ownerWindow)?.let { chosenDirectory -> screenFacingCore.openWorkDir(chosenDirectory.toString()) }
+                val startingDirectory = coreWslDistributionAcrossScreen?.let { distribution ->
+                    Path.of(screenPathOfCorePath(WSL_HOME_DIRECTORIES, distribution))
+                }
+                chooseWorkDirDirectory(ownerWindow, startingDirectory)?.let { chosenDirectory ->
+                    when (val corePath = coreWorkDirPathOf(chosenDirectory.toString(), coreWslDistributionAcrossScreen)) {
+                        is CoreWorkDirPath.Translated -> screenFacingCore.openWorkDir(corePath.corePath)
+                        // 코어가 열 수 없는 자리는 고른 그 자리에서 알린다. 코어에 보내면 왕복 뒤에 같은 말을 듣는다.
+                        is CoreWorkDirPath.Refused -> JOptionPane.showMessageDialog(
+                            ownerWindow,
+                            corePath.reason,
+                            "이 폴더는 열 수 없습니다",
+                            JOptionPane.WARNING_MESSAGE,
+                        )
+                    }
+                }
             },
             onInitializeOpenedWorkDirRequested = screenFacingCore::initializeOpenedWorkDir,
             onCloneRepositoriesRequested = screenFacingCore::openRepositoryClone,

@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.readText
+import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -51,6 +52,31 @@ class ProcessChatSessionOpenerTest {
         val (workingDirectory, repoClaudeMd) = report.readText().lines()
         assertEquals(sessionDirectory.toRealPath().toString(), workingDirectory, "엔진이 답한 자리에서 떠야 한다")
         assertEquals("1", repoClaudeMd, "엔진이 더하라고 한 환경이 자식까지 닿아야 한다")
+    }
+
+    /**
+     * 엔진은 명령을 이름(`claude`)으로 답하고, 그 이름을 찾을 PATH 를 환경에 담아 준다. `wsl.exe -e` 로 뜬 코어처럼 이 JVM 의 PATH 에
+     * 그 자리가 없어도 띄워야 한다(3 단계 실측 — ProcessBuilder 는 이름을 이 JVM 의 PATH 로 찾는다).
+     */
+    @Test
+    fun `엔진이 답한 이름은 그 환경의 PATH 에서 찾는다`(): Unit = runBlocking {
+        val binDirectory = temporaryDirectory.resolve("bin-only-in-plan").createDirectories()
+        val report = temporaryDirectory.resolve("띄워졌다.txt")
+        binDirectory.resolve("kyu-test-only-claude").apply {
+            writeText("#!/bin/sh\necho 떴다 > '$report'\n")
+            toFile().setExecutable(true)
+        }
+
+        val session = ProcessChatSessionOpener().openChatSession(
+            SessionEntryPlan(
+                command = listOf("kyu-test-only-claude"),
+                workingDirectory = temporaryDirectory,
+                environment = mapOf("PATH" to "$binDirectory${java.io.File.pathSeparator}/usr/bin:/bin"),
+            ),
+        )
+        session.endSession()
+
+        assertTrue(waitUntilFileAppears(report), "환경의 PATH 에만 있는 명령이 뜨지 않았다")
     }
 
     @Test

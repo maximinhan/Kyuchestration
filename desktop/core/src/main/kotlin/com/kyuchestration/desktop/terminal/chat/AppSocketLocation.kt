@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
 import com.kyuchestration.desktop.platform.runningOnMac
 import java.nio.file.Path
 import java.util.UUID
@@ -31,7 +32,7 @@ import java.util.UUID
  *   않는다" 이고, 그 일은 사용자 이름도 똑같이 한다.
  */
 internal fun appSocketDirectory(
-    osName: String = System.getProperty("os.name").orEmpty(),
+    osName: String = currentOperatingSystemName(),
     lookUpEnvironmentVariable: (String) -> String? = System::getenv,
     userName: String = System.getProperty("user.name").orEmpty(),
 ): Path {

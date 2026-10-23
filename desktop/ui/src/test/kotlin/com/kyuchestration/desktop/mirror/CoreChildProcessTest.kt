@@ -72,7 +72,10 @@ class CoreChildProcessTest {
     @Test
     fun `거울을 세우다 실패하면 코어의 stdin 을 닫고 끝나기를 기다린 뒤 그 실패를 던진다`() = runBlocking {
         // 첫 스냅샷 전에 화면이 던지고 떠나면 띄운 코어가 주인 없이 남는다 — 코어는 stdin 의 끝을 받아야 세션을 끝낸다.
-        val brokenCore = CoreChildProcess.start(listOf("sh", "-c", "echo 틀이-아닌-줄; cat > /dev/null"), diagnosticLog)
+        val brokenCore = CoreChildProcess.start(
+            CorePlace.SameMachine(listOf("sh", "-c", "echo 틀이-아닌-줄; cat > /dev/null")),
+            diagnosticLog,
+        )
 
         assertFailsWith<SerializationException> {
             brokenCore.connectMirror(readingScope, TEST_SCREEN_VERSION_LABEL, leaveTimeout = PROCESS_TIMEOUT)
@@ -82,7 +85,7 @@ class CoreChildProcessTest {
         assertEquals(DiagnosticLogEntry.CoreProcessExited(exitCode = 0, screenWasLeaving = true), recordedCoreExit())
     }
 
-    private fun startCoreProcess(): CoreChildProcess = CoreChildProcess.start(coreProcessCommandForTests(), diagnosticLog) {
+    private fun startCoreProcess(): CoreChildProcess = CoreChildProcess.start(CorePlace.SameMachine(coreProcessCommandForTests()), diagnosticLog) {
         isolatedCoreEnvironment(scratchDirectory, scratchDirectory.resolve("kyu"))
     }
 

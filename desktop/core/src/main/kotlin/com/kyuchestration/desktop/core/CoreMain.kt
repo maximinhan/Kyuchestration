@@ -7,6 +7,7 @@ import com.kyuchestration.desktop.diagnostics.DiagnosticLogOwner
 import com.kyuchestration.desktop.diagnostics.FileDiagnosticLog
 import com.kyuchestration.desktop.diagnostics.diagnosticLogFile
 import com.kyuchestration.desktop.diagnostics.recordUncaughtFailuresIn
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
 import java.io.FileDescriptor
 import java.io.FileOutputStream
 import java.io.IOException
@@ -53,7 +54,7 @@ private fun serveScreenOverStandardStreams(): Int {
     diagnosticLog.record(
         DiagnosticLogEntry.ApplicationStarted(
             versionLabel = versionLabel,
-            operatingSystemName = System.getProperty("os.name").orEmpty(),
+            operatingSystemName = currentOperatingSystemName(),
             javaRuntimeVersion = System.getProperty("java.version").orEmpty(),
         ),
     )
@@ -67,7 +68,7 @@ private fun serveScreenOverStandardStreams(): Int {
     val coreRun = startCore(
         framesFromScreen = framesFromScreen,
         framesToScreen = framesToScreen,
-        coreIdentity = CoreIdentity(versionLabel = versionLabel, diagnosticLogPath = diagnosticLogPath.toString()),
+        coreIdentity = coreIdentityOf(versionLabel = versionLabel, diagnosticLogPath = diagnosticLogPath.toString()),
         diagnosticLog = diagnosticLog,
     )
 

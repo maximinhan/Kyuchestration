@@ -81,9 +81,10 @@ interface ScreenFacingCore {
     /**
      * 화면의 파일 선택기가 고른 자리를 워크디렉토리로 연다. 초기화가 필요하면 그 걸음도 코어가 잇는다.
      *
-     * @param hostPath 화면 OS 의 경로 문자열. 화면 경로가 경계에 오르는 자리는 여기 하나이고, 푸는 것은 코어다(설계 6.9).
+     * @param workDirPath 코어의 경로. 선 위의 경로는 언제나 코어 경로다 — 윈도우 화면이 고른 `\\wsl.localhost\…` 는 화면이 코어
+     *   경로로 옮겨 보낸다(설계 6.9 의 3 단계 정정, coreWorkDirPathOf).
      */
-    fun openWorkDir(hostPath: String)
+    fun openWorkDir(workDirPath: String)
 
     fun initializeOpenedWorkDir()
 

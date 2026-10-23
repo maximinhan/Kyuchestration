@@ -41,6 +41,25 @@ class DiagnosticLogLocationTest {
         assertEquals(Path.of("/Users/yawn/Library/Logs/Kyuchestration/desktop.log"), logFile)
     }
 
+    /**
+     * 윈도우에서 뜨는 것은 화면뿐이다(코어는 WSL 안에 있다 — core-ui-split-design.md 6.16). 기록은 윈도우가 앱마다 두는 사용자 자리에
+     * 둔다 — 로밍되지 않는 쪽(LOCALAPPDATA)이다. 기록은 그 머신에서 난 일이라 다른 머신으로 따라갈 까닭이 없다.
+     */
+    @Test
+    fun `윈도우에서는 LOCALAPPDATA 아래 앱 이름 자리에 둔다`() {
+        val logFile = diagnosticLogFile(
+            owner = DiagnosticLogOwner.Screen,
+            osName = "Windows 11",
+            userHomeDirectory = Path.of("C:\\Users\\maxim"),
+            lookUpEnvironmentVariable = { if (it == "LOCALAPPDATA") "C:\\Users\\maxim\\AppData\\Local" else null },
+        )
+
+        assertEquals(
+            Path.of("C:\\Users\\maxim\\AppData\\Local").resolve("Kyuchestration").resolve("Logs").resolve("desktop.log"),
+            logFile,
+        )
+    }
+
     @Test
     fun `리눅스에서는 XDG_STATE_HOME 을 따른다`() {
         val logFile = diagnosticLogFile(

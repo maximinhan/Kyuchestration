@@ -45,6 +45,7 @@ fun startCore(
             coreIdentity = coreIdentity,
             framesFromScreen = framesFromScreen,
             framesToScreen = framesToScreen,
+            diagnosticLog = diagnosticLog,
         )
         // 화면이 떠나고 세션도 다 끝났다. 홀더들이 걸어 둔 반복(대시보드의 관찰 같은 것)을 함께 거둔다. 이 취소는 정상 종료다 —
         // serveScreen 이 화면 쪽 줄을 이미 까닭 없이 닫았으므로, 아래 invokeOnCompletion 이 이 취소를 실어 닫으려 해도 아무 일이

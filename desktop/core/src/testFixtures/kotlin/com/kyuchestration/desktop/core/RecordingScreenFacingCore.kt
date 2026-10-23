@@ -63,7 +63,7 @@ class RecordingScreenFacingCore(
 
     override fun useClaudeToken(token: String) = record(ScreenCommand.UseClaudeToken(token))
 
-    override fun openWorkDir(hostPath: String) = record(ScreenCommand.OpenWorkDir(hostPath))
+    override fun openWorkDir(workDirPath: String) = record(ScreenCommand.OpenWorkDir(workDirPath))
 
     override fun initializeOpenedWorkDir() = record(ScreenCommand.InitializeOpenedWorkDir)
 

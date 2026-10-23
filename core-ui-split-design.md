@@ -3,7 +3,7 @@
 > 창은 윈도우의 것으로 뜨고, 프로젝트 폴더·`claude` 세션·`kyu` 엔진은 WSL 안에서 돈다. 지금 한 JVM 이 하는 일을 둘로 가른다 — 세션을 소유하는 **코어**(헤드리스 JVM)와 그것을 그리는 **화면**(Compose). 화면은 코어를 자식 프로세스로 띄우고 stdio 로 JSON 줄을 주고받는다. 윈도우에서는 그 자식이 `wsl.exe` 너머에 있고, 맥·리눅스에서는 같은 머신에 있다. 길은 하나다. 화면은 언제 죽어도 되고, 코어는 세션과 함께 남아 다음 화면을 기다린다.
 
 - 작성일: 2026-10-22
-- 상태: **설계 확정 전 — 실측 완료, 사용자 승인 대기.** 구현 미착수
+- 상태: **구현 중** — 1 · 2 단계 머지, 3 단계 진행(3a). 단계마다 "(N 단계 정정)" 으로 코드의 사실을 적는다
 - 선행 문서: [app-owned-sessions-design.md](app-owned-sessions-design.md) — 원칙 5(개정)·11·12, 5.5(대화 이어가기)
 - 선행 문서: [chat-ui-design.md](chat-ui-design.md) — 5.4(승인 브리지·앱 소켓), 원칙 14·15
 - 선행 문서: [session-tree-design.md](session-tree-design.md) — 6.4(앱 소켓의 `kind` 규약), 6.9(관문), 6.13(수명), 원칙 16·17·18
@@ -173,6 +173,7 @@ WSL 쪽에 매초 "살아 있다" 를 적고 받은 신호(`HUP`·`TERM`·`PIPE`
 | 그 안의 **절대 경로 심볼릭 링크**(`kyu-link-probe → /tmp/…/target`) | 이름은 목록에 보이지만 `Files.exists(NOFOLLOW_LINKS)=false`, `toRealPath()` 는 `NoSuchFileException`. PowerShell `Get-Item .Target` 도 빈 값 |
 | PowerShell `[System.IO.Path]::GetFullPath` · `Directory.Exists` · `Resolve-Path` | 두 형식 다 그대로 · `True` · 그대로 |
 | 탐색기 왼쪽 "Linux" 노드의 경로 | `::{B2B4A4D1-2754-4140-A2EB-9A76D9D7CDC6}` — 파일 시스템 경로가 아니라 셸 이름 공간이다 |
+| **(3 단계 실측)** 윈도우가 이름에 못 쓰는 글자(`\ : * ? " < > \|` · 제어 문자)를 담은 리눅스 이름 | 윈도우 JVM 에 **그 글자 + U+F000** 으로 보인다(`a:b` → `a\uF03Ab`, `ctl\u0001x` → `ctl\uF001x`). `wslpath -u` 는 되돌린다. 끝이 `.` 인 이름은 `isDirectory=false` — 윈도우가 끝의 점을 떼어 버려 고를 수 없다 |
 
 **화면은 WSL 폴더를 "볼" 수는 있지만 리눅스와 같게 보지는 못한다.** 심볼릭 링크가 끊겨 보이고, 대소문자만 다른 이름이 윈도우 API 에서 어떻게 갈릴지는 쓰는 함수마다 다르다. **화면은 워크디렉토리의 파일 시스템을 만지지 않는다**(원칙 19). 고른 경로 문자열만 코어에게 넘기고, 코어가 리눅스 쪽에서 푼다(6.9).
 
@@ -243,6 +244,7 @@ stdio 는 한 번뿐이다. 화면이 끊긴 뒤 다음 화면이 코어에 붙�
 | 윈도우 JVM 이 `wsl.exe -e python3 printargs.py <인자>` 로 넘긴 인자 | `한국어 공백` · `back\slash` · `$HOME` · `a;b` · `tail\` 는 그대로. **`"quoted"` 는 `quoted` 로 따옴표가 사라진다** | 윈도우의 명령줄은 문자열 하나다. **`wsl.exe` 에는 단순한 인자만 넘기고, 나머지는 전부 stdio 로 보낸다**(6.12) |
 | `wsl.exe -d Ubuntu-24.04 --cd ~ -e pwd` | `/home/yawn` | 화면은 사용자의 리눅스 홈 경로를 몰라도 된다 |
 | `wsl.exe -d Ubuntu-24.04 --cd ~ -e .local/bin/kyu version` | `kyu v0.13.0 (3edd9cf05752)` | **셸도 따옴표도 없이** `~/.local/bin` 의 실행 파일을 띄우는 길(6.12) |
+| **(3 단계 실측)** `wsl.exe -e` 로 뜬 코어가 `claude` 를 이름으로 띄우기 | **"claude 를 실행하지 못했습니다"**. `ProcessBuilder` 는 이름을 자식에게 줄 환경이 아니라 **JVM 이 받은 PATH** 로 찾는다(JVM 의 PATH 에 없고 자식 환경의 PATH 에만 있으면 `error: 2`). 코어가 로그인 셸로 채운 PATH 는 손자에게만 닿고 있었다 | 코어는 자식의 실행 파일을 자식에게 줄 PATH 에서 찾아 절대 경로로 띄운다(`commandResolvedOnChildSearchPath`). Finder 로 띄운 맥 앱도 같은 결함이었다 |
 
 ### 3.8 재지 않은 것
 
@@ -512,6 +514,7 @@ app-owned 의 개정(*"GUI 세션은 앱과 생사를 같이한다"*)은 창과 
 | `seq` | 코어가 낸 변화마다 1 씩 는다. 스냅샷은 그것을 찍은 `seq` 를 단다. 화면은 `seq` 가 하나라도 건너뛰면 다시 붙어 스냅샷을 받는다 — 거울이 조용히 어긋나지 않게 |
 | `protocol` 은 정수 하나 | 6.14 |
 | **(2 단계 정정)** 지금 싣는 필드 | `hello { protocol, screenVersion }` · `welcome { protocol, coreVersion, coreDiagnosticLog, engineDirectory }` · `bye { reason: protocol_mismatch }`. `screenOs` · `coreOs` · `wslDistro` 는 쓰는 자리(3 단계의 경로 변환 · 진단 기록 경로)가 생길 때 더한다 — 필드를 더하는 변경은 판을 올리지 않는다. `bye` 의 나머지 까닭 둘은 5 단계의 것이다 |
+| **(3 단계 정정)** 더한 필드와 판 | `hello.screenOs` · `welcome.coreOs`(`windows` · `macos` · `linux`, 열거형이 아니라 낱말 — 새 판이 모르는 낱말을 보내도 인사 틀이 읽히게) · `welcome.wslDistro`(코어의 `WSL_DISTRO_NAME`, WSL 밖이면 싣지 않음). 코어는 인사한 화면을 `core.log` 에, 화면은 인사 답의 코어를 `desktop.log` 에 남긴다. `open_workdir` 의 `hostPath` 가 `workDirPath`(코어 경로)로 바뀌어 **`protocol` 은 2** 다(6.9 정정) |
 | **(2 단계 정정)** 낡은 답의 `rejected` 사유 | `question_not_open` 하나 — 승인 · 관문 물음이 이미 닫혔다(답이 갔거나 claude 가 거뒀거나 세션이 끝났다). 물음이 열려 있는지는 챗 홀더가 답 함수의 결과로 알리고(`answerPermission` · `answerGateQuestion` 이 닿았는가를 돌려준다), serveScreen 은 그 결과로 거절을 쓴다. 어느 까닭으로 닫혔는지는 가르지 않는다 — 화면이 할 일은 같다 |
 
 ### 6.5 변화를 보내는 법 — `StateFlow` 를 그대로 두고, 코어 안의 게시자가 변화로 바꾼다
@@ -599,6 +602,23 @@ conversation_removed  { target }
 | `wslpath` 를 부른다, 직접 자르지 않는다 | 대소문자·두 형식·자동 마운트를 `wslpath` 가 이미 안다(3.3). 코어가 WSL 안에 있는지는 `WSL_DISTRO_NAME` 으로 안다. 맥·리눅스에서는 이 갈래를 지나지 않는다 |
 | 화면이 코어 경로를 **보여줄** 때 | 그대로 보인다(`/home/yawn/work`) — 사람이 WSL 터미널에서 쓰는 이름이다. 화면이 윈도우 경로로 바꿔야 하는 자리는 "탐색기에서 열기" 같은 OS 기능뿐이고 지금은 없다. 진단 기록 경로(6.2 (다))만 `\\wsl.localhost\<배포판>` + 경로로 잇는다 — 배포판 이름은 `welcome` 이 준다 |
 
+**(3 단계 정정) 화면이 옮기고, WSL 밖의 자리는 거절한다.** 위 표와 판단은 처음의 설계다. 3 단계의 코드는 이렇다.
+
+| 화면이 고른 것 | 화면이 하는 일 | 선 위 |
+|---|---|---|
+| `\\wsl.localhost\<코어의 배포판>\…` · `\\wsl$\<코어의 배포판>\…`(호스트 · 배포판 대소문자 무시) | 배포판의 뿌리를 `/` 로, 나머지를 `/` 로 잇는다. U+F000 + 글자로 보인 리눅스 이름은 되돌린다(3.3 정정) | `open_workdir { workDirPath: "/…" }` |
+| 다른 배포판의 `\\wsl.localhost\…` | 거절 — *"이 코어는 WSL 의 Ubuntu-24.04 에 있습니다. 다른 배포판(docker-desktop)의 폴더는 열 수 없습니다"* | 오르지 않는다 |
+| `C:\…` · 다른 네트워크 공유 | **거절** — *"코어는 WSL(Ubuntu-24.04) 안의 폴더만 엽니다"* | 오르지 않는다 |
+| 맥 · 리눅스 · WSLg 화면의 경로 | 그대로 | 그대로 |
+
+| 판단 | 근거 |
+|---|---|
+| **선 위의 경로는 언제나 코어 경로** — 화면이 옮긴다 | 처음 설계가 코어에 맡긴 근거는 자동 마운트 자리(`/mnt/c`, `wsl.conf` 의 `[automount] root`)가 코어 OS 의 사실이라서였다. `C:\…` 를 받지 않으면 그 근거가 남지 않는다 — 남는 것은 `\\wsl.localhost\<배포판>\` 의 뿌리가 그 배포판의 `/` 라는 고정된 사실과 윈도우 쪽 이름 바꾸기(U+F000) 하나다. 거절도 왕복 없이 고른 그 자리에서 알린다 |
+| `C:\…` 를 거절한다(처음 설계는 받아들였다) | 그 위에서 `claude` · `kyu` · `git` 이 9P 너머 윈도우 파일 시스템을 쓰게 된다 — 느리고(8 절 6), 실행 권한 · 대소문자 규칙이 리눅스와 다르다. 코어는 WSL 안의 폴더만 연다 |
+| 배포판은 코어가 `welcome.wslDistro` 로 말한 것, 없으면 화면이 고른 것 | 코어가 사는 자리의 사실이 먼저다. 코어가 말하지 않으면(`WSL_DISTRO_NAME` 없음) `-d` 로 고른 배포판으로 옮긴다 — 비우면 UNC 경로가 거절도 변환도 없이 코어에 간다. 코어를 WSL 너머에 띄웠을 때만 옮긴다 — WSLg 화면에도 `WSL_DISTRO_NAME` 이 있지만 코어와 같은 리눅스를 본다 |
+| 필드 이름을 바꾸고 `protocol` 을 2 로 | `hostPath`(화면 경로, 코어가 푼다)와 `workDirPath`(코어 경로)는 뜻이 다르다. 필드가 빠지고 뜻이 바뀌면 판을 올린다(6.14) |
+| 폴더 선택 창 | 윈도우도 JFileChooser 다(AWT `FileDialog` 는 윈도우에서 폴더를 못 고른다). `\\wsl.localhost\<배포판>\home` 에서 시작한다 — 화면은 코어 사용자의 리눅스 홈을 모른다. 네이티브 창(`IFileOpenDialog`)이 "Linux" 아래 폴더를 어떤 경로로 주는지는 사람이 눌러 봐야 안다(3.8, 4 단계 손 확인) |
+
 ### 6.10 OS 기능 — 화면의 것
 
 | 기능 | 지금 | 갈라진 뒤 |
@@ -641,6 +661,7 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 | `wsl.exe` 의 절대 경로 | 사용자의 PATH 에 다른 `wsl.exe`(옛 `bash.exe` 시절 래퍼 등)가 앞에 있어도 갈리지 않게 |
 | 인자는 동사 하나(`serve --stdio` 또는 `attach`) | 나머지(판, 화면 OS)는 `hello` 로 보낸다 |
 | **(2 단계 정정)** 지금의 함수 | `Local` 갈래만 있다 — `app` 모듈의 `coreLaunchCommand()` 가 자기 실행기(`jpackage.app-path`)에 `core serve --stdio` 를 붙이거나, 실행기 없이 떴으면(`./gradlew run`) 같은 java · 클래스패스 · 앱 리소스 자리로 같은 main 을 부른다. `WslDistribution` 은 3 단계에서 더한다 |
+| **(3 단계 정정)** 지금의 모양 | 함수가 아니라 `ui` 의 `CorePlace`(`SameMachine(명령)` · `WslDistribution(wsl.exe, 배포판)`) 하나다. `CoreChildProcess.start(place, …)` 가 받고, 그 뒤의 stdio · 거울은 같다. WSL 갈래는 `<SystemRoot>\System32\wsl.exe -d D --cd ~ -e .local/bin/kyuchestration-core serve --stdio` 에 환경 `WSL_UTF8=1`(wsl.exe 가 스스로 쓰는 글을 UTF-8 로). `wsl.exe` 에게 묻는 일(목록 · 코어 있음)도 같은 `wslProcessBuilder` 를 지난다. 화면이 떠날 때의 강제 종료는 `wsl.exe` 만 끝낸다(3.2 B) — 코어를 끝내는 길은 stdin 의 끝뿐이고, `wsl.exe` 가 그 끝을 코어까지 나른다(3 단계 실측: 창 닫기 · 화면 JVM `halt` 둘 다 코어와 claude 자손 0) |
 | 코어의 `claude`·`kyu` 찾기 | 코어가 한다 — 지금 앱의 `LoginShellSearchPath.kt` 그대로(3.7 이 그것이 여전히 필요함을 보였다) |
 | 윈도우 JVM 이 `wsl.exe` 를 찾지 못하면 | "WSL 이 설치되어 있지 않습니다" 화면(6.17). 지금의 `WindowsNeedsWsl` 이 화면 쪽으로 옮겨 온 모양이다 |
 
@@ -760,6 +781,16 @@ desktop/
 | 설치를 화면이 대신 돌리지 않는다(v1) | 설치 스크립트가 지금 비공개 저장소의 토큰을 묻는다. 그 대화를 `wsl.exe` 너머로 화면이 대신하면 토큰 입력 칸·진행 표시·실패 갈래를 새로 짜야 한다. 명령 한 줄을 복사해 WSL 터미널에서 돌리는 것으로 시작한다 — 8 절 5 |
 | 엔진 설치 화면은 코어의 상태 | 코어가 붙은 뒤 엔진이 없으면 지금의 `EngineInstallationScreen` 이 그대로 선다. 엔진은 코어 옆(WSL)에 받는다 |
 
+**(3 단계 정정)** 지금의 흐름
+
+| 걸음 | 코드 |
+|---|---|
+| 코어가 있는가 | `version` 동사 대신 `wsl.exe -d D --cd ~ -e test -x .local/bin/kyuchestration-core`(셸 없는 `/usr/bin/test`). 0 있음 · 글 없는 1 없음 · 그 밖(글을 쓴 1 포함 — wsl.exe 의 커널 갱신 · 기본 사용자 없음 같은 것)은 `wsl.exe` 의 실패(없는 배포판이면 리눅스 쪽 255, 윈도우 JVM 에서는 -1)라 그 말을 그대로 보인다. 판은 붙은 뒤 `welcome` 이 견준다(6.14) |
+| 미리 보지 않는다 | 배포판마다 코어가 있는지 미리 묻지 않는다 — `wsl.exe -d` 는 멈춘 배포판을 띄운다. 고른(또는 기억한) 배포판만 본다 |
+| 기억 | 준비 창을 먼저 띄운다(멈춘 배포판을 깨우는 `test` 가 수십 초 걸릴 수 있다). 지난번에 고른 배포판이 목록에 있고 코어가 있으면 묻지 않고 준비 창을 닫는다. 기억 파일을 못 읽으면 기억이 없는 것으로 본다. 기억은 코어에 닿을 수 있을 때만 적는다(`%APPDATA%\Kyuchestration\wsl-distribution`). 화면의 진단 기록은 `%LOCALAPPDATA%\Kyuchestration\Logs\desktop.log` |
+| 목록 | `-l -v` 를 `WSL_UTF8=1` 로. 옛 판의 UTF-16LE 도 NUL 바이트로 가려 읽는다. 머리줄은 한국어 로케일에서도 영어였다(실측) |
+| 코어 없음 안내 | 지금은 자리(`~/.local/bin/kyuchestration-core`)만 알린다. 설치 명령 한 줄(복사 버튼)은 설치 스크립트와 함께 3b |
+
 ---
 
 ## 7. 구현 단계
@@ -771,6 +802,7 @@ desktop/
 | **1** | **프로토콜 추출 — 한 프로세스 안에서.** 모듈은 아직 하나다. 챗 홀더의 공개 표면을 대상 명시로 바꾸고(6.8 (가)), 대화들을 세션별로 내놓는다. 관문 물음에 id(6.7). `FailureView`(6.3). 틀·명령·변화의 `@Serializable` 타입과 `ScreenChangePublisher` · `CoreMirror` 를 만들고, **앱이 같은 JVM 안에서 직렬화된 줄을 거쳐서만** 화면을 그리게 한다(메모리 파이프) | 시험: 직렬화 왕복, 비밀 가리기, 게시자 → 거울(실제 홀더). **실측 시나리오**(실 `claude`, 스크래치 워크디렉토리): 메인 챗 · 승인 카드 · 하위 둘 띄우기 · 관문 대화 상자 · 중단이 지금과 같이 돈다. 그 사이 오간 줄을 기록해 큰 대화의 스냅샷 크기를 PR 본문에 적는다 |
 | **2** | **코어 분리 — 같은 머신.** Gradle 모듈 `protocol`·`core`·`ui`(6.15). `kyuchestration-core serve --stdio`. 화면이 `coreLaunchCommand(Local)` 로 띄운다. 코어는 stdin EOF 에 세션을 다 끝내고 끝난다(6.13 단계 2~4). 시험이 모듈로 옮겨 간다. 맥·리눅스 패키지에 코어를 넣는 법(6.16) | **실측**: 리눅스(WSLg)·맥에서 1 단계의 시나리오가 프로세스 경계를 넘어 돈다. 화면을 `kill -9` 하면 코어가 EOF 를 보고 모든 `claude` 를 끝낸다(`ps` 에 남는 것 없음). 화면 JVM 과 코어 JVM 의 RSS 를 따로 잰다(3.8). `./gradlew :core:dependencies` 에 Compose 가 없다 |
 | **3** | **윈도우 화면 + `wsl.exe` 연결 + 경로.** `coreLaunchCommand(WslDistribution)`, 배포판 목록(UTF-16LE · `WSL_UTF8`)과 고르기, `open_workdir { hostPath }` 를 코어가 `wslpath -u` 로 풀기(6.9), 윈도우 파일 선택기 갈래, 브라우저 열기를 화면으로(6.10). 개발은 WSL 에서 `:core` 를 설치하고 윈도우에서 `:ui:run` | **실측**(윈도우 + WSL, 실 `claude`): 윈도우 창에서 WSL 폴더를 골라 열고 → 메인 챗에 한국어로 말하고 → 승인 카드에 답하고 → 하위 세션을 띄운다. 네이티브 선택 창이 주는 경로 형식을 확인한다(3.8). 다른 배포판 폴더를 고르면 거절 문구. 창을 닫으면 WSL 에 `claude` 가 남지 않는다 |
+| **3 (정정)** | **3a**: `CorePlace.WslDistribution` · 배포판 목록과 고르기 · 화면이 `\\wsl.localhost` 를 코어 경로로 옮기기(6.9 정정) · `hello`/`welcome` 의 OS · 배포판 · 코어가 자식의 PATH 로 `claude` 찾기(3.7 정정). **3b**: WSL 코어 설치 스크립트 · 릴리스 산출물 · 윈도우 패키징 · CI. 브라우저 열기를 화면으로(6.10)는 3b 이후 | **3a 실측**: 윈도우 JVM(OpenJDK 23) 하네스가 화면의 `CoreChildProcess`(WSL 모드)와 거울로 WSL 코어와 hello → welcome → 스냅샷 → 명령 → 변화, 한국어 워크디렉토리 열기, 실 claude 메인 한 턴(한국어 · 이모지 · 따옴표 · 역슬래시 그대로), 떠나기 · `halt` 모두 코어와 자손 0. 윈도우 창 손 확인 · 승인 카드 · 하위 세션은 이후 단계 |
 | **4** | **msi 릴리스.** `release.yml` 에 윈도우 잡(`packageMsi`)과 리눅스 코어 tar.gz 잡, `install.sh --with-core`, 첫 실행 흐름(6.17), README | **실측**: 시험 태그로 워크플로를 돌려 msi·tar.gz 가 나온다. 사용자의 윈도우에 msi 를 깔고, 코어가 없는 배포판에서 안내를 따라 설치한 뒤 3 단계 시나리오가 돈다. 판이 다른 화면·코어를 붙이면 `protocol_mismatch` 화면 |
 | **5** | **코어 수명·재접속.** `serve`(데몬)와 `attach`(중계), `core.sock`·`core.lock`, 새 화면이 옛 연결을 밀어냄, 화면 없음 + 세션 없음 10 분에 끝남, `shutdown_core`, 판 갈아 끼우기(6.14), 창 닫기 = 떼기 | **실측**: ① 턴이 도는 중에 윈도우 창을 닫고 → 다시 열면 같은 대화에 그 턴의 끝이 서 있다 ② 화면 JVM 을 작업 관리자로 죽이고 다시 열면 붙는다 — WSL 에 남은 `attach` 없음(`pgrep`) ③ 승인 카드가 뜬 채로 화면을 죽이고 다시 열면 카드가 그대로 있고 답이 간다 ④ 화면 없이 세션 없이 10 분 뒤 코어가 사라진다 ⑤ **모든 `wsl.exe` 가 끝난 뒤 배포판이 멈추는가**를 사용자 머신에서 잰다(3.8 첫 줄) ⑥ 맥에서 떼어 낸 코어가 화면 종료 뒤에 사는가 |
 

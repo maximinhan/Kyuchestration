@@ -52,7 +52,7 @@ class SecretsStayOffTheScreenFramesTest {
         val coreToTap = coreOutbox.linesDeliveredIn(backgroundScope)
         val tapToMirror = Channel<String>(Channel.UNLIMITED)
         val linesSentToScreen = mutableListOf<String>()
-        backgroundScope.launch { serveScreen(bed.core, TEST_CORE_IDENTITY, framesFromScreen = screenToCore, framesToScreen = coreOutbox) }
+        backgroundScope.launch { serveScreen(bed.core, TEST_CORE_IDENTITY, framesFromScreen = screenToCore, framesToScreen = coreOutbox, diagnosticLog = DiagnosticLog.Discarding) }
         backgroundScope.launch {
             for (line in coreToTap) {
                 linesSentToScreen += line

@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.engine.EngineInstaller
 import com.kyuchestration.desktop.engine.reasonEngineDoesNotRun
 import com.kyuchestration.desktop.kyu.managedEngineDirectory
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
 import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
@@ -39,7 +40,7 @@ import kotlinx.serialization.json.Json
 class GitHubReleaseEngineInstaller(
     private val engineDirectory: Path = managedEngineDirectory(),
     private val gitHubApiBaseUrl: String = GITHUB_API_BASE_URL,
-    private val osName: String = System.getProperty("os.name").orEmpty(),
+    private val osName: String = currentOperatingSystemName(),
     private val osArchitecture: String = System.getProperty("os.arch").orEmpty(),
     /**
      * 받아 온 엔진이 돌지 않을 때 그 사실을 남길 자리.

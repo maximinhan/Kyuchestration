@@ -1,10 +1,11 @@
 package com.kyuchestration.desktop.kyu
 
 import com.kyuchestration.desktop.platform.childProcessEnvironment
+import com.kyuchestration.desktop.platform.currentOperatingSystemName
+import com.kyuchestration.desktop.platform.findExecutableOnSearchPath
+import com.kyuchestration.desktop.platform.isExecutableRegularFile
 import com.kyuchestration.desktop.platform.runningOnMac
-import java.io.File
 import java.nio.file.Path
-import kotlin.io.path.isExecutable
 import kotlin.io.path.isRegularFile
 
 /**
@@ -65,7 +66,7 @@ internal fun findKyuExecutable(
     }
 
     return bundledEngineCopyPath.takeIf(isExecutableFile)
-        ?: findOnSearchPath(lookUpEnvironmentVariable("PATH"), isExecutableFile)
+        ?: findExecutableOnSearchPath("kyu", lookUpEnvironmentVariable("PATH"), isExecutableFile)
         ?: managedEngineExecutablePath.takeIf(isExecutableFile)
 }
 
@@ -125,7 +126,7 @@ private const val APPLICATION_RESOURCES_DIRECTORY_PROPERTY = "compose.applicatio
  * 미리 두면 시험할 수 없는 코드가 하나 생긴다.
  */
 internal fun managedEngineDirectory(
-    osName: String = System.getProperty("os.name").orEmpty(),
+    osName: String = currentOperatingSystemName(),
     userHomeDirectory: Path = Path.of(System.getProperty("user.home").orEmpty()),
 ): Path = if (runningOnMac(osName)) {
     userHomeDirectory.resolve("Library/Application Support/Kyuchestration/engine")
@@ -157,15 +158,6 @@ internal const val PINNED_KYU_EXECUTABLE_VARIABLE = "KYU_BINARY_PATH"
  * 아니므로, 그 이름으로 찾아질 파일이 이 프로젝트에는 없다. 찾는 시늉만 하면 윈도우에서
  * 띄운 사람이 받게 될 답이 "WSL 에서 띄우세요" 가 아니라 침묵이 된다.
  */
-private fun findOnSearchPath(searchPath: String?, isExecutableFile: (Path) -> Boolean): Path? =
-    searchPath.orEmpty()
-        .split(File.pathSeparatorChar)
-        .filter { it.isNotBlank() }
-        .map { directory -> Path.of(directory, "kyu") }
-        .firstOrNull(isExecutableFile)
-
-private fun isExecutableRegularFile(path: Path): Boolean = path.isRegularFile() && path.isExecutable()
-
 /**
  * 동봉된 원본을 볼 때는 실행 권한을 따지지 않는다. jpackage 가 그 권한을 떼어 내는 것이 정상이고,
  * 그래서 앱이 이 파일을 복사해 자기 자리에 놓는다.

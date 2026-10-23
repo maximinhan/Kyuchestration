@@ -1,5 +1,7 @@
 package com.kyuchestration.desktop.core
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticLog
+import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.protocol.ByeReason
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.FrameToCore
@@ -42,11 +44,14 @@ suspend fun serveScreen(
     coreIdentity: CoreIdentity,
     framesFromScreen: ReceiveChannel<String>,
     framesToScreen: ScreenFrameOutbox,
+    diagnosticLog: DiagnosticLog,
     screenBacklogLimitBytes: Long = SCREEN_BACKLOG_LIMIT_BYTES,
 ) {
     val publisher = ScreenChangePublisher(core)
     var lastSnapshotBytes = 0L
     var screenFellBehind = false
+    // 거울은 seq 가 건너뛰면 같은 연결에서 다시 인사한다(6.4). 화면이 붙은 것은 연결의 첫 인사 한 번이다.
+    var screenGreeted = false
 
     fun write(frame: FrameToScreen) = framesToScreen.write(encodeFrameToScreen(frame))
     fun sendSnapshot() {
@@ -106,10 +111,16 @@ suspend fun serveScreen(
                 }
                 when (frame) {
                     is FrameToCore.Hello -> {
+                        if (!screenGreeted) {
+                            screenGreeted = true
+                            diagnosticLog.record(DiagnosticLogEntry.ScreenGreeted(frame.screenVersion, frame.screenOs))
+                        }
                         write(
                             FrameToScreen.Welcome(
                                 protocol = SCREEN_PROTOCOL_VERSION,
                                 coreVersion = coreIdentity.versionLabel,
+                                coreOs = coreIdentity.operatingSystem,
+                                wslDistro = coreIdentity.wslDistributionName,
                                 coreDiagnosticLog = coreIdentity.diagnosticLogPath,
                                 engineDirectory = core.engineDirectoryLabel,
                             ),
@@ -170,7 +181,7 @@ private fun ScreenCommand.applyTo(core: ScreenServingCore): String? {
         is ScreenCommand.SubmitClaudeBrowserLoginCode -> core.submitClaudeBrowserLoginCode(code)
         ScreenCommand.CancelClaudeBrowserLogin -> core.cancelClaudeBrowserLogin()
         is ScreenCommand.UseClaudeToken -> core.useClaudeToken(token)
-        is ScreenCommand.OpenWorkDir -> core.openWorkDir(hostPath)
+        is ScreenCommand.OpenWorkDir -> core.openWorkDir(workDirPath)
         ScreenCommand.InitializeOpenedWorkDir -> core.initializeOpenedWorkDir()
         ScreenCommand.RefreshWorkDir -> core.refreshWorkDir()
         ScreenCommand.CloseWorkDir -> core.closeWorkDir()

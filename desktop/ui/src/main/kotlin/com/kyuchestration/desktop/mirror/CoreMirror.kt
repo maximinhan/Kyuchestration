@@ -1,12 +1,12 @@
 package com.kyuchestration.desktop.mirror
 
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
-import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.dashboard.WorkDirDashboardState
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.initialization.WorkDirInitializationState
+import com.kyuchestration.desktop.platform.currentOperatingSystemWord
 import com.kyuchestration.desktop.protocol.CommandOutcome
 import com.kyuchestration.desktop.protocol.CoreStateImage
 import com.kyuchestration.desktop.protocol.FailureView
@@ -15,6 +15,7 @@ import com.kyuchestration.desktop.protocol.FrameToScreen
 import com.kyuchestration.desktop.protocol.SCREEN_PROTOCOL_VERSION
 import com.kyuchestration.desktop.protocol.ScreenChange
 import com.kyuchestration.desktop.protocol.ScreenCommand
+import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.protocol.decodeFrameToScreen
 import com.kyuchestration.desktop.protocol.encodeFrameToCore
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
@@ -59,7 +60,10 @@ class CoreMirror private constructor(
     override val engineDirectoryLabel: String,
     /** 코어가 진단을 적는 파일(인사 답). 화면의 기록과 다른 프로세스의 파일이라 오류 자리에서 함께 알린다. */
     val coreDiagnosticLogPath: String,
+    /** 코어가 WSL 안에서 돌면 그 배포판(인사 답). 윈도우 화면이 자기 경로와 코어 경로를 옮기는 근거다(6.9). */
+    val coreWslDistributionName: String?,
     private val screenVersionLabel: String,
+    private val screenOperatingSystem: String?,
     private val diagnosticLog: DiagnosticLog,
 ) : ScreenFacingCore {
 
@@ -159,7 +163,7 @@ class CoreMirror private constructor(
         }
         if (frame.seq != nextChangeSequence) {
             snapshotBeingAssembled = SnapshotAssembly()
-            sendFrame(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = screenVersionLabel))
+            sendFrame(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = screenVersionLabel, screenOs = screenOperatingSystem))
             return
         }
         nextChangeSequence = frame.seq + 1
@@ -234,7 +238,7 @@ class CoreMirror private constructor(
 
     override fun useClaudeToken(token: String) = send(ScreenCommand.UseClaudeToken(token))
 
-    override fun openWorkDir(hostPath: String) = send(ScreenCommand.OpenWorkDir(hostPath))
+    override fun openWorkDir(workDirPath: String) = send(ScreenCommand.OpenWorkDir(workDirPath))
 
     override fun initializeOpenedWorkDir() = send(ScreenCommand.InitializeOpenedWorkDir)
 
@@ -315,6 +319,7 @@ class CoreMirror private constructor(
          * @param readingScope 틀을 읽는 코루틴이 사는 자리. 화면 스레드가 아니어야 한다 — 창을 닫는 자리가 화면 스레드를 붙잡고
          *   [endAllSessions] 를 기다리는데, 그 기다림을 푸는 것이 이 코루틴이다.
          * @param screenVersionLabel 이 화면의 판. 인사에 실어 코어의 기록에 남고, 판이 갈렸을 때 사람에게 보인다.
+         * @param screenOperatingSystem 이 화면이 도는 OS 의 낱말. 인사에 실어 코어의 기록에 남는다.
          */
         suspend fun connect(
             framesFromCore: ReceiveChannel<String>,
@@ -322,10 +327,16 @@ class CoreMirror private constructor(
             readingScope: CoroutineScope,
             diagnosticLog: DiagnosticLog,
             screenVersionLabel: String,
+            screenOperatingSystem: String? = currentOperatingSystemWord(),
         ): CoreConnection {
-            framesToCore.send(encodeFrameToCore(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = screenVersionLabel)))
+            framesToCore.send(
+                encodeFrameToCore(
+                    FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = screenVersionLabel, screenOs = screenOperatingSystem),
+                ),
+            )
             val welcome = decodeFrameToScreen(framesFromCore.receive()) as? FrameToScreen.Welcome
                 ?: error("코어가 인사에 welcome 이 아닌 틀로 답했다")
+            diagnosticLog.record(DiagnosticLogEntry.CoreGreeted(welcome.coreVersion, welcome.coreOs, welcome.wslDistro))
             if (welcome.protocol != SCREEN_PROTOCOL_VERSION) {
                 framesToCore.close()
                 return CoreConnection.ProtocolMismatch(
@@ -349,7 +360,9 @@ class CoreMirror private constructor(
                 initialImage = assembled,
                 engineDirectoryLabel = welcome.engineDirectory,
                 coreDiagnosticLogPath = welcome.coreDiagnosticLog,
+                coreWslDistributionName = welcome.wslDistro,
                 screenVersionLabel = screenVersionLabel,
+                screenOperatingSystem = screenOperatingSystem,
                 diagnosticLog = diagnosticLog,
             ).apply {
                 nextChangeSequence = snapshotSequence + 1

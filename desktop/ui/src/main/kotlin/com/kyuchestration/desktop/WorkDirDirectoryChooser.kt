@@ -15,12 +15,11 @@ import kotlin.io.path.isDirectory
  * 새 자리를 만드는 길도 여기 있다. 두 대화상자 모두 새 폴더를 만들 수 있어서, 앱이 만들 자리와
  * 이름을 따로 묻는 폼을 들 이유가 없다.
  *
- * **맥과 리눅스가 서로 다른 대화상자를 쓴다.** 처음에는 JFileChooser 하나로 두었다 — AWT 의
- * FileDialog 는 디렉토리를 고르는 방법이 플랫폼마다 다르고(맥은 시스템 속성, 윈도우는 아예 불가)
- * JFileChooser 만 세 플랫폼에서 같은 방식으로 디렉토리를 고르기 때문이다. 그 근거가 지금은
- * 약하다. 윈도우 네이티브는 이 앱의 대상이 아니고(릴리스가 윈도우 엔진 바이너리를 내지 않는다 —
- * 윈도우 사용자는 WSL 안에서 리눅스 앱을 쓴다), 그러면 갈라지는 것은 맥과 리눅스 둘뿐이라
- * "아예 불가" 인 자리가 없다.
+ * **맥은 네이티브 창, 리눅스 · 윈도우는 JFileChooser 다.** AWT 의 FileDialog 는 디렉토리를 고르는
+ * 방법이 플랫폼마다 다르고(맥은 시스템 속성, 윈도우는 아예 불가) JFileChooser 는 어디서나 같은
+ * 방식으로 디렉토리를 고른다. 윈도우 화면(코어는 WSL 안 — core-ui-split-design.md 6.10)은 그래서
+ * JFileChooser 로 `\\wsl.localhost\<배포판>\…` 를 고른다. 윈도우 네이티브 폴더 선택 창(IFileOpenDialog)이
+ * "Linux" 아래 폴더를 어떤 경로로 주는지는 사람이 눌러 봐야 알아 아직 쓰지 않는다(설계 3.8).
  *
  * 맥에서 네이티브 창을 쓰는 값은 둘이다. 하나는 그 창이 맥 사용자가 다른 앱에서 늘 보는 창이라는
  * 것(사이드바 · 최근 자리 · ⌘⇧G)이고, 다른 하나는 아래 [directoryTheFileChooserMeant] 가 되돌리는
@@ -28,12 +27,15 @@ import kotlin.io.path.isDirectory
  *
  * 모달 대화상자는 자기 이벤트 루프를 돌린다. Compose Desktop 도 같은 AWT 이벤트 스레드에서
  * 그리므로, 대화상자가 떠 있는 동안에도 뒤의 창은 계속 그려진다.
+ *
+ * @param startingDirectory JFileChooser 가 처음 열 자리. null 이면 사용자의 홈이다. 윈도우 화면은 WSL 쪽 자리를 준다 — 윈도우의
+ *   홈에서 시작하면 사람이 가장 먼저 보는 것이 코어가 열지 않는 자리다. 맥의 네이티브 창은 홈에서 시작한다(맥에는 WSL 이 없다).
  */
-fun chooseWorkDirDirectory(ownerWindow: Window?): Path? =
+fun chooseWorkDirDirectory(ownerWindow: Window?, startingDirectory: Path?): Path? =
     if (runningOnMac()) {
         chooseDirectoryWithMacNativeDialog(ownerWindow)
     } else {
-        chooseDirectoryWithFileChooser(ownerWindow)
+        chooseDirectoryWithFileChooser(ownerWindow, startingDirectory)
     }
 
 /**
@@ -78,8 +80,8 @@ private fun restoreMacFileDialogSetting(settingBeforeDialog: String?) {
     }
 }
 
-private fun chooseDirectoryWithFileChooser(ownerWindow: Window?): Path? {
-    val chooser = JFileChooser(File(System.getProperty("user.home"))).apply {
+private fun chooseDirectoryWithFileChooser(ownerWindow: Window?, startingDirectory: Path?): Path? {
+    val chooser = JFileChooser(startingDirectory?.toFile() ?: File(System.getProperty("user.home"))).apply {
         dialogTitle = "워크디렉토리 선택"
         // 워크디렉토리는 디렉토리다. 파일까지 고를 수 있게 두면 고른 것이 무엇인지 매번 되물어야 한다.
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY

@@ -74,26 +74,57 @@ class ScreenProtocolSerializationTest {
     }
 
     @Test
-    fun `인사 틀은 규약의 판과 화면의 판을 싣는다`() {
+    fun `인사 틀은 규약의 판 · 화면의 판 · 화면의 OS 를 싣는다`() {
         assertEquals(
-            """{"frame":"hello","protocol":1,"screenVersion":"v0.15.0"}""",
-            encodeFrameToCore(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v0.15.0")),
+            """{"frame":"hello","protocol":2,"screenVersion":"v0.15.0","screenOs":"windows"}""",
+            encodeFrameToCore(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v0.15.0", screenOs = "windows")),
         )
     }
 
     @Test
-    fun `인사 답은 규약의 판 · 코어의 판 · 코어의 진단 기록 · 엔진 자리를 싣는다`() {
+    fun `인사 답은 규약의 판 · 코어의 판 · 코어의 OS 와 WSL 배포판 · 코어의 진단 기록 · 엔진 자리를 싣는다`() {
         assertEquals(
-            """{"frame":"welcome","protocol":1,"coreVersion":"v0.15.0","coreDiagnosticLog":"/home/yawn/.local/state/kyuchestration/core.log",""" +
+            """{"frame":"welcome","protocol":2,"coreVersion":"v0.15.0","coreOs":"linux","wslDistro":"Ubuntu-24.04",""" +
+                """"coreDiagnosticLog":"/home/yawn/.local/state/kyuchestration/core.log",""" +
                 """"engineDirectory":"/home/yawn/.local/share/kyuchestration/engine"}""",
             encodeFrameToScreen(
                 FrameToScreen.Welcome(
                     protocol = SCREEN_PROTOCOL_VERSION,
                     coreVersion = "v0.15.0",
+                    coreOs = "linux",
+                    wslDistro = "Ubuntu-24.04",
                     coreDiagnosticLog = "/home/yawn/.local/state/kyuchestration/core.log",
                     engineDirectory = "/home/yawn/.local/share/kyuchestration/engine",
                 ),
             ),
+        )
+    }
+
+    /** WSL 밖의 코어(맥 · 리눅스)는 배포판이 없다. 빈 필드는 싣지 않는다. */
+    @Test
+    fun `WSL 밖의 코어는 배포판 필드를 싣지 않는다`() {
+        val welcome = FrameToScreen.Welcome(
+            protocol = SCREEN_PROTOCOL_VERSION,
+            coreVersion = "v0.15.0",
+            coreOs = "macos",
+            wslDistro = null,
+            coreDiagnosticLog = "/Users/yawn/Library/Logs/Kyuchestration/core.log",
+            engineDirectory = "/Users/yawn/Library/Application Support/Kyuchestration/engine",
+        )
+
+        assertFalse("wslDistro" in encodeFrameToScreen(welcome))
+        assertEquals(welcome, decodeFrameToScreen(encodeFrameToScreen(welcome)))
+    }
+
+    /**
+     * OS 는 낱말 셋 중 하나지만 열거형으로 읽지 않는다. 새 판의 상대가 모르는 낱말을 실어 보내면 열거형은 인사 틀 전체를 읽지 못하는
+     * 틀로 만든다 — 코어는 읽지 못한 인사를 건너뛰고 화면은 오지 않을 인사 답을 기다린다. 필드를 더하는 변경은 판을 올리지 않는다(6.14).
+     */
+    @Test
+    fun `모르는 OS 낱말을 실은 인사도 읽는다`() {
+        assertEquals(
+            FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v9.0.0", screenOs = "freebsd"),
+            decodeFrameToCore("""{"frame":"hello","protocol":2,"screenVersion":"v9.0.0","screenOs":"freebsd"}"""),
         )
     }
 
@@ -117,6 +148,15 @@ class ScreenProtocolSerializationTest {
                 engineDirectory = "/home/yawn/engine",
             ),
             decodeFrameToScreen("""{"frame":"welcome","engineDirectory":"/home/yawn/engine"}"""),
+        )
+    }
+
+    /** 선 위의 경로는 언제나 코어 경로다(설계 6.9 의 3 단계 정정). 필드 이름이 그것을 말한다. */
+    @Test
+    fun `워크디렉토리 열기 명령은 코어의 경로를 싣는다`() {
+        assertEquals(
+            """{"frame":"command","id":"c-1","command":{"type":"open_workdir","workDirPath":"/home/yawn/작업 디렉토리"}}""",
+            encodeFrameToCore(FrameToCore.Command("c-1", ScreenCommand.OpenWorkDir("/home/yawn/작업 디렉토리"))),
         )
     }
 
