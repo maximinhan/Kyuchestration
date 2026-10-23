@@ -213,6 +213,9 @@ private fun runDesktopApplication(
     val coreConnectionFailure by screenFacingCore.coreConnectionFailure.collectAsState()
     val engineInstallationState by screenFacingCore.engineInstallationState.collectAsState()
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
+    // 주소마다 한 번 연다 — 같은 상태가 다시 그려질 때마다 브라우저가 열리지 않게 주소를 열쇠로 둔다.
+    val authorizationUrlToOpen = authorizationUrlTheScreenOpens(claudeAuthenticationState, coreWslDistributionAcrossScreen)
+    LaunchedEffect(authorizationUrlToOpen) { authorizationUrlToOpen?.let(::openInScreenBrowser) }
     val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
     val initializationState by screenFacingCore.workDirInitializationState.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
