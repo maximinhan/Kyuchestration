@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * 화면이 뜨는 자리.
@@ -223,7 +224,13 @@ private fun runDesktopApplication(
     val claudeAuthenticationState by screenFacingCore.claudeAuthenticationState.collectAsState()
     // 주소마다 한 번 연다 — 같은 상태가 다시 그려질 때마다 브라우저가 열리지 않게 주소를 열쇠로 둔다.
     val authorizationUrlToOpen = authorizationUrlTheScreenOpens(claudeAuthenticationState, coreWslDistributionAcrossScreen)
-    LaunchedEffect(authorizationUrlToOpen) { authorizationUrlToOpen?.let(::openInScreenBrowser) }
+    // 열지 못한 까닭. 로그인 화면이 그것과 함께 주소를 복사하라고 안내한다. 브라우저를 띄우는 일은 창을 그리는 스레드 밖에서 한다.
+    var screenBrowserFailure by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(authorizationUrlToOpen) {
+        screenBrowserFailure = authorizationUrlToOpen
+            ?.let { url -> withContext(Dispatchers.IO) { openInScreenBrowser(url) } as? ScreenBrowserOpening.NotOpened }
+            ?.reason
+    }
     val dashboardState by screenFacingCore.workDirDashboardState.collectAsState()
     val initializationState by screenFacingCore.workDirInitializationState.collectAsState()
     // 화면에 보이는 세션과 따로 구독한다. 카드를 옮기는 것과 세션이 늘고 주는 것은 다른 사건이라,
@@ -274,6 +281,7 @@ private fun runDesktopApplication(
             engineInstallationState = engineInstallationState,
             engineDirectoryLabel = screenFacingCore.engineDirectoryLabel,
             claudeAuthenticationState = claudeAuthenticationState,
+            screenBrowserFailure = screenBrowserFailure,
             dashboardState = dashboardState,
             initializationState = initializationState,
             chatScreenState = chatViewing.screenState,

@@ -2,7 +2,10 @@ package com.kyuchestration.desktop
 
 import com.kyuchestration.desktop.claudeauth.ClaudeAuthenticationState
 import kotlin.test.Test
+import java.io.IOException
+import java.net.URI
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 /**
  * 로그인 주소를 화면의 브라우저로 여는가(core-ui-split-design.md 6.10).
@@ -34,5 +37,32 @@ class ScreenBrowserTest {
             null,
             authorizationUrlTheScreenOpens(ClaudeAuthenticationState.BrowserLoginStarting, coreWslDistributionAcrossScreen = "Ubuntu-24.04"),
         )
+    }
+
+    @Test
+    fun `브라우저가 열리면 열렸다고 답한다`() {
+        val opened = mutableListOf<URI>()
+
+        assertEquals(ScreenBrowserOpening.Opened, openInScreenBrowser("https://claude.ai/oauth/authorize?code=true", browse = { opened += it }))
+        assertEquals(listOf(URI("https://claude.ai/oauth/authorize?code=true")), opened)
+    }
+
+    /**
+     * 여는 일이 실패해도 로그인 중인 앱이 죽으면 안 된다 — 주소가 URI 가 아니거나, 이 데스크톱이 열기를 못 하거나(헤드리스 ·
+     * 지원 안 함), 기본 브라우저가 없거나, 보안 관리자가 막을 때. 실패는 값으로 돌려준다 — 화면이 "열지 못했다, 주소를 복사하라" 를 보인다.
+     */
+    @Test
+    fun `브라우저를 열지 못하면 던지지 않고 그 까닭을 돌려준다`() {
+        val failures = listOf<(URI) -> Unit>(
+            { throw UnsupportedOperationException("BROWSE 를 지원하지 않습니다") },
+            { throw IOException("기본 브라우저가 없습니다") },
+            { throw IllegalArgumentException("열 수 없는 주소") },
+            { throw SecurityException("막혔습니다") },
+        )
+
+        failures.forEach { browse ->
+            assertIs<ScreenBrowserOpening.NotOpened>(openInScreenBrowser("https://claude.ai/oauth/authorize", browse))
+        }
+        assertIs<ScreenBrowserOpening.NotOpened>(openInScreenBrowser("https://claude.ai/주소 에 빈칸", browse = { }))
     }
 }

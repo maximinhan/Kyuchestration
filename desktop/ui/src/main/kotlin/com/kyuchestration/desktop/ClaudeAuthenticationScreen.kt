@@ -57,6 +57,7 @@ internal fun ClaudeAuthenticationScreen(
     versionLabel: String,
     diagnosticLogPathLabel: String,
     claudeAuthenticationState: ClaudeAuthenticationState,
+    screenBrowserFailure: String?,
     onCheckCredentialsRequested: () -> Unit,
     onBrowserLoginRequested: () -> Unit,
     onBrowserLoginCodeSubmitted: (String) -> Unit,
@@ -90,6 +91,7 @@ internal fun ClaudeAuthenticationScreen(
 
         WhatToDoAboutCredentials(
             claudeAuthenticationState = claudeAuthenticationState,
+            screenBrowserFailure = screenBrowserFailure,
             onCheckCredentialsRequested = onCheckCredentialsRequested,
             onBrowserLoginRequested = onBrowserLoginRequested,
             onBrowserLoginCodeSubmitted = onBrowserLoginCodeSubmitted,
@@ -106,6 +108,7 @@ internal fun ClaudeAuthenticationScreen(
 @Composable
 private fun WhatToDoAboutCredentials(
     claudeAuthenticationState: ClaudeAuthenticationState,
+    screenBrowserFailure: String?,
     onCheckCredentialsRequested: () -> Unit,
     onBrowserLoginRequested: () -> Unit,
     onBrowserLoginCodeSubmitted: (String) -> Unit,
@@ -128,6 +131,7 @@ private fun WhatToDoAboutCredentials(
         is ClaudeAuthenticationState.BrowserLoginWaitingForCode ->
             BrowserLoginCodeForm(
                 authorizationUrl = claudeAuthenticationState.authorizationUrl,
+                screenBrowserFailure = screenBrowserFailure,
                 onBrowserLoginCodeSubmitted = onBrowserLoginCodeSubmitted,
                 onBrowserLoginCancelled = onBrowserLoginCancelled,
             )
@@ -297,6 +301,7 @@ private fun PastedTokenForm(
 @Composable
 private fun BrowserLoginCodeForm(
     authorizationUrl: String,
+    screenBrowserFailure: String?,
     onBrowserLoginCodeSubmitted: (String) -> Unit,
     onBrowserLoginCancelled: () -> Unit,
 ) {
@@ -309,7 +314,9 @@ private fun BrowserLoginCodeForm(
         modifier = Modifier.widthIn(max = EXPLANATION_MAX_WIDTH),
     ) {
         Text(
-            text = "브라우저가 열리지 않았으면 이 주소를 직접 여세요.",
+            text = screenBrowserFailure
+                ?.let { reason -> "브라우저를 열지 못했습니다($reason). 이 주소를 복사해 브라우저에서 여세요." }
+                ?: "브라우저가 열리지 않았으면 이 주소를 직접 여세요.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )

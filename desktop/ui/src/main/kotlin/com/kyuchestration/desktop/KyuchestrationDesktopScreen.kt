@@ -69,6 +69,7 @@ fun KyuchestrationDesktopScreen(
      * 않은 채로 대시보드를 보여주면 사용자는 카드를 누를 때마다 같은 실패를 만난다.
      */
     claudeAuthenticationState: ClaudeAuthenticationState,
+    screenBrowserFailure: String?,
     dashboardState: WorkDirDashboardState,
     initializationState: WorkDirInitializationState,
     /** 대화 자리가 지금 보여줄 것. 이 앱의 기본 화면이다. */
@@ -145,6 +146,7 @@ fun KyuchestrationDesktopScreen(
                     versionLabel = versionLabel,
                     diagnosticLogPathLabel = diagnosticLogPathLabel,
                     claudeAuthenticationState = claudeAuthenticationState,
+                    screenBrowserFailure = screenBrowserFailure,
                     onCheckCredentialsRequested = onCheckClaudeCredentialsRequested,
                     onBrowserLoginRequested = onClaudeBrowserLoginRequested,
                     onBrowserLoginCodeSubmitted = onClaudeBrowserLoginCodeSubmitted,
