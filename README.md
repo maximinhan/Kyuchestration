@@ -868,13 +868,11 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
 받고, 사람용 표를 되파싱하지 않는다 — 그 표는 사람이 읽기 좋게 언제든 다듬을 수 있어야 하는데,
 앱이 그것에 자기 파싱을 맞춰두면 문구 하나를 고칠 때마다 함께 깨진다.
 
-**윈도우에서는 WSL 안의 리눅스 앱으로 쓴다.** 막고 있던 것이 tmux 이던 시절은 끝났고, PTY 가
-윈도우에서 도는지 모른다던 걱정도 함께 사라졌다 — 앱은 이제 파이프에 문 프로세스로 세션을 연다
-([챗 UI 설계](chat-ui-design.md) 7.4). 남은 것은 아무도 윈도우 네이티브를 만들어 돌려본 적이
-없다는 사실이다: 릴리스는 윈도우 바이너리를 내지 않고(`.github/workflows/release.yml` 의 크로스
-컴파일 목록), 설치 패키지에도 msi 가 없다(`desktop/app/build.gradle.kts` 의 `targetFormats`). 그 둘을
-치우는 것은 별도 작업이다([app-owned-sessions-design.md](app-owned-sessions-design.md) 5.7 —
-"윈도우는 별도 작업이고 이 문서의 네 단계에 들어 있지 않다").
+**윈도우에서는 창이 윈도우의 것이고, 세션은 WSL 안에서 돈다.** 앱은 세션을 쥐는 **코어**와 그것을
+그리는 **화면**으로 나뉘어 있다([코어 · 화면 분리 설계](core-ui-split-design.md)). 윈도우에는 화면(msi)을
+깔고, 프로젝트 폴더 · `claude` · `kyu` 가 있는 WSL 안에 코어를 깐다 — 화면이 `wsl.exe` 로 그 코어를
+띄운다. 설치는 [윈도우 — 창은 윈도우, 코어는 WSL](#윈도우--창은-윈도우-코어는-wsl) 에 있다. WSLg 로
+리눅스 창을 띄우는 길(deb)도 그대로 열려 있다.
 
 ### 시작하기
 
@@ -953,7 +951,9 @@ curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/inst
 |---|---|
 | `kyuchestration-desktop_<버전>_arm64.dmg` | 애플 실리콘 맥 (M1 이후) |
 | `kyuchestration-desktop_<버전>_amd64.dmg` | 인텔 맥 |
-| `kyuchestration-desktop_<버전>_amd64.deb` | 리눅스 · **WSL(윈도우)** |
+| `kyuchestration-desktop_<버전>_amd64.deb` | 리눅스 · WSLg |
+| `kyuchestration-desktop_<버전>_windows_amd64.msi` | **윈도우 창** — 코어는 WSL 에 따로([아래](#윈도우--창은-윈도우-코어는-wsl)) |
+| `kyuchestration-core_<버전>_linux_amd64.tar.gz` | 윈도우 창이 띄우는 WSL 의 코어 — 손으로 받지 않고 `install.sh --with-core` 가 받는다 |
 
 **리눅스 · WSL** —
 
@@ -979,6 +979,39 @@ sudo apt install ./kyuchestration-desktop_<버전>_amd64.deb
 > 올리지 않으려고 감수하는 불일치다. **제품 버전은 받은 파일 이름과 앱 시작 화면의 제목 아래에
 > 적힌 쪽이다.**
 > 앞자리가 1 이 되는 판부터는 이 매핑이 사라져 두 숫자가 같아진다.
+
+#### 윈도우 — 창은 윈도우, 코어는 WSL
+
+둘을 깐다. 순서는 상관없지만 둘 다 있어야 창이 세션을 연다.
+
+**① WSL 터미널에서 코어와 엔진** — 프로젝트 폴더와 `claude` 가 있는 배포판에서 돌린다.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash -s -- --with-core
+```
+
+| 놓는 것 | 자리 |
+|---|---|
+| 엔진 `kyu` | `~/.local/bin/kyu` |
+| 코어 이미지(자바 런타임을 품는다 — WSL 에 자바가 없어도 된다) | `~/.local/share/kyuchestration/core` |
+| 코어 실행 파일 링크 — 윈도우 화면이 부르는 자리 | `~/.local/bin/kyuchestration-core` |
+
+sudo 가 필요 없다. **업데이트도 같은 명령이다** — 최신 릴리스로 갈아 끼운다. 받다가 끊겨도 쓰던 코어가 남는다.
+
+**② 윈도우에 화면** — [최신 릴리스](https://github.com/maximinhan/Kyuchestration/releases/latest)의
+`kyuchestration-desktop_<버전>_windows_amd64.msi` 를 받아 연다. 사용자 단위로 깔리므로 관리자 권한을 묻지 않는다.
+아직 서명하지 않아 SmartScreen 이 "알 수 없는 게시자" 를 띄우면 **추가 정보 → 실행** 으로 연다.
+
+**처음 띄우면** 코어를 띄울 WSL 배포판을 고른다(`docker-desktop` 은 목록에서 뺀다). 고른 배포판은
+`%APPDATA%\Kyuchestration\wsl-distribution` 에 기억해 다음부터 묻지 않는다. 그 배포판에 코어가 없거나 화면과
+판이 다르면 창이 ①의 한 줄을 복사 단추와 함께 보인다.
+
+| 알아 둘 것 | |
+|---|---|
+| 워크디렉토리 | WSL 안의 폴더만 연다. 선택 창은 `\\wsl.localhost\<배포판>\home` 에서 시작한다. `C:\…` 나 다른 배포판의 폴더는 이유와 함께 거절한다 |
+| claude 로그인 | WSL 의 claude 는 윈도우 브라우저를 열지 못해 창이 대신 연다 |
+| 창을 닫으면 | 코어가 세션(claude)을 모두 끝내고 나간다 — WSL 에 남는 프로세스가 없다 |
+| 기록 파일 | 화면 `%LOCALAPPDATA%\Kyuchestration\Logs\desktop.log`, 코어 `\\wsl.localhost\<배포판>\home\<사용자>\.local\state\kyuchestration\core.log` |
 
 #### 맥이 앱을 막는 이유
 
