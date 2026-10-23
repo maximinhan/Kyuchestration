@@ -30,6 +30,13 @@ dependencies {
     testFixturesApi(testFixtures(project(":diagnostics")))
 }
 
+// 코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16). 시험도 셸 스크립트 · 가짜 kyu ·
+// POSIX 경로 위에 서 있다. 윈도우 CI 는 컴파일까지만 보고 시험은 건너뛴다 — 건너뛴 사실은 이 이유와 함께 빌드 로그에 남는다.
+tasks.named<Test>("test") {
+    val hostIsWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+    onlyIf("코어는 윈도우에서 돌지 않는다(설계 6.16) — 윈도우에서는 코어 시험을 건너뛴다") { !hostIsWindows }
+}
+
 // ── WSL 에 설치하는 코어 이미지(core-ui-split-design.md 6.16 의 3 단계 정정) ─────────────────────────────────────────────
 //
 // 윈도우 사용자의 코어는 WSL 안에 산다. 설치 패키지(msi)에는 화면만 들고, 코어는 이 이미지를 install.sh --with-core 가 받아

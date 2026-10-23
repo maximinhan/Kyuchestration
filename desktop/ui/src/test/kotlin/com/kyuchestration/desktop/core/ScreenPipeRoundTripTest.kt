@@ -38,6 +38,8 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 같은 JVM 안에서 코어 → 게시자 → 틀 줄 → 거울이 화면에 코어와 같은 상태를 주는가(core-ui-split-design.md 7 절 1 단계).
@@ -46,6 +48,7 @@ import kotlinx.coroutines.test.runTest
  * 가닥이 자식 프로세스의 stdin · stdout 으로 바뀐다.
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
+@DisabledOnOs(OS.WINDOWS, disabledReason = "코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16)")
 class ScreenPipeRoundTripTest {
 
     private val workDirPath: Path = createTempDirectory("kyu-screen-pipe")

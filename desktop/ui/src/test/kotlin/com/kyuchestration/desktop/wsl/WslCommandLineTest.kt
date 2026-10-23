@@ -1,6 +1,5 @@
 package com.kyuchestration.desktop.wsl
 
-import com.kyuchestration.desktop.platform.runningOnWindows
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.readText
@@ -11,14 +10,15 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.Assumptions.assumeFalse
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 화면이 `wsl.exe` 에게 묻는 두 가지 — 배포판 목록, 고른 배포판에 코어가 있는가.
  *
- * 진짜 `wsl.exe` 대신 받은 인자와 환경을 적고 정해 둔 답을 내는 셸 스크립트를 세운다. 그래서 윈도우에서는 건너뛴다 — 윈도우에서
- * `wsl.exe` 와의 실제 왕복은 PR 의 실측(윈도우 JVM 하네스)이 잰다.
+ * 진짜 `wsl.exe` 대신 받은 인자와 환경을 적고 정해 둔 답을 내는 셸 스크립트를 세운다.
  */
+@DisabledOnOs(OS.WINDOWS, disabledReason = "가짜 wsl.exe 가 셸 스크립트다 — 윈도우에서 wsl.exe 와의 실제 왕복은 PR 의 실측이 잰다")
 class WslCommandLineTest {
 
     private lateinit var scratchDirectory: Path
@@ -29,7 +29,6 @@ class WslCommandLineTest {
 
     @BeforeTest
     fun setUp() {
-        assumeFalse(runningOnWindows(), "가짜 wsl.exe 가 셸 스크립트라 윈도우에서는 돌지 않는다")
         scratchDirectory = createTempDirectory("kyu-fake-wsl")
         fakeWsl = scratchDirectory.resolve("wsl.exe")
         receivedArguments = scratchDirectory.resolve("arguments.txt")

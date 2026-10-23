@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerializationException
+import org.junit.jupiter.api.condition.DisabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 화면이 코어를 진짜 자식 프로세스로 띄우고 그 stdio 에 거울을 잇는다(core-ui-split-design.md 7 절 2 단계).
@@ -30,6 +32,7 @@ import kotlinx.serialization.SerializationException
  * 여기서는 실 claude 를 띄우지 않는다 — 코어의 엔진 자리를 없는 파일로 고정해 두어 코어가 아무 세션도 열지 않는다. 세션까지 여는
  * 시험은 RealClaudeCoreProcessIntegrationTest 다.
  */
+@DisabledOnOs(OS.WINDOWS, disabledReason = "코어는 리눅스 · 맥에서만 돈다 — 윈도우의 코어는 WSL 안에 있다(core-ui-split-design.md 6.16)")
 class CoreChildProcessTest {
 
     private val scratchDirectory: Path = createTempDirectory("kyu-core-child")
