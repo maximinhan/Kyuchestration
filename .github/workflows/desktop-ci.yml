@@ -103,3 +103,12 @@ jobs:
         run: |
           ./gradlew --no-daemon :app:packageMsi
           find app/build/compose/binaries/main/msi -name '*.msi' -exec ls -l {} \;
+
+      # jpackage 가 실패하면 Gradle 은 로그 파일 자리만 알린다. 러너가 끝나면 그 파일은 사라지므로 여기서 펼친다.
+      - name: msi 를 만들지 못했으면 jpackage 기록 펼치기
+        if: failure() && runner.os == 'Windows'
+        run: |
+          for log in app/build/compose/logs/packageMsi/*; do
+            echo "== $log"
+            cat "$log"
+          done
