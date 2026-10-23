@@ -303,7 +303,8 @@ val checkBundledEngine = tasks.register("checkBundledEngine") {
 // 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
 //
 // 윈도우는 걸지 않는다. msi 는 화면만 담는다 — 코어와 엔진은 WSL 에 따로 놓는다(core-ui-split-design.md 6.16).
-val hostPackagesBundledEngine = !System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+val hostIsWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+val hostPackagesBundledEngine = !hostIsWindows
 val packagingTaskNames = setOf("createDistributable", "packageDeb", "packageDmg")
 if (hostPackagesBundledEngine) {
     tasks.matching { it.name in packagingTaskNames }.configureEach {
@@ -398,7 +399,14 @@ compose.desktop {
             // 분리해 ASCII 로 둔다.
             packageName = "Kyuchestration"
             packageVersion = project.version.toString()
-            description = "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
+            // msi 는 한국어 설명을 실을 수 없다. jpackage 가 쓰는 WiX 3 는 MSI 데이터베이스를 코드 페이지 1252 로 짓고, 그 밖의
+            // 글자를 만나면 light.exe 가 LGHT0311 로 멈춘다(윈도우 러너 실측: exit 311). 설명은 윈도우의 "앱 및 기능" 에만
+            // 보이는 값이라 윈도우에서 만드는 패키지에만 로마자로 둔다 — deb · dmg 는 그대로 한국어다.
+            description = if (hostIsWindows) {
+                "Kyuchestration - multi-repo workdir orchestrator"
+            } else {
+                "뀨케스트레이션 — 멀티레포 워크디렉토리 오케스트레이터"
+            }
             vendor = "maximinhan"
 
             // 엔진(kyu)을 앱 패키지 안에 함께 넣는 자리. Compose 는 이 디렉토리 아래에서 이
