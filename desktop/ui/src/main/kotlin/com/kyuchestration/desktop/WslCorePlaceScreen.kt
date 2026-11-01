@@ -138,8 +138,12 @@ private fun ProblemWithChosenDistribution(
             WslMessage(problem.wslMessage)
         }
         is ChosenDistributionProblem.CoreInstallFailed -> {
-            ProblemHeadline("${problem.distributionName} 에 코어를 놓지 못했습니다 — ${problem.step.label()}, 종료 코드 ${problem.exitCode}")
-            OutputLines(problem.lastOutputLines)
+            val failure = problem.failure
+            ProblemHeadline(
+                "${problem.distributionName} 에 코어를 놓지 못했습니다 — ${failure.step.label()}" +
+                    (failure.exitCode?.let { ", 종료 코드 $it" } ?: ""),
+            )
+            OutputLines(listOfNotNull(failure.screenSideFailure) + failure.lastOutputLines)
             DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
             Button(onClick = { onDistributionChosen(problem.distributionName) }) { Text("다시 시도") }
             Guidance("다시 시도해도 같으면 그 배포판의 터미널에서 손으로 깔 수 있습니다(릴리스에서 받습니다).")

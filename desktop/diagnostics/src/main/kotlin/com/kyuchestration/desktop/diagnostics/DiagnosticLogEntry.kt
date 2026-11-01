@@ -229,20 +229,24 @@ sealed interface DiagnosticLogEntry {
      * 들었을 때 어느 걸음이 시간을 먹었는지가 여기 있어야 한다.
      *
      * @param linuxCommand 셸 없이 넘긴 낱말들. 묶음 안의 파일 자리와 홈 경로뿐이다 — 묶음으로 깔 때는 네트워크도 토큰도 없다.
-     * @param failureOutputLines 0 이 아닐 때 그 명령이 마지막에 쓴 줄들. 0 이면 비운다.
+     * @param exitCode 받지 못했으면(`wsl.exe` 를 못 띄움 · stdio 가 끊김) null.
+     * @param screenSideFailure 화면 쪽에서 난 까닭(예외 문구) — `wsl.exe` 를 못 띄움 · 묶음을 다 넘기지 못함.
+     * @param output 그 명령이 쓴 전체 출력. 화면은 꼬리 몇 줄만 보이므로 앞쪽에 있던 진짜 까닭은 여기서만 읽힌다. 상한은 부르는 쪽이 정한다.
      */
     data class WslCoreInstallCommandFinished(
         val distributionName: String,
         val linuxCommand: List<String>,
-        val exitCode: Int,
+        val exitCode: Int?,
         val elapsedMillis: Long,
-        val failureOutputLines: List<String>,
+        val screenSideFailure: String?,
+        val output: String,
     ) : DiagnosticLogEntry {
         override val summary: String
-            get() = "WSL 코어 설치 걸음 — $distributionName: ${linuxCommand.joinToString(" ")} (종료 코드 $exitCode · ${elapsedMillis} ms)"
+            get() = "WSL 코어 설치 걸음 — $distributionName: ${linuxCommand.joinToString(" ")} " +
+                "(종료 코드 ${exitCode ?: "없음"} · ${elapsedMillis} ms)" + (screenSideFailure?.let { " · 화면 쪽: $it" } ?: "")
 
         override val detail: String?
-            get() = failureOutputLines.joinToString("\n").ifBlank { null }
+            get() = output.ifBlank { null }
     }
 
     /**

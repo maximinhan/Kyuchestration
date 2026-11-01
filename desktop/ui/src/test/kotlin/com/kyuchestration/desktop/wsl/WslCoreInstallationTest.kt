@@ -2,6 +2,7 @@ package com.kyuchestration.desktop.wsl
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
+import java.io.IOException
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -31,6 +32,7 @@ class WslCoreInstallationTest {
         },
         installScriptLines: List<String> = listOf("대상: linux_amd64", "코어 설치 완료"),
         installScriptExitCode: Int = 0,
+        installScriptFailure: IOException? = null,
     ) = WslCoreInstallation(
         commands = object : WslDistributionCommands {
             override suspend fun run(distributionName: String, linuxCommand: List<String>): WslCommandResult {
@@ -58,6 +60,7 @@ class WslCoreInstallationTest {
                 assertEquals("Ubuntu-24.04", distributionName)
                 ranCommands += linuxCommand
                 installScriptLines.forEach(onOutputLine)
+                installScriptFailure?.let { throw it }
                 return installScriptExitCode
             }
         },
@@ -138,6 +141,7 @@ class WslCoreInstallationTest {
             WslCoreInstallationOutcome.Failed(
                 WslCoreInstallationStep.RunningInstallScript,
                 exitCode = 7,
+                screenSideFailure = null,
                 lastOutputLines = listOf("대상: linux_amd64", "오류: 코어가 뜨지 않았습니다"),
             ),
             outcome,
@@ -160,6 +164,7 @@ class WslCoreInstallationTest {
             WslCoreInstallationOutcome.Failed(
                 WslCoreInstallationStep.ExtractingBundle,
                 exitCode = 2,
+                screenSideFailure = null,
                 lastOutputLines = listOf("gzip: stdin: not in gzip format", "tar: Child returned status 1"),
             ),
             outcome,
@@ -181,6 +186,7 @@ class WslCoreInstallationTest {
             WslCoreInstallationOutcome.Failed(
                 WslCoreInstallationStep.PreparingScratchDirectory,
                 exitCode = 1,
+                screenSideFailure = null,
                 lastOutputLines = listOf("mkdir: cannot create directory: Permission denied"),
             ),
             outcome,
@@ -193,7 +199,12 @@ class WslCoreInstallationTest {
         val outcome = installation(answer = { WslCommandResult(-1, "Catastrophic failure") }).installOnUbuntu()
 
         assertEquals(
-            WslCoreInstallationOutcome.Failed(WslCoreInstallationStep.FindingLinuxHome, exitCode = -1, lastOutputLines = listOf("Catastrophic failure")),
+            WslCoreInstallationOutcome.Failed(
+                WslCoreInstallationStep.FindingLinuxHome,
+                exitCode = -1,
+                screenSideFailure = null,
+                lastOutputLines = listOf("Catastrophic failure"),
+            ),
             outcome,
         )
         assertEquals(listOf(listOf("pwd")), ranCommands)
@@ -237,7 +248,93 @@ class WslCoreInstallationTest {
         assertEquals(listOf("pwd", "rm", "mkdir", "tar", "env"), entries.map { it.linuxCommand.first() })
         assertEquals(listOf(0, 0, 0, 0, 7), entries.map { it.exitCode })
         assertEquals(setOf("Ubuntu-24.04"), entries.map { it.distributionName }.toSet())
-        assertEquals(listOf("오류: 코어가 뜨지 않았습니다"), entries.last().failureOutputLines)
-        assertEquals(emptyList(), entries.first().failureOutputLines)
+        assertEquals("오류: 코어가 뜨지 않았습니다", entries.last().output)
+        assertEquals("/home/yawn", entries.first().output)
+    }
+
+    /** 던지면 준비 창이 단추 없는 "까는 중" 에 머문다 — 그 걸음의 실패로 돌려준다. */
+    @Test
+    fun `wsl 을 띄우지 못하면 그 걸음의 실패로 화면 쪽 까닭과 함께 돌려주고 기록한다`() = runTest {
+        val outcome = installation(answer = { command ->
+            when (command.first()) {
+                "pwd" -> WslCommandResult(0, "/home/yawn")
+                "tar" -> throw IOException("Cannot run program \"wsl.exe\": CreateProcess error=2")
+                else -> WslCommandResult(0, "")
+            }
+        }).installOnUbuntu()
+
+        assertEquals(
+            WslCoreInstallationOutcome.Failed(
+                WslCoreInstallationStep.ExtractingBundle,
+                exitCode = null,
+                screenSideFailure = "java.io.IOException: Cannot run program \"wsl.exe\": CreateProcess error=2",
+                lastOutputLines = emptyList(),
+            ),
+            outcome,
+        )
+        val lastEntry = recordedEntries.last() as DiagnosticLogEntry.WslCoreInstallCommandFinished
+        assertEquals("tar", lastEntry.linuxCommand.first())
+        assertEquals(null, lastEntry.exitCode)
+    }
+
+    @Test
+    fun `설치 스크립트를 돌리다 stdio 가 끊기면 그 걸음의 실패로 돌려준다`() = runTest {
+        val outcome = installation(installScriptFailure = IOException("Stream closed")).installOnUbuntu()
+
+        assertEquals(
+            WslCoreInstallationOutcome.Failed(
+                WslCoreInstallationStep.RunningInstallScript,
+                exitCode = null,
+                screenSideFailure = "java.io.IOException: Stream closed",
+                lastOutputLines = emptyList(),
+            ),
+            outcome,
+        )
+    }
+
+    /** 묶음을 다 넘기지 못했으면 리눅스 쪽이 0 이어도 실패다 — 덜 받은 묶음이다. 리눅스 쪽의 글도 함께 싣는다. */
+    @Test
+    fun `묶음을 다 넘기지 못하면 리눅스 쪽 결과와 함께 실패로 돌려준다`() = runTest {
+        val outcome = installation(answer = { command ->
+            when (command.first()) {
+                "pwd" -> WslCommandResult(0, "/home/yawn")
+                "tar" -> WslCommandResult(2, "gzip: stdin: unexpected end of file", standardInputFailure = "java.io.IOException: 읽기 실패")
+                else -> WslCommandResult(0, "")
+            }
+        }).installOnUbuntu()
+
+        assertEquals(
+            WslCoreInstallationOutcome.Failed(
+                WslCoreInstallationStep.ExtractingBundle,
+                exitCode = 2,
+                screenSideFailure = "java.io.IOException: 읽기 실패",
+                lastOutputLines = listOf("gzip: stdin: unexpected end of file"),
+            ),
+            outcome,
+        )
+        val tarEntry = recordedEntries.last() as DiagnosticLogEntry.WslCoreInstallCommandFinished
+        assertEquals("java.io.IOException: 읽기 실패", tarEntry.screenSideFailure)
+        assertEquals("gzip: stdin: unexpected end of file", tarEntry.output)
+    }
+
+    /** 화면은 꼬리 몇 줄만 보인다. 앞쪽에 있던 진짜 까닭은 기록에서 읽혀야 한다. */
+    @Test
+    fun `기록에는 설치 스크립트의 전체 출력을 남긴다`() = runTest {
+        val manyLines = (1..30).map { "줄 $it" }
+
+        installation(installScriptLines = manyLines, installScriptExitCode = 7).installOnUbuntu()
+
+        val installScriptEntry = recordedEntries.last() as DiagnosticLogEntry.WslCoreInstallCommandFinished
+        assertEquals(manyLines.joinToString("\n"), installScriptEntry.output)
+    }
+
+    @Test
+    fun `기록의 출력은 상한에서 앞을 남기고 잘린 것을 적는다`() = runTest {
+        val longLine = "x".repeat(DIAGNOSTIC_LOG_OUTPUT_CHARACTERS_KEPT + 10)
+
+        installation(installScriptLines = listOf(longLine), installScriptExitCode = 7).installOnUbuntu()
+
+        val installScriptEntry = recordedEntries.last() as DiagnosticLogEntry.WslCoreInstallCommandFinished
+        assertEquals("x".repeat(DIAGNOSTIC_LOG_OUTPUT_CHARACTERS_KEPT) + "\n… (10자 잘림)", installScriptEntry.output)
     }
 }

@@ -47,13 +47,9 @@ sealed interface ChosenDistributionProblem {
 
     data class DistributionFailed(override val distributionName: String, val wslMessage: String) : ChosenDistributionProblem
 
-    /** 묶음으로 깔다 한 걸음이 0 이 아닌 코드로 끝났다. 손으로 까는 길과 다시 시도를 보인다. */
-    data class CoreInstallFailed(
-        override val distributionName: String,
-        val step: WslCoreInstallationStep,
-        val exitCode: Int,
-        val lastOutputLines: List<String>,
-    ) : ChosenDistributionProblem
+    /** 묶음으로 깔다 한 걸음이 실패했다(종료 코드 · 화면 쪽 까닭). 손으로 까는 길과 다시 설치를 보인다. */
+    data class CoreInstallFailed(override val distributionName: String, val failure: WslCoreInstallationOutcome.Failed) :
+        ChosenDistributionProblem
 
     /** 리눅스 홈 경로에 빈칸이 있어 화면이 깔지 않았다(WslCoreInstallationOutcome.LinuxHomeUnusable). */
     data class CoreInstallRefusedForLinuxHome(override val distributionName: String, val linuxHome: String) : ChosenDistributionProblem
@@ -168,7 +164,7 @@ class WslCorePlacePreparation(
         return when (outcome) {
             WslCoreInstallationOutcome.Installed -> null
             is WslCoreInstallationOutcome.Failed ->
-                ChosenDistributionProblem.CoreInstallFailed(distributionName, outcome.step, outcome.exitCode, outcome.lastOutputLines)
+                ChosenDistributionProblem.CoreInstallFailed(distributionName, outcome)
             is WslCoreInstallationOutcome.LinuxHomeUnusable ->
                 ChosenDistributionProblem.CoreInstallRefusedForLinuxHome(distributionName, outcome.linuxHome)
         }

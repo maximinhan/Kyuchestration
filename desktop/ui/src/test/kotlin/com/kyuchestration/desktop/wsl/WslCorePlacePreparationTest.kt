@@ -257,12 +257,13 @@ class WslCorePlacePreparationTest {
     /** 실패한 배포판은 기억하지 않는다 — 다음에 뜰 때 같은 자리에서 또 멈춘다. 손으로 까는 길과 다시 시도가 함께 보인다. */
     @Test
     fun `깔다 실패하면 그 걸음과 종료 코드와 마지막 줄들을 보이고 기억하지 않는다`() = runTest {
-        val preparation = preparation(
-            coreCheck = { WslCoreCheck.NotInstalled },
-            bundledCore = bundle { _, _ ->
-                WslCoreInstallationOutcome.Failed(WslCoreInstallationStep.RunningInstallScript, exitCode = 7, lastOutputLines = listOf("오류: 코어가 뜨지 않았습니다"))
-            },
+        val failure = WslCoreInstallationOutcome.Failed(
+            WslCoreInstallationStep.RunningInstallScript,
+            exitCode = 7,
+            screenSideFailure = null,
+            lastOutputLines = listOf("오류: 코어가 뜨지 않았습니다"),
         )
+        val preparation = preparation(coreCheck = { WslCoreCheck.NotInstalled }, bundledCore = bundle { _, _ -> failure })
         preparation.lookAround()
 
         preparation.choose("Debian")
@@ -271,12 +272,7 @@ class WslCorePlacePreparationTest {
             WslCorePlacePreparationState.Choosing(
                 ubuntuAndDebian,
                 preselectedName = "Debian",
-                problem = ChosenDistributionProblem.CoreInstallFailed(
-                    "Debian",
-                    WslCoreInstallationStep.RunningInstallScript,
-                    exitCode = 7,
-                    lastOutputLines = listOf("오류: 코어가 뜨지 않았습니다"),
-                ),
+                problem = ChosenDistributionProblem.CoreInstallFailed("Debian", failure),
             ),
             preparation.state.value,
         )
@@ -290,7 +286,7 @@ class WslCorePlacePreparationTest {
             coreCheck = { WslCoreCheck.NotInstalled },
             bundledCore = bundle { _, _ ->
                 if (++attempts == 1) {
-                    WslCoreInstallationOutcome.Failed(WslCoreInstallationStep.ExtractingBundle, exitCode = 2, lastOutputLines = emptyList())
+                    WslCoreInstallationOutcome.Failed(WslCoreInstallationStep.ExtractingBundle, 2, null, emptyList())
                 } else {
                     WslCoreInstallationOutcome.Installed
                 }
@@ -336,5 +332,39 @@ class WslCorePlacePreparationTest {
             (preparation.state.value as WslCorePlacePreparationState.Choosing).problem,
         )
         assertEquals(emptyList(), installedDistributions)
+    }
+
+    /**
+     * 실제 [WslCoreInstallation] 을 잇는다. 걸음이 던지면(묶음 파일을 못 읽음 · `wsl.exe` 를 못 띄움) 상태가 단추 없는 InstallingCore 에
+     * 머물지 않고 다시 고르기로 돌아와야 한다.
+     */
+    @Test
+    fun `설치 걸음이 던져도 상태는 설치 실패로 돌아온다`() = runTest {
+        val throwingCommands = object : WslDistributionCommands {
+            override suspend fun run(distributionName: String, linuxCommand: List<String>): WslCommandResult =
+                throw java.io.IOException("Cannot run program \"wsl.exe\"")
+
+            override suspend fun runFeedingStandardInput(distributionName: String, linuxCommand: List<String>, standardInput: java.nio.file.Path) =
+                throw java.io.IOException("Cannot run program \"wsl.exe\"")
+
+            override suspend fun runReportingEachLine(distributionName: String, linuxCommand: List<String>, onOutputLine: (String) -> Unit): Int =
+                throw java.io.IOException("Cannot run program \"wsl.exe\"")
+        }
+        val installation = WslCoreInstallation(
+            throwingCommands,
+            java.nio.file.Path.of("kyuchestration-wsl-core.tar.gz"),
+            com.kyuchestration.desktop.diagnostics.DiagnosticLog.Discarding,
+        )
+        val preparation = preparation(
+            coreCheck = { WslCoreCheck.NotInstalled },
+            bundledCore = BundledWslCore("v0.16.0", installation::install),
+        )
+        preparation.lookAround()
+
+        preparation.choose("Debian")
+
+        val problem = (preparation.state.value as WslCorePlacePreparationState.Choosing).problem as ChosenDistributionProblem.CoreInstallFailed
+        assertEquals(WslCoreInstallationStep.FindingLinuxHome, problem.failure.step)
+        assertEquals("java.io.IOException: Cannot run program \"wsl.exe\"", problem.failure.screenSideFailure)
     }
 }

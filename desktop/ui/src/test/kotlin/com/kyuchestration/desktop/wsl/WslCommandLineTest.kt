@@ -235,10 +235,10 @@ class WslCommandLineTest {
 
     /**
      * 리눅스 쪽이 stdin 을 다 읽지 않고 끝나면 남은 쓰기는 끊긴 파이프에 닿는다. 그 끊김은 결과이고 까닭은 리눅스 쪽의 종료 코드와 글이다 —
-     * 그것을 돌려준다.
+     * 둘을 함께 돌려준다.
      */
     @Test
-    fun `리눅스 쪽이 stdin 을 다 읽기 전에 실패하면 끊긴 파이프가 아니라 그 실패를 돌려준다`() = runTest {
+    fun `리눅스 쪽이 stdin 을 다 읽기 전에 실패하면 그 실패와 끊긴 파이프를 함께 돌려준다`() = runTest {
         fakeWslRunning(
             """
             echo 'gzip: stdin: not in gzip format' >&2
@@ -250,7 +250,31 @@ class WslCommandLineTest {
 
         val result = WslCommandLine(fakeWsl).runFeedingStandardInput("Ubuntu-24.04", listOf("tar", "-xzf", "-"), standardInput = sent)
 
-        assertEquals(WslCommandResult(exitCode = 2, output = "gzip: stdin: not in gzip format"), result)
+        assertEquals(2, result.exitCode)
+        assertEquals("gzip: stdin: not in gzip format", result.output)
+        assertTrue(result.standardInputFailure != null, "8 MiB 를 다 넘기지 못했는데 까닭이 없다")
+    }
+
+    /** 화면 쪽에서 파일을 못 읽어도 던지지 않는다 — stdin 을 닫고 리눅스 쪽의 종료 코드와 글을 끝까지 거둔다. */
+    @Test
+    fun `넘길 파일을 못 읽어도 리눅스 쪽의 결과를 거두어 그 까닭과 함께 돌려준다`() = runTest {
+        fakeWslRunning(
+            """
+            cat > /dev/null
+            echo 'gzip: stdin: unexpected end of file' >&2
+            exit 2
+            """.trimIndent(),
+        )
+
+        val result = WslCommandLine(fakeWsl).runFeedingStandardInput(
+            "Ubuntu-24.04",
+            listOf("tar", "-xzf", "-"),
+            standardInput = scratchDirectory.resolve("no-such-bundle.tar.gz"),
+        )
+
+        assertEquals(2, result.exitCode)
+        assertEquals("gzip: stdin: unexpected end of file", result.output)
+        assertTrue(result.standardInputFailure.orEmpty().contains("no-such-bundle.tar.gz"), result.standardInputFailure)
     }
 
     /**

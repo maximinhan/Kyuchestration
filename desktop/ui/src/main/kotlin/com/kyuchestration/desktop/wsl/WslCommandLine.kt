@@ -40,8 +40,12 @@ sealed interface InstalledWslCoreVersion {
     data class DistributionFailed(val wslMessage: String) : InstalledWslCoreVersion
 }
 
-/** @param output 합쳐 읽은 stdout · stderr. 윈도우의 줄 끝은 `\n` 으로 바꾸고 앞뒤 빈칸을 걷었다. */
-data class WslCommandResult(val exitCode: Int, val output: String)
+/**
+ * @param output 합쳐 읽은 stdout · stderr. 윈도우의 줄 끝은 `\n` 으로 바꾸고 앞뒤 빈칸을 걷었다.
+ * @param standardInputFailure stdin 으로 파일을 다 넘기지 못한 까닭(화면 쪽 사실 — 파일을 못 읽음 · 끊긴 파이프). 리눅스 쪽 결과는
+ *   그래도 끝까지 거둔다. stdin 을 넘기지 않는 호출에서는 늘 null.
+ */
+data class WslCommandResult(val exitCode: Int, val output: String, val standardInputFailure: String? = null)
 
 /**
  * 윈도우 화면이 코어를 띄우기 전에 `wsl.exe` 너머에서 하는 일(core-ui-split-design.md 6.17) — 배포판 목록, 코어가 있는가와 그 판,
@@ -103,6 +107,10 @@ class WslCommandLine(private val wslExecutable: Path) : WslDistributionCommands 
      *
      * 쓰기와 읽기를 다른 스레드에서 한다. 리눅스 쪽이 stdin 을 읽기 전에 파이프 버퍼보다 많이 쓰면, 같은 스레드가 stdin 을 다 쓴 뒤에
      * 출력을 읽는 길에서는 둘이 서로를 기다린다.
+     *
+     * 넘기다 실패해도 던지지 않고 리눅스 쪽의 종료 코드와 글을 끝까지 거두어 함께 돌려준다. 파일을 못 읽어 중간에 stdin 을 닫으면
+     * `tar` 는 `gzip: unexpected end of file` 을 쓰고, 리눅스 쪽이 먼저 실패해 생긴 끊긴 파이프는 그 실패(`not in gzip format`)의
+     * 결과다 — 어느 한쪽만으로는 무엇이 먼저였는지 알 수 없다. 리눅스 쪽이 0 이어도 다 넘기지 못했으면 실패다(덜 받은 묶음).
      */
     override suspend fun runFeedingStandardInput(distributionName: String, linuxCommand: List<String>, standardInput: Path): WslCommandResult =
         withContext(Dispatchers.IO) {
@@ -110,13 +118,7 @@ class WslCommandLine(private val wslExecutable: Path) : WslDistributionCommands 
             val feeding = async { feedStandardInput(process, standardInput) }
             val output = process.inputStream.use { it.readBytes() }
             val exitCode = process.waitFor()
-            val pipeFailure = feeding.await()
-            // 리눅스 쪽이 stdin 을 다 읽지 않고 끝나면 남은 쓰기는 끊긴 파이프에 닿는다. 그 끊김은 결과이고 까닭은 리눅스 쪽의 종료 코드와
-            // 글이라 그것을 돌려준다. 리눅스 쪽은 0 으로 끝났는데 다 넘기지 못했다면 그 자체가 실패다 — 덜 받은 묶음으로 잘 끝났다고 볼 수 없다.
-            if (pipeFailure != null && exitCode == 0) {
-                throw pipeFailure
-            }
-            WslCommandResult(exitCode, wslMessageOf(output))
+            WslCommandResult(exitCode, wslMessageOf(output), standardInputFailure = feeding.await()?.toString())
         }
 
     /**
@@ -149,36 +151,25 @@ private fun inDistribution(distributionName: String, linuxCommand: List<String>)
     listOf("-d", distributionName, "--cd", "~", "-e") + linuxCommand
 
 /**
- * 끊긴 파이프는 돌려주고([WslCommandLine.runFeedingStandardInput] 이 리눅스 쪽 결과와 함께 판단한다), 파일을 읽다 난 실패는 던진다 —
- * 그것은 리눅스 쪽과 무관한 화면 쪽 사실이다. 어느 쪽이든 stdin 은 닫는다. 닫지 않으면 리눅스 쪽이 끝을 기다려 출력을 읽는 쪽도
- * 끝나지 않는다.
+ * 다 넘기지 못한 까닭(파일 읽기 · 파이프 쓰기의 [IOException])을 돌려준다. 던지지 않는 것은 그 뒤에 리눅스 쪽 결과를 거두어 함께
+ * 보이기 위해서다([WslCommandLine.runFeedingStandardInput]). 어느 쪽이든 stdin 은 닫는다 — 닫지 않으면 리눅스 쪽이 끝을 기다려 출력을
+ * 읽는 쪽도 끝나지 않는다.
  */
 private fun feedStandardInput(process: Process, standardInput: Path): IOException? {
     val linuxStandardInput = process.outputStream
-    var pipeFailure: IOException? = null
-    try {
-        Files.newInputStream(standardInput).use { source ->
-            val buffer = ByteArray(STANDARD_INPUT_CHUNK_BYTES)
-            while (pipeFailure == null) {
-                val read = source.read(buffer)
-                if (read < 0) {
-                    break
-                }
-                pipeFailure = pipeFailureOf { linuxStandardInput.write(buffer, 0, read) }
-            }
-        }
-    } finally {
-        val closeFailure = pipeFailureOf { linuxStandardInput.close() }
-        pipeFailure = pipeFailure ?: closeFailure
+    val feedFailure = try {
+        Files.newInputStream(standardInput).use { source -> source.transferTo(linuxStandardInput) }
+        null
+    } catch (couldNotFeed: IOException) {
+        couldNotFeed
     }
-    return pipeFailure
-}
-
-private fun pipeFailureOf(pipeWrite: () -> Unit): IOException? = try {
-    pipeWrite()
-    null
-} catch (brokenPipe: IOException) {
-    brokenPipe
+    val closeFailure = try {
+        linuxStandardInput.close()
+        null
+    } catch (couldNotClose: IOException) {
+        couldNotClose
+    }
+    return feedFailure ?: closeFailure
 }
 
 /** 사람에게 그대로 보일 `wsl.exe` 의 글. 윈도우의 줄 끝(`\r\n`)은 화면의 글자 칸이 그리는 줄 끝으로 바꾼다. */
@@ -200,8 +191,6 @@ private const val TEST_SAYS_NO = 1
 private const val CAT_SAYS_UNREADABLE = 1
 
 private const val CAT_MESSAGE_PREFIX = "cat:"
-
-private const val STANDARD_INPUT_CHUNK_BYTES = 64 * 1024
 
 /** 깔린 코어의 판. 손으로든 화면이든 `install.sh --with-core` 가 남긴다(core-ui-split-design.md 6.16 의 4a 정정). */
 internal const val WSL_INSTALLED_CORE_VERSION_FROM_HOME = ".local/share/kyuchestration/core/VERSION"
