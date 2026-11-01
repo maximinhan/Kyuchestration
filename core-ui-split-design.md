@@ -3,7 +3,7 @@
 > 창은 윈도우의 것으로 뜨고, 프로젝트 폴더·`claude` 세션·`kyu` 엔진은 WSL 안에서 돈다. 지금 한 JVM 이 하는 일을 둘로 가른다 — 세션을 소유하는 **코어**(헤드리스 JVM)와 그것을 그리는 **화면**(Compose). 화면은 코어를 자식 프로세스로 띄우고 stdio 로 JSON 줄을 주고받는다. 윈도우에서는 그 자식이 `wsl.exe` 너머에 있고, 맥·리눅스에서는 같은 머신에 있다. 길은 하나다. 화면은 언제 죽어도 되고, 코어는 세션과 함께 남아 다음 화면을 기다린다.
 
 - 작성일: 2026-10-22
-- 상태: **구현 중** — 1 · 2 단계 머지, 3 단계 진행(3a). 단계마다 "(N 단계 정정)" 으로 코드의 사실을 적는다
+- 상태: **구현 중** — 1 · 2 · 3 단계 머지, 4 단계 진행(4a). 단계마다 "(N 단계 정정)" 으로 코드의 사실을 적는다
 - 선행 문서: [app-owned-sessions-design.md](app-owned-sessions-design.md) — 원칙 5(개정)·11·12, 5.5(대화 이어가기)
 - 선행 문서: [chat-ui-design.md](chat-ui-design.md) — 5.4(승인 브리지·앱 소켓), 원칙 14·15
 - 선행 문서: [session-tree-design.md](session-tree-design.md) — 6.4(앱 소켓의 `kind` 규약), 6.9(관문), 6.13(수명), 원칙 16·17·18
@@ -33,7 +33,7 @@
 
 | 자리 | 적힌 이유 | 이 설계에서 |
 |---|---|---|
-| `desktop/build.gradle.kts:412` — *"Msi 는 뺀다"* | 윈도우 엔진 바이너리가 없어 *"설치는 되고 부를 것이 없는 패키지"* | 화면만 윈도우에 깔리고 엔진은 WSL 의 것을 코어가 부른다. msi 는 화면만 담는다(6.16) |
+| `desktop/build.gradle.kts:412` — *"Msi 는 뺀다"* | 윈도우 엔진 바이너리가 없어 *"설치는 되고 부를 것이 없는 패키지"* | 화면만 윈도우에 깔리고 엔진은 WSL 의 것을 코어가 부른다. msi 는 화면만 담는다(6.16). **(4a 정정)** msi 는 화면과 WSL 코어 묶음(리눅스 코어 이미지 · 리눅스 kyu · install.sh)을 담는다 |
 | `.github/workflows/release.yml:121` | 같은 이유 | 윈도우 잡이 하나 는다(7 절 4 단계) |
 | `WorkDirDirectoryChooser.kt:21` — *"윈도우 네이티브는 이 앱의 대상이 아니고"* | 맥·리눅스 둘만 가르면 됐다 | 파일 선택기는 화면의 것이고, 윈도우 갈래가 생긴다(6.10) |
 | `AppSocketLocation.kt:24` — *"윈도우 갈래를 두지 않는다"* | 그 갈래를 지날 실행이 없다 | **여전히 두지 않는다.** 앱 소켓을 여는 것은 코어고, 코어는 언제나 리눅스·맥에서 돈다 |
@@ -762,8 +762,23 @@ desktop/
 | 화면과 코어는 **같은 태그, 같은 판** | `release.yml` 의 `resolve-version` 이 이미 하나의 판을 모든 잡에 나눠 준다. 잡이 둘(윈도우 msi · 리눅스 코어 tar.gz) 는다 |
 | **(3 단계 정정)** WSL 의 코어 이미지 | `:core:packageCoreArchive` → `kyuchestration-core_<판>_linux_<아키텍처>.tar.gz` = `bin/kyuchestration-core`(링크를 풀어 자리를 찾는 sh) · `runtime/`(jlink) · `lib/*.jar`. **런타임을 품는다**(실측 40 MB, 묶음 27 MB) — WSL 의 Ubuntu 에는 자바가 없고 설치에 sudo 가 든다. 모듈은 jdeps 가 고르고(java.base · java.instrument · java.net.http · jdk.unsupported) TLS 의 `jdk.crypto.ec` 를 더한다 — 빼면 api.github.com 에 `handshake_failure`(실측). Gradle 9 의 묶음은 기본으로 모든 파일을 0644 로 실어 `useFileSystemPermissions()` 로 이미지의 권한을 싣는다(실측: 빼면 Permission denied). 이미지의 권한은 원본에서 물려받지 않고 자리로 정한다 — 실행되는 것(`bin/*` · `runtime/bin/*` · `runtime/lib/jspawnhelper` · `runtime/lib/jexec`)은 0755, 그 밖은 0644(작업 트리의 파일 모드 · jlink 의 0444 에 기대지 않는다). 엔진은 이미지에 넣지 않고 `~/.local/bin/kyu` 를 쓴다 — 같은 설치 명령이 같은 릴리스의 kyu 를 놓는다 |
 | **(3 단계 정정)** 설치 | `install.sh` 를 넓혔다(`install-core.sh` 를 따로 두지 않음 — 릴리스 조회 · 인증 순서 · 자산 받기를 두 벌 두지 않으려고). `--with-core` 는 kyu 를 놓은 뒤 코어를 같은 디렉토리 안에 풀어 **그 자리에서 화면 없이 띄워 0 으로 끝나는지 본 뒤에** 링크를 걸고 자리를 바꾼다 — 받다가 · 풀다가 · 띄워 보다가 어디서 끊겨도 쓰던 코어가 남고, 자리를 바꾸다 실패하면 옛 코어를 되돌린다. 링크는 `KYU_INSTALL_DIR` 과 무관하게 언제나 `~/.local/bin/kyuchestration-core` 다(화면과의 약속). 다시 돌리면 갈아 끼운다. `KYU_CORE_ARCHIVE` 로 소스에서 만든 묶음을 풀 수 있다(개발) |
-| **(3 단계 정정)** msi | Compose 의 `TargetFormat.Msi`, 사용자 단위 설치 · 고정 `upgradeUuid` · 시작 메뉴. 화면만 담는다 — 윈도우의 패키징 · run 은 동봉 엔진을 묻지 않는다. 자산 `kyuchestration-desktop_<판>_windows_amd64.msi`, 서명 없음. 코어의 jar 도 실행기 모듈(`app`)이 의존해 함께 실리지만 윈도우에서는 읽히지 않는다 |
-| **(3 단계 정정)** CI | Desktop CI 에 `windows-latest`. 코어 시험과 코어를 띄우는 화면 시험은 윈도우에서 이유와 함께 건너뛰고(core 는 `onlyIf`, ui · app 은 `@DisabledOnOs`), 모듈마다 시험 · 건너뜀 · 실패 수를 로그에 적는다. 우분투는 코어 묶음을 풀어 인사해 보고, 윈도우는 msi 를 만든다 — 태그 없이 PR 에서 릴리스 잡과 같은 태스크를 지난다 |
+| **(3 단계 정정)** msi | Compose 의 `TargetFormat.Msi`, 사용자 단위 설치 · 고정 `upgradeUuid` · 시작 메뉴. 화면만 담는다(**4a 정정**: WSL 코어 묶음도 싣는다 — 아래 표) — 윈도우의 패키징 · run 은 동봉 엔진을 묻지 않는다. 자산 `kyuchestration-desktop_<판>_windows_amd64.msi`, 서명 없음. 코어의 jar 도 실행기 모듈(`app`)이 의존해 함께 실리지만 윈도우에서는 읽히지 않는다 |
+| **(3 단계 정정)** CI | Desktop CI 에 `windows-latest`. 코어 시험과 코어를 띄우는 화면 시험은 윈도우에서 이유와 함께 건너뛰고(core 는 `onlyIf`, ui · app 은 `@DisabledOnOs`), 모듈마다 시험 · 건너뜀 · 실패 수를 로그에 적는다. 우분투는 코어 묶음을 풀어 인사해 보고, 윈도우는 msi 를 만든다 — 태그 없이 PR 에서 릴리스 잡과 같은 태스크를 지난다. **(4a 정정)** 윈도우를 매트릭스(우분투 · 맥)에서 떼어 `windows-msi` 잡으로 둔다. 새 `wsl-core-bundle` 잡(우분투)이 `setup-go` 로 릴리스와 같은 조건(`-trimpath`, `CGO_ENABLED=0`)의 리눅스 kyu 를 만들어 묶음을 만들고 풀어 본 뒤 artifact `wsl-core-bundle` 로 올리고, `windows-msi` 가 `needs` 로 받아 `build` · 시험 수 세기 · `placeWslCoreBundle` · `packageMsi` · msi 확인을 돈다. 묶음 잡을 시험 매트릭스와 떼어 둔 것은 윈도우가 맥 · 우분투의 시험을 기다리지 않게 하려고다. 우분투의 코어 이미지 풀어 보기는 묶음 풀어 보기가 대신한다(묶음 안의 것이 같은 코어 이미지다). 묶음 풀어 보기 · msi 확인 · 시험 수 세기는 릴리스와 함께 `.github/scripts/` 의 스크립트 하나씩을 부른다 |
+
+**(4a 정정) msi 가 WSL 코어 묶음을 싣는다** (2026-11-01 사용자 결정)
+
+| 판단 | 근거 |
+|---|---|
+| **1 번 안 — msi 에 리눅스 코어 묶음을 동봉하고, 첫 실행 때 화면이 WSL 에 밀어 넣는다** | 사용자 요구 *"VS Code 처럼 WSL 에 따로 설치 없이"*. ① **판 일치가 공짜** — 화면 · 코어 · 엔진이 같은 빌드에서 나와 한 파일에 실린다. 화면이 릴리스에서 받아 오면 "어느 릴리스" 를 화면이 골라야 하고, 그 사이 새 릴리스가 나오면 판이 갈린다 ② **오프라인 첫 실행** — 네트워크 · GitHub 토큰 없이 깔린다(8 절 5 의 토큰 물음이 사라진다) ③ 크기 — msi 63 MB + 코어 tar.gz 25 MB + kyu 10 MB ≈ 98 MB 로 셈했고 감수한다(4a 실측: 코어 tar.gz 27 MB, kyu 11 MB, 묶음 34 MB) |
+| 묶음의 모양 | `kyuchestration-wsl-core.tar.gz` 하나, 최상위 디렉토리 없이 `core.tar.gz` · `kyu` · `install.sh` · `VERSION`. `core.tar.gz` 는 `:core:packageCoreArchive` 의 `kyuchestration-core_<판>_linux_amd64.tar.gz` 그대로(이름만 고정), `kyu` 는 리눅스 amd64(0755), `install.sh` 는 저장소 루트의 것(0755). **tar 안의 tar** 다 — 코어 이미지를 풀어 두면 `install.sh` 가 받는 입력(`KYU_CORE_ARCHIVE` 의 tar.gz)이 두 벌이 된다. 손으로 깔든 화면이 깔든 같은 `install_core` 가 같은 묶음을 풀고 띄워 보고 자리를 바꾼다 |
+| 이름에 판을 넣지 않는다 | 화면은 같은 빌드에서 나온 자기 리소스에서 고정 이름으로 찾고, 판은 화면 자신의 판(`DesktopBuildVersion.label`)과 같다 |
+| **리소스 경로 규약** | 빌드: `desktop/app/build/engineResources/windows-x64/wsl-core/kyuchestration-wsl-core.tar.gz`(Compose `appResourcesRootDir` 의 윈도우 하위 디렉토리). 설치된 앱: 시스템 프로퍼티 `compose.application.resources.dir` 가 가리키는 디렉토리의 `wsl-core\kyuchestration-wsl-core.tar.gz` = app-image 의 `app\resources\wsl-core\…`(jpackage 의 `$APPDIR\resources` — 리눅스 app-image 의 cfg 에 `-Dcompose.application.resources.dir=$APPDIR/resources` 가 적힌 것을 확인했고, 윈도우 자리는 CI 가 msi 를 관리 설치로 풀어 확인한다). 화면이 이 자리를 읽는 것은 4b 다. 리소스로 들어간 파일은 설치된 패키지에서 실행 권한을 잃지만(2 단계 실측) 묶음은 tar 머리에 권한을 실어 WSL 에서 풀 때 되살아난다 |
+| **`VERSION`** | `v<판>` 한 줄(`v0.16.0`) — 화면의 판 라벨(`BuildVersion` 의 꼴)과 문자열로 견준다. 같은 파일(`:core:writeCoreVersionLabel`)을 묶음 최상위와 코어 이미지 안(`kyuchestration-core/VERSION`) 둘 다에 싣는다. 손으로 깔든 화면이 깔든 깔린 코어 디렉토리(`~/.local/share/kyuchestration/core/VERSION`)에 남아 4b 가 한 자리만 읽는다 — 코어를 띄워 `welcome` 을 받기 전에 판을 안다 |
+| 만드는 자리 | `:core:packageWslCoreBundle -PwslCoreBundleKyu=<절대경로>` → `desktop/core/build/wsl-core-bundle/`. 리눅스 x86-64 가 아닌 호스트에서는 jlink 전에 멈춘다 — 윈도우 · 맥에서 만든 `runtime/bin/java` 는 WSL 에서 뜨지 않고, 그 사실은 사용자의 첫 실행에서야 드러난다. kyu 는 ELF x86-64 머리를 본다(윈도우의 `kyu.exe` · 맥 바이너리를 넣어도 묶음은 만들어진다). 권한은 코어 이미지와 같은 규칙(실행되는 것 0755, 그 밖 0644)을 갈래마다 정한다 — 경로로 가르는 부모 `eachFile` 은 갈래의 `rename` 보다 먼저 돌아 kyu 를 원래 이름(`kyu_linux_amd64`)으로 보고 0644 로 실었다(실측) |
+| 싣는 자리 | `:app:placeWslCoreBundle -PwslCoreBundle=<절대경로>` 가 리소스 자리에 복사한다 — 로컬 · 릴리스 · Desktop CI 가 같은 한 길이다. 윈도우의 `createDistributable` · `packageMsi` 는 `checkBundledWslCore` 로 묶음이 없으면 어디서 가져오는지를 말하며 멈춘다(맥 · 리눅스의 `checkBundledEngine` 과 같은 자리). `run` 에는 걸지 않는다 — 소스에서 윈도우 화면을 띄우는 흐름은 묶음 없이 돈다. 윈도우의 "동봉 엔진" 은 묶음 안의 kyu 다 |
+| **`install.sh` 의 `KYU_BINARY_FILE`** | 주면 릴리스 대신 그 파일을 kyu 로 놓는다 — 받은 자산과 같은 길(설치 디렉토리 안의 받는 자리 → `chmod +x` → `mv`)과 같은 `kyu version`. 준 파일은 옮기지 않고 복사한다(묶음을 푼 쪽이 치운다). 없는 파일을 릴리스로 메우지 않는다 — 조용히 최신 릴리스를 받으면 화면과 다른 판이 놓인다. `KYU_CORE_ARCHIVE` 와 함께면 릴리스 정보조차 묻지 않고(`resolve_release_access` 를 부르지 않는다) curl 도 요구하지 않는다. 시험은 가짜 curl 의 호출 기록이 없음으로 본다 |
+| **릴리스 자산으로 올리지 않는다** | 사용자에게 보이는 설치 길은 msi 와 `install.sh` 둘이면 된다. 묶음은 msi 의 내용물이고, 같은 것이 따로 자산으로 놓이면 "어느 것을 받아야 하나" 의 물음만 는다. 손으로 까는 사람은 지금처럼 `install.sh --with-core` 가 코어 이미지 자산과 kyu 자산을 받는다 |
+| CI | 릴리스: `core-archive` 가 `kyu-binaries` 를 받아 코어 이미지와 묶음을 함께 만든다 — msi 가 WSL 에 놓는 kyu 가 릴리스 자산의 kyu 와 같은 바이트다. 묶음을 풀어 curl 을 가린 채 `install.sh` 로 깔고 `VERSION` · `kyu version` · 깔린 코어의 인사가 모두 `v<판>` 인지, 묶음 안 `core.tar.gz` 가 코어 이미지 자산과 같은 파일인지 본다. 묶음은 artifact `wsl-core-bundle` 로만 올린다. `desktop-msi` 는 `core-archive` 를 `needs` 해 묶음을 받아 `placeWslCoreBundle` · `packageMsi` 를 돌고, app-image 와 msi(`msiexec /a` 관리 설치)의 `app\resources\wsl-core\` 에 같은 크기의 묶음이 있는지 본다. 릴리스 잡은 자산을 이름의 꼴로 골라 여덟 개인지 본다(받은 artifact 에 묶음이 섞여 있어서다). Desktop CI 는 위 "(3 단계 정정) CI" 행의 4a 정정 |
 
 ### 6.17 첫 실행 — 윈도우 화면이 코어를 찾기까지
 
@@ -799,6 +814,29 @@ desktop/
 | 목록 | `-l -v` 를 `WSL_UTF8=1` 로. 옛 판의 UTF-16LE 도 NUL 바이트로 가려 읽는다. 머리줄은 한국어 로케일에서도 영어였다(실측) |
 | 코어 없음 안내 | 지금은 자리(`~/.local/bin/kyuchestration-core`)만 알린다. 설치 명령 한 줄(복사 버튼)은 설치 스크립트와 함께 3b |
 
+**(4a 정정) 첫 실행 — 화면이 묶음으로 코어를 놓는다** (구현은 4b)
+
+```
+코어가 있는가 (지금의 test -x)
+  ├─ 있다 ─ cat ~/.local/share/kyuchestration/core/VERSION 을 화면의 판과 견준다
+  │          ├ 같다 ──────────────────────────────▶ 붙는다 (serve --stdio)
+  │          └ 다르다 · 파일이 없다(4a 이전에 깐 코어) ─▶ 깐다
+  └─ 없다 ─────────────────────────────────────────▶ 깐다
+
+깐다:
+  ├─ 리소스에 묶음이 있다 ─ wsl.exe 의 stdin 으로 묶음을 넘겨 WSL 의 임시 디렉토리에 풀고
+  │                        env KYU_CORE_ARCHIVE=<…>/core.tar.gz KYU_BINARY_FILE=<…>/kyu bash <…>/install.sh --with-core
+  └─ 묶음이 없다(소스 실행) ─▶ 지금의 설치 명령 안내(복사 버튼)
+```
+
+| 판단 | 근거 |
+|---|---|
+| 설치를 화면이 대신 돌린다 — 위 표의 "대신 돌리지 않는다(v1)" 를 거둔다 | 그 이유는 비공개 저장소의 토큰 물음이었다. 묶음으로 깔면 네트워크에 닿지 않아 물을 것이 없다(6.16 의 4a 정정 — `KYU_BINARY_FILE` · `KYU_CORE_ARCHIVE` 가 둘 다 있으면 릴리스 정보도 묻지 않는다) |
+| 묶음을 `wsl.exe` 의 stdin 으로 넘긴다 | 3.1 — `wsl.exe` 를 직접 부르면 stdin 의 바이트가 그대로 간다. 화면이 리눅스 경로(`/tmp/…`)를 알 필요가 없고 `\\wsl.localhost` 로 쓰는 길의 권한 · 경로 변환을 지나지 않는다 |
+| 설치의 판단은 `install.sh` 의 것 그대로 | 풀어 띄워 본 뒤 자리 바꾸기 · 실패하면 쓰던 코어 되돌리기 · 고정 링크(6.16 의 3 단계 정정). 화면이 같은 판단을 코틀린으로 다시 짜면 두 벌이 된다 |
+| 판은 `VERSION` 으로 견준다 | 코어를 띄워 `welcome` 을 받기 전에 안다. 판이 다른 코어는 `protocol` 이 같아도 다른 판의 기능으로 돈다 — 같은 빌드의 묶음이 손에 있으므로 갈아 끼운다. 4a 이전에 손으로 깐 코어에는 `VERSION` 이 없다 — 다른 판으로 본다 |
+| 묶음이 없으면 지금의 안내 | 소스에서 띄운 화면(`./gradlew run`)은 묶음 없이 돈다(`run` 은 `checkBundledWslCore` 를 걸지 않는다). 그때는 3b 의 설치 명령 한 줄로 떨어진다 |
+
 ---
 
 ## 7. 구현 단계
@@ -812,6 +850,7 @@ desktop/
 | **3** | **윈도우 화면 + `wsl.exe` 연결 + 경로.** `coreLaunchCommand(WslDistribution)`, 배포판 목록(UTF-16LE · `WSL_UTF8`)과 고르기, `open_workdir { hostPath }` 를 코어가 `wslpath -u` 로 풀기(6.9), 윈도우 파일 선택기 갈래, 브라우저 열기를 화면으로(6.10). 개발은 WSL 에서 `:core` 를 설치하고 윈도우에서 `:ui:run` | **실측**(윈도우 + WSL, 실 `claude`): 윈도우 창에서 WSL 폴더를 골라 열고 → 메인 챗에 한국어로 말하고 → 승인 카드에 답하고 → 하위 세션을 띄운다. 네이티브 선택 창이 주는 경로 형식을 확인한다(3.8). 다른 배포판 폴더를 고르면 거절 문구. 창을 닫으면 WSL 에 `claude` 가 남지 않는다 |
 | **3 (정정)** | **3a**: `CorePlace.WslDistribution` · 배포판 목록과 고르기 · 화면이 `\\wsl.localhost` 를 코어 경로로 옮기기(6.9 정정) · `hello`/`welcome` 의 OS · 배포판 · 코어가 자식의 PATH 로 `claude` 찾기(3.7 정정). **3b**: WSL 코어 설치 스크립트 · 릴리스 산출물 · 윈도우 패키징 · CI. 브라우저 열기를 화면으로(6.10)는 3b 이후 | **3a 실측**: 윈도우 JVM(OpenJDK 23) 하네스가 화면의 `CoreChildProcess`(WSL 모드)와 거울로 WSL 코어와 hello → welcome → 스냅샷 → 명령 → 변화, 한국어 워크디렉토리 열기, 실 claude 메인 한 턴(한국어 · 이모지 · 따옴표 · 역슬래시 그대로), 떠나기 · `halt` 모두 코어와 자손 0. 윈도우 창 손 확인 · 승인 카드 · 하위 세션은 이후 단계 |
 | **4** | **msi 릴리스.** `release.yml` 에 윈도우 잡(`packageMsi`)과 리눅스 코어 tar.gz 잡, `install.sh --with-core`, 첫 실행 흐름(6.17), README | **실측**: 시험 태그로 워크플로를 돌려 msi·tar.gz 가 나온다. 사용자의 윈도우에 msi 를 깔고, 코어가 없는 배포판에서 안내를 따라 설치한 뒤 3 단계 시나리오가 돈다. 판이 다른 화면·코어를 붙이면 `protocol_mismatch` 화면 |
+| **4 (정정)** | **4a**: WSL 코어 묶음(`:core:packageWslCoreBundle` — 코어 이미지 tar.gz · 리눅스 kyu · `install.sh` · `VERSION`)과 코어 이미지 안의 `VERSION`, msi 에 싣기(`placeWslCoreBundle` · `checkBundledWslCore`), `install.sh` 의 `KYU_BINARY_FILE`(둘 다 손에 있으면 네트워크 없이), 릴리스 · Desktop CI 구조(6.16 의 4a 정정). 화면 코드는 그대로다. **4b**: 화면이 리소스의 묶음을 `wsl.exe` stdin 으로 WSL 에 풀어 `install.sh` 를 돌리고, `cat ~/.local/share/kyuchestration/core/VERSION` 으로 판을 견줘 다르면 다시 깐다. 묶음이 없는 소스 실행은 지금의 설치 명령 안내로 떨어진다(6.17 의 4a 정정). **README 윈도우 절은 4b 가 고친다** — WSL 터미널에서 돌리는 ① 를 걷고 msi 하나로. 사용자 체험이 바뀌는 것이 4b 라 4a 에서는 그대로 둔다 | **4a**: 로컬(WSL2 우분투)에서 묶음의 구조 · 권한 · `VERSION` 을 `tar -tzvf` 로, 묶음만으로 curl 을 가린 채 깔아 `core/VERSION` · `kyuchestration-core` 링크 · `kyu` 가 놓이고 깔린 코어가 같은 판으로 인사. Desktop CI 윈도우 잡에서 msi 안 `app\resources\wsl-core\` 에 묶음. **4b**: 사용자의 윈도우에 msi 를 깔고, 코어가 없는 배포판에서 화면이 스스로 깔아 3 단계 시나리오가 돈다. 판이 다른 코어를 다시 깐다. 네트워크를 끊고 첫 실행 |
 | **5** | **코어 수명·재접속.** `serve`(데몬)와 `attach`(중계), `core.sock`·`core.lock`, 새 화면이 옛 연결을 밀어냄, 화면 없음 + 세션 없음 10 분에 끝남, `shutdown_core`, 판 갈아 끼우기(6.14), 창 닫기 = 떼기 | **실측**: ① 턴이 도는 중에 윈도우 창을 닫고 → 다시 열면 같은 대화에 그 턴의 끝이 서 있다 ② 화면 JVM 을 작업 관리자로 죽이고 다시 열면 붙는다 — WSL 에 남은 `attach` 없음(`pgrep`) ③ 승인 카드가 뜬 채로 화면을 죽이고 다시 열면 카드가 그대로 있고 답이 간다 ④ 화면 없이 세션 없이 10 분 뒤 코어가 사라진다 ⑤ **모든 `wsl.exe` 가 끝난 뒤 배포판이 멈추는가**를 사용자 머신에서 잰다(3.8 첫 줄) ⑥ 맥에서 떼어 낸 코어가 화면 종료 뒤에 사는가 |
 
 **1 단계가 가장 크다.** 리뷰가 어려우면 둘로 나눈다 — 1a: 챗 홀더의 대상 명시화와 대화 맵 공개(직렬화 없음, 동작 그대로), 1b: 타입·게시자·거울·메모리 파이프.
@@ -824,7 +863,7 @@ desktop/
 2. **오래된 줄의 페이징.** 6.6. 스냅샷이 실제로 느려지면 꼬리만 먼저 보내고 위로 올릴 때 더 받는 명령을 더한다.
 3. **띄우는 중에 다른 세션을 고르면.** 6.8 의 동작 변화 — 지금은 막 뜬 프로세스를 끝내고, 바뀐 뒤에는 그대로 둔다. 사용자 확인이 필요하다.
 4. **화면 둘.** 지금은 새 화면이 옛 화면을 밀어낸다(6.13). 윈도우 창과 맥 창이 같은 WSL 코어를 함께 보는 일은 요구가 없다. 생기면 연결마다 게시자를 두면 되고 프로토콜은 바뀌지 않는다.
-5. **화면이 코어 설치를 대신 돌릴 것인가.** 6.17. 저장소가 공개되면 토큰 물음이 사라지므로 그때 `wsl.exe -e bash -c` 로 설치 스크립트를 돌리는 길이 단순해진다.
+5. **화면이 코어 설치를 대신 돌릴 것인가.** 6.17. 저장소가 공개되면 토큰 물음이 사라지므로 그때 `wsl.exe -e bash -c` 로 설치 스크립트를 돌리는 길이 단순해진다. **4a/4b 로 답함** — 대신 돌린다. msi 가 WSL 코어 묶음을 싣고(4a), 화면이 그것을 WSL 에 풀어 `install.sh` 를 네트워크 없이 돌린다(4b). 토큰 물음이 저장소 공개를 기다리지 않고 사라진다(6.16 · 6.17 의 4a 정정).
 6. **`/mnt/c` 의 워크디렉토리.** 6.9 는 받아들인다. 느리다는 것을 화면이 알려야 하는지는 실제로 쓰는 사람이 생기면 정한다.
 7. **중계를 Go 로.** 4.9 (나). `attach` JVM 의 메모리가 문제로 보이면 다시 본다.
 8. **코어 하나에 워크디렉토리 여럿.** 지금 앱은 창 하나에 워크디렉토리 하나다(app-owned 열린 질문 6). 코어가 데몬이 되면 "다른 워크디렉토리를 열면 앞의 세션이 끝난다"(`close_workdir`)가 화면을 닫았다 여는 일과 섞인다. 이 설계는 지금의 규칙을 그대로 둔다.
