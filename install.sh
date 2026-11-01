@@ -53,7 +53,7 @@ cleanup() {
     [ -n "$RELEASE_JSON_PATH" ] && rm -f "$RELEASE_JSON_PATH"
     [ -n "$DOWNLOAD_PATH" ] && rm -f "$DOWNLOAD_PATH"
     [ -n "$CORE_STAGING_PATH" ] && rm -rf "$CORE_STAGING_PATH"
-    # 마지막 [ ] 가 거짓이면 트랩 전체가 실패로 끝나므로 성공을 못박는다.
+    # 마지막 [ ] 가 거짓이면 트랩 전체가 실패로 끝나므로 성공으로 끝낸다.
     return 0
 }
 trap cleanup EXIT
