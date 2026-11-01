@@ -5,7 +5,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -49,6 +48,9 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -169,12 +171,14 @@ private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathL
         rememberedDistribution = chosenDistribution::read,
         rememberDistribution = chosenDistribution::write,
     )
+    // 창의 합성이 아니라 이 함수가 쥔다. 설치 중에 창을 닫으면 돌던 wsl.exe 를 끝내고 끝나기를 기다린 뒤에 떠나야 한다(WslCommandLine 의
+    // runWslProcess) — 합성의 스코프는 창이 사라질 때 취소만 하고 기다리지 않으며, 그 사이 JVM 이 끝나면 자식이 남는다.
+    // wsl.exe 를 기다리는 일은 WslCommandLine 이 IO 스레드에서 한다 — 창을 그리는 스레드는 막히지 않는다.
+    val preparationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("wsl-core-place"))
+    preparationScope.launch { preparation.lookAround() }
     // 본 창을 이어서 띄워야 하므로 이 창이 닫혀도 프로세스를 끝내지 않는다.
     application(exitProcessOnExit = false) {
         val state by preparation.state.collectAsState()
-        val preparationScope = rememberCoroutineScope()
-        // wsl.exe 를 기다리는 일은 WslCommandLine 이 IO 스레드에서 한다 — 창을 그리는 스레드는 막히지 않는다.
-        LaunchedEffect(Unit) { preparation.lookAround() }
         LaunchedEffect(state) {
             if (state is WslCorePlacePreparationState.Ready) {
                 exitApplication()
@@ -189,6 +193,7 @@ private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathL
             )
         }
     }
+    runBlocking { preparationScope.coroutineContext.job.cancelAndJoin() }
     val ready = preparation.state.value as? WslCorePlacePreparationState.Ready ?: return null
     return CorePlace.WslDistribution(wslExecutable, ready.distributionName)
 }

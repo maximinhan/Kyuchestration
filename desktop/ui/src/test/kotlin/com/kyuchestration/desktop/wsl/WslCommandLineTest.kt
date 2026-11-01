@@ -14,7 +14,13 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.condition.DisabledOnOs
 import org.junit.jupiter.api.condition.OS
 
@@ -303,5 +309,40 @@ class WslCommandLineTest {
         assertEquals(listOf("대상: linux_amd64", "kyu v0.16.0 (abc)"), reportedLines)
         assertTrue(firstLineSeen.exists())
         assertEquals(listOf("1", "-d", "Ubuntu-24.04", "--cd", "~", "-e", "env", "A=b", "bash", "install.sh"), receivedLines())
+    }
+
+    /**
+     * 설치 중에 준비 창을 닫으면 준비 코루틴이 취소된다. 막힌 읽기는 취소를 모르므로 `wsl.exe` 를 끝내야 돌아온다 — 끝내지 않으면 그
+     * 자식이 화면 뒤에 남아 다음 실행의 걸음과 겹친다. 끝날 때까지 기다린 뒤에 취소가 끝난다.
+     */
+    @Test
+    fun `부른 쪽이 취소되면 돌고 있는 wsl 을 끝내고 끝날 때까지 기다린다`() = runBlocking {
+        val pidFile = scratchDirectory.resolve("fake-wsl.pid")
+        fakeWslRunning(
+            """
+            echo ${'$'}${'$'} > '$pidFile'
+            exec sleep 30
+            """.trimIndent(),
+        )
+        val commandLine = WslCommandLine(fakeWsl)
+        val runs = listOf<suspend () -> Unit>(
+            { commandLine.run("Ubuntu-24.04", listOf("sleep")) },
+            { commandLine.runFeedingStandardInput("Ubuntu-24.04", listOf("sleep"), standardInput = fakeWsl) },
+            { commandLine.runReportingEachLine("Ubuntu-24.04", listOf("sleep")) {} },
+        )
+        for (runOne in runs) {
+            pidFile.toFile().delete()
+            val running = launch(Dispatchers.Default) { runOne() }
+            withTimeout(10.seconds) {
+                while (!pidFile.exists() || pidFile.readText().isBlank()) {
+                    kotlinx.coroutines.delay(20)
+                }
+            }
+            val pid = pidFile.readText().trim().toLong()
+
+            withTimeout(10.seconds) { running.cancelAndJoin() }
+
+            assertTrue(ProcessHandle.of(pid).map { !it.isAlive }.orElse(true), "취소한 뒤에도 가짜 wsl.exe(pid $pid)가 살아 있다")
+        }
     }
 }

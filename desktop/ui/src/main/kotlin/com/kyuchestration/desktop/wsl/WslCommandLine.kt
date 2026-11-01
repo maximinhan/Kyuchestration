@@ -5,8 +5,14 @@ import com.kyuchestration.desktop.mirror.wslProcessBuilder
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** `wsl.exe -l -v` 의 답. */
@@ -113,12 +119,13 @@ class WslCommandLine(private val wslExecutable: Path) : WslDistributionCommands 
      * 결과다 — 어느 한쪽만으로는 무엇이 먼저였는지 알 수 없다. 리눅스 쪽이 0 이어도 다 넘기지 못했으면 실패다(덜 받은 묶음).
      */
     override suspend fun runFeedingStandardInput(distributionName: String, linuxCommand: List<String>, standardInput: Path): WslCommandResult =
-        withContext(Dispatchers.IO) {
-            val process = wslProcessBuilder(wslExecutable, inDistribution(distributionName, linuxCommand)).redirectErrorStream(true).start()
-            val feeding = async { feedStandardInput(process, standardInput) }
-            val output = process.inputStream.use { it.readBytes() }
-            val exitCode = process.waitFor()
-            WslCommandResult(exitCode, wslMessageOf(output), standardInputFailure = feeding.await()?.toString())
+        runWslProcess(inDistribution(distributionName, linuxCommand)) { process ->
+            coroutineScope {
+                val feeding = async { feedStandardInput(process, standardInput) }
+                val output = process.inputStream.use { it.readBytes() }
+                val exitCode = process.waitFor()
+                WslCommandResult(exitCode, wslMessageOf(output), standardInputFailure = feeding.await()?.toString())
+            }
         }
 
     /**
@@ -132,18 +139,53 @@ class WslCommandLine(private val wslExecutable: Path) : WslDistributionCommands 
         distributionName: String,
         linuxCommand: List<String>,
         onOutputLine: (String) -> Unit,
-    ): Int = withContext(Dispatchers.IO) {
-        val process = wslProcessBuilder(wslExecutable, inDistribution(distributionName, linuxCommand)).redirectErrorStream(true).start()
+    ): Int = runWslProcess(inDistribution(distributionName, linuxCommand)) { process ->
         process.outputStream.close()
         process.inputStream.bufferedReader(Charsets.UTF_8).useLines { lines -> lines.forEach(onOutputLine) }
         process.waitFor()
     }
 
-    private suspend fun runWsl(arguments: List<String>): Pair<Int, ByteArray> = withContext(Dispatchers.IO) {
-        val process = wslProcessBuilder(wslExecutable, arguments).redirectErrorStream(true).start()
+    private suspend fun runWsl(arguments: List<String>): Pair<Int, ByteArray> = runWslProcess(arguments) { process ->
         process.outputStream.close()
         val output = process.inputStream.use { it.readBytes() }
         process.waitFor() to output
+    }
+
+    /**
+     * `wsl.exe` 를 띄워 [useProcess] 에 맡긴다. 부른 쪽이 취소되면(준비 창을 닫았다) 그 `wsl.exe` 를 끝내고 끝날 때까지 기다린 뒤에
+     * 취소를 마친다. [useProcess] 의 막힌 읽기는 코루틴 취소를 모른다 — 프로세스가 끝나야 끝을 보고 돌아온다. 끝내지 않으면 그 자식이
+     * 화면 뒤에 남아 다음 실행의 걸음(임시 자리 `rm -rf`)과 겹친다.
+     *
+     * `wsl.exe` 를 끝내도 리눅스 쪽에는 신호가 가지 않는다(3.2 B) — 리눅스 쪽 명령은 다음에 출력을 쓸 때 끊긴 파이프를 만난다. 설치가
+     * 그렇게 끊겨도 쓰던 코어가 남는 까닭은 6.17 의 4b 정정에 적었다.
+     */
+    private suspend fun <T> runWslProcess(arguments: List<String>, useProcess: suspend (Process) -> T): T = withContext(Dispatchers.IO) {
+        val process = wslProcessBuilder(wslExecutable, arguments).redirectErrorStream(true).start()
+        coroutineScope {
+            val endOnCancellation = launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) { process.endAndWait() }
+                }
+            }
+            try {
+                useProcess(process)
+            } finally {
+                endOnCancellation.cancel()
+            }
+        }
+    }
+}
+
+/** 이미 끝났으면 아무것도 하지 않는다. 윈도우의 `destroy` 는 곧바로 끝내고, 그 밖에서는 정중히 끝낸 뒤 기다려도 안 끝나면 강제로. */
+private fun Process.endAndWait() {
+    if (!isAlive) {
+        return
+    }
+    destroy()
+    if (!waitFor(PROCESS_END_GRACE_SECONDS, TimeUnit.SECONDS)) {
+        destroyForcibly().waitFor()
     }
 }
 
@@ -191,6 +233,8 @@ private const val TEST_SAYS_NO = 1
 private const val CAT_SAYS_UNREADABLE = 1
 
 private const val CAT_MESSAGE_PREFIX = "cat:"
+
+private const val PROCESS_END_GRACE_SECONDS = 5L
 
 /** 깔린 코어의 판. 손으로든 화면이든 `install.sh --with-core` 가 남긴다(core-ui-split-design.md 6.16 의 4a 정정). */
 internal const val WSL_INSTALLED_CORE_VERSION_FROM_HOME = ".local/share/kyuchestration/core/VERSION"
