@@ -77,18 +77,19 @@ class WslCommandLine(private val wslExecutable: Path) : WslDistributionCommands 
     }
 
     /**
-     * 코어를 본 바로 뒤에 부른다. 없는 `VERSION` 에 `cat` 은 글을 쓰고 1 로 끝나므로 [checkCore] 처럼 "글이 있으면 `wsl.exe` 의 실패" 로
-     * 가르지 않는다 — 0 과 한 줄만 판으로 믿고, `wsl.exe` 자신의 실패(없는 배포판의 255, 윈도우 JVM 에서 -1)만 따로 가른다. 1 은
-     * `cat` 의 것이다 — 바로 앞의 `test -x` 가 그 배포판을 띄웠으니 `wsl.exe` 가 1 로 끝내는 실패(커널 갱신 · 기본 사용자 없음)는 이미
-     * 지났다.
+     * 0 과 한 줄만 판으로 믿는다. 없는 `VERSION` 에 `cat` 은 `cat:` 으로 시작하는 글을 쓰고 1 로 끝난다 — 그것만 "판 모름" 이다.
+     * [checkCore] 처럼 "1 + 글" 을 통째로 `wsl.exe` 의 실패로 보면 4a 이전에 깐 코어가 배포판 실패로 보이고, 통째로 판 모름으로 보면
+     * `wsl.exe` 가 1 로 끝내는 실패(커널 갱신 · 기본 사용자 없음)가 "다시 깐다" 로 묻힌다. 그래서 글의 주인을 본다.
      */
     suspend fun readInstalledCoreVersion(distributionName: String): InstalledWslCoreVersion {
         val (exitCode, output) = runWsl(inDistribution(distributionName, listOf("cat", WSL_INSTALLED_CORE_VERSION_FROM_HOME)))
-        val versionLines = wslMessageOf(output).lines().filter { it.isNotBlank() }
+        val message = wslMessageOf(output)
+        val versionLines = message.lines().filter { it.isNotBlank() }
         return when {
             exitCode == 0 && versionLines.size == 1 -> InstalledWslCoreVersion.Known(versionLines.single().trim())
-            exitCode == 0 || exitCode == CAT_SAYS_UNREADABLE -> InstalledWslCoreVersion.Unknown
-            else -> InstalledWslCoreVersion.DistributionFailed(wslMessageOf(output))
+            exitCode == 0 -> InstalledWslCoreVersion.Unknown
+            exitCode == CAT_SAYS_UNREADABLE && message.startsWith(CAT_MESSAGE_PREFIX) -> InstalledWslCoreVersion.Unknown
+            else -> InstalledWslCoreVersion.DistributionFailed(message)
         }
     }
 
@@ -197,6 +198,8 @@ fun wslExecutablePath(lookUpEnvironmentVariable: (String) -> String? = System::g
 private const val TEST_SAYS_NO = 1
 
 private const val CAT_SAYS_UNREADABLE = 1
+
+private const val CAT_MESSAGE_PREFIX = "cat:"
 
 private const val STANDARD_INPUT_CHUNK_BYTES = 64 * 1024
 

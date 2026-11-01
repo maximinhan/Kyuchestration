@@ -150,15 +150,26 @@ class WslCommandLineTest {
         )
     }
 
-    /**
-     * 4a 이전에 손으로 깐 코어에는 VERSION 이 없다. `cat` 은 그때 글을 쓰고 1 로 끝난다 — `checkCore` 와 달리 글이 있다고 `wsl.exe` 의
-     * 실패로 보지 않는다. 바로 앞의 `test -x` 가 그 배포판을 띄웠다.
-     */
+    /** 4a 이전에 손으로 깐 코어에는 VERSION 이 없다. `cat` 은 그때 `cat:` 으로 시작하는 글을 쓰고 1 로 끝난다. */
     @Test
     fun `VERSION 이 없으면 판을 모른다`() = runTest {
         fakeWslAnswering("cat: .local/share/kyuchestration/core/VERSION: No such file or directory\n", exitCode = 1)
 
         assertEquals(InstalledWslCoreVersion.Unknown, WslCommandLine(fakeWsl).readInstalledCoreVersion("Ubuntu-24.04"))
+    }
+
+    /**
+     * `wsl.exe` 자신도 글을 쓰고 1 로 끝난다(커널 갱신 · 기본 사용자 없음). 바로 앞의 `test -x` 와 이 호출 사이에 배포판이 멈추거나
+     * 지워질 수 있다 — `cat` 의 글이 아니면 판을 모르는 것이 아니라 배포판을 띄우지 못한 것이다.
+     */
+    @Test
+    fun `1 로 끝나도 cat 의 글이 아니면 배포판을 띄우지 못한 것이다`() = runTest {
+        fakeWslAnswering("WSL 2 를 사용하려면 커널 구성 요소를 업데이트해야 합니다.\r\n", exitCode = 1)
+
+        assertEquals(
+            InstalledWslCoreVersion.DistributionFailed("WSL 2 를 사용하려면 커널 구성 요소를 업데이트해야 합니다."),
+            WslCommandLine(fakeWsl).readInstalledCoreVersion("Ubuntu-24.04"),
+        )
     }
 
     @Test
