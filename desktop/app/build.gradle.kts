@@ -336,8 +336,9 @@ abstract class PlaceWslCoreBundle : DefaultTask() {
                     "리눅스 x86-64 에서 ./gradlew :core:packageWslCoreBundle -PwslCoreBundleKyu=<리눅스 kyu> 로 만듭니다.",
             ),
         )
-        if (!suppliedBundle.isFile) {
-            throw GradleException("-PwslCoreBundle 이 가리키는 파일이 없습니다: $suppliedBundle")
+        // 상대 경로는 Gradle 이 뜬 자리를 기준으로 풀려, 부른 셸의 자리와 갈릴 수 있다 — 절대 경로만 받는다.
+        if (!suppliedBundle.isAbsolute || !suppliedBundle.isFile) {
+            throw GradleException("-PwslCoreBundle 은 있는 파일의 절대 경로여야 합니다: $suppliedBundle")
         }
         val destination = bundleDestination.get().asFile
         destination.parentFile.mkdirs()

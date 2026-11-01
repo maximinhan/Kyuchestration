@@ -119,7 +119,7 @@ jobs:
           if-no-files-found: error
 
   # 리눅스용 설치 패키지(화면 + 코어 + 엔진). WSLg 로 창을 띄우는 사람도 이것을 쓴다. 윈도우 창을 쓰는
-  # 사람은 아래 desktop-msi(화면)와 core-archive(WSL 의 코어)를 쓴다.
+  # 사람은 아래 desktop-msi(화면 + WSL 코어 묶음)를 쓴다.
   desktop-deb:
     needs: resolve-version
     runs-on: ubuntu-latest
@@ -306,11 +306,14 @@ jobs:
           path: desktop/build/release-assets/*.dmg
           if-no-files-found: error
 
-  # WSL 에 푸는 코어 이미지(core-ui-split-design.md 6.16). 윈도우 화면(msi)이 wsl.exe 로 띄우는 코어다 —
-  # install.sh --with-core 가 이 자산을 받아 ~/.local/share/kyuchestration/core 에 푼다. jlink 런타임을 품으므로
-  # 리눅스 러너에서 만든다(jlink 는 자기가 도는 OS 의 런타임을 만든다). 판은 화면과 같다(설계 6.14).
+  # WSL 에 푸는 코어 이미지와, 그것을 msi 에 실을 WSL 코어 묶음(core-ui-split-design.md 6.16 의 3 단계 · 4a 정정). 윈도우 화면(msi)이
+  # wsl.exe 로 띄우는 코어다 — 화면이 msi 의 묶음을 WSL 에 풀어 install.sh 로 놓고(4b), 손으로 깔 때는 install.sh --with-core 가 릴리스의
+  # 코어 이미지를 받는다. jlink 런타임을 품으므로 리눅스 러너에서 만든다(jlink 는 자기가 도는 OS 의 런타임을 만든다). 판은 화면과 같다(설계 6.14).
+  #
+  # 묶음의 kyu 는 kyu-binaries 의 산출물이다. 릴리스 자산의 kyu 와 msi 가 WSL 에 놓는 kyu 가 같은 바이트여야 "같은 태그, 같은 엔진" 이 선다 —
+  # 여기서 다시 빌드하면 같은 조건이어도 두 벌이 생긴다.
   core-archive:
-    needs: resolve-version
+    needs: [resolve-version, kyu-binaries]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -327,24 +330,33 @@ jobs:
             desktop/gradle/libs.versions.toml
             desktop/gradle/wrapper/gradle-wrapper.properties
 
+      # 아티팩트는 실행 비트를 잃는다. 묶음이 kyu 의 권한을 0755 로 정해 싣으므로 여기서 chmod 하지 않는다.
+      - uses: actions/download-artifact@v4
+        with:
+          name: kyu-binaries
+          path: ${{ runner.temp }}/kyu-binaries
+
       # 전체 빌드와 시험은 같은 우분투 러너의 desktop-deb 잡이 이미 돈다. 같은 시험을 두 번 돌려 릴리스를 늦추지 않고 묶기만 한다 —
       # 시험이 깨지면 desktop-deb 가 실패해 릴리스 잡에 닿지 못하는 것은 같다.
-      - name: 코어 이미지 묶기
-        env:
-          DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
-        run: ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" :core:packageCoreArchive
-
-      # 만든 것을 풀어 띄워 본다. 실행 권한이 빠지면(Gradle 9 의 묶음 기본값) 받은 사람의 WSL 에서야 드러난다.
-      - name: 코어 이미지를 풀어 인사해 보기
+      - name: 코어 이미지와 WSL 코어 묶음 만들기
         env:
           DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
         run: |
-          archive="core/build/core-archive/kyuchestration-core_${DESKTOP_VERSION}_linux_amd64.tar.gz"
-          work=$(mktemp -d)
-          tar -xzf "$archive" -C "$work"
-          printf '%s\n' '{"frame":"hello","protocol":2,"screenVersion":"release","screenOs":"linux"}' \
-            | XDG_STATE_HOME="$work/state" "$work/kyuchestration-core/bin/kyuchestration-core" serve --stdio > "$work/frames.txt"
-          grep -q "\"coreVersion\":\"v${DESKTOP_VERSION}\"" "$work/frames.txt"
+          ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" \
+            :core:packageCoreArchive :core:packageWslCoreBundle "-PwslCoreBundleKyu=${RUNNER_TEMP}/kyu-binaries/kyu_linux_amd64"
+
+      # 만든 것을 풀어 윈도우 화면이 WSL 에서 할 일 그대로 해 본다 — 네트워크 없이 설치, VERSION 과 kyu version 과 깔린 코어의 인사가
+      # 모두 이 태그의 판인지. 실행 권한이 빠지면(Gradle 9 의 묶음 기본값) 받은 사람의 WSL 에서야 드러난다. 묶음 안의 core.tar.gz 가
+      # 아래에서 올리는 코어 이미지 자산과 같은 파일인지도 견주어, 이 걸음이 그 자산도 함께 보게 한다.
+      - name: 묶음을 풀어 설치하고 인사해 보기
+        shell: bash
+        env:
+          DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
+        run: |
+          cmp "core/build/core-archive/kyuchestration-core_${DESKTOP_VERSION}_linux_amd64.tar.gz" \
+            <(tar -xOzf core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz core.tar.gz)
+          bash ../.github/scripts/verify-wsl-core-bundle.sh \
+            core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz "v${DESKTOP_VERSION}" same-label
 
       - uses: actions/upload-artifact@v4
         with:
@@ -352,10 +364,17 @@ jobs:
           path: desktop/core/build/core-archive/*.tar.gz
           if-no-files-found: error
 
-  # 윈도우 설치 패키지 — 화면만 담는다(코어와 엔진은 WSL 안). 서명은 아직 없다 — 받은 사람의 윈도우가 "알 수 없는 게시자"
-  # 경고를 띄운다. WiX 는 Compose 플러그인이 받는다.
+      # 릴리스 자산이 아니다 — 아래 desktop-msi 가 받아 msi 에 싣는다. 사용자에게 보이는 설치 길은 msi 와 install.sh 둘이다(설계 6.16).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-core-bundle
+          path: desktop/core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz
+          if-no-files-found: error
+
+  # 윈도우 설치 패키지 — 화면과 WSL 코어 묶음(리눅스 코어 이미지 · kyu · install.sh)을 담는다. 묶음은 리눅스에서만 만들 수 있어 core-archive
+  # 의 산출물을 받는다. 서명은 아직 없다 — 받은 사람의 윈도우가 "알 수 없는 게시자" 경고를 띄운다. WiX 는 Compose 플러그인이 받는다.
   desktop-msi:
-    needs: resolve-version
+    needs: [resolve-version, core-archive]
     runs-on: windows-latest
     defaults:
       run:
@@ -376,10 +395,29 @@ jobs:
       - name: 빌드와 테스트
         run: ./gradlew --no-daemon build
 
-      - name: msi 만들기
+      - uses: actions/download-artifact@v4
+        with:
+          name: wsl-core-bundle
+          path: ${{ runner.temp }}/wsl-core-bundle
+
+      # 묶음은 Gradle 한 길(placeWslCoreBundle)로 놓는다 — 로컬 · Desktop CI 와 같은 태스크다. 손으로 복사하면 자리 이름이 두 곳에 산다.
+      - name: 묶음을 놓고 msi 만들기
         env:
           DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
-        run: ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" :app:packageMsi
+        run: |
+          ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" \
+            "-PwslCoreBundle=${RUNNER_TEMP}/wsl-core-bundle/kyuchestration-wsl-core.tar.gz" \
+            :app:placeWslCoreBundle :app:packageMsi
+
+      # deb · dmg 쪽과 같은 이유로 만든 것을 열어 본다 — checkBundledWslCore 는 "놓은 자리에 있는가" 만 본다.
+      - name: msi 안에 WSL 코어 묶음이 실렸는지 확인
+        shell: pwsh
+        run: |
+          $msi = @(Get-ChildItem app/build/compose/binaries/main/msi -Filter *.msi)[0].FullName
+          ../.github/scripts/verify-msi-carries-wsl-core.ps1 `
+            -AppImage app/build/compose/binaries/main/app `
+            -Msi $msi `
+            -SuppliedBundle "$env:RUNNER_TEMP/wsl-core-bundle/kyuchestration-wsl-core.tar.gz"
 
       - name: 자산 이름 붙이기
         env:
@@ -428,9 +466,16 @@ jobs:
         run: |
           ls -l dist
 
-          # dist/* 로 넘긴다. 이 자리에 도달했다는 것 자체가 여덟 개(kyu 셋 · deb 하나 · dmg 둘 · 코어 tar.gz 하나 · msi 하나)가
-          # 다 만들어졌다는 뜻이다.
+          # 자산을 이름의 꼴로 하나씩 고른다 — dist 에는 릴리스에 올리지 않는 WSL 코어 묶음(msi 안에 실린 것)도 함께 내려온다.
+          # 이 자리에 도달했다는 것 자체가 여덟 개(kyu 셋 · deb 하나 · dmg 둘 · 코어 tar.gz 하나 · msi 하나)가 다 만들어졌다는
+          # 뜻이고, 수가 다르면 꼴이 어긋난 것이다.
+          shopt -s nullglob
+          assets=(dist/kyu_* dist/*.deb dist/*.dmg dist/kyuchestration-core_*.tar.gz dist/*.msi)
+          if [ "${#assets[@]}" -ne 8 ]; then
+            echo "::error::릴리스 자산이 여덟 개여야 하는데 ${#assets[@]} 개다: ${assets[*]}"
+            exit 1
+          fi
           gh release create "$RELEASE_TAG" \
             --title "$RELEASE_TAG" \
             --generate-notes \
-            dist/*
+            "${assets[@]}"
