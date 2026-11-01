@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -93,14 +94,7 @@ func ListClaudeCodeConversations(workDirPath, sessionCwd string) (ClaudeCodeConv
 		return ClaudeCodeConversationListing{}, err
 	}
 
-	// 링크를 편다. claude 는 편 경로로 전사 자리를 정하고 그 경로를 cwd 로 적는다(실측) — 맥의 /tmp 처럼
-	// 링크 아래의 자리에서 편 값을 쓰지 않으면 디렉토리도 못 찾고 cwd 비교도 늘 어긋난다.
-	resolvedSessionCwd, err := filepath.EvalSymlinks(sessionCwd)
-	if err != nil {
-		return ClaudeCodeConversationListing{}, fmt.Errorf("세션 자리의 링크를 펴지 못했습니다 (%s): %w", sessionCwd, err)
-	}
-
-	projectDirectories, err := claudeCodeProjectDirectoriesFor(resolvedSessionCwd)
+	resolvedSessionCwd, projectDirectories, err := claudeCodeTranscriptPlacesFor(sessionCwd)
 	if err != nil {
 		return ClaudeCodeConversationListing{}, err
 	}
@@ -150,8 +144,9 @@ func ListClaudeCodeConversations(workDirPath, sessionCwd string) (ClaudeCodeConv
 //
 // 적힌 것이 없어도, 다른 대화가 적혀 있어도 이 id 로 바꾼다 — 사람이 고른 것이다. 이미 같은 id 면 쓰지 않는다.
 //
-// 전사가 그 자리에 실제로 있는지를 목록과 같은 읽기로 확인하고, 없으면 거절한다. 없는 id 를 적으면 다음
-// 실행의 --resume 이 종료 코드 1 로 끝나는데(설계 문서 5.5.4), 그 실패는 적는 지금 막을 수 있다.
+// 전사가 그 자리에 실제로 있는지를 목록과 같은 읽기(readClaudeCodeTranscript)로 확인하고, 없으면 거절한다.
+// 없는 id 를 적으면 다음 실행의 --resume 이 종료 코드 1 로 끝나는데(설계 문서 5.5.4), 그 실패는 적는 지금
+// 막을 수 있다. 목록을 통째로 다시 만들지 않고 그 id 의 전사 하나만 읽는다 — 확인할 것이 그 하나뿐이다.
 func AdoptClaudeCodeConversation(workDirPath, label, sessionCwd, conversationID string) (ConversationAssignment, error) {
 	records, warnings, err := readConversations(workDirPath)
 	if err != nil {
@@ -163,14 +158,26 @@ func AdoptClaudeCodeConversation(workDirPath, label, sessionCwd, conversationID 
 			conversationID, conversationsFilePath(workDirPath))
 	}
 
-	listing, err := ListClaudeCodeConversations(workDirPath, sessionCwd)
+	resolvedSessionCwd, projectDirectories, err := claudeCodeTranscriptPlacesFor(sessionCwd)
 	if err != nil {
 		return ConversationAssignment{}, err
 	}
-	warnings = append(warnings, listing.Warnings...)
-	if !slices.ContainsFunc(listing.Conversations, func(conversation ClaudeCodeConversation) bool {
-		return conversation.ID == conversationID
-	}) {
+	transcriptFound := false
+	for _, projectDirectory := range projectDirectories {
+		transcriptPath := filepath.Join(projectDirectory, conversationID+".jsonl")
+		if _, err := os.Stat(transcriptPath); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		_, belongsHere, warning := readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd)
+		if warning != "" {
+			warnings = append(warnings, warning)
+		}
+		if belongsHere {
+			transcriptFound = true
+			break
+		}
+	}
+	if !transcriptFound {
 		return ConversationAssignment{}, fmt.Errorf(
 			"%s 에서 Claude Code 로 나눈 대화 중에 %s 가 없습니다 — kyu conversations list 로 고를 수 있는 대화를 확인하세요",
 			sessionCwd, conversationID)
@@ -199,11 +206,30 @@ func (records conversationRecords) conversationIDsOfThisTool() map[string]bool {
 	return conversationIDs
 }
 
+// claudeCodeTranscriptPlacesFor 는 세션 cwd 의 링크를 편 값과, 그 cwd 의 전사가 있을 수 있는 디렉토리들이다.
+//
+// 링크를 편다. claude 는 편 경로로 전사 자리를 정하고 그 경로를 cwd 로 적는다(실측) — 맥의 /tmp 처럼
+// 링크 아래의 자리에서 편 값을 쓰지 않으면 디렉토리도 못 찾고 cwd 비교도 늘 어긋난다.
+func claudeCodeTranscriptPlacesFor(sessionCwd string) (resolvedSessionCwd string, projectDirectories []string, err error) {
+	resolvedSessionCwd, err = filepath.EvalSymlinks(sessionCwd)
+	if err != nil {
+		return "", nil, fmt.Errorf("세션 자리의 링크를 펴지 못했습니다 (%s): %w", sessionCwd, err)
+	}
+	projectDirectories, err = claudeCodeProjectDirectoriesFor(resolvedSessionCwd)
+	if err != nil {
+		return "", nil, err
+	}
+	return resolvedSessionCwd, projectDirectories, nil
+}
+
 // claudeCodeProjectDirectoriesFor 는 그 cwd 의 전사가 있을 수 있는 디렉토리들이다. 없는 것은 답하지 않는다.
 //
 // 이름이 길면 꼬리의 해시를 다시 만들지 않고 앞 200 자로 찾는다. 해시는 claude 의 구현 세부라 판이나
 // 실행 환경이 바뀌면 다를 수 있는데, 앞자리로 모은 뒤 전사 안의 cwd 로 다시 확인하면 꼬리가 무엇이든
 // 맞는 대화만 남는다.
+//
+// 케이스를 무시하는 파일 시스템에서는 앞자리 비교도 케이스를 무시한다. 짧은 이름의 Stat 은 그 파일 시스템이
+// 이미 케이스를 무시해 주지만, 앞자리 비교는 이 코드가 하는 문자열 비교라 그렇지 않다.
 func claudeCodeProjectDirectoriesFor(resolvedSessionCwd string) ([]string, error) {
 	projectsDirectory, err := claudeCodeProjectsDirectory()
 	if err != nil {
@@ -231,11 +257,36 @@ func claudeCodeProjectDirectoriesFor(resolvedSessionCwd string) ([]string, error
 	hashedNamePrefix := directoryName[:claudeCodeProjectDirectoryNameLimit] + "-"
 	var projectDirectories []string
 	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), hashedNamePrefix) {
+		if entry.IsDir() && directoryNameStartsWith(entry.Name(), hashedNamePrefix, fileSystemIgnoresCase) {
 			projectDirectories = append(projectDirectories, filepath.Join(projectsDirectory, entry.Name()))
 		}
 	}
 	return projectDirectories, nil
+}
+
+// fileSystemIgnoresCase 는 이 플랫폼의 기본 파일 시스템이 글자 케이스를 무시하는지다 — 맥(APFS 기본)과 윈도우(NTFS).
+//
+// 케이스만 다른 두 경로가 같은 자리이므로, 터미널에서 친 cwd 와 앱이 준 cwd 의 케이스가 다르면 바이트 비교로는
+// 같은 폴더의 대화가 빈 목록이 된다. 리눅스는 케이스가 다르면 실제로 다른 자리라 바이트 비교를 그대로 둔다.
+// 맥에서 케이스를 가르게 포맷한 볼륨은 드물고, 그때 케이스만 다른 두 폴더의 대화가 섞여 보이는 것이 대가다.
+// 변수인 이유는 리눅스 CI 에서 그 길을 시험하기 위해서다.
+var fileSystemIgnoresCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
+// cwdsNameTheSamePlace 는 전사에 적힌 cwd 와 세션 cwd 가 같은 자리인지다.
+func cwdsNameTheSamePlace(recordedCwd, resolvedSessionCwd string, ignoreCase bool) bool {
+	recordedCwd = filepath.Clean(recordedCwd)
+	if ignoreCase {
+		return strings.EqualFold(recordedCwd, resolvedSessionCwd)
+	}
+	return recordedCwd == resolvedSessionCwd
+}
+
+// directoryNameStartsWith 는 전사 디렉토리 이름이 그 앞자리로 시작하는지다. 인코딩한 이름은 ASCII 라 바이트로 자른다.
+func directoryNameStartsWith(directoryName, prefix string, ignoreCase bool) bool {
+	if ignoreCase {
+		return len(directoryName) >= len(prefix) && strings.EqualFold(directoryName[:len(prefix)], prefix)
+	}
+	return strings.HasPrefix(directoryName, prefix)
 }
 
 // claudeCodeProjectsDirectory 는 Claude Code 가 전사를 cwd 별로 나눠 두는 자리다 — <설정 자리>/projects.
@@ -299,13 +350,15 @@ type claudeCodeTranscriptLine struct {
 
 // readClaudeCodeTranscript 는 전사 하나를 줄 단위로 읽어 대화 하나로 옮긴다.
 //
-// belongsHere 가 거짓이면 목록에서 뺀다 — 사람이 쓴 줄이 없거나, 안에 적힌 cwd 가 이 자리가 아니거나,
+// belongsHere 가 거짓이면 목록에서 뺀다 — 사람이 쓴 글이 없거나, 안에 적힌 cwd 가 이 자리가 아니거나,
 // 줄의 sessionId 가 파일 이름과 다를 때다. 마지막 것만 경고를 낸다. 앞의 둘은 정상인 사실(빈 대화 ·
 // 이름이 겹친 다른 자리)이지만, 이름과 안이 다른 전사는 --resume <파일 이름> 이 무엇을 여는지 알 수 없는
 // 이상이라 사용자가 알아야 한다.
 //
-// 파일을 통째로 올리지 않는다. 전사는 수십 MB 가 흔하고(이 저장소의 대화 하나가 14MB) 목록은 그것을
-// 여럿 읽는다. 깨진 줄은 건너뛴다 — claude 가 쓰는 중인 전사의 마지막 줄은 잘려 있을 수 있다.
+// 파일을 통째로 올리지 않는다. 전사는 수십 MB 가 흔하고(이 저장소의 대화 하나가 14MB) 앱이 폴더를 열 때마다
+// 목록이 그것을 여럿 읽는다. 그래서 두 가지를 아낀다. 이 리더가 쓰는 종류의 줄만 디코드하고
+// (relevantTranscriptLineTypes), 안의 cwd 가 정해져 이 자리가 아니면 그 줄에서 읽기를 멈춘다.
+// 깨진 줄은 건너뛴다 — claude 가 쓰는 중인 전사의 마지막 줄은 잘려 있을 수 있다.
 func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd string) (conversation ClaudeCodeConversation, belongsHere bool, warning string) {
 	transcriptFile, err := os.Open(transcriptPath)
 	if err != nil {
@@ -320,7 +373,6 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 
 	var (
 		recordedCwd        string
-		hasUserLine        bool
 		titleFromClaude    string
 		titleFromSummary   string
 		firstTextOfAPerson string
@@ -330,7 +382,7 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 	lineReader := bufio.NewReader(transcriptFile)
 	for {
 		lineBytes, readErr := lineReader.ReadBytes('\n')
-		if len(bytes.TrimSpace(lineBytes)) > 0 {
+		if isRelevantTranscriptLine(lineBytes) {
 			var line claudeCodeTranscriptLine
 			if json.Unmarshal(lineBytes, &line) == nil {
 				if line.SessionID != "" && line.SessionID != conversationID {
@@ -348,8 +400,11 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 						titleFromSummary = line.Summary
 					}
 				case "user", "assistant":
-					if recordedCwd == "" {
+					if recordedCwd == "" && line.Cwd != "" {
 						recordedCwd = line.Cwd
+						if !cwdsNameTheSamePlace(recordedCwd, resolvedSessionCwd, fileSystemIgnoresCase) {
+							return ClaudeCodeConversation{}, false, ""
+						}
 					}
 					if conversation.StartedAt.IsZero() {
 						if startedAt, err := time.Parse(time.RFC3339Nano, line.Timestamp); err == nil {
@@ -357,7 +412,6 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 						}
 					}
 					if line.Type == "user" {
-						hasUserLine = true
 						if firstTextOfAPerson == "" && line.Message != nil {
 							firstTextOfAPerson = textAPersonWrote(line.Message.Content)
 						}
@@ -373,15 +427,39 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 		}
 	}
 
-	if !hasUserLine || filepath.Clean(recordedCwd) != resolvedSessionCwd {
+	// 사람이 쓴 글이 없으면(/status 만 치고 나간 세션) 이어갈 대화가 아니다. cwd 가 끝내 적히지 않은 전사는
+	// 이 자리의 것인지 확인할 수 없어 뺀다.
+	if firstTextOfAPerson == "" || recordedCwd == "" {
 		return ClaudeCodeConversation{}, false, ""
 	}
 
 	conversation.Title = cmp.Or(
-		lineBreaksAsSpaces(titleFromClaude),
-		lineBreaksAsSpaces(titleFromSummary),
-		firstRunes(lineBreaksAsSpaces(firstTextOfAPerson), conversationTitleRuneLimit))
+		layoutWhitespaceAsSpaces(titleFromClaude),
+		layoutWhitespaceAsSpaces(titleFromSummary),
+		firstRunes(layoutWhitespaceAsSpaces(firstTextOfAPerson), conversationTitleRuneLimit))
 	return conversation, true, ""
+}
+
+// relevantTranscriptLineTypes 는 이 리더가 디코드하는 줄 종류의 표지다.
+//
+// 전사의 대부분은 api-request-blob · attachment 같은 큰 줄이라, 디코드 전에 바이트로 거른다. claude 는 줄을
+// 공백 없는 JSON 으로 적는다(실측) — 이 표지가 맞지 않는 줄이 섞여도 디코드 뒤에 type 을 다시 보므로
+// 잘못 고른 줄은 무시될 뿐이다. 엇갈린 sessionId 검사도 이 줄들에서만 한다. 다른 대화를 가리키는 전사라면
+// 대화 줄에서 드러난다.
+var relevantTranscriptLineTypes = [][]byte{
+	[]byte(`"type":"user"`),
+	[]byte(`"type":"assistant"`),
+	[]byte(`"type":"ai-title"`),
+	[]byte(`"type":"summary"`),
+}
+
+func isRelevantTranscriptLine(lineBytes []byte) bool {
+	for _, lineType := range relevantTranscriptLineTypes {
+		if bytes.Contains(lineBytes, lineType) {
+			return true
+		}
+	}
+	return false
 }
 
 // textAPersonWrote 는 사용자 줄의 content 에서 사람이 쓴 첫 글을 꺼낸다. 없으면 빈 문자열이다.
@@ -436,9 +514,11 @@ func withoutInjectedTags(text string) string {
 	}
 }
 
-// lineBreaksAsSpaces 는 제목이 목록의 한 줄에 들어가도록 줄바꿈을 공백으로 편다.
-func lineBreaksAsSpaces(text string) string {
-	return strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(text))
+// layoutWhitespaceAsSpaces 는 제목이 목록의 한 줄 한 칸에 들어가도록 줄바꿈과 탭을 공백으로 편다.
+//
+// 탭도 함께인 이유는 사람용 표가 tabwriter 라서다 — 제목 안의 탭을 열 경계로 읽어 표가 깨진다.
+func layoutWhitespaceAsSpaces(text string) string {
+	return strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(text))
 }
 
 // firstRunes 는 앞 limit 글자만 남긴다. 바이트로 자르면 한글 한 글자가 반으로 갈린다.
