@@ -196,50 +196,53 @@ val packageCoreArchive = tasks.register<Tar>("packageCoreArchive") {
 // 묶음 이름에 판을 넣지 않는다. 화면은 같은 빌드에서 나온 자기 리소스에서 고정 이름으로 찾고, 판은 화면 자신의 판과 같다.
 
 /**
- * 묶음에 넣을 리눅스 amd64 kyu. 프로퍼티가 없으면 이 값을 묻는 순간(묶음 태스크가 실행 계획에 들 때) 어디서 구하는지를 말하며 멈춘다 —
- * 묶음을 부르지 않는 빌드(build · packageCoreArchive)는 묻지 않으므로 kyu 를 요구하지 않는다.
- */
-val wslCoreBundleEngine: Provider<File> = providers.gradleProperty("wslCoreBundleKyu").map(::File).orElse(
-    providers.provider {
-        throw GradleException(
-            "리눅스 amd64 kyu 가 필요합니다 — -PwslCoreBundleKyu=<절대경로> 로 주세요. 릴리스 잡은 kyu-binaries 산출물을, " +
-                "로컬은 저장소 루트에서 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o <경로> ./cmd/kyu 로 만든 것을 주세요.",
-        )
-    },
-)
-
-/**
- * 묶음을 만들기 전에, 무거운 일(jlink)을 시작하기 전에 끊는다.
+ * 묶음에 넣을 리눅스 amd64 kyu — 입력을 이 값을 펴는 자리에서 모두 본다.
+ *
+ * 묶음 태스크의 `from` 은 Gradle 이 실행 계획을 짤 때 이 값을 편다(실측: 없는 프로퍼티는 "Could not determine the dependencies"
+ * 로 죽었다). 그래서 여기서 멈추면 compileKotlin · jar · jlink 어느 것도 돌기 전이다 — 검사를 태스크로 두면 순서를 아무리 걸어도
+ * 그 태스크의 의존(컴파일)이 먼저 돈다. 묶음을 부르지 않는 빌드(build · packageCoreArchive)는 이 값을 펴지 않으므로 kyu 를 요구하지
+ * 않는다.
  *
  * - 호스트: 묶음의 코어 이미지는 이 호스트의 jlink 런타임을 품는다. 윈도우 · 맥에서 만들면 runtime/bin/java 가 그 OS 의 것이라 WSL 에서
  *   뜨지 않고, 그 사실은 사용자의 첫 실행에서야 드러난다. WSL 코어는 x86-64 만 낸다(install.sh 의 install_core 와 같은 선).
  * - 엔진: 리눅스 amd64 ELF 인지 머리 바이트로 본다. 윈도우의 kyu.exe · 맥 바이너리를 넣어도 묶음은 만들어지고 install.sh 의 kyu version
  *   에서야 깨진다.
  */
-val checkWslCoreBundleInputs = tasks.register("checkWslCoreBundleInputs") {
-    group = "verification"
-    description = "WSL 코어 묶음을 만들 수 있는 호스트인지, 넣을 kyu 가 리눅스 amd64 인지 확인한다"
-    val suppliedEngine = wslCoreBundleEngine
-    doLast {
-        val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
-        if (!hostOperatingSystemName.startsWith("Linux", ignoreCase = true) || hostCoreImageArchitecture() != "amd64") {
+val wslCoreBundleEngine: Provider<File> = providers.gradleProperty("wslCoreBundleKyu")
+    .map { suppliedPath -> requireWslCoreBundleInputs(File(suppliedPath)) }
+    .orElse(
+        providers.provider {
+            requireWslCoreBundleHost()
             throw GradleException(
-                "WSL 코어 묶음은 리눅스 x86-64 에서만 만듭니다 — 묶음의 코어 이미지는 이 호스트의 jlink 런타임을 품고, " +
-                    "윈도우 · 맥에서 만든 runtime/bin/java 는 WSL 에서 뜨지 않습니다" +
-                    "(이 호스트: $hostOperatingSystemName ${System.getProperty("os.arch")}).",
+                "리눅스 amd64 kyu 가 필요합니다 — -PwslCoreBundleKyu=<절대경로> 로 주세요. 릴리스 잡은 kyu-binaries 산출물을, " +
+                    "로컬은 저장소 루트에서 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o <경로> ./cmd/kyu 로 만든 것을 주세요.",
             )
-        }
-        val engine = suppliedEngine.get()
-        if (!engine.isAbsolute || !engine.isFile) {
-            throw GradleException("-PwslCoreBundleKyu 는 있는 파일의 절대경로여야 합니다: $engine")
-        }
-        if (!isLinuxAmd64Executable(engine)) {
-            throw GradleException(
-                "-PwslCoreBundleKyu 가 리눅스 amd64 실행 파일(ELF x86-64)이 아닙니다: $engine — " +
-                    "GOOS=linux GOARCH=amd64 로 만든 것을 주세요.",
-            )
-        }
+        },
+    )
+
+fun requireWslCoreBundleHost() {
+    val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
+    if (!hostOperatingSystemName.startsWith("Linux", ignoreCase = true) || hostCoreImageArchitecture() != "amd64") {
+        throw GradleException(
+            "WSL 코어 묶음은 리눅스 x86-64 에서만 만듭니다 — 묶음의 코어 이미지는 이 호스트의 jlink 런타임을 품고, " +
+                "윈도우 · 맥에서 만든 runtime/bin/java 는 WSL 에서 뜨지 않습니다" +
+                "(이 호스트: $hostOperatingSystemName ${System.getProperty("os.arch")}).",
+        )
     }
+}
+
+fun requireWslCoreBundleInputs(engine: File): File {
+    requireWslCoreBundleHost()
+    if (!engine.isAbsolute || !engine.isFile) {
+        throw GradleException("-PwslCoreBundleKyu 는 있는 파일의 절대경로여야 합니다: $engine")
+    }
+    if (!isLinuxAmd64Executable(engine)) {
+        throw GradleException(
+            "-PwslCoreBundleKyu 가 리눅스 amd64 실행 파일(ELF x86-64)이 아닙니다: $engine — " +
+                "GOOS=linux GOARCH=amd64 로 만든 것을 주세요.",
+        )
+    }
+    return engine
 }
 
 /** ELF 머리의 매직 · 64비트 등급 · 기계 번호(EM_X86_64, 리틀 엔디언 두 바이트)를 본다. */
@@ -254,13 +257,9 @@ fun isLinuxAmd64Executable(candidate: File): Boolean {
     return elfMagic && sixtyFourBitClass && machine == elfMachineX86_64
 }
 
-// 확인이 jlink 보다 먼저 돈다. 의존이 아니라 순서만 건다 — packageCoreArchive 만 부르는 흐름(릴리스 자산 · CI)에 kyu 를 요구하지 않는다.
-linkCoreRuntime.configure { mustRunAfter(checkWslCoreBundleInputs) }
-
 tasks.register<Tar>("packageWslCoreBundle") {
     group = "distribution"
     description = "msi 에 실을 WSL 코어 묶음(코어 이미지 · 리눅스 kyu · install.sh · VERSION)을 build/wsl-core-bundle 에 만든다"
-    dependsOn(checkWslCoreBundleInputs)
     compression = Compression.GZIP
     destinationDirectory.set(layout.buildDirectory.dir("wsl-core-bundle"))
     archiveFileName.set("kyuchestration-wsl-core.tar.gz")
