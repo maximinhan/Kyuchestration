@@ -31,6 +31,8 @@ const usageText = `사용법: kyu <명령> [인자]
                          GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
   kyu session-command [repo]
                          세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
+  kyu conversations list <path> [repo]
+                         그 세션 자리에서 Claude Code 로 나눈 대화 (이어갈 것을 고르는 목록)
   kyu mcp <serve|approve>
                          메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
                          approve 는 레포의 실행 유발 설정을 눈으로 확인하고 승인한다)
@@ -44,13 +46,15 @@ const usageText = `사용법: kyu <명령> [인자]
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (메인 세션 전용)
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다
+  --adopt-conversation <id>
+                         그 자리의 Claude Code 대화를 이 세션의 대화로 적고 이어간다
 
 옵션 (kyu clone):
   --profile <이름>       어느 토큰으로 붙을지 (필수)
   --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
-옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list,
-      kyu claude-auth set, kyu claude-auth status):
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu conversations list,
+      kyu auth add, kyu auth list, kyu claude-auth set, kyu claude-auth status):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
 kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크톱 앱의 몫이다.
@@ -111,6 +115,11 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer) error {
 	// 만들거나 죽이거나 셀 수 있는 것이 아니다(설계 문서 5.1).
 	case "session-command":
 		return cli.AnswerSessionCommand(out, errOut, commandArgs)
+
+	// conversations 는 읽기만 한다. 앱이 폴더를 열 때 부르는 자리라, 여기서 무언가를 적으면 폴더를 연
+	// 것만으로 대화 기록이 바뀐다 — 적는 것은 사람이 고른 뒤의 session-command --adopt-conversation 이다.
+	case "conversations":
+		return cli.ManageClaudeCodeConversations(out, errOut, commandArgs)
 
 	// mcp 는 답하고 끝나지 않는 유일한 명령이다. stdin 이 닫힐 때까지 살아 있고, 그 수명은
 	// 자기를 띄운 메인 세션의 수명이다(orchestration-tools-design.md 5.1).

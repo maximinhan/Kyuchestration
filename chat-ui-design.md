@@ -802,7 +802,7 @@ data class ChatConversation(
 
 ### 5.6 대화 이어가기와 `conversations.json`
 
-바뀌는 것이 없다. `kyu session-command` 가 `.coord/conversations.json` 에서 대화를 정하고(`internal/cli/session_command.go` 의 `conversationForLabel`), `--session-id` 또는 `--resume` 을 argv 에 넣어 답한다. 챗 모드도 같은 답을 받아 같은 플래그로 실행한다 — 3.9 가 그 모드에서도 도는 것을 쟀다.
+바뀌는 것이 없다. `kyu session-command` 가 `.coord/conversations.json` 에서 대화를 정하고(`internal/cli/session_command.go` 의 `conversationForTarget`), `--session-id` 또는 `--resume` 을 argv 에 넣어 답한다. 챗 모드도 같은 답을 받아 같은 플래그로 실행한다 — 3.9 가 그 모드에서도 도는 것을 쟀다.
 
 **세션 지도의 낱말이 하나 더 갈릴 뻔했다.** `workdir.SessionConversation` 과 `workdir.DelegationConversation` 이 있는데(orchestration 5.5.1), 챗 세션은 **`SessionConversation` 그대로**다. 화면이 터미널이든 챗이든 사용자가 여는 그 세션이고, 대화 하나를 두 화면이 동시에 열면 `--session-id already in use` 로 거절되는 것도 그대로다. **낱말을 늘리지 않는다.**
 

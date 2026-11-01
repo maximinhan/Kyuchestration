@@ -285,7 +285,7 @@ func nextChildSessionID(childrenOfParent map[string]childSessionRecord) string {
 // 화면을 켜둔 것만으로 아무도 연 적 없는 대화가 만들어진다.
 //
 // 경고를 돌려주지 않는다. 기록을 버렸다는 말은 AssignConversation 이 카드를 눌러 실제로 대화를
-// 이어가려는 그 순간에 한다(session_command.go 의 conversationFlagsForLabel). 3 초마다 같은 말을
+// 이어가려는 그 순간에 한다(session_command.go 의 conversationForTarget). 3 초마다 같은 말을
 // 되풀이할 자리가 아니고, 읽지 못한 기록으로는 어떤 대화도 이어갈 수 없으므로 "이어갈 대화 없음"
 // 은 그 자체로 참인 답이다.
 func LabelsWithRecordedConversation(workDirPath string) (map[string]bool, error) {

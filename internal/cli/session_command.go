@@ -44,6 +44,10 @@ const resumeFlagName = "--resume"
 // 없는 쪽이 그것이어서다. 앱에서 이 옵션이 붙는 순간 앞 대화를 가리키던 기록은 사라진다.
 const forgetConversationOptionName = "--forget-conversation"
 
+// adoptConversationOptionName 은 그 자리에서 Claude Code 로 나눈 대화 하나를 이 라벨의 대화로 적고 이어가라는
+// 뜻이다 — 앱이 폴더를 열 때 보여 준 대화 목록(kyu conversations list)에서 사람이 고른 것이 이 옵션으로 온다.
+const adoptConversationOptionName = "--adopt-conversation"
+
 const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] --json
 
   kyu session-command --json            메인 세션이 실행할 것 (명령·cwd·더할 환경)
@@ -53,6 +57,8 @@ const sessionCommandUsageText = `사용법: kyu session-command [repo] [옵션] 
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽게 한다 (메인 세션 전용)
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
+  --adopt-conversation <id>
+                         그 자리의 Claude Code 대화(kyu conversations list)를 이 세션의 대화로 적고 이어간다
   --chat                 파이프로 부릴 스트림 모드로 답한다 — 앱의 챗 화면이 쓴다
   --app-socket <경로>    앱이 이 세션을 위해 연 소켓의 자리 — --chat 과 함께만 쓴다
 
@@ -114,6 +120,9 @@ type sessionCommandRequest struct {
 
 	// forgetRecordedConversation 은 적혀 있는 대화를 버리고 새 대화로 답할지다.
 	forgetRecordedConversation bool
+
+	// adoptedConversationID 는 이 라벨의 대화로 채택할 Claude Code 대화의 ID 다. 비어 있으면 채택하지 않는다.
+	adoptedConversationID string
 
 	// chatMode 는 앱이 이 세션을 PTY 가 아니라 파이프로 부릴지다.
 	//
@@ -232,6 +241,14 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 		case arg == forgetConversationOptionName:
 			request.forgetRecordedConversation = true
 
+		case arg == adoptConversationOptionName:
+			conversationID, err := sessionCommandValueAfter(args, argIndex)
+			if err != nil {
+				return sessionCommandRequest{}, err
+			}
+			request.adoptedConversationID = conversationID
+			argIndex++
+
 		case arg == chatModeOptionName:
 			request.chatMode = true
 
@@ -262,6 +279,10 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 			appSocketOptionName, chatModeOptionName)
 	}
 
+	if err := validateAdoptedConversation(request); err != nil {
+		return sessionCommandRequest{}, err
+	}
+
 	if err := validateChildSessionRequest(request); err != nil {
 		return sessionCommandRequest{}, err
 	}
@@ -271,6 +292,51 @@ func parseSessionCommandArgs(args []string) (sessionCommandRequest, error) {
 			machineJSONOptionName, sessionCommandUsageText)
 	}
 	return request, nil
+}
+
+// validateAdoptedConversation 은 채택할 대화가 이 요청과 함께 성립하는지 본다.
+//
+// 모양이 틀린 id 는 claude 에게 가기 전에 여기서 막는다. 적고 나서야 --resume 이 거절하면 그 사이에 기록이
+// 이미 바뀌어 있다.
+func validateAdoptedConversation(request sessionCommandRequest) error {
+	if request.adoptedConversationID == "" {
+		return nil
+	}
+	if request.forgetRecordedConversation {
+		return fmt.Errorf("%s 와 %s 는 함께 쓸 수 없습니다 — 하나는 새 대화를, 하나는 고른 대화를 이어가라는 뜻입니다\n\n%s",
+			adoptConversationOptionName, forgetConversationOptionName, sessionCommandUsageText)
+	}
+	if request.childSessionRequested {
+		return fmt.Errorf("하위 세션은 언제나 새 대화로 뜹니다(이어가지 않습니다) — %s 는 뜻이 없습니다",
+			adoptConversationOptionName)
+	}
+	if !workdir.IsConversationID(request.adoptedConversationID) {
+		return fmt.Errorf("%s 의 값은 대화 ID(소문자 uuid)여야 합니다: %s\n\n%s",
+			adoptConversationOptionName, request.adoptedConversationID, sessionCommandUsageText)
+	}
+	return nil
+}
+
+// sessionTarget 은 한 세션이 무엇으로 불리고 어디서 뜨는지다 — 대화 기록의 라벨과 claude 의 cwd.
+type sessionTarget struct {
+	label string
+	cwd   string
+}
+
+// sessionTargetFor 는 레포 이름(비어 있으면 메인 세션)을 라벨과 cwd 로 옮긴다.
+//
+// session-command 의 답과 kyu conversations list 가 이 함수 하나로 자리를 정한다. 둘이 갈라지면 사람이
+// 목록에서 고른 대화를 다른 자리에서 --resume 하게 되고, claude 의 전사는 cwd 별로 갈려 있어(설계 문서
+// 5.5.1) 그 대화는 열리지 않는다.
+func sessionTargetFor(workDirAbsolutePath string, repos []workdir.Repo, repoName string) (sessionTarget, error) {
+	if repoName == "" {
+		return sessionTarget{label: mainSessionLabel, cwd: workDirAbsolutePath}, nil
+	}
+	repo, err := repoNamed(repos, repoName)
+	if err != nil {
+		return sessionTarget{}, err
+	}
+	return sessionTarget{label: repo.Name, cwd: repo.AbsolutePath}, nil
 }
 
 // answerForMainSession 은 워크디렉토리 최상위에서 열 조율용 세션을 답한다(설계 문서 5.4).
@@ -283,14 +349,19 @@ func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos
 		return err
 	}
 
-	conversation, err := conversationForLabel(errOut, location.absolutePath, mainSessionLabel, request)
+	target, err := sessionTargetFor(location.absolutePath, repos, "")
+	if err != nil {
+		return err
+	}
+
+	conversation, err := conversationForTarget(errOut, location.absolutePath, target, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
 		mainSessionCommand(repos, request, conversation.flags, mcpSetup),
-		location.absolutePath,
+		target.cwd,
 		sessionEnvironment(request),
 		conversation, nil, nil)
 }
@@ -300,7 +371,7 @@ func answerForMainSession(out, errOut io.Writer, location workDirLocation, repos
 // 없는 레포는 여기서 끝난다 — 대화를 배정하기 전이다. 답할 수 없는 물음에 대화를 적어두면
 // 오타 하나가 다시는 쓰이지 않을 기록을 남기고, 사용자가 그것을 지울 이유를 알아낼 방법은 없다.
 func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos []workdir.Repo, request sessionCommandRequest) error {
-	repo, err := repoNamed(repos, request.repoName)
+	target, err := sessionTargetFor(location.absolutePath, repos, request.repoName)
 	if err != nil {
 		return err
 	}
@@ -310,14 +381,14 @@ func answerForRepoSession(out, errOut io.Writer, location workDirLocation, repos
 		return err
 	}
 
-	conversation, err := conversationForLabel(errOut, location.absolutePath, repo.Name, request)
+	conversation, err := conversationForTarget(errOut, location.absolutePath, target, request)
 	if err != nil {
 		return err
 	}
 
 	return writeSessionCommandAsJSON(out,
 		claudeCommand(request, conversation.flags, mcpSetup),
-		repo.AbsolutePath,
+		target.cwd,
 		sessionEnvironment(request),
 		conversation, nil, nil)
 }
@@ -360,7 +431,7 @@ type sessionConversation struct {
 	resumedConversationID string
 }
 
-// conversationForLabel 은 이 라벨이 쓸 대화를 정해 claude 에게 가리키는 플래그로 옮긴다.
+// conversationForTarget 은 이 세션이 쓸 대화를 정해 claude 에게 가리키는 플래그로 옮긴다.
 //
 // 정하는 것이 곧 기록하는 것이다(설계 문서 5.5.3) — 조회처럼 보이는 이 걸음이
 // .coord/conversations.json 을 쓴다. 만들어 놓고 적지 않으면 다음 물음이 다른 ID 를 만들고,
@@ -369,12 +440,13 @@ type sessionConversation struct {
 // 대화 기록을 읽지 못한 것은 실패가 아니라 경고다. 앞선 대화를 잃을 뿐 새 대화는 열 수 있고,
 // 여기서 실패로 끝내면 사용자는 자기가 쓴 적도 없는 파일을 손으로 지우기 전까지 앱에서
 // 어떤 세션도 열지 못한다.
-func conversationForLabel(
+func conversationForTarget(
 	errOut io.Writer,
-	workDirPath, label string,
+	workDirPath string,
+	target sessionTarget,
 	request sessionCommandRequest,
 ) (sessionConversation, error) {
-	assignment, err := assignConversation(workDirPath, label, request)
+	assignment, err := assignConversation(workDirPath, target, request)
 	if err != nil {
 		return sessionConversation{}, err
 	}
@@ -405,15 +477,21 @@ func writeConversationWarnings(errOut io.Writer, warnings []string) error {
 	return nil
 }
 
-// assignConversation 은 요청이 고른 길로 대화를 정한다 — 이어가기가 기본이고, 새로 시작이 선택이다.
+// assignConversation 은 요청이 고른 길로 대화를 정한다 — 이어가기가 기본이고, 새로 시작과 채택이 선택이다.
 //
 // 기본이 이어가기인 것이 이 표면의 자세다. 앱이 카드를 누를 때마다 무엇을 골라야 하는 것이 아니라,
 // 고르지 않으면 대화가 이어진다(설계 문서 5.5.3).
-func assignConversation(workDirPath, label string, request sessionCommandRequest) (workdir.ConversationAssignment, error) {
+//
+// 채택만 cwd 가 필요하다. 그 자리에 고른 대화의 전사가 실제로 있는지를 보아야 해서다.
+func assignConversation(workDirPath string, target sessionTarget, request sessionCommandRequest) (workdir.ConversationAssignment, error) {
 	// 세션 지도를 본다. 같은 레포에 위임 대화가 함께 있을 수 있고, 하나의 UUID 를 둘이 쓰면
 	// 뒤에 오는 쪽이 already in use 로 거절된다(orchestration-tools-design.md 5.5.1).
-	if request.forgetRecordedConversation {
-		return workdir.StartNewConversation(workDirPath, label, workdir.SessionConversation)
+	switch {
+	case request.forgetRecordedConversation:
+		return workdir.StartNewConversation(workDirPath, target.label, workdir.SessionConversation)
+	case request.adoptedConversationID != "":
+		return workdir.AdoptClaudeCodeConversation(workDirPath, target.label, target.cwd, request.adoptedConversationID)
+	default:
+		return workdir.AssignConversation(workDirPath, target.label, workdir.SessionConversation)
 	}
-	return workdir.AssignConversation(workDirPath, label, workdir.SessionConversation)
 }
