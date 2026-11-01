@@ -45,8 +45,10 @@ macOS 와 Windows(WSL) 에서 쓴다.
 ([app-owned-sessions-design.md](app-owned-sessions-design.md) 6 절).
 
 **세션의 `claude` 는 엔진이 아니라 앱의 코어가 띄운다.** 메인 · 레포 세션도, 메인이 낳는
-[하위 세션](#하위-세션--메인이-낳고-대화한다)도 마찬가지다. 엔진은 무엇을 띄울지 명령만 답한다 —
-`kyu session-command --chat`, 하위 세션이면 `--child` 를 더한다. 띄울 줄 아는 지식(플래그 · 대화 ID ·
+[하위 세션](#하위-세션--메인이-낳고-대화한다)도 마찬가지다. 엔진은 무엇을 띄울지 명령만 답한다 — 앱의 챗은
+`kyu session-command [repo] --chat --app-socket <경로> --json` 으로 묻고, 하위 세션은 여기서
+레포 인자 대신 `--child [id] --cwd <상대경로>` 를 준다. `--child` 는 `--chat` · `--app-socket` 과 함께일 때만 받는다 — 하위는
+앱 소켓 너머로 상위에게 묻기(`ask_parent`) 때문이다. 띄울 줄 아는 지식(플래그 · 대화 ID ·
 MCP 등록)은 엔진에 두고, 프로세스를 쥐는 것은 코어다.
 
 **엔진이 직접 `claude` 를 부르는 자리는 하나 남아 있다.** `kyu mcp serve` 가 여는 `run_in_repo` 는 레포
@@ -285,6 +287,12 @@ kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크�
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
 | `kyu mcp serve <워크디렉토리> [--app-socket <경로>]` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo`(은퇴 예정) ([설계](orchestration-tools-design.md) 5.3) · [하위 세션](#하위-세션--메인이-낳고-대화한다) 도구 다섯 |
 | `kyu mcp serve --child --app-socket <경로>` | 하위 세션에 붙는 서버 (stdio) | JSON-RPC — `ask_parent` 하나 ([설계](session-tree-design.md) 6.3) |
+| `kyu mcp ask --app-socket <경로>` | 도구 호출 하나의 승인 물음을 그 소켓 너머의 앱에게 중계 (stdio) | JSON-RPC — `request_permission` 하나. `claude` 가 `--permission-prompt-tool` 로 부르고 모델에게는 보이지 않는다. 앱의 승인 카드가 답한다([설계](chat-ui-design.md) 5.2.2) |
+
+`serve` 와 `ask` 는 사람이 직접 부르는 명령이 아니다. `kyu session-command --json` 이 답하는 세션 명령의
+`--mcp-config` 에 실려 있고, `claude` 가 그것을 자식 프로세스로 띄운다. 같은 낱말 아래의 `kyu mcp approve <repo>` 는
+반대로 **사람만 부를 수 있는** 명령이라(터미널에서만 답을 받는다) 이 표에 두지 않는다 — 레포 하나의 실행 유발
+설정을 눈으로 확인하고 위임을 승인한다([orchestration-tools-design.md](orchestration-tools-design.md) 5.6).
 
 공통 규칙이 다섯 가지다.
 
