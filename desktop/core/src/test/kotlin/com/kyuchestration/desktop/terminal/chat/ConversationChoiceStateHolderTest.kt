@@ -174,7 +174,7 @@ class ConversationChoiceStateHolderTest {
         val notice = assertIs<ChatEntry.EngineNotice>(assertNotNull(holder.conversations.value[SessionTarget.Main]).entries.first())
         assertEquals(
             "이 자리의 Claude Code 대화 목록을 읽지 못해 고르지 않고 이어갑니다 — kyu conversations list 가 종료 코드 2 로 끝났습니다",
-            notice.text,
+            notice.line,
         )
     }
 
@@ -197,6 +197,25 @@ class ConversationChoiceStateHolderTest {
         assertEquals(emptyList(), commandSource.askedConversationChoices)
         assertEquals(emptyMap(), holder.sessionEntries.value)
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
+    }
+
+    @Test
+    fun `목록을 읽는 사이 세션을 끝내면 띄우지도 묻지도 않는다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        val commandSource = RecordingSessionCommandSource()
+        val holder = stateHolder(
+            opener,
+            commandSource,
+            claudeCodeConversationSource = listing(outside(TERMINAL_CONVERSATION_ID, at = "2026-11-01T09:00:56Z")),
+        )
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+
+        holder.endSession(SessionTarget.Main)
+        runCurrent()
+
+        assertEquals(emptyList(), opener.openedPlans)
+        assertEquals(emptyList(), commandSource.askedConversationChoices)
+        assertEquals(emptyMap(), holder.sessionEntries.value)
     }
 
     @Test

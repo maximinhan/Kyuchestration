@@ -83,7 +83,7 @@ class ScreenPipeRoundTripTest {
     }
 
     @Test
-    fun `명령 서른셋이 틀을 건너 같은 모양으로 코어에 닿는다`() = runTest {
+    fun `명령 서른다섯이 틀을 건너 같은 모양으로 코어에 닿는다`() = runTest {
         val core = RecordingScreenFacingCore()
         val mirror = startPipe(core).connectMirror()
         val expected = RecordingScreenFacingCore()

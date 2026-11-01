@@ -21,6 +21,7 @@ import com.kyuchestration.desktop.repoclone.kyucli.KyuCliWorkDirRepositoryCloner
 import com.kyuchestration.desktop.terminal.chat.ChatSessionStateHolder
 import com.kyuchestration.desktop.terminal.chat.ProcessChatSessionOpener
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
+import com.kyuchestration.desktop.terminal.kyucli.KyuCliClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirInitializer
 import com.kyuchestration.desktop.workdir.kyucli.KyuCliWorkDirObserver
@@ -85,6 +86,8 @@ fun assembleInProcessScreenFacingCore(coroutineScope: CoroutineScope, diagnostic
         chatSessions = ChatSessionStateHolder(
             // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11).
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
+            // 터미널에서 하던 대화도 엔진이 읽는다 — 전사의 자리와 모양을 앱이 알지 않는다(원칙 11 · 5.5.7).
+            claudeCodeConversationSource = KyuCliClaudeCodeConversationSource(kyuCommandRunner),
             chatSessionOpener = ProcessChatSessionOpener(),
             // 하위 세션도 엔진이 조립한다(원칙 11) — 앱이 넘기는 것은 상위가 고른 것과 누가 살아 있는가뿐이다.
             childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),

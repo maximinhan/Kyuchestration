@@ -143,6 +143,13 @@ class InProcessScreenFacingCore(
     override fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget) =
         chatSessions.dismissSessionEntryFailure(target)
 
+    // 워크디렉토리를 다시 묻지 않는다. 고르는 진입은 그것을 시작한 워크디렉토리를 들고 있고, 그 사이 닫혔으면 버려진다.
+    override fun chooseConversation(target: PersonOpenedSessionTarget, choice: SessionConversationChoice) =
+        chatSessions.chooseConversation(target, choice)
+
+    override fun cancelConversationChoice(target: PersonOpenedSessionTarget) =
+        chatSessions.cancelConversationChoice(target)
+
     override fun sendUserMessage(target: SessionTarget, text: String) = chatSessions.sendUserMessage(target, text)
 
     override fun interruptTurn(target: SessionTarget) = chatSessions.interruptTurn(target)

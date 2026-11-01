@@ -221,7 +221,7 @@ class CoreMirrorTest {
 
         val commandFrames = pipe.framesSentToCore().filterIsInstance<FrameToCore.Command>()
         assertEquals(inProcess.receivedCommands, commandFrames.map { it.command })
-        assertEquals(33, commandFrames.map { it.id }.toSet().size)
+        assertEquals(35, commandFrames.map { it.id }.toSet().size)
     }
 
     @Test

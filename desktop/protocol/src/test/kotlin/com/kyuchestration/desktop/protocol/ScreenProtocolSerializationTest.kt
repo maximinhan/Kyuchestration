@@ -77,7 +77,7 @@ class ScreenProtocolSerializationTest {
     @Test
     fun `인사 틀은 규약의 판 · 화면의 판 · 화면의 OS 를 싣는다`() {
         assertEquals(
-            """{"frame":"hello","protocol":2,"screenVersion":"v0.15.0","screenOs":"windows"}""",
+            """{"frame":"hello","protocol":3,"screenVersion":"v0.15.0","screenOs":"windows"}""",
             encodeFrameToCore(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v0.15.0", screenOs = "windows")),
         )
     }
@@ -85,7 +85,7 @@ class ScreenProtocolSerializationTest {
     @Test
     fun `인사 답은 규약의 판 · 코어의 판 · 코어의 OS 와 WSL 배포판 · 코어의 진단 기록 · 엔진 자리를 싣는다`() {
         assertEquals(
-            """{"frame":"welcome","protocol":2,"coreVersion":"v0.15.0","coreOs":"linux","wslDistro":"Ubuntu-24.04",""" +
+            """{"frame":"welcome","protocol":3,"coreVersion":"v0.15.0","coreOs":"linux","wslDistro":"Ubuntu-24.04",""" +
                 """"coreDiagnosticLog":"/home/yawn/.local/state/kyuchestration/core.log",""" +
                 """"engineDirectory":"/home/yawn/.local/share/kyuchestration/engine"}""",
             encodeFrameToScreen(
@@ -125,7 +125,7 @@ class ScreenProtocolSerializationTest {
     fun `모르는 OS 낱말을 실은 인사도 읽는다`() {
         assertEquals(
             FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v9.0.0", screenOs = "freebsd"),
-            decodeFrameToCore("""{"frame":"hello","protocol":2,"screenVersion":"v9.0.0","screenOs":"freebsd"}"""),
+            decodeFrameToCore("""{"frame":"hello","protocol":3,"screenVersion":"v9.0.0","screenOs":"freebsd"}"""),
         )
     }
 

@@ -6,7 +6,7 @@ import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 
 /**
- * 경계의 명령 서른셋을 한 번씩 부른다. 같은 목록을 거울과 같은 JVM 의 코어에 함께 부어, 명령이 틀을 건너도 같은 모양으로
+ * 경계의 명령 서른다섯을 한 번씩 부른다. 같은 목록을 거울과 같은 JVM 의 코어에 함께 부어, 명령이 틀을 건너도 같은 모양으로
  * 닿는지 견준다 — 명령 하나를 빠뜨린 거울이나 디스패치는 그 명령의 줄에서 어긋난다.
  */
 val CALLS_TO_EVERY_SCREEN_COMMAND: List<(ScreenFacingCore) -> Unit> = listOf(
@@ -23,6 +23,8 @@ val CALLS_TO_EVERY_SCREEN_COMMAND: List<(ScreenFacingCore) -> Unit> = listOf(
     { it.closeWorkDir() },
     { it.enterSession(SessionTarget.Repo("proj-a"), SessionConversationChoice.StartNewConversation) },
     { it.dismissSessionEntryFailure(SessionTarget.Main) },
+    { it.chooseConversation(SessionTarget.Main, SessionConversationChoice.AdoptConversation("654ce605-b030-40e8-8448-2e9003ad32b1")) },
+    { it.cancelConversationChoice(SessionTarget.Repo("proj-a")) },
     { it.sendUserMessage(SessionTarget.Child("child-1"), "안녕") },
     { it.interruptTurn(SessionTarget.Main) },
     { it.answerPermission(SessionTarget.Main, "toolu_01", PermissionCardChoice.Deny("안 됩니다")) },

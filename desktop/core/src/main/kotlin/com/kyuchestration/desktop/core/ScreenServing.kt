@@ -187,6 +187,8 @@ private fun ScreenCommand.applyTo(core: ScreenServingCore): String? {
         ScreenCommand.CloseWorkDir -> core.closeWorkDir()
         is ScreenCommand.EnterSession -> core.enterSession(target, conversationChoice)
         is ScreenCommand.DismissSessionEntryFailure -> core.dismissSessionEntryFailure(target)
+        is ScreenCommand.ChooseConversation -> core.chooseConversation(target, choice)
+        is ScreenCommand.CancelConversationChoice -> core.cancelConversationChoice(target)
         is ScreenCommand.SendUserMessage -> core.sendUserMessage(target, text)
         is ScreenCommand.InterruptTurn -> core.interruptTurn(target)
         is ScreenCommand.AnswerPermission -> if (!core.answerPermissionIfStillAsked(target, toolUseId, choice)) rejection = QUESTION_NOT_OPEN

@@ -107,6 +107,7 @@ private fun sessionCommandArguments(
     val conversationOption = when (conversationChoice) {
         SessionConversationChoice.ContinueRecordedConversation -> emptyList()
         SessionConversationChoice.StartNewConversation -> listOf(FORGET_CONVERSATION_OPTION)
+        is SessionConversationChoice.AdoptConversation -> listOf(ADOPT_CONVERSATION_OPTION, conversationChoice.conversationId)
     }
 
     // 앱 소켓은 앱이 정하고 엔진이 옮긴다(chat-ui-design.md 5.2). 엔진은 이 경로를 --mcp-config 의
@@ -136,3 +137,6 @@ internal const val CHAT_MODE_OPTION = "--chat"
  * 것 쪽이고, 엔진에게 말하는 것은 되돌릴 수 없는 일 쪽이다 — 그 옮김이 이 어댑터의 몫이다.
  */
 private const val FORGET_CONVERSATION_OPTION = "--forget-conversation"
+
+/** 그 자리의 바깥 대화 하나를 이 라벨의 대화로 적고 이어가라는 옵션(session_command.go 의 adoptConversationOptionName). */
+private const val ADOPT_CONVERSATION_OPTION = "--adopt-conversation"
