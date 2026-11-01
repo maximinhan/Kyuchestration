@@ -8,14 +8,24 @@ on:
     branches: [main]
     paths:
       - 'desktop/**'
+      # WSL 코어 묶음이 install.sh 를 싣고, 아래 걸음들이 .github/scripts 의 스크립트를 부른다.
+      - 'install.sh'
+      - '.github/scripts/**'
       - '.github/workflows/desktop-ci.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'install.sh'
+      - '.github/scripts/**'
       - '.github/workflows/desktop-ci.yml'
 
 permissions:
   contents: read
+
+# 판을 넘기는 것은 릴리스와 같은 길을 지나기 위해서다 — WSL 코어 묶음의 VERSION · 깔린 코어의 인사 · msi 의 판이 한 값에서 나오는지
+# 본다. 두 잡(묶음 · msi)이 같은 값을 써야 해서 워크플로에 하나 둔다.
+env:
+  CI_DESKTOP_VERSION: '0.1.0'
 
 jobs:
   # 우분투 · 맥 · 윈도우에서 돈다.
@@ -25,8 +35,9 @@ jobs:
   # 리눅스 둘 다에 설치 패키지를 내는데, 검사가 한쪽에서만 돌면 나머지 한쪽은 태그를 미는
   # 순간에 처음 시험된다 — 가장 늦고 가장 비싼 자리다.
   #
-  # 윈도우는 화면이 도는 자리다(코어 · 화면 분리 3 단계 — 코어는 WSL 안). 코어 시험과 코어를 띄우는
-  # 화면 시험은 윈도우에서 이유와 함께 건너뛴다. 건너뛴 수는 아래 "시험 결과 세기" 가 모듈마다 적는다.
+  # 윈도우는 화면이 도는 자리다(코어는 WSL 안). 코어 시험과 코어를 띄우는 화면 시험은 윈도우에서 이유와 함께 건너뛴다 — 건너뛴 수는
+  # "시험 결과 세기" 가 모듈마다 적는다. msi 만 아래 windows-msi 가 따로 만든다 — 우분투에서만 만들 수 있는 WSL 코어 묶음을 기다려야
+  # 해서다. 윈도우의 빌드 · 시험은 그 묶음을 기다리지 않는다: 묶음 잡이 깨져도 윈도우 전용 회귀가 따로 보여야 한다.
   build-and-test:
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -60,64 +71,117 @@ jobs:
       - name: Gradle wrapper 로 빌드와 테스트
         run: ./gradlew --no-daemon build
 
-      # 몇 개가 돌았고 몇 개를 건너뛰었는지 모듈마다 적는다. 건너뛴 시험이 조용히 늘면 초록이 무엇을 말하는지 흐려진다 —
-      # 윈도우에서 무엇이 실제로 돌았는지가 여기서 보인다. 시험 결과가 없는 모듈(윈도우의 core)은 그 사실을 적는다.
       - name: 시험 결과 세기
         if: always()
         env:
           # 윈도우 러너의 파이썬은 파이프로 나가는 stdout 을 cp1252 로 써서 한국어에서 죽는다(실측). UTF-8 로 쓴다.
           PYTHONUTF8: '1'
-        run: |
-          python3 - <<'PY'
-          import glob, re
-          for module in ["protocol", "diagnostics", "core", "ui", "app"]:
-              reports = glob.glob(f"{module}/build/test-results/test/*.xml")
-              if not reports:
-                  print(f"{module}: 시험 결과 없음(건너뜀)")
-                  continue
-              total = skipped = failed = unreadable = 0
-              for report in reports:
-                  head = open(report, encoding="utf-8").read(4000)
-                  found = re.search(r'tests="(\d+)" skipped="(\d+)" failures="(\d+)" errors="(\d+)"', head)
-                  # 모양이 다른 보고서 하나 때문에 이 걸음이 죽으면 나머지 모듈의 수가 사라진다. 세지 못한 것은 따로 센다.
-                  if found is None:
-                      unreadable += 1
-                      print(f"{module}: 읽지 못한 보고서 {report}")
-                      continue
-                  total += int(found[1]); skipped += int(found[2]); failed += int(found[3]) + int(found[4])
-              print(f"{module}: 시험 {total} · 건너뜀 {skipped} · 실패 {failed}" + (f" · 읽지 못한 보고서 {unreadable}" if unreadable else ""))
-          PY
+        run: python3 ../.github/scripts/count-test-results.py
 
-      # 윈도우 사용자의 코어 이미지(WSL 에 푸는 tar.gz)가 나오고, 풀어서 띄우면 인사에 답하는지 본다. 릴리스 잡과 같은 태스크다.
-      - name: 코어 이미지 묶고 띄워 보기
-        if: runner.os == 'Linux'
-        run: |
-          ./gradlew --no-daemon :core:packageCoreArchive
-          archive=$(find core/build/core-archive -name 'kyuchestration-core_*_linux_amd64.tar.gz')
-          work=$(mktemp -d)
-          tar -xzf "$archive" -C "$work"
-          ls -l "$archive"
-          # jspawnhelper 가 실행되지 않으면 코어가 claude · kyu 를 띄우지 못한다 — 인사만으로는 드러나지 않을 수 있다.
-          for executable in bin/kyuchestration-core runtime/bin/java runtime/lib/jspawnhelper; do
-            test -x "$work/kyuchestration-core/$executable" || { echo "::error::실행 권한이 없다: $executable"; exit 1; }
-          done
-          printf '%s\n' '{"frame":"hello","protocol":2,"screenVersion":"ci","screenOs":"linux"}' \
-            | XDG_STATE_HOME="$work/state" "$work/kyuchestration-core/bin/kyuchestration-core" serve --stdio > "$work/frames.txt"
-          head -c 200 "$work/frames.txt"; echo
-          grep -q '"frame":"welcome"' "$work/frames.txt"
+  # msi 에 실을 WSL 코어 묶음(core-ui-split-design.md 6.16 의 4a 정정). 묶음의 코어 이미지는 jlink 런타임을 품어 리눅스에서만
+  # 만든다. 시험은 위 매트릭스가 돌므로 여기서는 묶고 풀어 보기만 한다 — msi 잡이 시험 매트릭스를 기다리지 않게 따로 둔다.
+  wsl-core-bundle:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
 
-      # 윈도우 설치 패키지가 나오는지 본다. WiX 는 Compose 플러그인이 받는다.
-      - name: msi 만들기
-        if: runner.os == 'Windows'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            desktop/gradle/libs.versions.toml
+            desktop/gradle/wrapper/gradle-wrapper.properties
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 릴리스의 kyu-binaries 와 같은 빌드 조건(-trimpath, CGO_ENABLED=0). 태그가 없어 판은 심지 않는다 — kyu 는 커밋으로 자기를 말한다.
+      - name: 리눅스 amd64 kyu 만들기
+        working-directory: .
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/kyu_linux_amd64" ./cmd/kyu
+
+      - name: 코어 이미지와 WSL 코어 묶음 만들기
         run: |
-          ./gradlew --no-daemon :app:packageMsi
+          ./gradlew --no-daemon "-PdesktopVersion=${CI_DESKTOP_VERSION}" \
+            :core:packageCoreArchive :core:packageWslCoreBundle "-PwslCoreBundleKyu=$RUNNER_TEMP/kyu_linux_amd64"
+
+      # 윈도우 화면이 WSL 에서 할 일 그대로 — 묶음을 풀어 네트워크 없이 설치하고, 깔린 코어가 같은 판으로 인사하는지 본다.
+      - name: 묶음을 풀어 설치하고 인사해 보기
+        run: |
+          bash ../.github/scripts/verify-wsl-core-bundle.sh \
+            core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz "v${CI_DESKTOP_VERSION}" any
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-core-bundle
+          path: desktop/core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz
+          if-no-files-found: error
+
+  # 윈도우 설치 패키지 — 위 잡의 WSL 코어 묶음을 받아 싣는다. 태그 없이 PR 에서 릴리스 잡과 같은 태스크를 지난다. 빌드 · 시험은 위
+  # 매트릭스의 윈도우가 하므로 여기서는 묶음을 놓고 패키징해 열어 보기만 한다.
+  windows-msi:
+    needs: wsl-core-bundle
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            desktop/gradle/libs.versions.toml
+            desktop/gradle/wrapper/gradle-wrapper.properties
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wsl-core-bundle
+          path: ${{ runner.temp }}/wsl-core-bundle
+
+      # WiX 는 Compose 플러그인이 받는다. 묶음은 Gradle 한 길(placeWslCoreBundle)로 놓는다 — 손으로 복사하면 자리 이름이 두 곳에 산다.
+      # createDistributable 을 함께 부르는 까닭: 윈도우의 packageMsi 는 app-image 를 거치지 않고 jpackage 를 곧바로 부른다(실측:
+      # createRuntimeImage → prepareAppResources → packageMsi, binaries/main/app 이 없다). 화면이 런타임에 리소스를 찾는 자리
+      # (compose.application.resources.dir)의 근거는 app-image 에만 보이므로 그것을 만들어 아래 확인이 함께 본다.
+      - name: 묶음을 놓고 msi 만들기
+        run: |
+          ./gradlew --no-daemon "-PdesktopVersion=${CI_DESKTOP_VERSION}" \
+            "-PwslCoreBundle=${RUNNER_TEMP}/wsl-core-bundle/kyuchestration-wsl-core.tar.gz" \
+            :app:placeWslCoreBundle :app:createDistributable :app:packageMsi
           find app/build/compose/binaries/main/msi -name '*.msi' -exec ls -l {} \;
+
+      - name: msi 안에 WSL 코어 묶음이 실렸는지 확인
+        shell: pwsh
+        run: |
+          $msi = @(Get-ChildItem app/build/compose/binaries/main/msi -Filter *.msi)[0].FullName
+          ../.github/scripts/verify-msi-carries-wsl-core.ps1 `
+            -AppImage app/build/compose/binaries/main/app `
+            -Msi $msi `
+            -SuppliedBundle "$env:RUNNER_TEMP/wsl-core-bundle/kyuchestration-wsl-core.tar.gz"
 
       # jpackage 가 실패하면 Gradle 은 로그 파일 자리만 알린다. 러너가 끝나면 그 파일은 사라지므로 여기서 펼친다.
       - name: msi 를 만들지 못했으면 jpackage 기록 펼치기
-        if: failure() && runner.os == 'Windows'
+        if: failure()
         run: |
-          for log in app/build/compose/logs/packageMsi/*; do
+          # 실패가 msi 를 만든 뒤의 걸음(확인 등)이면 jpackage 기록이 없다. 그 사실을 적고 0 으로 끝낸다 — 이 걸음이 앞의 실패를
+          # 덮어 다른 원인으로 읽히지 않게.
+          shopt -s nullglob
+          logs=(app/build/compose/logs/packageMsi/*)
+          if [ "${#logs[@]}" -eq 0 ]; then
+            echo "jpackage 기록 없음(app/build/compose/logs/packageMsi) — packageMsi 까지는 닿지 않았거나 성공했다"
+            exit 0
+          fi
+          for log in "${logs[@]}"; do
             echo "== $log"
             cat "$log"
           done

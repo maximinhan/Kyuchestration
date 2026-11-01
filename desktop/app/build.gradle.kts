@@ -64,6 +64,10 @@ dependencies {
 // 동봉이 CLI 단독 설치를 대신하지 않는다. 터미널에서만 쓰는 사람은 install.sh 로 바이너리
 // 하나를 넣으면 되고(README 설치 절), 그 길은 그대로다.
 //
+// 윈도우의 동봉 엔진은 WSL 코어 묶음 안의 리눅스 kyu 다. 윈도우 화면은 엔진을 부르지 않는다 — 엔진을 부르는 코어가 WSL 안에
+// 있고, msi 는 그 코어와 엔진을 묶음 한 파일로 실어 화면이 첫 실행 때 WSL 에 놓는다(아래 WSL 코어 묶음, core-ui-split-design.md
+// 6.16 · 6.17 의 4a 정정).
+//
 // build/ 아래에 둔다. 저장소에 적어 두는 것이 아니라 만들어지는 12MB 바이너리라, 소스 트리에
 // 두면 .gitignore 한 줄을 더 얹어야 하고 clean 이 치우지도 못한다.
 val bundledEngineRootDirectory: Provider<Directory> = layout.buildDirectory.dir("engineResources")
@@ -85,9 +89,9 @@ data class BundledEngineTarget(
  * 이 머신이 만들 동봉 엔진의 대상. 설치 패키지를 내지 않는 호스트에서는 안내와 함께 멈춘다.
  *
  * Provider 로 감싸 늦게 편다. 구성 단계에서 곧바로 정하면 이 값을 쓰지도 않는
- * `./gradlew build` 까지 윈도우에서 통째로 끊긴다. 윈도우의 설치 패키지(msi)는 화면만 담고 엔진을
- * 담지 않는다 — 엔진은 WSL 의 코어 옆에 있다(core-ui-split-design.md 6.16). 그래서 윈도우의 패키징은
- * 이 값을 묻지 않는다(아래 hostPackagesBundledEngine).
+ * `./gradlew build` 까지 윈도우에서 통째로 끊긴다. 윈도우의 설치 패키지(msi)에는 윈도우용 엔진이
+ * 없다 — 엔진은 WSL 코어 묶음 안의 리눅스 kyu 다(core-ui-split-design.md 6.16 의 4a 정정). 그래서 윈도우의
+ * 패키징은 이 값을 묻지 않고 묶음을 묻는다(아래 hostPackagesBundledEngine · checkBundledWslCore).
  */
 val hostBundledEngineTarget: Provider<BundledEngineTarget> = providers.provider {
     val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
@@ -97,8 +101,8 @@ val hostBundledEngineTarget: Provider<BundledEngineTarget> = providers.provider 
         hostOperatingSystemName.startsWith("Mac", ignoreCase = true) -> "macos" to "darwin"
         hostOperatingSystemName.startsWith("Linux", ignoreCase = true) -> "linux" to "linux"
         else -> throw GradleException(
-            "이 호스트($hostOperatingSystemName)의 설치 패키지는 엔진을 담지 않습니다. " +
-                "윈도우의 msi 는 화면만 담고, 엔진은 WSL 에 코어와 함께 놓습니다(install.sh --with-core).",
+            "이 호스트($hostOperatingSystemName)의 설치 패키지는 이 OS 용 엔진을 담지 않습니다. " +
+                "윈도우의 msi 가 싣는 엔진은 WSL 코어 묶음 안의 리눅스 kyu 입니다(:core:packageWslCoreBundle · placeWslCoreBundle).",
         )
     }
     val (resourceArchitecture, goArchitecture) = when (hostArchitecture) {
@@ -291,6 +295,91 @@ val checkBundledEngine = tasks.register("checkBundledEngine") {
     }
 }
 
+// ── msi 에 싣는 WSL 코어 묶음(core-ui-split-design.md 6.16 · 6.17 의 4a 정정) ───────────────────────────────────────────────
+//
+// 윈도우 화면은 코어를 WSL 안에서 띄운다. msi 가 리눅스 코어 이미지 · 리눅스 kyu · install.sh 를 묶음 한 파일
+// (:core:packageWslCoreBundle 의 kyuchestration-wsl-core.tar.gz)로 싣고, 화면이 첫 실행 때 그것을 WSL 에 풀어 install.sh 를 돌린다(4b).
+// 사용자가 WSL 터미널에서 따로 설치하지 않아도 되고, 화면과 코어의 판이 같은 빌드에서 나와 갈리지 않는다.
+//
+// 자리는 앱 리소스의 windows-x64/wsl-core/kyuchestration-wsl-core.tar.gz 다. 설치된 앱에서는 compose.application.resources.dir 이
+// 가리키는 디렉토리의 wsl-core/kyuchestration-wsl-core.tar.gz 이고(app-image 의 app/resources/ 아래), 화면은 그 고정 이름으로 찾는다.
+//
+// 리소스로 들어간 파일은 설치된 패키지에서 실행 권한을 잃는다(맨 위 주석의 deb 실측). 묶음은 tar.gz 한 파일이라 그 영향을 받지
+// 않는다 — 안의 kyu · install.sh · 코어 실행 파일의 0755 는 tar 머리에 실려 WSL 에서 풀 때 되살아난다.
+//
+// 묶음은 리눅스 러너에서만 만들 수 있다(jlink 런타임을 품는다). 윈도우에서 msi 를 만드는 쪽은 그것을 받아 이 자리에 놓기만 한다 —
+// 릴리스 · Desktop CI 는 우분투 잡의 산출물을 내려받아 placeWslCoreBundle 로 놓는다. 로컬도 같은 태스크다.
+
+/** 패키징이 집어 갈 WSL 코어 묶음. 윈도우의 msi 는 x64 만 낸다 — WSL 코어도 x86-64 만 낸다(install.sh 의 install_core). */
+val bundledWslCoreFile: Provider<RegularFile> =
+    bundledEngineRootDirectory.map { it.file("windows-x64/wsl-core/kyuchestration-wsl-core.tar.gz") }
+
+/**
+ * -PwslCoreBundle=<tar.gz 경로> 로 받은 묶음을 리소스 자리에 놓는다.
+ *
+ * 산출물을 Gradle 의 입출력으로 선언하지 않는 까닭은 buildBundledEngine 과 같다 — 선언하면 그 자리를 읽는 prepareAppResources 가
+ * 이 태스크를 요구하게 되고, 그러면 소스에서 띄우는 `./gradlew run` 까지 묶음을 요구한다.
+ */
+abstract class PlaceWslCoreBundle : DefaultTask() {
+
+    @get:Internal
+    abstract val suppliedBundlePath: Property<String>
+
+    @get:Internal
+    abstract val bundleDestination: RegularFileProperty
+
+    @TaskAction
+    fun place() {
+        val suppliedBundle = File(
+            suppliedBundlePath.orNull?.takeIf { it.isNotBlank() } ?: throw GradleException(
+                "놓을 WSL 코어 묶음을 -PwslCoreBundle=<kyuchestration-wsl-core.tar.gz 경로> 로 주세요. " +
+                    "리눅스 x86-64 에서 ./gradlew :core:packageWslCoreBundle -PwslCoreBundleKyu=<리눅스 kyu> 로 만듭니다.",
+            ),
+        )
+        // 상대 경로는 Gradle 이 뜬 자리를 기준으로 풀려, 부른 셸의 자리와 갈릴 수 있다 — 절대 경로만 받는다.
+        if (!suppliedBundle.isAbsolute || !suppliedBundle.isFile) {
+            throw GradleException("-PwslCoreBundle 은 있는 파일의 절대 경로여야 합니다: $suppliedBundle")
+        }
+        val destination = bundleDestination.get().asFile
+        destination.parentFile.mkdirs()
+        suppliedBundle.copyTo(destination, overwrite = true)
+        logger.lifecycle("WSL 코어 묶음을 놓았습니다: $destination (${destination.length()} 바이트)")
+    }
+}
+
+val placeWslCoreBundle = tasks.register<PlaceWslCoreBundle>("placeWslCoreBundle") {
+    group = "compose desktop"
+    description = "-PwslCoreBundle 로 받은 WSL 코어 묶음을 msi 에 넣을 리소스 자리에 놓는다"
+    suppliedBundlePath.set(providers.gradleProperty("wslCoreBundle"))
+    bundleDestination.set(bundledWslCoreFile)
+}
+
+val checkBundledWslCore = tasks.register("checkBundledWslCore") {
+    group = "verification"
+    description = "msi 에 넣을 WSL 코어 묶음이 자리에 있는지 확인한다"
+    mustRunAfter(placeWslCoreBundle)
+
+    doLast {
+        val hostArchitecture = System.getProperty("os.arch").orEmpty()
+        if (hostArchitecture != "amd64" && hostArchitecture != "x86_64") {
+            throw GradleException(
+                "윈도우 msi 는 x64 만 냅니다($hostArchitecture) — Compose 는 이 호스트에서 windows-x64 가 아닌 리소스 디렉토리를 고르므로 " +
+                    "묶음이 msi 에 실리지 않습니다.",
+            )
+        }
+        val bundleFile = bundledWslCoreFile.get().asFile
+        if (!bundleFile.isFile) {
+            throw GradleException(
+                "msi 에 넣을 WSL 코어 묶음이 없습니다: $bundleFile\n" +
+                    "릴리스 · Desktop CI 는 우분투 잡의 wsl-core-bundle 산출물을 내려받아 놓습니다. 로컬은 리눅스 x86-64 에서 " +
+                    "./gradlew :core:packageWslCoreBundle -PwslCoreBundleKyu=<리눅스 kyu> 로 만든 것을 " +
+                    "./gradlew -PwslCoreBundle=<그 tar.gz 경로> placeWslCoreBundle 로 놓은 뒤 다시 패키징하세요. " +
+                    "묶음 없이 만든 msi 는 첫 실행에서 WSL 에 코어를 놓지 못합니다.",
+            )
+        }
+    }
+}
+
 // 엔진이 빠진 설치 패키지가 나가지 않게 막는다. 빠져도 빌드는 끝까지 성공하므로, 받아서
 // 설치해 보기 전에는 아무도 모른다.
 //
@@ -302,21 +391,27 @@ val checkBundledEngine = tasks.register("checkBundledEngine") {
 // named 가 아니라 matching 으로 잡는다 — 이 태스크들은 Compose 플러그인이 프로젝트 평가가
 // 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
 //
-// 윈도우는 걸지 않는다. msi 는 화면만 담는다 — 코어와 엔진은 WSL 에 따로 놓는다(core-ui-split-design.md 6.16).
+// 윈도우는 엔진 대신 WSL 코어 묶음을 묻는다 — 윈도우 msi 의 엔진은 그 묶음 안의 리눅스 kyu 다. 거는 것은 packageMsi 하나다 —
+// 사용자에게 나가는 것은 msi 뿐이다. run · createDistributable · runDistributable 에는 걸지 않는다: 소스나 로컬 app-image 로 윈도우
+// 화면을 띄우는 흐름은 묶음 없이 돌고, 화면은 묶음이 없으면 WSL 터미널에서 돌릴 설치 명령을 안내한다(4b). 윈도우의 packageMsi 는
+// createDistributable 을 거치지 않고 jpackage 를 곧바로 부르므로(4a CI 실측) 둘에 따로 걸지 않아도 msi 는 막힌다.
 val hostIsWindows: Boolean by rootProject.extra
 val hostPackagesBundledEngine = !hostIsWindows
-val packagingTaskNames = setOf("createDistributable", "packageDeb", "packageDmg")
 if (hostPackagesBundledEngine) {
-    tasks.matching { it.name in packagingTaskNames }.configureEach {
+    tasks.matching { it.name in setOf("createDistributable", "packageDeb", "packageDmg") }.configureEach {
         dependsOn(checkBundledEngine)
+    }
+} else {
+    tasks.matching { it.name == "packageMsi" }.configureEach {
+        dependsOn(checkBundledWslCore)
     }
 }
 
-// 한 번의 실행에서 둘 다 부를 때(./gradlew buildBundledEngine packageDeb) 리소스를 옮기는
-// 쪽이 나중에 오게 한다. 의존이 아니라 순서만 건다 — 의존으로 걸면 Go 가 없는 머신에서
+// 한 번의 실행에서 둘 다 부를 때(./gradlew buildBundledEngine packageDeb · placeWslCoreBundle packageMsi) 리소스를 놓는
+// 쪽이 먼저 오게 한다. 의존이 아니라 순서만 건다 — 의존으로 걸면 Go 가 없는 머신에서
 // packageDeb 뿐 아니라 run 까지 통째로 멈춘다. run 쪽 의존은 아래에서 Go 가 있을 때만 건다.
 tasks.matching { it.name == "prepareAppResources" }.configureEach {
-    mustRunAfter(buildBundledEngine)
+    mustRunAfter(buildBundledEngine, placeWslCoreBundle)
 }
 
 // 엔진을 새로 만들지 않고 앱만 띄우고 싶을 때 끈다: ./gradlew run -PbundledEngineForRun=false
@@ -343,12 +438,16 @@ val bundledEngineForRun = providers.gradleProperty("bundledEngineForRun")
  *
  * `build` · `test` 는 그대로 Go 와 무관하다 — 여기서 거는 것은 run 하나뿐이다.
  *
- * 윈도우에서는 엔진을 만들지 않는다. 윈도우의 화면은 WSL 의 코어에 붙고, 엔진은 그 코어 옆에 있다.
+ * 윈도우에서는 엔진을 만들지 않는다. 윈도우의 화면은 WSL 의 코어에 붙고, 엔진은 그 코어 옆에 있다 — 소스 실행은 WSL 코어 묶음
+ * 없이 뜨고, WSL 에 코어가 없으면 화면이 설치 명령을 안내한다.
  */
 tasks.matching { it.name == "run" }.configureEach {
     when {
         !hostPackagesBundledEngine -> doFirst {
-            logger.lifecycle("윈도우 화면 — 엔진은 WSL 의 코어 옆에 있습니다(install.sh --with-core).")
+            logger.lifecycle(
+                "윈도우 화면 — WSL 코어 묶음 없이 실행합니다. 코어와 엔진은 WSL 에 있어야 합니다" +
+                    "(WSL 터미널에서 install.sh --with-core).",
+            )
         }
 
         !bundledEngineForRun -> doFirst {
@@ -390,8 +489,8 @@ compose.desktop {
             // 여기에 적어 두는 것은 "어디로 배포할 것인가" 의 선언이고, 실제 생성은 각 OS 러너에서
             // 일어난다(.github/workflows/release.yml).
             //
-            // Msi 는 화면만 담는다. 윈도우의 코어와 엔진은 WSL 안에 install.sh --with-core 로 놓고,
-            // 화면이 wsl.exe 로 그 코어를 띄운다(core-ui-split-design.md 6.12 · 6.16).
+            // Msi 는 윈도우 화면과 WSL 코어 묶음(리눅스 코어 이미지 · 리눅스 kyu · install.sh)을 담는다. 코어는 WSL 안에서
+            // 돌고, 화면이 wsl.exe 로 그 코어를 띄운다(core-ui-split-design.md 6.12 · 6.16 의 4a 정정).
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi)
 
             // 설치 패키지 이름은 파일 이름과 설치 경로(/opt/kyuchestration · /Applications)에
@@ -409,8 +508,8 @@ compose.desktop {
             }
             vendor = "maximinhan"
 
-            // 엔진(kyu)을 앱 패키지 안에 함께 넣는 자리. Compose 는 이 디렉토리 아래에서 이
-            // 플랫폼의 하위 디렉토리(linux-x64 · macos-arm64 · macos-x64)를 골라 앱 이미지의
+            // 엔진(kyu) · WSL 코어 묶음을 앱 패키지 안에 함께 넣는 자리. Compose 는 이 디렉토리 아래에서 이
+            // 플랫폼의 하위 디렉토리(linux-x64 · macos-arm64 · macos-x64 · windows-x64)를 골라 앱 이미지의
             // resources 로 옮기고, 앱은 실행 시점에 compose.application.resources.dir 시스템
             // 프로퍼티로 그 자리를 받는다.
             appResourcesRootDir.set(bundledEngineRootDirectory)
