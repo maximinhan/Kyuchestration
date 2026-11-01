@@ -233,6 +233,8 @@ kyu repos <owners|list>
                        GitHub 의 소유자·레포 목록 — 기계용 (--json 전용)
 kyu session-command [repo]
                        세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
+kyu conversations list <path> [repo]
+                       그 세션 자리에서 Claude Code 로 나눈 대화 (이어갈 것을 고르는 목록)
 kyu mcp <serve|approve>
                        메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
                        approve 는 레포의 실행 유발 설정을 눈으로 확인하고 승인한다)
@@ -246,13 +248,15 @@ kyu version            이 바이너리의 버전
   --bypass-permissions   claude 를 권한 확인 없이 띄운다 — 신뢰하는 워크디렉토리에서만
   --repo-claude-md       메인 세션이 각 레포의 CLAUDE.md 까지 읽는다 (메인 세션 전용)
   --forget-conversation  적혀 있는 대화를 버리고 새 대화로 답한다 — 앞 대화는 이어갈 수 없게 된다
+  --adopt-conversation <id>
+                         그 자리의 Claude Code 대화를 이 세션의 대화로 적고 이어간다
 
 옵션 (kyu clone):
   --profile <이름>       어느 토큰으로 붙을지 (필수)
   --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
-옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu auth add, kyu auth list,
-      kyu claude-auth set, kyu claude-auth status):
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu conversations list,
+      kyu auth add, kyu auth list, kyu claude-auth set, kyu claude-auth status):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
 kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크톱 앱의 몫이다. 인자 없이 부르면
@@ -276,6 +280,7 @@ kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크�
 | `kyu clone --profile <이름> --repo <owner/name> --json` | 적어 보낸 레포를 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
+| `kyu conversations list <경로> [repo] --json` | 그 세션 자리에서 Claude Code 로 나눈 대화 (마지막 활동이 늦은 것부터) | `{schemaVersion, cwd, conversations[{id, title, startedAt, lastActiveAt, recordedFor}]}` |
 | `kyu mcp serve <워크디렉토리>` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo` ([설계](orchestration-tools-design.md) 5.3) |
 
 공통 규칙이 다섯 가지다.
@@ -613,6 +618,19 @@ kyu session-command proj-a --bypass-permissions --json
 
 `--forget-conversation` 은 적혀 있는 대화를 버리고 새 대화로 답한다 — 화면의 **새 대화로 시작**
 이 이 옵션으로 온다. 이름이 하는 일 쪽(기록을 잊는다)인 이유는 되돌릴 수 없는 쪽이 그것이어서다.
+
+`--adopt-conversation <id>` 는 그 세션 자리에서 사용자가 터미널 `claude` 로 나눈 대화 하나를 그 라벨의
+대화로 **적고** `--resume <id>` 로 답한다(`resumedConversationId` 도 그 id). 고를 대화는
+`kyu conversations list <경로> [repo] --json` 이 답한다 — 목록의 `cwd` 와 이 명령이 그 라벨에 주는 `cwd`
+는 같은 함수로 정해진다. 적혀 있던 대화가 있어도 바꾸고, 같은 id 면 그대로 둔다. 다음은 거절한다(종료 코드 1,
+아무것도 적지 않는다).
+
+| 거절 | 까닭 |
+|---|---|
+| `--forget-conversation` 과 함께 | 새 대화와 고른 대화를 함께 가리킨다 |
+| `--child` 와 함께 | 하위 세션은 늘 새 대화다([설계](session-tree-design.md) 6.15) |
+| uuid 꼴이 아닌 값 | `claude --resume` 이 받지 않는다 |
+| 그 자리에 전사가 없는 id · 위임이나 하위 세션의 대화 | 없는 id 를 적으면 다음 실행이 종료 코드 1 로 끝나고, 한 대화를 둘이 쓰면 뒤에 연 쪽이 거절된다 |
 
 #### `--repo-claude-md`
 
@@ -1402,6 +1420,14 @@ git 만 보고, 세션을 만들고 붙고 죽이던 명령은 은퇴했다(설�
 두기 때문이다. 앱을 껐다 켜서 그 워크디렉토리를 다시 열면 이어갈 것이 있는 줄에 **`이어갈
 대화` 칩**이 붙어 있고, 그 줄을 누르면 `claude --resume` 으로 **그 대화가 이어진다.** 확인
 창은 없다 — 앱을 끄는 것이 대화를 버리는 일이 아니므로 물을 것이 없다.
+
+**터미널에서 한 대화도 이어갈 수 있다.** 앱을 쓰기 전부터 같은 폴더에서 `claude` 로 일해 왔다면 그 대화는
+`.coord/conversations.json` 이 아니라 Claude Code 의 전사에만 있다. 엔진이 그것을 찾아 목록으로 답하고
+([`kyu conversations list --json`](#기계용-표면)), 사람이 고른 것을 그 세션의 대화로 적는다
+([`--adopt-conversation`](#kyu-session-command-repo)). 앱이 폴더를 열 때 이 목록을 보여 주고 고르게 하는
+화면은 다음 PR 에서 붙는다. 전사 자리는 `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/projects/<인코딩한
+cwd>/<대화 id>.jsonl` 이고, 인코딩은 실측(claude 2.1.316)으로 정했다 — 링크를 편 절대경로에서 ASCII 영숫자가
+아닌 글자는 UTF-16 단위 하나마다 `-` 하나(한글 한 글자에 하나, 이모지는 둘), 200 자를 넘으면 해시 꼬리가 붙는다.
 
 **이어가지 못하는 경우도 있다.** 전사가 사라졌거나(`~/.claude` 를 정리했거나 다른 머신에서 연
 경우) 기록의 ID 가 망가졌으면 `claude` 는 곧바로 종료 코드 1 로 끝난다. 그때 앱은 **대신 새
