@@ -505,6 +505,36 @@ kyu session-command proj-a --json
 
 **5.5.4 의 "엔진이 미리 판정한다" 기각은 그대로다.** 그것은 **적혀 있는** 대화를 열기 전마다 전사를 보는 안이었다. 이번 것은 사람이 고르는 순간 한 번 보는 것이고, resume 실패를 가려내는 근거는 여전히 `resumedConversationId` 다.
 
+#### 5.5.7 정정 — 폴더 밖 대화 고르기 (2026-11-01)
+
+**문제.** 5.5.6 이 엔진에 목록과 채택을 더했지만 앱은 아직 그것을 부르지 않았다. 사용자는 오래 터미널 `claude` 로 대화해 온 폴더를 v0.16.1 로 열고 세션 카드의 "이어가기" 를 눌렀는데, 그 대화가 아니라 앱이 만든 빈 대화가 열렸다. 앱은 자기가 `.coord/conversations.json` 에 적은 대화만 `--resume` 했고 터미널 전사는 보지 않았다. 사용자의 요구는 둘이다 — "기존 클로드 세션이 있었다면 그게 기본으로 이어지거나, 새 세션을 여는 걸 선택하도록", 그리고 "적힌 대화가 있어도 대화가 새로 보이면 물어봐야" 한다(뀨케스트레이션 전에 터미널로 이어 가던 대화를 이어 나가고 싶을 수 있으니까).
+
+**흐름.** 이어가기(`ContinueRecordedConversation`)가 코어에 오면, 코어는 세션 명령을 묻기 **전에** `kyu conversations list <워크디렉토리> [repo] --json` 으로 그 자리의 대화를 본다(포트 `ClaudeCodeConversationSource`). 세션 명령을 먼저 묻지 않는 것은 묻는 것이 곧 기록하는 것이라서다(5.5.3) — 고르기도 전에 적힌 대화가 바뀌면 안 된다.
+
+| 이름 | 뜻 |
+|---|---|
+| 후보 | `recordedFor` 가 `null` 인 대화 — 앱 밖에서 나눈 것. 다른 라벨에 적힌 대화는 그 세션의 것이라 넣지 않는다(넣으면 두 세션이 한 대화를 연다) |
+| 적힌 대화 | `recordedFor` 가 이 세션의 라벨인 대화. 없을 수 있다 — 적힌 id 의 전사가 아직 없는 경우도 같다 |
+
+**묻는 조건**: 후보가 하나라도 있고, **적힌 대화가 없거나 가장 최근 후보의 `lastActiveAt` 이 적힌 대화의 것보다 뒤**일 때만 묻는다. 물으면 진입 상태가 `ChoosingConversation(candidates, recorded, defaultChoice)` 가 되고, 화면이 그 세션 자리에 고르기를 세운다. 기본 선택은 코어가 정해 함께 보낸다 — 가장 최근의 것이고, 묻는 조건 때문에 물을 때는 언제나 가장 최근 후보다.
+
+**왜 이 조건인가.** 사람이 앱 밖에서 터미널로 이어 간 대화는 반드시 적힌 것보다 최근이라 잡힌다. 한 번 골라 그 대화로 말을 주고받으면 적힌 대화가 가장 최근이 되어 다음부터 묻지 않는다. 터미널로 돌아가 다시 이어 가면 다시 물어 온다. "이미 물었는가" 를 어디에도 적지 않고, 매번 묻는 성가심과 놓치는 것 사이의 균형을 전사의 시각만으로 얻는다.
+
+| 갈래 | 묻는가 |
+|---|---|
+| 이어가기 + 위 조건 충족 | 묻는다 |
+| 이어가기 + 조건 미충족 | 묻지 않고 오늘처럼 이어간다 |
+| 이어가기 + 목록 명령 실패 | 묻지 않고 이어간다. 진단 기록(`ClaudeCodeConversationListingFailed`)과 그 챗 맨 앞 줄에 남긴다 — 묻지 못했다고 세션을 못 여는 것은 과하다 |
+| 새 대화 · 채택 | 묻지 않는다 — 사람이 이미 고른 것이다 |
+
+**고른 뒤.** 화면의 "이어가기" 는 `chooseConversation(target, choice)` 다 — 바깥 대화면 `AdoptConversation(id)` 가 `--adopt-conversation <id>` 로, 앱에서 하던 대화면 이어가기가, 새 대화면 `--forget-conversation` 이 엔진에게 간다. 고르는 동안 코어는 진입 번호(`ChatSessionStateHolder` 의 `pendingEntryRequestIds`)를 그대로 들고 있어, 그 사이 워크디렉토리를 닫거나 세션을 끝내면 늦게 온 선택은 버려진다. "취소" 는 `cancelConversationChoice` 로 진입을 지운다. 엔진에게는 아무것도 묻지 않았으므로 기록도 그대로다.
+
+**원칙 11 과의 양립.** 지금까지 앱은 대화 ID 를 하나도 쥐지 않았다(`SessionConversationChoice` 의 갈래 둘). 채택은 ID 를 싣는다. 그러나 앱은 그 값을 **짓지도 열어 보지도 기록하지도 않는다** — 엔진이 목록으로 답한 문자열을 불투명한 값 그대로 엔진에게 되돌려 줄 뿐이다. 기록 파일의 자리와 모양, 전사의 자리, 무엇이 채택할 수 있는 대화인지(uuid 꼴 · 전사 유무 · 위임 대화)는 여전히 엔진만 안다. 앱이 잘못된 값을 되돌려 주면 엔진이 거절하고, 그것은 진입 실패로 보인다.
+
+**프로토콜 판 3.** `SessionConversationChoice` 가 enum 에서 `type` 낱말을 단 sealed interface 로 바뀌었다(`continue_recorded_conversation` · `start_new_conversation` · `adopt_conversation`). 같은 필드(`enter_session.conversationChoice`)의 모양이 바뀌었으므로 판을 올린다(core-ui-split-design.md 6.14). 진입 상태 `choosing_conversation` 과 명령 `choose_conversation` · `cancel_conversation_choice` 도 이 판에서 더해졌다. 판 2 의 화면과 판 3 의 코어는 인사에서 갈라지고, 기존 판 불일치 화면이 그것을 말한다.
+
+**실측 (2026-11-01, claude 2.1.316).** 임시 폴더에서 `claude -p "이 대화의 암호 단어는 보라색코끼리 다…"` 로 터미널 대화를 만든 뒤, 진짜 코어 프로세스에 붙은 거울로 그 폴더를 열고 메인을 이어가기로 눌렀다. 고르기가 그 대화 하나를 후보이자 기본으로 세웠고, 그대로 고르자 메인 챗의 `resumedConversationId` 가 그 id 였으며, "암호 단어가 뭐였지?" 에 "보라색코끼리" 로 답했다. 그 뒤 `kyu conversations list` 는 그 대화를 `recordedFor: "main"` 으로 답했다(RealClaudeTerminalConversationChoiceIntegrationTest).
+
 ### 5.6 낱말 — "세션" 이 둘이다
 
 `claude` 는 대화 하나를 "session" 이라 부르고(`--session-id`, `--resume`), 이 도구도 PTY 하나를 "세션" 이라 부른다. **같은 낱말이 다른 것을 가리킨다.**

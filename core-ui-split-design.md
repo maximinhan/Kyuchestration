@@ -713,6 +713,15 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 
 **화면과 코어는 같은 태그에서 같은 판으로 나간다**(6.16). 판이 다른 것은 둘 중 하나를 갱신하지 않은 경우뿐이다.
 
+**판 이력** (`SCREEN_PROTOCOL_VERSION`, `desktop/protocol/…/ScreenFrame.kt`)
+
+| 판 | 바뀐 것 | 왜 올렸나 |
+|---|---|---|
+| 0 | 판을 싣지 않은 1 단계(PR #76)의 화면 · 코어. 판 필드가 없는 인사를 이 값으로 읽는다 | — |
+| 1 | `hello` · `welcome` 에 `protocol` 을 싣는다 | 판 불일치의 길을 열기 위해 |
+| 2 | `open_workdir` 의 `hostPath`(화면 경로) → `workDirPath`(코어 경로)(6.9 의 3 단계 정정) | 필드가 빠지고 뜻이 바뀌었다 |
+| 3 | `enter_session.conversationChoice` 가 이름 문자열에서 `type` 을 단 객체로(`continue_recorded_conversation` · `start_new_conversation` · `adopt_conversation { conversationId }`). 진입 상태 `choosing_conversation` 과 명령 `choose_conversation` · `cancel_conversation_choice` 를 더한다(app-owned-sessions-design.md 5.5.7) | 같은 필드의 모양이 바뀌었다 — 판 2 의 상대는 그 필드를 읽지 못한다. 판 불일치는 위 표의 첫 줄 그대로 처리된다(고칠 것 없음) |
+
 ### 6.15 Gradle 모듈 — `protocol` · `core` · `ui`
 
 `desktop/` 는 지금 모듈 하나다(`desktop/settings.gradle.kts`). 셋으로 가른다.
