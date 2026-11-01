@@ -39,13 +39,14 @@ tasks.named<Test>("test") {
 
 // ── WSL 에 설치하는 코어 이미지(core-ui-split-design.md 6.16 의 3 단계 정정) ─────────────────────────────────────────────
 //
-// 윈도우 사용자의 코어는 WSL 안에 산다. 설치 패키지(msi)에는 화면만 들고, 코어는 이 이미지를 install.sh --with-core 가 받아
-// ~/.local/share/kyuchestration/core 에 풀고 ~/.local/bin/kyuchestration-core 로 링크한다.
+// 윈도우 사용자의 코어는 WSL 안에 산다. install.sh --with-core 가 이 이미지를 ~/.local/share/kyuchestration/core 에 풀고
+// ~/.local/bin/kyuchestration-core 로 링크한다. 이미지는 릴리스 자산으로도 나가고, 아래 WSL 코어 묶음에 실려 msi 안에도 들어간다.
 //
 //   kyuchestration-core/
 //   ├─ bin/kyuchestration-core   링크를 풀어 이미지 자리를 찾는 sh 실행 파일(src/coreImage)
 //   ├─ runtime/                  jlink 런타임 — WSL 에 자바를 요구하지 않는다
-//   └─ lib/*.jar                 코어와 그 의존
+//   ├─ lib/*.jar                 코어와 그 의존
+//   └─ VERSION                   판 라벨 한 줄(v0.16.0) — 깔린 코어의 판을 화면이 띄우지 않고 읽는 자리
 //
 // 런타임을 품는 까닭: WSL 의 Ubuntu 에는 기본으로 자바가 없고, 설치하려면 sudo 가 필요하다. 설치 스크립트는 sudo 없이 ~/.local
 // 에만 놓는다(install.sh 와 같은 자세). 그 값이 런타임 40 MB(실측, jdeps 가 고른 모듈 + TLS 의 EC 제공자)다.
@@ -100,17 +101,20 @@ abstract class LinkCoreRuntime @Inject constructor(
     }
 }
 
-val coreImageArchitecture: Provider<String> = providers.provider {
+/** 이 호스트에서 만든 코어 이미지의 아키텍처(Go · 릴리스 자산의 철자). 리눅스가 아니면 이미지를 만들 수 없어 멈춘다. */
+fun hostCoreImageArchitecture(): String {
     val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
     if (!hostOperatingSystemName.startsWith("Linux", ignoreCase = true)) {
         throw GradleException("코어 이미지는 리눅스에서만 만듭니다 — jlink 는 자기가 도는 OS 의 런타임을 만듭니다($hostOperatingSystemName).")
     }
-    when (val hostArchitecture = System.getProperty("os.arch").orEmpty()) {
+    return when (val hostArchitecture = System.getProperty("os.arch").orEmpty()) {
         "amd64", "x86_64" -> "amd64"
         "aarch64", "arm64" -> "arm64"
         else -> throw GradleException("이 아키텍처($hostArchitecture)용 코어 이미지는 만들지 않습니다.")
     }
 }
+
+val coreImageArchitecture: Provider<String> = providers.provider { hostCoreImageArchitecture() }
 
 /**
  * 이미지 안에서 실행되는 파일. 그 밖은 모두 읽기 · 쓰기 파일이다.
@@ -129,6 +133,18 @@ fun isExecutableInCoreImage(relativePath: String): Boolean =
 val EXECUTABLE_FILE_MODE = "755".toInt(radix = 8)
 
 val READ_WRITE_FILE_MODE = "644".toInt(radix = 8)
+
+/**
+ * 판 라벨 파일 하나(`v0.16.0` 한 줄). 화면의 판 라벨(`BuildVersion` 의 `v<판>`)과 같은 꼴이다 — 화면이 자기 라벨과 문자열로 견준다.
+ * 코어 이미지와 WSL 코어 묶음이 같은 파일을 싣는다.
+ */
+val writeCoreVersionLabel = tasks.register("writeCoreVersionLabel") {
+    val versionLabel = "v${project.version}"
+    val versionFile = layout.buildDirectory.file("core-version/VERSION")
+    inputs.property("versionLabel", versionLabel)
+    outputs.file(versionFile)
+    doLast { versionFile.get().asFile.writeText("$versionLabel\n") }
+}
 
 val coreRuntimeClasspath = files(tasks.named("jar"), configurations.named("runtimeClasspath"))
 
@@ -149,9 +165,10 @@ val assembleCoreImage = tasks.register<Sync>("assembleCoreImage") {
     from(linkCoreRuntime) { into("runtime") }
     from(coreRuntimeClasspath) { into("lib") }
     from("src/coreImage")
+    from(writeCoreVersionLabel)
 }
 
-tasks.register<Tar>("packageCoreArchive") {
+val packageCoreArchive = tasks.register<Tar>("packageCoreArchive") {
     group = "distribution"
     description = "코어 이미지를 릴리스 자산 kyuchestration-core_<판>_linux_<아키텍처>.tar.gz 로 묶는다"
     compression = Compression.GZIP
@@ -161,4 +178,103 @@ tasks.register<Tar>("packageCoreArchive") {
     // jspawnhelper 가 풀린 자리에서 실행되지 않는다(실측: Permission denied). 이미지에 모아 둔 권한을 그대로 싣는다.
     useFileSystemPermissions()
     into("kyuchestration-core") { from(assembleCoreImage) }
+}
+
+// ── msi 에 싣는 WSL 코어 묶음(core-ui-split-design.md 6.16 · 6.17 의 4a 정정) ───────────────────────────────────────────────
+//
+// 윈도우 화면이 첫 실행 때 WSL 에 밀어 넣을 것 전부. 화면은 자기 리소스에서 이 파일을 고정 이름으로 찾아 wsl.exe 로 WSL 에 풀고
+// install.sh 를 돌린다(4b). 최상위 디렉토리 없이:
+//
+//   core.tar.gz   위 packageCoreArchive 의 산출물 그대로(이름만 고정) — install.sh 의 KYU_CORE_ARCHIVE 가 받는 바로 그 꼴
+//   kyu           리눅스 amd64 엔진(-PwslCoreBundleKyu) — install.sh 의 KYU_BINARY_FILE
+//   install.sh    저장소 루트의 것 그대로
+//   VERSION       코어 이미지 안의 것과 같은 판 라벨 한 줄
+//
+// 코어를 풀어 둔 디렉토리가 아니라 tar.gz 그대로 싣는다. install.sh 가 받는 입력 형식을 두 벌(묶음 · 디렉토리) 두지 않으려고다 —
+// 손으로 깔든 화면이 깔든 같은 함수(install_core)가 같은 묶음을 풀고 띄워 보고 자리를 바꾼다.
+//
+// 묶음 이름에 판을 넣지 않는다. 화면은 같은 빌드에서 나온 자기 리소스에서 고정 이름으로 찾고, 판은 화면 자신의 판과 같다.
+
+/**
+ * 묶음에 넣을 리눅스 amd64 kyu. 프로퍼티가 없으면 이 값을 묻는 순간(묶음 태스크가 실행 계획에 들 때) 어디서 구하는지를 말하며 멈춘다 —
+ * 묶음을 부르지 않는 빌드(build · packageCoreArchive)는 묻지 않으므로 kyu 를 요구하지 않는다.
+ */
+val wslCoreBundleEngine: Provider<File> = providers.gradleProperty("wslCoreBundleKyu").map(::File).orElse(
+    providers.provider {
+        throw GradleException(
+            "리눅스 amd64 kyu 가 필요합니다 — -PwslCoreBundleKyu=<절대경로> 로 주세요. 릴리스 잡은 kyu-binaries 산출물을, " +
+                "로컬은 저장소 루트에서 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o <경로> ./cmd/kyu 로 만든 것을 주세요.",
+        )
+    },
+)
+
+/**
+ * 묶음을 만들기 전에, 무거운 일(jlink)을 시작하기 전에 끊는다.
+ *
+ * - 호스트: 묶음의 코어 이미지는 이 호스트의 jlink 런타임을 품는다. 윈도우 · 맥에서 만들면 runtime/bin/java 가 그 OS 의 것이라 WSL 에서
+ *   뜨지 않고, 그 사실은 사용자의 첫 실행에서야 드러난다. WSL 코어는 x86-64 만 낸다(install.sh 의 install_core 와 같은 선).
+ * - 엔진: 리눅스 amd64 ELF 인지 머리 바이트로 본다. 윈도우의 kyu.exe · 맥 바이너리를 넣어도 묶음은 만들어지고 install.sh 의 kyu version
+ *   에서야 깨진다.
+ */
+val checkWslCoreBundleInputs = tasks.register("checkWslCoreBundleInputs") {
+    group = "verification"
+    description = "WSL 코어 묶음을 만들 수 있는 호스트인지, 넣을 kyu 가 리눅스 amd64 인지 확인한다"
+    val suppliedEngine = wslCoreBundleEngine
+    doLast {
+        val hostOperatingSystemName = System.getProperty("os.name").orEmpty()
+        if (!hostOperatingSystemName.startsWith("Linux", ignoreCase = true) || hostCoreImageArchitecture() != "amd64") {
+            throw GradleException(
+                "WSL 코어 묶음은 리눅스 x86-64 에서만 만듭니다 — 묶음의 코어 이미지는 이 호스트의 jlink 런타임을 품고, " +
+                    "윈도우 · 맥에서 만든 runtime/bin/java 는 WSL 에서 뜨지 않습니다" +
+                    "(이 호스트: $hostOperatingSystemName ${System.getProperty("os.arch")}).",
+            )
+        }
+        val engine = suppliedEngine.get()
+        if (!engine.isAbsolute || !engine.isFile) {
+            throw GradleException("-PwslCoreBundleKyu 는 있는 파일의 절대경로여야 합니다: $engine")
+        }
+        if (!isLinuxAmd64Executable(engine)) {
+            throw GradleException(
+                "-PwslCoreBundleKyu 가 리눅스 amd64 실행 파일(ELF x86-64)이 아닙니다: $engine — " +
+                    "GOOS=linux GOARCH=amd64 로 만든 것을 주세요.",
+            )
+        }
+    }
+}
+
+/** ELF 머리의 매직 · 64비트 등급 · 기계 번호(EM_X86_64, 리틀 엔디언 두 바이트)를 본다. */
+fun isLinuxAmd64Executable(candidate: File): Boolean {
+    val header = candidate.inputStream().use { it.readNBytes(20) }
+    if (header.size < 20) return false
+    val elfMagic = header[0] == 0x7f.toByte() && header[1] == 'E'.code.toByte() &&
+        header[2] == 'L'.code.toByte() && header[3] == 'F'.code.toByte()
+    val sixtyFourBitClass = header[4] == 2.toByte()
+    val machine = (header[18].toInt() and 0xff) or ((header[19].toInt() and 0xff) shl 8)
+    val elfMachineX86_64 = 62
+    return elfMagic && sixtyFourBitClass && machine == elfMachineX86_64
+}
+
+// 확인이 jlink 보다 먼저 돈다. 의존이 아니라 순서만 건다 — packageCoreArchive 만 부르는 흐름(릴리스 자산 · CI)에 kyu 를 요구하지 않는다.
+linkCoreRuntime.configure { mustRunAfter(checkWslCoreBundleInputs) }
+
+tasks.register<Tar>("packageWslCoreBundle") {
+    group = "distribution"
+    description = "msi 에 실을 WSL 코어 묶음(코어 이미지 · 리눅스 kyu · install.sh · VERSION)을 build/wsl-core-bundle 에 만든다"
+    dependsOn(checkWslCoreBundleInputs)
+    compression = Compression.GZIP
+    destinationDirectory.set(layout.buildDirectory.dir("wsl-core-bundle"))
+    archiveFileName.set("kyuchestration-wsl-core.tar.gz")
+    // 권한은 코어 이미지와 같은 규칙이다 — 실행되는 것(화면이 부르는 install.sh, install.sh 가 version 으로 불러 보는 kyu)은 0755, 그 밖
+    // 0644. 원본에서 물려받지 않는다: CI 아티팩트로 건너온 kyu 는 실행 비트를 잃는다. 이미지처럼 경로로 가르는 eachFile 을 쓰지 않고
+    // 갈래마다 정한다 — 부모의 eachFile 은 갈래의 rename 보다 먼저 돌아 kyu 를 원래 이름(kyu_linux_amd64)으로 본다(실측: 0644 로 실렸다).
+    from(packageCoreArchive) {
+        rename { "core.tar.gz" }
+        filePermissions { unix(READ_WRITE_FILE_MODE) }
+    }
+    from(wslCoreBundleEngine) {
+        rename { "kyu" }
+        filePermissions { unix(EXECUTABLE_FILE_MODE) }
+    }
+    from(layout.projectDirectory.file("../../install.sh")) { filePermissions { unix(EXECUTABLE_FILE_MODE) } }
+    from(writeCoreVersionLabel) { filePermissions { unix(READ_WRITE_FILE_MODE) } }
 }
