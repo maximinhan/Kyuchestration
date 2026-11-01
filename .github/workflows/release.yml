@@ -401,13 +401,16 @@ jobs:
           path: ${{ runner.temp }}/wsl-core-bundle
 
       # 묶음은 Gradle 한 길(placeWslCoreBundle)로 놓는다 — 로컬 · Desktop CI 와 같은 태스크다. 손으로 복사하면 자리 이름이 두 곳에 산다.
+      # createDistributable 을 함께 부르는 까닭: 윈도우의 packageMsi 는 app-image 를 거치지 않고 jpackage 를 곧바로 부른다(실측:
+      # createRuntimeImage → prepareAppResources → packageMsi, binaries/main/app 이 없다). 화면이 런타임에 리소스를 찾는 자리
+      # (compose.application.resources.dir)의 근거는 app-image 에만 보이므로 그것을 만들어 아래 확인이 함께 본다.
       - name: 묶음을 놓고 msi 만들기
         env:
           DESKTOP_VERSION: ${{ needs.resolve-version.outputs.desktop_version }}
         run: |
           ./gradlew --no-daemon "-PdesktopVersion=${DESKTOP_VERSION}" \
             "-PwslCoreBundle=${RUNNER_TEMP}/wsl-core-bundle/kyuchestration-wsl-core.tar.gz" \
-            :app:placeWslCoreBundle :app:packageMsi
+            :app:placeWslCoreBundle :app:createDistributable :app:packageMsi
 
       # deb · dmg 쪽과 같은 이유로 만든 것을 열어 본다 — checkBundledWslCore 는 "놓은 자리에 있는가" 만 본다.
       - name: msi 안에 WSL 코어 묶음이 실렸는지 확인

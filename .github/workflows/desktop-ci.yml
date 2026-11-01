@@ -154,11 +154,14 @@ jobs:
           path: ${{ runner.temp }}/wsl-core-bundle
 
       # WiX 는 Compose 플러그인이 받는다. 묶음은 Gradle 한 길(placeWslCoreBundle)로 놓는다 — 손으로 복사하면 자리 이름이 두 곳에 산다.
+      # createDistributable 을 함께 부르는 까닭: 윈도우의 packageMsi 는 app-image 를 거치지 않고 jpackage 를 곧바로 부른다(실측:
+      # createRuntimeImage → prepareAppResources → packageMsi, binaries/main/app 이 없다). 화면이 런타임에 리소스를 찾는 자리
+      # (compose.application.resources.dir)의 근거는 app-image 에만 보이므로 그것을 만들어 아래 확인이 함께 본다.
       - name: 묶음을 놓고 msi 만들기
         run: |
           ./gradlew --no-daemon "-PdesktopVersion=${CI_DESKTOP_VERSION}" \
             "-PwslCoreBundle=${RUNNER_TEMP}/wsl-core-bundle/kyuchestration-wsl-core.tar.gz" \
-            :app:placeWslCoreBundle :app:packageMsi
+            :app:placeWslCoreBundle :app:createDistributable :app:packageMsi
           find app/build/compose/binaries/main/msi -name '*.msi' -exec ls -l {} \;
 
       - name: msi 안에 WSL 코어 묶음이 실렸는지 확인
@@ -174,7 +177,15 @@ jobs:
       - name: msi 를 만들지 못했으면 jpackage 기록 펼치기
         if: failure()
         run: |
-          for log in app/build/compose/logs/packageMsi/*; do
+          # 실패가 msi 를 만든 뒤의 걸음(확인 등)이면 jpackage 기록이 없다. 그 사실을 적고 0 으로 끝낸다 — 이 걸음이 앞의 실패를
+          # 덮어 다른 원인으로 읽히지 않게.
+          shopt -s nullglob
+          logs=(app/build/compose/logs/packageMsi/*)
+          if [ "${#logs[@]}" -eq 0 ]; then
+            echo "jpackage 기록 없음(app/build/compose/logs/packageMsi) — packageMsi 까지는 닿지 않았거나 성공했다"
+            exit 0
+          fi
+          for log in "${logs[@]}"; do
             echo "== $log"
             cat "$log"
           done
