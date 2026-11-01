@@ -851,7 +851,9 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
         kyu/         # kyu 를 어디서 찾고 어떻게 부르고 그 문서를 어떻게 읽는가 (어느 어댑터의 것도 아닌 앎)
         engine/      # 동봉 엔진 복사 · 없으면 받는 걸음을 쥔 상태 홀더
         engine/githubrelease/  # 최신 릴리스에서 받아 놓는 어댑터 (앱이 GitHub 에 직접 닿는 유일한 곳)
+        workdir/     # 관찰 · 초기화 포트 (관찰 결과 타입은 protocol 에 있다)
         workdir/kyucli/    # kyu list · kyu init 어댑터 (JSON 계약이 닿는 곳)
+        repoclone/   # 토큰 프로필 · 레포 조회 · 클론 포트와 그 걸음을 쥔 상태 홀더
         repoclone/kyucli/  # kyu auth · kyu repos · kyu clone 어댑터
         claudeauth/  # claude 로그인 확인 · 브라우저 로그인 · 토큰 맡기기를 쥔 상태 홀더
         dashboard/   # 폴링과 오류 전이를 쥔 상태 홀더
