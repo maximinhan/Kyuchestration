@@ -856,20 +856,27 @@ desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Grad
     protocol/    # 화면 ↔ 코어의 틀 · 명령 · 변화 · 화면 모델, 경계 인터페이스 ScreenFacingCore
     diagnostics/ # 진단 기록 · 판 라벨 — 화면과 코어가 같은 사건 갈래로 각자 자기 파일에 적는다
     core/        # 세션을 쥐는 코어 — Compose 를 의존하지 않는다
+        core/        # 코어의 진입(CoreMain · serve) · 화면에 변화를 내보내는 게시자 · 같은 JVM 안의 코어 조립
+        platform/    # 자식 프로세스의 환경 — 로그인 셸의 PATH 를 읽고 흔한 자리를 덧붙인다, claude 토큰 환경 변수
         kyu/         # kyu 를 어디서 찾고 어떻게 부르고 그 문서를 어떻게 읽는가 (어느 어댑터의 것도 아닌 앎)
-        engine/      # 동봉 엔진 복사 · 없으면 받는 걸음을 쥔 상태 홀더
+        engine/      # 엔진 설치 포트 · 실패 타입 + 없으면 받는 걸음을 쥔 상태 홀더
+        engine/bundled/        # 동봉 엔진을 실행할 수 있는 자리로 복사해 두는 걸음
         engine/githubrelease/  # 최신 릴리스에서 받아 놓는 어댑터 (앱이 GitHub 에 직접 닿는 유일한 곳)
         workdir/     # 관찰 · 초기화 포트 (관찰 결과 타입은 protocol 에 있다)
         workdir/kyucli/    # kyu list · kyu init 어댑터 (JSON 계약이 닿는 곳)
         repoclone/   # 토큰 프로필 · 레포 조회 · 클론 포트와 그 걸음을 쥔 상태 홀더
         repoclone/kyucli/  # kyu auth · kyu repos · kyu clone 어댑터
         claudeauth/  # claude 로그인 확인 · 브라우저 로그인 · 토큰 맡기기를 쥔 상태 홀더
+        claudeauth/kyucli/   # kyu claude-auth 어댑터 (맡긴 토큰의 저장소)
+        claudeauth/process/  # claude 를 띄워 로그인 상태를 묻고 브라우저 로그인을 진행하는 어댑터
         dashboard/   # 폴링과 오류 전이를 쥔 상태 홀더
         initialization/  # 고른 자리를 워크디렉토리로 여는 걸음이 어디까지 왔는지를 쥔 상태 홀더
+        terminal/    # 무엇을 띄울지 묻는 포트(메인 · 레포 · 하위) · 진입 계획 · 진입 실패 타입
         terminal/chat/   # claude 를 파이프에 물려 부리는 어댑터 · 대화와 세션 트리를 쥔 상태 홀더 (세션을 여는 유일한 길)
         terminal/kyucli/ # kyu session-command 어댑터 (무엇을 띄울지 묻는 자리)
     ui/          # 화면 — Compose. core 를 의존하지 않는다
         mirror/      # 코어를 자식 프로세스로 띄워 붙고(같은 머신 · WSL) 그 상태를 비추는 거울
+        dashboard/   # 세션 패널 줄의 칩이 쓰는 사실 합치기(git 상태 · 이어갈 대화 · 앱 세션)
         theme/       # 색 계단 · 라이트/다크 스킴 · 타이포 · 모서리 · 상태 색 (씨앗과 톤 번호만 있는 자리)
         wsl/         # 윈도우 화면이 WSL 배포판을 고르고 그 배포판에 코어를 놓는 자리
     app/         # 실행기 하나(첫 인자가 core 면 코어, 아니면 화면)와 설치 패키지 · 동봉 엔진
