@@ -28,14 +28,16 @@ env:
   CI_DESKTOP_VERSION: '0.1.0'
 
 jobs:
-  # 우분투 · 맥에서 돈다.
+  # 우분투 · 맥 · 윈도우에서 돈다.
   #
   # 맥을 뒤늦게 들인 이유가 있다. 이 CI 가 우분투 하나였을 때, 맥에서만 깨지는 PTY 시험이
   # 릴리스 워크플로의 dmg 잡에서야 드러나 릴리스를 통째로 막았다(PR 28). 데스크톱 앱은 맥과
   # 리눅스 둘 다에 설치 패키지를 내는데, 검사가 한쪽에서만 돌면 나머지 한쪽은 태그를 미는
   # 순간에 처음 시험된다 — 가장 늦고 가장 비싼 자리다.
   #
-  # 윈도우는 아래 windows-msi 로 따로 돈다 — msi 가 우분투에서만 만들 수 있는 WSL 코어 묶음을 받아야 해서다.
+  # 윈도우는 화면이 도는 자리다(코어는 WSL 안). 코어 시험과 코어를 띄우는 화면 시험은 윈도우에서 이유와 함께 건너뛴다 — 건너뛴 수는
+  # "시험 결과 세기" 가 모듈마다 적는다. msi 만 아래 windows-msi 가 따로 만든다 — 우분투에서만 만들 수 있는 WSL 코어 묶음을 기다려야
+  # 해서다. 윈도우의 빌드 · 시험은 그 묶음을 기다리지 않는다: 묶음 잡이 깨져도 윈도우 전용 회귀가 따로 보여야 한다.
   build-and-test:
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -43,10 +45,12 @@ jobs:
       # 초록인가" 가 그 자체로 단서다.
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-latest]
+        runner: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         working-directory: desktop
+        # 윈도우 러너의 기본 셸은 PowerShell 이다. ./gradlew 와 아래 스크립트가 세 OS 에서 같게 돌도록 bash 로 맞춘다.
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +73,13 @@ jobs:
 
       - name: 시험 결과 세기
         if: always()
+        env:
+          # 윈도우 러너의 파이썬은 파이프로 나가는 stdout 을 cp1252 로 써서 한국어에서 죽는다(실측). UTF-8 로 쓴다.
+          PYTHONUTF8: '1'
         run: python3 ../.github/scripts/count-test-results.py
 
   # msi 에 실을 WSL 코어 묶음(core-ui-split-design.md 6.16 의 4a 정정). 묶음의 코어 이미지는 jlink 런타임을 품어 리눅스에서만
-  # 만든다. 시험은 위 우분투 잡이 돌므로 여기서는 묶고 풀어 보기만 한다 — 윈도우 잡이 맥 · 우분투의 시험을 기다리지 않게 따로 둔다.
+  # 만든다. 시험은 위 매트릭스가 돌므로 여기서는 묶고 풀어 보기만 한다 — msi 잡이 시험 매트릭스를 기다리지 않게 따로 둔다.
   wsl-core-bundle:
     runs-on: ubuntu-latest
     defaults:
@@ -116,15 +123,14 @@ jobs:
           path: desktop/core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz
           if-no-files-found: error
 
-  # 윈도우는 화면이 도는 자리다(코어는 WSL 안). 코어 시험과 코어를 띄우는 화면 시험은 윈도우에서 이유와 함께 건너뛴다 — 건너뛴 수는
-  # "시험 결과 세기" 가 모듈마다 적는다. msi 는 위 잡의 WSL 코어 묶음을 받아 싣는다 — 태그 없이 PR 에서 릴리스 잡과 같은 태스크를 지난다.
+  # 윈도우 설치 패키지 — 위 잡의 WSL 코어 묶음을 받아 싣는다. 태그 없이 PR 에서 릴리스 잡과 같은 태스크를 지난다. 빌드 · 시험은 위
+  # 매트릭스의 윈도우가 하므로 여기서는 묶음을 놓고 패키징해 열어 보기만 한다.
   windows-msi:
     needs: wsl-core-bundle
     runs-on: windows-latest
     defaults:
       run:
         working-directory: desktop
-        # 윈도우 러너의 기본 셸은 PowerShell 이다. ./gradlew 와 아래 스크립트가 다른 잡과 같게 돌도록 bash 로 맞춘다.
         shell: bash
     steps:
       - uses: actions/checkout@v4
@@ -137,16 +143,6 @@ jobs:
           cache-dependency-path: |
             desktop/gradle/libs.versions.toml
             desktop/gradle/wrapper/gradle-wrapper.properties
-
-      - name: Gradle wrapper 로 빌드와 테스트
-        run: ./gradlew --no-daemon build
-
-      - name: 시험 결과 세기
-        if: always()
-        env:
-          # 윈도우 러너의 파이썬은 파이프로 나가는 stdout 을 cp1252 로 써서 한국어에서 죽는다(실측). UTF-8 로 쓴다.
-          PYTHONUTF8: '1'
-        run: python3 ../.github/scripts/count-test-results.py
 
       - uses: actions/download-artifact@v4
         with:
