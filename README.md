@@ -1006,7 +1006,7 @@ sudo 가 필요 없다. **판이 바뀐 msi 를 덮어 깔면** 다음 실행에
 같다. 로그인은 코어가 붙은 뒤 창에서 할 수 있다(아래 표).
 
 **터미널만 쓰거나, 앱이 코어를 놓지 못했을 때** — WSL 터미널에서 같은 것을 릴리스에서 받아 놓는다. 앱이 놓다
-실패하면 이 한 줄을 복사 단추와 "다시 시도" 와 함께 보인다.
+실패하면 이 한 줄을 복사 단추와 "다시 설치" 와 함께 보인다.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash -s -- --with-core
