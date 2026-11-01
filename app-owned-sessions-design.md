@@ -527,7 +527,17 @@ kyu session-command proj-a --json
 | 이어가기 + 목록 명령 실패 | 묻지 않고 이어간다. 진단 기록(`ClaudeCodeConversationListingFailed`)과 그 챗 맨 앞 줄에 남긴다 — 묻지 못했다고 세션을 못 여는 것은 과하다 |
 | 새 대화 · 채택 | 묻지 않는다 — 사람이 이미 고른 것이다 |
 
-**고른 뒤.** 화면의 "이어가기" 는 `chooseConversation(target, choice)` 다 — 바깥 대화면 `AdoptConversation(id)` 가 `--adopt-conversation <id>` 로, 앱에서 하던 대화면 이어가기가, 새 대화면 `--forget-conversation` 이 엔진에게 간다. 고르는 동안 코어는 진입 번호(`ChatSessionStateHolder` 의 `pendingEntryRequestIds`)를 그대로 들고 있어, 그 사이 워크디렉토리를 닫거나 세션을 끝내면 늦게 온 선택은 버려진다. "취소" 는 `cancelConversationChoice` 로 진입을 지운다. 엔진에게는 아무것도 묻지 않았으므로 기록도 그대로다.
+**고른 뒤.** 화면의 "이어가기" 는 `chooseConversation(target, choice)` 다 — 바깥 대화면 `AdoptConversation(id)` 가 `--adopt-conversation <id>` 로, 앱에서 하던 대화면 이어가기가, 새 대화면 `--forget-conversation` 이 엔진에게 간다. 고르는 중인 것은 진입 기록(`ChatSessionStateHolder` 의 `pendingEntries`)의 한 단계라, 그 사이 워크디렉토리를 닫거나 세션을 끝내면 기록과 함께 사라지고 늦게 온 선택은 버려진다. 고른 뒤의 열기도 다른 진입처럼 앞서 시작된 끝내기를 기다린다.
+
+| 고르는 동안 온 것 | 처리 |
+|---|---|
+| 제시한 갈래(후보의 채택 · 적힌 대화가 있을 때의 이어가기 · 새 대화) | 진입을 잇는다 |
+| 제시하지 않은 id 의 채택 | 버리고 고르기를 둔다(진단 기록 `UnofferedConversationChoiceRefused`, id 는 적지 않는다). 다른 라벨의 대화를 넘기면 두 세션이 한 대화를 연다 |
+| 같은 세션의 카드 "새 대화" | 그 물음의 답으로 받는다 |
+| 같은 세션의 이어가기 | 이미 떠 있는 물음이라 아무것도 하지 않는다 |
+| "취소"(`cancelConversationChoice`) | 진입만 지운다. 엔진에게 아무것도 묻지 않았으므로 기록도 그대로이고, 스스로 끝난 세션의 지난 전사도 남는다 — 전사는 실제로 띄우는 자리에서 놓는다 |
+
+목록을 읽지 못한 채 세션 열기까지 실패하면 그 경고는 진입 실패(`SessionEntryState.Failed.conversationListingWarning`)와 함께 보인다. 필드를 더한 변경이라 판은 그대로 3 이다.
 
 **원칙 11 과의 양립.** 지금까지 앱은 대화 ID 를 하나도 쥐지 않았다(`SessionConversationChoice` 의 갈래 둘). 채택은 ID 를 싣는다. 그러나 앱은 그 값을 **짓지도 열어 보지도 기록하지도 않는다** — 엔진이 목록으로 답한 문자열을 불투명한 값 그대로 엔진에게 되돌려 줄 뿐이다. 기록 파일의 자리와 모양, 전사의 자리, 무엇이 채택할 수 있는 대화인지(uuid 꼴 · 전사 유무 · 위임 대화)는 여전히 엔진만 안다. 앱이 잘못된 값을 되돌려 주면 엔진이 거절하고, 그것은 진입 실패로 보인다.
 
