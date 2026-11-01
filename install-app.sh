@@ -205,12 +205,12 @@ release_tag_name() {
     tr -d ' \t' < "$1" \
         | tr ',' '\n' \
         | awk '
-            match($0, /"tag_name":"[^"]*"/) {
+            !found && match($0, /"tag_name":"[^"]*"/) {
                 value = substr($0, RSTART, RLENGTH)
                 sub(/^"tag_name":"/, "", value)
                 sub(/"$/, "", value)
                 print value
-                exit
+                found = 1
             }
         '
 }
@@ -219,6 +219,10 @@ release_tag_name() {
 #
 # GitHub 응답에서 자산 객체는 url 이 name 보다 먼저 온다. 그래서 자산 주소를 볼 때마다 기억해
 # 두었다가, 찾는 이름을 만나면 직전에 본 것을 답한다.
+#
+# 이 함수와 release_tag_name 의 awk 는 찾은 뒤에도 exit 하지 않고 입력을 끝까지 읽는다. 먼저 끝나면
+# 아직 쓰던 tr 이 SIGPIPE(141)로 죽고, pipefail 과 set -e 가 그것을 설치 실패로 만든다 — 릴리스 노트가
+# 파이프 버퍼보다 길거나, tr 이 작은 응답도 나눠 쓰면 난다.
 asset_api_url_for() {
     local release_json_path="$1"
     local asset_name="$2"
@@ -231,9 +235,9 @@ asset_api_url_for() {
                 sub(/^"url":"/, "", candidate)
                 sub(/"$/, "", candidate)
             }
-            index($0, wanted) > 0 && candidate != "" {
+            !found && index($0, wanted) > 0 && candidate != "" {
                 print candidate
-                exit
+                found = 1
             }
         '
 }
