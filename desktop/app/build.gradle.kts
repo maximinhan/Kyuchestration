@@ -391,8 +391,10 @@ val checkBundledWslCore = tasks.register("checkBundledWslCore") {
 // named 가 아니라 matching 으로 잡는다 — 이 태스크들은 Compose 플러그인이 프로젝트 평가가
 // 끝난 뒤에 등록해서, 이 자리에서 이름으로 찾으면 아직 없다.
 //
-// 윈도우는 엔진 대신 WSL 코어 묶음을 묻는다 — 윈도우 msi 의 엔진은 그 묶음 안의 리눅스 kyu 다. 같은 이유로 run 에는 걸지 않는다:
-// 소스에서 윈도우 화면을 띄우는 흐름은 묶음 없이 돌고, 화면은 묶음이 없으면 WSL 터미널에서 돌릴 설치 명령을 안내한다(4b).
+// 윈도우는 엔진 대신 WSL 코어 묶음을 묻는다 — 윈도우 msi 의 엔진은 그 묶음 안의 리눅스 kyu 다. 거는 것은 packageMsi 하나다 —
+// 사용자에게 나가는 것은 msi 뿐이다. run · createDistributable · runDistributable 에는 걸지 않는다: 소스나 로컬 app-image 로 윈도우
+// 화면을 띄우는 흐름은 묶음 없이 돌고, 화면은 묶음이 없으면 WSL 터미널에서 돌릴 설치 명령을 안내한다(4b). 윈도우의 packageMsi 는
+// createDistributable 을 거치지 않고 jpackage 를 곧바로 부르므로(4a CI 실측) 둘에 따로 걸지 않아도 msi 는 막힌다.
 val hostIsWindows: Boolean by rootProject.extra
 val hostPackagesBundledEngine = !hostIsWindows
 if (hostPackagesBundledEngine) {
@@ -400,7 +402,7 @@ if (hostPackagesBundledEngine) {
         dependsOn(checkBundledEngine)
     }
 } else {
-    tasks.matching { it.name in setOf("createDistributable", "packageMsi") }.configureEach {
+    tasks.matching { it.name == "packageMsi" }.configureEach {
         dependsOn(checkBundledWslCore)
     }
 }
