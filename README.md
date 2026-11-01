@@ -283,7 +283,8 @@ kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크�
 | `kyu clone --profile <이름> --repo <owner/name> --json` | 적어 보낸 레포를 클론 | `{schemaVersion, results[], mainSessionRestartNeeded}` |
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
-| `kyu mcp serve <워크디렉토리>` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo` ([설계](orchestration-tools-design.md) 5.3) |
+| `kyu mcp serve <워크디렉토리> [--app-socket <경로>]` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo`(은퇴 예정) ([설계](orchestration-tools-design.md) 5.3) · [하위 세션](#하위-세션--메인이-낳고-대화한다) 도구 다섯 |
+| `kyu mcp serve --child --app-socket <경로>` | 하위 세션에 붙는 서버 (stdio) | JSON-RPC — `ask_parent` 하나 ([설계](session-tree-design.md) 6.3) |
 
 공통 규칙이 다섯 가지다.
 
@@ -843,20 +844,25 @@ internal/
     github/      # GitHub REST API 조회 + 클론 (kyu clone · kyu repos 가 닿는 유일한 바깥 세계)
     secretstore/ # 토큰 프로필 저장 (키체인 · secret-service · 파일 폴백)
     cli/         # 명령 구현
-desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Gradle 빌드)
-    kyu/         # kyu 를 어디서 찾고 어떻게 부르고 그 문서를 어떻게 읽는가 (어느 어댑터의 것도 아닌 앎)
-    engine/      # 엔진 설치 포트 · 실패 타입 + 없으면 받는 걸음을 쥔 상태 홀더
-    engine/githubrelease/  # 최신 릴리스에서 받아 놓는 어댑터 (앱이 GitHub 에 직접 닿는 유일한 곳)
-    workdir/     # 관찰 결과 타입 + 관찰 · 초기화 포트 — Compose 도 kyu 도 모른다
-    workdir/kyucli/  # kyu list · kyu init 어댑터 (JSON 계약이 닿는 곳)
-    repoclone/   # 토큰 프로필 · 레포 조회 · 클론 포트와 그 걸음을 쥔 상태 홀더
-    repoclone/kyucli/  # kyu auth · kyu repos · kyu clone 어댑터
-    dashboard/   # 폴링과 오류 전이를 쥔 상태 홀더 — Compose 를 모른다
-    theme/       # 색 계단 · 라이트/다크 스킴 · 타이포 · 모서리 · 상태 색 (씨앗과 톤 번호만 있는 자리)
-    initialization/  # 고른 자리를 워크디렉토리로 여는 걸음이 어디까지 왔는지를 쥔 상태 홀더
-    terminal/    # 진입 대상 · 진입 계획 · 진입 실패 타입 — 세션 하나를 여는 데 필요한 것들
-    terminal/chat/   # claude 를 파이프에 물려 부리는 어댑터와 대화를 쥔 상태 홀더 (앱이 세션을 여는 유일한 길)
-    terminal/kyucli/ # kyu session-command 어댑터 (무엇을 띄울지 묻는 자리)
+desktop/         # 데스크톱 앱 (Kotlin + Compose Multiplatform, 독립 Gradle 빌드, 모듈 다섯)
+    protocol/    # 화면 ↔ 코어의 틀 · 명령 · 변화 · 화면 모델, 경계 인터페이스 ScreenFacingCore
+    diagnostics/ # 진단 기록 · 판 라벨 — 화면과 코어가 같은 사건 갈래로 각자 자기 파일에 적는다
+    core/        # 세션을 쥐는 코어 — Compose 를 의존하지 않는다
+        kyu/         # kyu 를 어디서 찾고 어떻게 부르고 그 문서를 어떻게 읽는가 (어느 어댑터의 것도 아닌 앎)
+        engine/      # 동봉 엔진 복사 · 없으면 받는 걸음을 쥔 상태 홀더
+        engine/githubrelease/  # 최신 릴리스에서 받아 놓는 어댑터 (앱이 GitHub 에 직접 닿는 유일한 곳)
+        workdir/kyucli/    # kyu list · kyu init 어댑터 (JSON 계약이 닿는 곳)
+        repoclone/kyucli/  # kyu auth · kyu repos · kyu clone 어댑터
+        claudeauth/  # claude 로그인 확인 · 브라우저 로그인 · 토큰 맡기기를 쥔 상태 홀더
+        dashboard/   # 폴링과 오류 전이를 쥔 상태 홀더
+        initialization/  # 고른 자리를 워크디렉토리로 여는 걸음이 어디까지 왔는지를 쥔 상태 홀더
+        terminal/chat/   # claude 를 파이프에 물려 부리는 어댑터 · 대화와 세션 트리를 쥔 상태 홀더 (세션을 여는 유일한 길)
+        terminal/kyucli/ # kyu session-command 어댑터 (무엇을 띄울지 묻는 자리)
+    ui/          # 화면 — Compose. core 를 의존하지 않는다
+        mirror/      # 코어를 자식 프로세스로 띄워 붙고(같은 머신 · WSL) 그 상태를 비추는 거울
+        theme/       # 색 계단 · 라이트/다크 스킴 · 타이포 · 모서리 · 상태 색 (씨앗과 톤 번호만 있는 자리)
+        wsl/         # 윈도우 화면이 WSL 배포판을 고르고 그 배포판에 코어를 놓는 자리
+    app/         # 실행기 하나(첫 인자가 core 면 코어, 아니면 화면)와 설치 패키지 · 동봉 엔진
 ```
 
 엔진이 부르는 바깥 명령은 `git` 하나이고, 그것을 부르는 자리는 `internal/workdir` 과
@@ -947,7 +953,7 @@ export KYU_APP_INSTALL_DIR="$HOME/Applications"
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install-app.sh \
-  | bash -s -- ~/Downloads/kyuchestration-desktop_0.9.0_arm64.dmg
+  | bash -s -- ~/Downloads/kyuchestration-desktop_0.16.1_arm64.dmg
 ```
 
 **방법 2 — 릴리스 페이지에서 직접 받기**
@@ -980,7 +986,7 @@ sudo apt install ./kyuchestration-desktop_<버전>_amd64.deb
 **맥** — dmg 를 열어 앱을 `응용 프로그램` 으로 끌어다 놓는다. **그리고 거기서 막힌다.** 브라우저로
 받은 것에는 격리 속성이 붙어 있어서인데, 아래에 푸는 두 길이 있다.
 
-> **맥 정보창의 버전은 앞자리가 하나 크다.** 제품 버전이 `0.9.0` 이면 Finder 정보창에는 `1.9.0`
+> **맥 정보창의 버전은 앞자리가 하나 크다.** 제품 버전이 `0.16.1` 이면 Finder 정보창에는 `1.16.1`
 > 으로 뜬다. 맥의 jpackage 가 앞자리 0 인 앱 버전을 거절해서(애플 CFBundleVersion 규약) 맥
 > 패키지에 넘기는 값만 앞자리를 올리기 때문이다 — 제품 버전을 도구 제약에 맞춰 1.0.0 으로
 > 올리지 않으려고 감수하는 불일치다. **제품 버전은 받은 파일 이름과 앱 시작 화면의 제목 아래에
@@ -1056,7 +1062,7 @@ Developer ID 인증서로 서명하고 애플 공증 서버를 한 번 지나야
 터미널 쪽은 받은 dmg 에 걸어도 되고, 이미 `응용 프로그램` 으로 옮긴 `.app` 에 걸어도 된다.
 
 ```sh
-xattr -d com.apple.quarantine ~/Downloads/kyuchestration-desktop_0.9.0_arm64.dmg
+xattr -d com.apple.quarantine ~/Downloads/kyuchestration-desktop_0.16.1_arm64.dmg
 # 이미 옮겼다면 앱 안쪽까지 (-r)
 xattr -dr com.apple.quarantine /Applications/Kyuchestration.app
 ```
@@ -1368,7 +1374,7 @@ msi 가 코어를 놓을 때 같은 판의 `kyu` 를 함께 놓으므로 여기�
 목록이 깜빡이지 않는다. 갱신이 실패해도 마지막으로 읽은 목록을 그대로 두고 실패 사실만 배너로
 덧붙인다 — 목록이 사라지면 "갱신 한 번 실패" 와 "워크디렉토리가 없어짐" 을 구분할 수 없다.
 
-앱은 `PATH` 에서 `kyu` 를 찾아 `kyu list <경로> --json` 을 부른다. 찾지 못했거나, 실행하지
+코어는 [앞의 순서](#앱은-엔진을-들고-온다)로 찾은 `kyu` 로 `kyu list <경로> --json` 을 부른다. 찾지 못했거나, 실행하지
 못했거나, 문서의 판이 다르면 각각 다른 안내가 나온다. `kyu` 를 나중에 설치해도 창을 다시 띄울
 필요는 없다 — 다음 갱신에서 저절로 붙는다.
 
@@ -1389,15 +1395,19 @@ msi 가 코어를 놓을 때 같은 판의 `kyu` 를 함께 놓으므로 여기�
 | 도구 호출 | 이름과 상태의 카드. 눌러 펴면 인자와 결과가 보인다. 실패는 접힌 채로도 이유가 보인다 |
 | 턴 배지 | 그 턴의 비용·토큰·소요 시간. 머리말의 것은 이 대화가 쓴 것 전부다 |
 
-**Enter 로 보내고 Shift+Enter 로 줄바꿈한다.** 답이 오는 동안에는 입력창이 잠긴다 — 중단이
-아직 없는 동안(설계 4 단계) 쌓아 둔 말을 되돌릴 길이 없기 때문이다.
+**Enter 로 보내고 Shift+Enter 로 줄바꿈한다.** 답이 오는 동안에도 보낼 수 있다 — `claude` 가 말을 큐에
+받아 다음 턴으로 돌린다. 보낸 말이 스트림으로 되돌아오기 전까지는 입력창 위에 "대기 중" 으로 선다. 턴이 도는
+동안에는 **중단** 버튼이 보내기 옆에 따로 선다. 끊기는 것은 그 턴이고 대화는 산다. 한 버튼이 두 일을 하면
+보내려던 손이 턴을 끊기 때문에 자리를 나눴다.
 
 **앱을 껐다 켜면 대화는 이어지지만 화면의 전사는 비어 있다.** `claude` 는 앞 대화를 알고 앱은
 모른다 — 전사를 파일로 남기지 않기 때문이고, 그 사실을 이어가기로 연 대화의 맨 위가 먼저 말한다.
 
-**앱이 세션을 직접 보유한다.** 앱은 `kyu` 에게 무엇을 띄울지 묻고([`kyu session-command`](#기계용-표면)),
-받은 명령을 **파이프 셋에 물려 그대로 실행한다** — 그 프로세스가 곧 `claude` 다. 사이에 아무것도
-없으므로 **앱이 여는 세션에는 tmux 도 터미널도 없다**. 원시 터미널로 보는 자리가 한동안 챗
+**세션은 앱의 코어가 보유한다** — 맥 · 리눅스에서는 화면이 같은 머신에 띄운 코어가, 윈도우에서는 WSL
+안의 코어가([윈도우](#윈도우--창은-윈도우-코어는-wsl)). 코어는 `kyu` 에게 무엇을 띄울지 묻고
+([`kyu session-command`](#기계용-표면)), 받은 명령을 **파이프 셋에 물려 그대로 실행한다** — 그 프로세스가
+곧 `claude` 다. 화면은 코어가 내보내는 상태를 그릴 뿐 `claude` 를 직접 쥐지 않는다([코어 · 화면 분리
+설계](core-ui-split-design.md)). 사이에 아무것도 없으므로 **앱이 여는 세션에는 tmux 도 터미널도 없다**. 원시 터미널로 보는 자리가 한동안 챗
 머리말에 있었지만, 챗이 그 자리를 다 덮는 것이 확인되어 지웠다([chat-ui-design.md](chat-ui-design.md) 7).
 
 **tmux 는 엔진에서도 사라졌다.** 세션 패널이 3 초마다 부르는 [`kyu list`](#kyu-list-path) 는
@@ -1492,6 +1502,7 @@ git 만 보고, 세션을 만들고 붙고 죽이던 명령은 은퇴했다(설�
 | --- | --- |
 | macOS | `~/Library/Logs/Kyuchestration/desktop.log` — 콘솔 앱이 그대로 보여준다 |
 | Linux | `$XDG_STATE_HOME/kyuchestration/desktop.log` (설정하지 않았으면 `~/.local/state/kyuchestration/desktop.log`) |
+| Windows | 화면 `%LOCALAPPDATA%\Kyuchestration\Logs\desktop.log`, WSL 의 코어 `\\wsl.localhost\<배포판>\home\<사용자>\.local\state\kyuchestration\core.log` |
 
 남는 것은 다섯 가지다.
 
