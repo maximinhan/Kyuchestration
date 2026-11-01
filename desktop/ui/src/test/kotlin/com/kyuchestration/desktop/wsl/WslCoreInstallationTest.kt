@@ -93,6 +93,7 @@ class WslCoreInstallationTest {
                     "env",
                     "KYU_CORE_ARCHIVE=/home/yawn/$scratch/core.tar.gz",
                     "KYU_BINARY_FILE=/home/yawn/$scratch/kyu",
+                    "XDG_DATA_HOME=/home/yawn/.local/share",
                     "bash",
                     "$scratch/install.sh",
                     "--with-core",

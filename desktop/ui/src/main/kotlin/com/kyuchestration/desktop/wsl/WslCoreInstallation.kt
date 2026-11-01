@@ -125,6 +125,10 @@ class WslCoreInstallation(
                 // install.sh 는 홈과 무관한 자리에서 이 파일들을 찾을 수 있어야 한다 — 절대 경로로 준다.
                 "KYU_CORE_ARCHIVE=$scratch/$BUNDLED_CORE_ARCHIVE",
                 "KYU_BINARY_FILE=$scratch/$BUNDLED_KYU",
+                // install.sh 는 코어를 ${XDG_DATA_HOME:-~/.local/share}/kyuchestration/core 에 두고, 화면은 판을 늘
+                // ~/.local/share/kyuchestration/core/VERSION 에서 읽는다(WSL_INSTALLED_CORE_VERSION_FROM_HOME). 배포판에
+                // XDG_DATA_HOME 이 다른 자리로 있으면 화면은 판을 못 찾아 뜰 때마다 다시 깐다 — 둘이 구성으로 같은 자리를 보게 정해 넘긴다.
+                "XDG_DATA_HOME=$linuxHome/$DATA_HOME_FROM_HOME",
                 "bash",
                 "$SCRATCH_FROM_HOME/$BUNDLED_INSTALL_SCRIPT",
                 "--with-core",
@@ -209,6 +213,8 @@ internal const val DIAGNOSTIC_LOG_OUTPUT_CHARACTERS_KEPT = 64 * 1024
  * `rm -rf` 는 우리 것 밖에 닿지 않아야 하고, 리눅스 쪽 `/tmp` 의 고정 이름은 다른 사용자 · 프로그램의 것과 겹칠 수 있다.
  */
 private const val SCRATCH_FROM_HOME = ".local/share/kyuchestration/.screen-install"
+
+private const val DATA_HOME_FROM_HOME = ".local/share"
 
 private const val BUNDLED_CORE_ARCHIVE = "core.tar.gz"
 
