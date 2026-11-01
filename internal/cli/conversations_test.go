@@ -287,3 +287,17 @@ func withoutMcpConfigForTest(t *testing.T, command []string) []string {
 	_, rest := mcpServerRegistrationForTest(t, command)
 	return rest
 }
+
+func TestConversationsTableKeepsItsColumnsWhenTheTitleHasATab(t *testing.T) {
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalConversationForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, `앞\t뒤`, time.Now())
+
+	var out, errOut bytes.Buffer
+	if err := ManageClaudeCodeConversations(&out, &errOut, []string{"list", workDirPath}); err != nil {
+		t.Fatalf("ManageClaudeCodeConversations() 실패: %v", err)
+	}
+	if strings.Contains(out.String(), "\t") || !strings.Contains(out.String(), "-  앞 뒤") {
+		t.Errorf("stdout = %q, 탭을 공백으로 접고 열 간격이 그대로인 표를 기대", out.String())
+	}
+}

@@ -465,3 +465,109 @@ func TestAdoptClaudeCodeConversationRefusesADelegationConversation(t *testing.T)
 		t.Errorf("AdoptClaudeCodeConversation() = %v, 위임 대화라는 거절을 기대", err)
 	}
 }
+
+func TestListClaudeCodeConversationsStopsReadingATranscriptOnceItsCwdIsSomewhereElse(t *testing.T) {
+	// 이름이 겹친 다른 자리의 전사는 cwd 가 정해지는 줄에서 읽기를 멈춘다 — 수십 MB 를 끝까지 디코드할 까닭이
+	// 없다. 멈췄다는 사실은 그 뒤의 엇갈린 줄이 경고를 내지 않는 것으로 드러난다.
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := resolvedDirectoryForTest(t)
+	sessionCwdWithSuffix := sessionCwd + "-x"
+	if err := os.Mkdir(sessionCwdWithSuffix, 0o755); err != nil {
+		t.Fatalf("디렉토리 생성 실패: %v", err)
+	}
+
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryNameForTest(sessionCwdWithSuffix), firstConversationIDForTest, time.Now(),
+		userLineForTest(firstConversationIDForTest, sessionCwd+"/x", "2026-11-01T09:00:00Z", `"다른 자리"`),
+		userLineForTest(secondConversationIDForTest, sessionCwd+"/x", "2026-11-01T09:00:01Z", `"엇갈린 줄"`))
+
+	listing := listClaudeCodeConversationsForTest(t, t.TempDir(), sessionCwdWithSuffix)
+
+	if len(listing.Conversations) != 0 || len(listing.Warnings) != 0 {
+		t.Errorf("목록 = %+v, 다른 자리의 전사는 경고 없이 빠지기를 기대", listing)
+	}
+}
+
+func TestListClaudeCodeConversationsLeavesOutATranscriptWhereNoPersonWroteAnything(t *testing.T) {
+	// /status 만 치고 나간 세션은 사용자 줄이 있어도 사람이 쓴 글이 없다. 제목이 빈 줄로 목록에 남으면
+	// 사람이 고를 근거가 없다.
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := resolvedDirectoryForTest(t)
+
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryNameForTest(sessionCwd), firstConversationIDForTest, time.Now(),
+		userLineForTest(firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z",
+			`"<command-name>/status</command-name>\n<command-message>status</command-message>"`),
+		userLineForTest(firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:01Z",
+			`[{"type":"tool_result","tool_use_id":"t-1","content":"결과"}]`))
+
+	if listing := listClaudeCodeConversationsForTest(t, t.TempDir(), sessionCwd); len(listing.Conversations) != 0 {
+		t.Errorf("대화 = %+v, 사람이 쓴 글이 없는 전사는 빠지기를 기대", listing.Conversations)
+	}
+}
+
+func TestListClaudeCodeConversationsFoldsTabsInTheTitleToo(t *testing.T) {
+	// 제목은 사람용 표의 마지막 칸이다. 탭이 남으면 tabwriter 가 그것을 열 경계로 읽어 표가 깨진다.
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := resolvedDirectoryForTest(t)
+
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryNameForTest(sessionCwd), firstConversationIDForTest, time.Now(),
+		userLineForTest(firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z", `"앞\t뒤"`))
+
+	listing := listClaudeCodeConversationsForTest(t, t.TempDir(), sessionCwd)
+	if len(listing.Conversations) != 1 || listing.Conversations[0].Title != "앞 뒤" {
+		t.Errorf("대화 = %+v, 탭을 공백으로 접은 제목을 기대", listing.Conversations)
+	}
+}
+
+func TestCwdComparisonIgnoresCaseOnlyWhereTheFileSystemDoes(t *testing.T) {
+	// 맥(APFS 기본)과 윈도우는 글자 케이스가 달라도 같은 자리다. 터미널이 적은 cwd 와 앱이 준 cwd 의 케이스가
+	// 다르면 바이트 비교로는 빈 목록이 된다. 리눅스는 케이스가 다르면 다른 자리라 그대로 바이트 비교다.
+	if !cwdsNameTheSamePlace("/Users/Me/Work", "/users/me/work", true) {
+		t.Error("케이스 무시 파일 시스템에서 케이스만 다른 두 cwd 를 같은 자리로 기대")
+	}
+	if cwdsNameTheSamePlace("/home/me/Work", "/home/me/work", false) {
+		t.Error("케이스를 가르는 파일 시스템에서 케이스가 다른 두 cwd 를 다른 자리로 기대")
+	}
+	if cwdsNameTheSamePlace("/Users/Me/Work", "/Users/Me/Other", true) {
+		t.Error("이름이 다른 두 cwd 는 어디서든 다른 자리여야 한다")
+	}
+}
+
+func TestListClaudeCodeConversationsMatchesACwdWrittenInAnotherCaseOnACaseInsensitiveFileSystem(t *testing.T) {
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := filepath.Join(resolvedDirectoryForTest(t), "Work", strings.Repeat("a", 210))
+	if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
+		t.Fatalf("디렉토리 생성 실패: %v", err)
+	}
+	cwdInAnotherCase := strings.ToUpper(sessionCwd)
+	previous := fileSystemIgnoresCase
+	fileSystemIgnoresCase = true
+	t.Cleanup(func() { fileSystemIgnoresCase = previous })
+
+	// 긴 이름은 앞자리 찾기라 그 단계도 케이스를 무시해야 한다 — 짧은 이름은 같은 파일 시스템의 Stat 이 이미 그렇다.
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryNameForTest(cwdInAnotherCase)[:200]+"-abc123", firstConversationIDForTest, time.Now(),
+		userLineForTest(firstConversationIDForTest, cwdInAnotherCase, "2026-11-01T08:00:00Z", `"다른 케이스"`))
+
+	if listing := listClaudeCodeConversationsForTest(t, t.TempDir(), sessionCwd); len(listing.Conversations) != 1 {
+		t.Errorf("대화 = %+v, 케이스만 다른 자리의 대화 하나를 기대", listing.Conversations)
+	}
+}
+
+func TestAdoptClaudeCodeConversationReadsOnlyTheChosenTranscript(t *testing.T) {
+	// 채택은 id 하나를 확인하는 일이다. 같은 자리의 다른 전사를 다 읽으면 그 전사들의 경고까지 채택의 답에 섞인다.
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := resolvedDirectoryForTest(t)
+	projectDirectoryName := projectDirectoryNameForTest(sessionCwd)
+	workDirPath := t.TempDir()
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryName, firstConversationIDForTest, time.Now(),
+		userLineForTest(firstConversationIDForTest, sessionCwd, "2026-11-01T08:00:00Z", `"고른 대화"`))
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryName, secondConversationIDForTest, time.Now(),
+		userLineForTest(thirdConversationIDForTest, sessionCwd, "2026-11-01T08:00:00Z", `"엇갈린 전사"`))
+
+	assignment, err := AdoptClaudeCodeConversation(workDirPath, "main", sessionCwd, firstConversationIDForTest)
+	if err != nil {
+		t.Fatalf("AdoptClaudeCodeConversation() 실패: %v", err)
+	}
+	if len(assignment.Warnings) != 0 {
+		t.Errorf("경고 = %q, 고르지 않은 전사의 경고는 없기를 기대", assignment.Warnings)
+	}
+}
