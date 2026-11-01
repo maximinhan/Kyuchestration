@@ -111,6 +111,9 @@ fun KyuchestrationDesktopScreen(
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    /** 이어가기 전에 고르기가 선 자리에서 사람이 고른 것(5.5.7). */
+    onConversationChosen: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    onConversationChoiceCancelled: (PersonOpenedSessionTarget) -> Unit,
     onSendUserMessageRequested: (String) -> Unit,
     /** 도는 턴을 끊는 자리(3.8). 대화도 프로세스도 죽지 않는다 — 이번 턴만 끊긴다. */
     onInterruptTurnRequested: () -> Unit,
@@ -177,6 +180,8 @@ fun KyuchestrationDesktopScreen(
                             onRefreshRequested = onRefreshRequested,
                             onCloseWorkDirRequested = onCloseWorkDirRequested,
                             onEnterSessionRequested = onEnterSessionRequested,
+                            onConversationChosen = onConversationChosen,
+                            onConversationChoiceCancelled = onConversationChoiceCancelled,
                             onSendUserMessageRequested = onSendUserMessageRequested,
                             onInterruptTurnRequested = onInterruptTurnRequested,
                             onPermissionChoiceMade = onPermissionChoiceMade,
@@ -235,6 +240,8 @@ private fun OrchestrationShell(
     onRefreshRequested: () -> Unit,
     onCloseWorkDirRequested: () -> Unit,
     onEnterSessionRequested: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    onConversationChosen: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    onConversationChoiceCancelled: (PersonOpenedSessionTarget) -> Unit,
     onSendUserMessageRequested: (String) -> Unit,
     onInterruptTurnRequested: () -> Unit,
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
@@ -280,6 +287,8 @@ private fun OrchestrationShell(
             onStartNewConversationRequested = { target ->
                 onEnterSessionRequested(target, SessionConversationChoice.StartNewConversation)
             },
+            onConversationChosen = onConversationChosen,
+            onConversationChoiceCancelled = onConversationChoiceCancelled,
             sessionTree = sessionTree,
             onOpenChildSessionRequested = onChildSessionChosen,
             modifier = Modifier.weight(1f),

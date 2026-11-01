@@ -349,6 +349,8 @@ private fun runDesktopApplication(
                 chatViewing.moveTo(target)
                 screenFacingCore.enterSession(target, conversationChoice)
             },
+            onConversationChosen = screenFacingCore::chooseConversation,
+            onConversationChoiceCancelled = screenFacingCore::cancelConversationChoice,
             onSendUserMessageRequested = { text ->
                 chatViewing.viewedTarget?.let { target -> screenFacingCore.sendUserMessage(target, text) }
             },

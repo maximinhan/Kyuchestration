@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.protocol.FailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChildLifecycle
@@ -68,6 +69,9 @@ internal fun ChatConversationPane(
     onPermissionChoiceMade: (String, PermissionCardChoice) -> Unit,
     onEndSessionRequested: () -> Unit,
     onStartNewConversationRequested: (PersonOpenedSessionTarget) -> Unit,
+    /** 고르기 화면에서 사람이 고른 대화로 그 세션의 진입을 잇는다(5.5.7). */
+    onConversationChosen: (PersonOpenedSessionTarget, SessionConversationChoice) -> Unit,
+    onConversationChoiceCancelled: (PersonOpenedSessionTarget) -> Unit,
     /**
      * 메인 아래 하위 세션들. 메인 챗 위의 승인 띠와 하위 챗의 머리말이 이것을 본다(session-tree 6.12).
      */
@@ -91,6 +95,15 @@ internal fun ChatConversationPane(
 
         is ChatScreenState.ChatSessionEntryFailed ->
             ChatSessionEntryFailureNotice(chatScreenState.failure, diagnosticLogPathLabel, modifier)
+
+        is ChatScreenState.ConversationChoiceOnScreen ->
+            ConversationChooser(
+                target = chatScreenState.target,
+                choosing = chatScreenState.choosing,
+                onConversationChosen = onConversationChosen,
+                onConversationChoiceCancelled = onConversationChoiceCancelled,
+                modifier = modifier,
+            )
 
         is ChatScreenState.ChatOnScreen ->
             OpenedChat(

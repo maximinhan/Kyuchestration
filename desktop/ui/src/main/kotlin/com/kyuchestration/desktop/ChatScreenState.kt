@@ -41,6 +41,16 @@ sealed interface ChatScreenState {
         override val target: SessionTarget,
         val failure: FailureView,
     ) : ChatScreenState
+
+    /**
+     * 이어가기를 눌렀는데 앱 밖(터미널)의 대화가 더 최근이라 사람이 고르는 중이다(app-owned-sessions-design.md 5.5.7).
+     *
+     * 대상이 사람이 연 세션이다 — 고른 것을 코어에 돌려줄 때 그 대상이 필요하고, 하위 세션은 고를 대화가 없다.
+     */
+    data class ConversationChoiceOnScreen(
+        override val target: PersonOpenedSessionTarget,
+        val choosing: SessionEntryState.ChoosingConversation,
+    ) : ChatScreenState
 }
 
 /**
@@ -97,11 +107,18 @@ fun chatScreenStateFor(
     if (viewedTarget == null) {
         return ChatScreenState.NoChatOpen
     }
-    return when (val entry = sessionEntries[viewedTarget]) {
-        SessionEntryState.Running -> ChatScreenState.ChatSessionEntryRunning(viewedTarget)
-        is SessionEntryState.Failed -> ChatScreenState.ChatSessionEntryFailed(viewedTarget, entry.failure)
-        null -> conversations[viewedTarget]
+
+    // 진입 상태는 사람이 연 세션에만 있다. 대상을 그 타입으로 먼저 좁혀야 고르기가 고른 것을 돌려줄 대상을 든다.
+    val personOpenedTarget = viewedTarget as? PersonOpenedSessionTarget
+    val entry = personOpenedTarget?.let(sessionEntries::get)
+    if (personOpenedTarget == null || entry == null) {
+        return conversations[viewedTarget]
             ?.let { ChatScreenState.ChatOnScreen(viewedTarget, it) }
             ?: ChatScreenState.NoChatOpen
+    }
+    return when (entry) {
+        SessionEntryState.Running -> ChatScreenState.ChatSessionEntryRunning(personOpenedTarget)
+        is SessionEntryState.Failed -> ChatScreenState.ChatSessionEntryFailed(personOpenedTarget, entry.failure)
+        is SessionEntryState.ChoosingConversation -> ChatScreenState.ConversationChoiceOnScreen(personOpenedTarget, entry)
     }
 }
