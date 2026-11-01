@@ -224,6 +224,7 @@ class ScreenProtocolSerializationTest {
                     listOf(
                         SessionEntryOfTarget(SessionTarget.Main, SessionEntryState.Running),
                         SessionEntryOfTarget(SessionTarget.Repo("proj-a"), SessionEntryState.Failed(FAILURE)),
+                        SessionEntryOfTarget(SessionTarget.Repo("proj-d"), SessionEntryState.Failed(FAILURE, conversationListingWarning = "목록을 읽지 못했습니다")),
                         SessionEntryOfTarget(SessionTarget.Repo("proj-b"), CHOOSING_CONVERSATION),
                         SessionEntryOfTarget(
                             SessionTarget.Repo("proj-c"),
@@ -334,10 +335,15 @@ class ScreenProtocolSerializationTest {
 
         val CHOOSING_CONVERSATION = SessionEntryState.ChoosingConversation(
             candidates = listOf(
-                ExistingConversation(TERMINAL_CONVERSATION_ID, "터미널에서 하던 설계 검토", "2026-08-27T06:05:50Z", "2026-11-01T09:00:56Z"),
-                ExistingConversation("1f0c2a7e-0000-4000-8000-000000000001", "", null, "2026-10-30T01:00:00Z"),
+                ExistingConversation(
+                    TERMINAL_CONVERSATION_ID,
+                    "터미널에서 하던 설계 검토",
+                    Instant.parse("2026-08-27T06:05:50Z"),
+                    Instant.parse("2026-11-01T09:00:56Z"),
+                ),
+                ExistingConversation("1f0c2a7e-0000-4000-8000-000000000001", "", null, Instant.parse("2026-10-30T01:00:00Z")),
             ),
-            recorded = ExistingConversation("2a9d3b8f-0000-4000-8000-000000000002", "앱에서 하던 대화", null, "2026-10-31T12:00:00Z"),
+            recorded = ExistingConversation("2a9d3b8f-0000-4000-8000-000000000002", "앱에서 하던 대화", null, Instant.parse("2026-10-31T12:00:00Z")),
             defaultChoice = SessionConversationChoice.AdoptConversation(TERMINAL_CONVERSATION_ID),
         )
 

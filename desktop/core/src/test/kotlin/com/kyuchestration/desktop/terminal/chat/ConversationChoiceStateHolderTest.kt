@@ -12,6 +12,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
@@ -58,8 +64,18 @@ class ConversationChoiceStateHolderTest {
         val choosing = assertIs<SessionEntryState.ChoosingConversation>(holder.sessionEntries.value[SessionTarget.Main])
         assertEquals(
             listOf(
-                ExistingConversation(TERMINAL_CONVERSATION_ID, "대화 $TERMINAL_CONVERSATION_ID", "2026-08-27T06:05:50Z", "2026-11-01T09:00:56Z"),
-                ExistingConversation("1f0c2a7e-0000-4000-8000-000000000001", "대화 1f0c2a7e-0000-4000-8000-000000000001", null, "2026-10-30T01:00:00Z"),
+                ExistingConversation(
+                    TERMINAL_CONVERSATION_ID,
+                    "대화 $TERMINAL_CONVERSATION_ID",
+                    Instant.parse("2026-08-27T06:05:50Z"),
+                    Instant.parse("2026-11-01T09:00:56Z"),
+                ),
+                ExistingConversation(
+                    "1f0c2a7e-0000-4000-8000-000000000001",
+                    "대화 1f0c2a7e-0000-4000-8000-000000000001",
+                    null,
+                    Instant.parse("2026-10-30T01:00:00Z"),
+                ),
             ),
             choosing.candidates,
         )
@@ -179,6 +195,147 @@ class ConversationChoiceStateHolderTest {
     }
 
     @Test
+    fun `목록도 세션 열기도 실패하면 진입 실패에 목록 경고가 함께 선다`() = runTest {
+        val commandSource = RecordingSessionCommandSource().apply {
+            respondWith { throw TerminalSessionFailure.KyuExecutableNotFound() }
+        }
+        val holder = stateHolder(
+            RecordingChatSessionOpener(),
+            commandSource,
+            claudeCodeConversationSource = { _, _ -> throw ClaudeCodeConversationListingFailure("kyu 를 부르지 못했습니다") },
+        )
+
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        // 진단 기록에만 남으면 사람은 "왜 고르기가 안 떴는가" 를 화면에서 알 길이 없다.
+        val failed = assertIs<SessionEntryState.Failed>(holder.sessionEntries.value[SessionTarget.Main])
+        assertEquals(
+            "이 자리의 Claude Code 대화 목록을 읽지 못해 고르지 않고 이어갑니다 — kyu 를 부르지 못했습니다",
+            failed.conversationListingWarning,
+        )
+    }
+
+    @Test
+    fun `고르는 중에 같은 세션의 새 대화를 누르면 그것이 물음의 답이다`() = runTest {
+        val commandSource = RecordingSessionCommandSource()
+        val holder = stateHolder(
+            RecordingChatSessionOpener(),
+            commandSource,
+            claudeCodeConversationSource = listing(outside(TERMINAL_CONVERSATION_ID, at = "2026-11-01T09:00:56Z")),
+        )
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        // 카드의 "새 대화" 버튼이다. 고르기가 떠 있다고 그 누름을 버리면 버튼이 먹지 않는다.
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.StartNewConversation)
+        runCurrent()
+
+        assertEquals(listOf<SessionConversationChoice>(SessionConversationChoice.StartNewConversation), commandSource.askedConversationChoices)
+        assertEquals(listOf<SessionTarget>(SessionTarget.Main), holder.heldSessions.value.map { it.target })
+    }
+
+    @Test
+    fun `고르는 중에 다시 누른 이어가기는 이미 떠 있는 물음이라 아무것도 하지 않는다`() = runTest {
+        var listingCount = 0
+        val holder = stateHolder(
+            RecordingChatSessionOpener(),
+            claudeCodeConversationSource = { _, _ ->
+                listingCount++
+                listOf(outside(TERMINAL_CONVERSATION_ID, at = "2026-11-01T09:00:56Z"))
+            },
+        )
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        assertEquals(1, listingCount)
+        assertIs<SessionEntryState.ChoosingConversation>(holder.sessionEntries.value[SessionTarget.Main])
+    }
+
+    @Test
+    fun `고르기를 취소하면 스스로 끝난 세션의 전사가 그대로 남는다`() = runTest {
+        val opener = RecordingChatSessionOpener()
+        var conversations = emptyList<ClaudeCodeConversation>()
+        val holder = stateHolder(opener, claudeCodeConversationSource = { _, _ -> conversations })
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+        opener.lastSession.emit(ChatSessionEvent.UserMessageEchoed("앞서 한 말", parentToolUseId = null, messageUuid = null))
+        opener.lastSession.emit(ChatSessionEvent.SessionEnded(exitCode = 0))
+        runCurrent()
+        val transcriptBefore = assertNotNull(holder.conversations.value[SessionTarget.Main])
+
+        conversations = listOf(outside(TERMINAL_CONVERSATION_ID, at = "2026-11-01T09:00:56Z"))
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+        holder.cancelConversationChoice(SessionTarget.Main)
+
+        // 취소는 아무것도 바꾸지 않는다 — 고르기 전 화면에 있던 지난 전사도.
+        assertEquals(transcriptBefore, holder.conversations.value[SessionTarget.Main])
+        assertEquals(emptyMap(), holder.sessionEntries.value)
+    }
+
+    @Test
+    fun `제시하지 않은 대화를 채택하라는 선택은 버리고 고르기를 그대로 둔다`() = runTest {
+        val commandSource = RecordingSessionCommandSource()
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(
+            RecordingChatSessionOpener(),
+            commandSource,
+            diagnosticLog,
+            claudeCodeConversationSource = listing(
+                outside(TERMINAL_CONVERSATION_ID, at = "2026-11-01T09:00:56Z"),
+                recordedFor("proj-a", at = "2026-10-31T12:00:00Z"),
+            ),
+        )
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        // 다른 라벨(proj-a)에 적힌 대화다. 엔진에 넘기면 두 세션이 한 대화를 연다.
+        holder.chooseConversation(SessionTarget.Main, SessionConversationChoice.AdoptConversation(RECORDED_CONVERSATION_ID))
+        runCurrent()
+
+        assertEquals(emptyList(), commandSource.askedConversationChoices)
+        assertIs<SessionEntryState.ChoosingConversation>(holder.sessionEntries.value[SessionTarget.Main])
+        val refused = assertIs<DiagnosticLogEntry.UnofferedConversationChoiceRefused>(diagnosticLog.recordedEntries.single())
+        assertEquals("main", refused.targetLabel)
+    }
+
+    @Test
+    fun `고른 뒤의 열기도 앞서 시작한 끝내기를 기다린다`() = runTest {
+        val endingGate = CompletableDeferred<Unit>()
+        val openedTargets = mutableListOf<String>()
+        val opener = ChatSessionOpener { plan ->
+            openedTargets += plan.workingDirectory.toString()
+            GatedEndingChatSession(endingGate)
+        }
+        val repoCommandSource = RecordingSessionCommandSource()
+        val holder = stateHolder(
+            opener,
+            repoCommandSource,
+            claudeCodeConversationSource = listing(outside(TERMINAL_CONVERSATION_ID, at = "2026-11-01T09:00:56Z")),
+        )
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Repo("proj-a"), SessionConversationChoice.StartNewConversation)
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+        assertEquals(1, openedTargets.size)
+
+        // proj-a 의 끝내기가 프로세스를 기다리는 사이 사람이 메인의 대화를 고른다.
+        backgroundScope.launch(start = CoroutineStart.UNDISPATCHED) { holder.endSession(SessionTarget.Repo("proj-a")) }
+        holder.chooseConversation(SessionTarget.Main, SessionConversationChoice.AdoptConversation(TERMINAL_CONVERSATION_ID))
+        runCurrent()
+
+        // 모든 진입은 앞서 시작한 끝내기를 지난다 — 끝나기 전에 띄우면 같은 대화를 두 프로세스가 열 수 있다(5.6).
+        assertEquals(1, openedTargets.size)
+
+        endingGate.complete(Unit)
+        runCurrent()
+        assertEquals(2, openedTargets.size)
+    }
+
+    @Test
     fun `고르는 동안 워크디렉토리를 닫으면 늦게 온 선택은 버린다`() = runTest {
         val commandSource = RecordingSessionCommandSource()
         val holder = stateHolder(
@@ -237,6 +394,19 @@ class ConversationChoiceStateHolderTest {
 
         assertEquals(0, listingCount)
         assertEquals(2, commandSource.askedConversationChoices.size)
+    }
+
+    /** 끝내기를 시험이 풀어 줄 때까지 붙잡는 세션. 끝내기가 프로세스를 기다리는 동안의 자리를 만든다. */
+    private class GatedEndingChatSession(private val endingGate: CompletableDeferred<Unit>) : OpenedChatSession {
+        override val events: Flow<ChatSessionEvent> = emptyFlow()
+
+        override suspend fun sendUserMessage(message: OutgoingUserMessage) = Unit
+
+        override suspend fun interruptCurrentTurn() = Unit
+
+        override suspend fun endSession() {
+            endingGate.await()
+        }
     }
 
     private fun listing(vararg conversations: ClaudeCodeConversation) = ClaudeCodeConversationSource { _, _ -> conversations.toList() }

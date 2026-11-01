@@ -37,8 +37,15 @@ class CoreStateImageTest {
             sessionEntries = mapOf(
                 SessionTarget.Repo("proj-a") to SessionEntryState.Running,
                 SessionTarget.Main to SessionEntryState.ChoosingConversation(
-                    candidates = listOf(ExistingConversation("654ce605-b030-40e8-8448-2e9003ad32b1", "터미널 대화", null, "2026-11-01T09:00:56Z")),
-                    recorded = ExistingConversation("2a9d3b8f-0000-4000-8000-000000000002", "앱 대화", "2026-10-01T00:00:00Z", "2026-10-31T12:00:00Z"),
+                    candidates = listOf(
+                        ExistingConversation("654ce605-b030-40e8-8448-2e9003ad32b1", "터미널 대화", null, Instant.parse("2026-11-01T09:00:56Z")),
+                    ),
+                    recorded = ExistingConversation(
+                        "2a9d3b8f-0000-4000-8000-000000000002",
+                        "앱 대화",
+                        Instant.parse("2026-10-01T00:00:00Z"),
+                        Instant.parse("2026-10-31T12:00:00Z"),
+                    ),
                     defaultChoice = SessionConversationChoice.AdoptConversation("654ce605-b030-40e8-8448-2e9003ad32b1"),
                 ),
             ),

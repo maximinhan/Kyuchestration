@@ -3,6 +3,7 @@ package com.kyuchestration.desktop
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.chat.ExistingConversation
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
+import java.time.Instant
 import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -66,10 +67,15 @@ class ConversationChoiceOptionsTest {
 
         val CHOOSING = SessionEntryState.ChoosingConversation(
             candidates = listOf(
-                ExistingConversation(TERMINAL_ID, "터미널에서 하던 설계 검토", "2026-08-27T06:05:50Z", "2026-11-01T09:00:56Z"),
-                ExistingConversation(UNTITLED_ID, "", null, "2026-10-30T01:00:00Z"),
+                ExistingConversation(TERMINAL_ID, "터미널에서 하던 설계 검토", Instant.parse("2026-08-27T06:05:50Z"), Instant.parse("2026-11-01T09:00:56Z")),
+                ExistingConversation(UNTITLED_ID, "", null, Instant.parse("2026-10-30T01:00:00Z")),
             ),
-            recorded = ExistingConversation("2a9d3b8f-0000-4000-8000-000000000002", "앱에서 하던 대화의 제목", null, "2026-10-31T12:00:00Z"),
+            recorded = ExistingConversation(
+                "2a9d3b8f-0000-4000-8000-000000000002",
+                "앱에서 하던 대화의 제목",
+                null,
+                Instant.parse("2026-10-31T12:00:00Z"),
+            ),
             defaultChoice = SessionConversationChoice.AdoptConversation(TERMINAL_ID),
         )
     }
