@@ -40,8 +40,11 @@ engine_answer=$("$work/bundle/kyu" version)
 echo "kyu version: $engine_answer"
 case "$engine_version_check" in
   same-label)
-    if [ "$engine_answer" != "kyu $expected_label" ]; then
-      echo "::error::묶음의 kyu 가 '$engine_answer' 로 답한다 — 기대 'kyu $expected_label'"
+    # kyu 는 "kyu v0.16.0 (508ea4dbe759)" 처럼 판 뒤에 빌드 커밋을 덧붙인다(internal/cli/version.go). 견줄 것은 둘째 낱말인 판뿐이다 —
+    # v0.16.0 릴리스가 이 줄을 통째로 견줘 멈췄다.
+    engine_label=$(printf '%s\n' "$engine_answer" | awk '{print $2}')
+    if [ "$engine_label" != "$expected_label" ]; then
+      echo "::error::묶음의 kyu 가 '$engine_answer' 로 답한다 — 기대 판 '$expected_label'"
       exit 1
     fi
     ;;
