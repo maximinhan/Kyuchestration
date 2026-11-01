@@ -3,7 +3,7 @@
 > 창은 윈도우의 것으로 뜨고, 프로젝트 폴더·`claude` 세션·`kyu` 엔진은 WSL 안에서 돈다. 지금 한 JVM 이 하는 일을 둘로 가른다 — 세션을 소유하는 **코어**(헤드리스 JVM)와 그것을 그리는 **화면**(Compose). 화면은 코어를 자식 프로세스로 띄우고 stdio 로 JSON 줄을 주고받는다. 윈도우에서는 그 자식이 `wsl.exe` 너머에 있고, 맥·리눅스에서는 같은 머신에 있다. 길은 하나다. 화면은 언제 죽어도 되고, 코어는 세션과 함께 남아 다음 화면을 기다린다.
 
 - 작성일: 2026-10-22
-- 상태: **구현 중** — 1 · 2 · 3 단계 머지, 4 단계 진행(4a). 단계마다 "(N 단계 정정)" 으로 코드의 사실을 적는다
+- 상태: **구현 중** — 1 · 2 · 3 단계 머지, 4 단계 진행(4a 머지 · 4b — 화면이 msi 에 실린 묶음으로 WSL 에 코어를 놓는다). 단계마다 "(N 단계 정정)" 으로 코드의 사실을 적는다
 - 선행 문서: [app-owned-sessions-design.md](app-owned-sessions-design.md) — 원칙 5(개정)·11·12, 5.5(대화 이어가기)
 - 선행 문서: [chat-ui-design.md](chat-ui-design.md) — 5.4(승인 브리지·앱 소켓), 원칙 14·15
 - 선행 문서: [session-tree-design.md](session-tree-design.md) — 6.4(앱 소켓의 `kind` 규약), 6.9(관문), 6.13(수명), 원칙 16·17·18
@@ -272,6 +272,22 @@ stdio 는 한 번뿐이다. 화면이 끊긴 뒤 다음 화면이 코어에 붙�
 | 3.5 재접속 | Unix 소켓 + 중계가 된다. 중계가 EOF 를 안 넘기면 좀비 | 코어 데몬 + `attach` 중계를 우리 코드로. 새 화면이 옛 연결을 밀어낸다 — 6.13 · 4.9 |
 | 3.6 JVM | 코어 바닥 ≈ 55~60 MB, 시작 < 100 ms. 클래스패스의 86 % 가 화면 것 | `core` 모듈은 Compose 를 의존하지 않는다 — 6.15 |
 | 3.7 덤 | `wsl.exe -e` 의 PATH 에 `~/.local/bin` 없음. 인자의 `"` 가 사라진다. `--cd ~` 가 된다 | 화면은 `wsl.exe -d <배포판> --cd ~ -e .local/bin/kyuchestration-core <동사>` 만 넘긴다 — 6.12 |
+| 3.10 묶음 넘기기 | stdin 의 바이너리 · 27 MB tar.gz 가 그대로 간다(0.4 s). 줄은 실시간, `env` 로 값을 넘긴다. JVM 기본 문자셋은 MS949 | 화면이 묶음을 stdin 으로 풀고 `install.sh` 를 `env` 로 돌린다. 출력은 UTF-8 로 정해 읽는다 — 6.17 의 4b 정정 |
+
+### 3.10 (4b 실측) 묶음을 `wsl.exe` 의 stdin 으로 넘긴다
+
+**2026-11-01, 이 머신의 윈도우 JDK 23 → `wsl.exe -d Ubuntu-24.04 --cd ~ -e …`, 셸 없음, `WSL_UTF8=1`.** 하네스는 3.1 과 같은 윈도우 JVM 의 `ProcessBuilder` 이고, stdin 쓰기와 stdout · stderr 읽기를 다른 스레드에서 했다.
+
+| 잰 것 | 결과 |
+|---|---|
+| 1 MiB · 40 MiB 바이너리(0x00 · 0x0D0A · 0x1A · 0xFF 포함)를 stdin 으로 `sha256sum` | SHA-256 일치, 110~140 ms |
+| 27 MB 코어 tar.gz 를 stdin 으로 `tar -xzf - -C <홈 기준 상대 디렉토리>` (`mkdir -p` 먼저) | exit 0, 권한 · 내용 WSL 안에서 직접 푼 것과 `diff -r` 동일, 실행 비트 유지, 약 440 ms. 풀린 코어가 hello 에 welcome 으로 답함 |
+| 리눅스 스크립트의 stdout · stderr 줄(1 초 간격) | 버퍼링 없이 줄마다 실시간 도착, 둘은 따로 |
+| `-e env KYU_A=값한국어 KYU_B=/home/x/y sh script.sh` | 스크립트가 그 값을 봄(UTF-8). `WSLENV` 불필요 |
+| 스크립트 `exit 3` | `Process.exitValue()` = 3 |
+| **주의** 윈도우 JVM 기본 문자셋 | `native.encoding` · `stdout.encoding` 이 MS949. `wsl.exe` 출력을 읽을 때 UTF-8 을 명시해야 한다(기존 `WslCommandLine` 이 바이트로 읽어 `decodeWslOutput` 하는 길 유지). 인자의 한국어는 `CreateProcessW` 라 그대로 간다 |
+
+**바이트도 줄 끝도 바뀌지 않는다** — 3.1 의 결론이 큰 바이너리에도 선다. 화면은 묶음 파일을 윈도우 쪽에서 읽어 stdin 으로 흘리기만 하면 되고, 리눅스 경로(`/tmp/…`)도 `\\wsl.localhost` 로 쓰는 길도 몰라도 된다. 처음 잴 때 한국어가 `�� ��` 로 깨진 것은 `wsl.exe` 가 아니라 하네스가 받은 줄을 MS949 의 `System.out` 으로 다시 찍었기 때문이다(`-Dstdout.encoding=UTF-8` 로 다시 재어 바이트가 UTF-8 임을 `od` 로 확인).
 
 ---
 
@@ -837,6 +853,47 @@ desktop/
 | 판은 `VERSION` 으로 견준다 | 코어를 띄워 `welcome` 을 받기 전에 안다. 판이 다른 코어는 `protocol` 이 같아도 다른 판의 기능으로 돈다 — 같은 빌드의 묶음이 손에 있으므로 갈아 끼운다. 4a 이전에 손으로 깐 코어에는 `VERSION` 이 없다 — 다른 판으로 본다 |
 | 묶음이 없으면 지금의 안내 | 소스에서 띄운 화면(`./gradlew run`)은 묶음 없이 돈다(`run` 은 `checkBundledWslCore` 를 걸지 않는다). 그때는 3b 의 설치 명령 한 줄로 떨어진다 |
 
+**(4b 정정) 지금의 흐름 — 코드의 사실**
+
+```
+test -x .local/bin/kyuchestration-core
+  ├─ wsl.exe 실패 ────────────────────────────────▶ DistributionFailed (지금과 같다)
+  ├─ 없다 ─┬─ 묶음 있음 ──────────────────────────▶ 깐다
+  │        └─ 묶음 없음 ──────────────────────────▶ CoreNotInstalled + 설치 명령 한 줄
+  └─ 있다 ─┬─ 묶음 없음 ──────────────────────────▶ Ready (판은 읽지 않는다 — welcome 이 견준다)
+           └─ 묶음 있음 ─ cat .local/share/kyuchestration/core/VERSION
+                 ├ 0 + 한 줄 = 화면의 판 ─────────▶ Ready
+                 ├ 다른 판 · 0 이지만 한 줄 아님 · 1(파일 없음) ─▶ 깐다
+                 └ 그 밖(255 · -1) ──────────────▶ DistributionFailed
+
+깐다 (상태 InstallingCore(배포판, 걸음, 마지막 줄들) — 단추 없음):
+  FindingLinuxHome           pwd                         → 홈. 빈칸이 있으면 깔지 않는다
+  PreparingScratchDirectory  rm -rf · mkdir -p .local/share/kyuchestration/.screen-install
+  ExtractingBundle           tar -xzf - -C <임시 자리>   ← 묶음 파일을 stdin 으로
+  RunningInstallScript       env KYU_CORE_ARCHIVE=<홈>/<임시 자리>/core.tar.gz KYU_BINARY_FILE=<홈>/<임시 자리>/kyu
+                               bash <임시 자리>/install.sh --with-core   ← 출력 줄을 실시간으로 상태에
+  RemovingScratchDirectory   rm -rf <임시 자리>           → Ready + 배포판 기억
+```
+
+| 판단 | 근거 |
+|---|---|
+| 걸음은 `WslCoreInstallation` 이, `wsl.exe` 는 `WslCommandLine` 이 | 걸음 · 실패 갈래 · 임시 자리 정리는 `wsl.exe` 를 모르는 클래스가 정하고 셋의 모양(`WslDistributionCommands` — 그냥 · stdin 흘려 넣기 · 줄마다 알리기)만 받는다. 순서와 실패를 순수 JUnit 으로 시험한다 |
+| 판은 화면 자신의 판으로 견준다 | 묶음 안의 `VERSION` 은 읽지 않는다 — 같은 빌드에서 나와 한 msi 에 실린다. 화면이 개발 빌드(매니페스트 없음)면 견줄 판이 없어 묶음을 쓰지 않는다(`DesktopBuildVersion.releaseLabel` 이 null). 생기지 않는 짝이지만 생기면 뜰 때마다 다시 깔거나 판을 모른 채 둔다 |
+| 묶음이 있으면 판이 같은 코어만 띄운다 | 그래서 판 불일치 화면(6.14)의 "WSL 코어가 낡았다" 는 묶음 없는 소스 실행에서만 난다. 그 문구가 "이 화면에는 묶음이 실려 있지 않아 스스로 갈아 끼우지 못한다" 를 말한다 |
+| `cat` 의 판정은 `test -x` 와 다르다 | 없는 파일에 `cat` 은 `cat:` 으로 시작하는 글을 쓰고 1 로 끝난다. `test -x` 의 "1 + 글이면 `wsl.exe` 의 실패" 를 통째로 쓰면 4a 이전에 깐 코어가 배포판 실패로 보이고, 1 을 통째로 "판 모름" 으로 보면 `wsl.exe` 가 1 로 끝내는 실패(커널 갱신 · 기본 사용자 없음)가 "다시 깐다" 로 묻힌다 — 글의 주인을 본다 |
+| 임시 자리 `~/.local/share/kyuchestration/.screen-install` | 우리 데이터 디렉토리 안이라 화면이 돌리는 `rm -rf` 가 우리 것 밖에 닿지 않는다. 경로는 `WslCoreInstallation.kt` 의 상수 한 자리. 설치는 먼저 지우고 만든다 — 지난 실패가 남긴 것이 섞이지 않는다 |
+| 실패하면 임시 자리를 남긴다 | 사람이 풀린 묶음을 들여다볼 수 있게. 다음 설치가 먼저 지운다. 성공 뒤 지우기가 실패해도 깔린 것으로 본다(코어는 이미 놓였다) — 기록에 남는다 |
+| 실패 갈래 `CoreInstallFailed(배포판, 걸음의 실패)` | 창은 그 걸음 · 종료 코드(있으면) · 화면 쪽 까닭(있으면) · 마지막 줄들(고정폭, 최대 12 줄, 선택 가능)을 보이고, 고르는 단추의 글을 "다시 설치" 로 바꾸며 손으로 까는 설치 한 줄을 함께 보인다. 실패한 배포판은 기억하지 않는다. 쓰던 코어는 `install.sh` 가 그대로 둔다 |
+| 리눅스 홈에 빈칸이 있으면 깔지 않는다 — `CoreInstallRefusedForLinuxHome` | `env` 의 값에는 절대 경로가 든다. `wsl.exe` 의 인자는 윈도우 명령줄 하나로 합쳐졌다 갈리고 따옴표가 사라진다(3.7) — 빈칸이 든 값은 두 낱말로 가 엉뚱한 자리를 가리킨다. 묵살하지 않고 그 홈을 보이고 손으로 까는 길을 안내한다 |
+| 출력은 UTF-8 로 정해 읽는다 | 윈도우 JVM 의 기본 문자셋은 MS949 다(3.10). 줄마다 받는 호출은 stdout · stderr 를 합쳐 UTF-8 로 읽는다 — `install.sh` 의 진행은 stderr, 마지막 `kyu version` 은 stdout, `wsl.exe` 자신의 오류는 판마다 어느 쪽인지 다르다 |
+| stdin 쓰기와 출력 읽기는 다른 스레드 | 리눅스 쪽이 stdin 을 읽기 전에 파이프 버퍼보다 많이 쓰면 같은 스레드에서는 서로 기다린다. 리눅스 쪽이 먼저 끝나 생긴 끊긴 파이프는 결과로 보고 리눅스 쪽의 종료 코드와 글을 돌려준다(리눅스 쪽이 0 인데 다 넘기지 못했으면 그것이 실패다) |
+| 기록 | 걸음마다 리눅스 명령 · 종료 코드(없으면 없음) · 소요 · 화면 쪽 까닭 · 전체 출력(`WslCoreInstallCommandFinished`). 묶음을 쓰지 않으면 그 까닭(`WslCoreBundleNotUsed` — 리소스 자리를 모름 · 파일 없음 · 개발 빌드) |
+| 설치 중에 창을 닫으면 | 준비 스코프는 창의 합성이 아니라 `prepareWslCorePlace` 가 쥐고, 창이 닫히면 취소한 뒤 **끝나기를 기다린다**(`cancelAndJoin`). 취소된 `wsl.exe` 호출은 그 `wsl.exe` 를 끝내고(`destroy`, 5 초 뒤 `destroyForcibly`) 끝날 때까지 기다린다 — 막힌 읽기는 코루틴 취소를 모른다. 리눅스 쪽에는 신호가 가지 않고(3.2 B) `install.sh` 는 다음 진행 줄을 쓸 때 끊긴 파이프로 끝난다(4b 실측: 설치 스크립트 도중 2.5 초에 취소 → 2.6 초에 화면 쪽 취소 끝, 리눅스 쪽은 그다음 stderr 쓰기에서 끝나고 EXIT trap 이 돌았다, 남은 프로세스 0). **끊겨도 안전한 이유**: `install.sh` 는 따로 푼 자리에서 띄워 본 뒤 `mv` 로 자리를 바꾸므로 어느 줄에서 끊겨도 쓰던 코어나 새 코어 중 하나가 온전히 남고, 다음 설치는 임시 자리를 먼저 지우고 다시 깐다 |
+| 리눅스 쪽 데이터 자리 | 화면은 `install.sh` 를 돌릴 때 `XDG_DATA_HOME=<홈>/.local/share` 를 정해 넘긴다. `install.sh` 는 `${XDG_DATA_HOME:-~/.local/share}` 를 따르고 화면은 판을 `~/.local/share/kyuchestration/core/VERSION` 에서 읽는다 — 배포판에 다른 `XDG_DATA_HOME` 이 있으면 화면은 판을 못 찾아 뜰 때마다 다시 깔았다. 우연한 환경이 아니라 구성으로 같은 자리를 보게 한다 |
+| 실패의 까닭 | 걸음에서 난 `IOException`(`wsl.exe` 를 못 띄움 · stdio 끊김)은 던지지 않고 그 걸음의 실패(종료 코드 없음 + 화면 쪽 까닭)가 된다 — 던지면 상태가 단추 없는 `InstallingCore` 에 머문다. 묶음을 넘기다 실패해도 리눅스 쪽 종료 코드와 글을 끝까지 거두어 화면 쪽 까닭과 함께 싣는다. 판 읽기의 1 은 글이 `cat:` 으로 시작할 때만 "판 모름" 이고 그 밖은 배포판 실패다 |
+| 기록의 출력 | 화면은 꼬리 12 줄만 보이고, `desktop.log` 에는 걸음마다 전체 출력(64 KiB 상한, 앞을 남기고 잘림을 적는다) |
+| `install.sh` 의 "PATH 에 없습니다" 줄 | 진행 줄에 보인다. `wsl.exe -e` 의 PATH 에 `~/.local/bin` 이 없어서다(3.7) — 화면은 상대 경로로 부르므로 상관없지만 사람이 읽으면 헷갈린다. 고치는 것은 다음 단계 후보 |
+
 ---
 
 ## 7. 구현 단계
@@ -850,7 +907,7 @@ desktop/
 | **3** | **윈도우 화면 + `wsl.exe` 연결 + 경로.** `coreLaunchCommand(WslDistribution)`, 배포판 목록(UTF-16LE · `WSL_UTF8`)과 고르기, `open_workdir { hostPath }` 를 코어가 `wslpath -u` 로 풀기(6.9), 윈도우 파일 선택기 갈래, 브라우저 열기를 화면으로(6.10). 개발은 WSL 에서 `:core` 를 설치하고 윈도우에서 `:ui:run` | **실측**(윈도우 + WSL, 실 `claude`): 윈도우 창에서 WSL 폴더를 골라 열고 → 메인 챗에 한국어로 말하고 → 승인 카드에 답하고 → 하위 세션을 띄운다. 네이티브 선택 창이 주는 경로 형식을 확인한다(3.8). 다른 배포판 폴더를 고르면 거절 문구. 창을 닫으면 WSL 에 `claude` 가 남지 않는다 |
 | **3 (정정)** | **3a**: `CorePlace.WslDistribution` · 배포판 목록과 고르기 · 화면이 `\\wsl.localhost` 를 코어 경로로 옮기기(6.9 정정) · `hello`/`welcome` 의 OS · 배포판 · 코어가 자식의 PATH 로 `claude` 찾기(3.7 정정). **3b**: WSL 코어 설치 스크립트 · 릴리스 산출물 · 윈도우 패키징 · CI. 브라우저 열기를 화면으로(6.10)는 3b 이후 | **3a 실측**: 윈도우 JVM(OpenJDK 23) 하네스가 화면의 `CoreChildProcess`(WSL 모드)와 거울로 WSL 코어와 hello → welcome → 스냅샷 → 명령 → 변화, 한국어 워크디렉토리 열기, 실 claude 메인 한 턴(한국어 · 이모지 · 따옴표 · 역슬래시 그대로), 떠나기 · `halt` 모두 코어와 자손 0. 윈도우 창 손 확인 · 승인 카드 · 하위 세션은 이후 단계 |
 | **4** | **msi 릴리스.** `release.yml` 에 윈도우 잡(`packageMsi`)과 리눅스 코어 tar.gz 잡, `install.sh --with-core`, 첫 실행 흐름(6.17), README | **실측**: 시험 태그로 워크플로를 돌려 msi·tar.gz 가 나온다. 사용자의 윈도우에 msi 를 깔고, 코어가 없는 배포판에서 안내를 따라 설치한 뒤 3 단계 시나리오가 돈다. 판이 다른 화면·코어를 붙이면 `protocol_mismatch` 화면 |
-| **4 (정정)** | **4a**: WSL 코어 묶음(`:core:packageWslCoreBundle` — 코어 이미지 tar.gz · 리눅스 kyu · `install.sh` · `VERSION`)과 코어 이미지 안의 `VERSION`, msi 에 싣기(`placeWslCoreBundle` · `checkBundledWslCore`), `install.sh` 의 `KYU_BINARY_FILE`(둘 다 손에 있으면 네트워크 없이), 릴리스 · Desktop CI 구조(6.16 의 4a 정정). 화면 코드는 그대로다. **4b**: 화면이 리소스의 묶음을 `wsl.exe` stdin 으로 WSL 에 풀어 `install.sh` 를 돌리고, `cat ~/.local/share/kyuchestration/core/VERSION` 으로 판을 견줘 다르면 다시 깐다. 묶음이 없는 소스 실행은 지금의 설치 명령 안내로 떨어진다(6.17 의 4a 정정). **README 윈도우 절은 4b 가 고친다** — WSL 터미널에서 돌리는 ① 를 걷고 msi 하나로. 사용자 체험이 바뀌는 것이 4b 라 4a 에서는 그대로 둔다 | **4a**: 로컬(WSL2 우분투)에서 묶음의 구조 · 권한 · `VERSION` 을 `tar -tzvf` 로, 묶음만으로 curl 을 가린 채 깔아 `core/VERSION` · `kyuchestration-core` 링크 · `kyu` 가 놓이고 깔린 코어가 같은 판으로 인사. Desktop CI 윈도우 잡에서 msi 안 `app\resources\wsl-core\` 에 묶음. **4b**: 사용자의 윈도우에 msi 를 깔고, 코어가 없는 배포판에서 화면이 스스로 깔아 3 단계 시나리오가 돈다. 판이 다른 코어를 다시 깐다. 네트워크를 끊고 첫 실행 |
+| **4 (정정)** | **4a**: WSL 코어 묶음(`:core:packageWslCoreBundle` — 코어 이미지 tar.gz · 리눅스 kyu · `install.sh` · `VERSION`)과 코어 이미지 안의 `VERSION`, msi 에 싣기(`placeWslCoreBundle` · `checkBundledWslCore`), `install.sh` 의 `KYU_BINARY_FILE`(둘 다 손에 있으면 네트워크 없이), 릴리스 · Desktop CI 구조(6.16 의 4a 정정). 화면 코드는 그대로다. **4b**: 화면이 리소스의 묶음을 `wsl.exe` stdin 으로 WSL 에 풀어 `install.sh` 를 돌리고, `cat ~/.local/share/kyuchestration/core/VERSION` 으로 판을 견줘 다르면 다시 깐다. 묶음이 없는 소스 실행은 지금의 설치 명령 안내로 떨어진다(6.17 의 4a 정정). **README 윈도우 절은 4b 가 고친다** — WSL 터미널에서 돌리는 ① 를 걷고 msi 하나로. 사용자 체험이 바뀌는 것이 4b 라 4a 에서는 그대로 둔다 | **4a**: 로컬(WSL2 우분투)에서 묶음의 구조 · 권한 · `VERSION` 을 `tar -tzvf` 로, 묶음만으로 curl 을 가린 채 깔아 `core/VERSION` · `kyuchestration-core` 링크 · `kyu` 가 놓이고 깔린 코어가 같은 판으로 인사. Desktop CI 윈도우 잡에서 msi 안 `app\resources\wsl-core\` 에 묶음. **4b 실측**(윈도우 JVM 하네스가 화면의 실제 `WslCorePlacePreparation` · `WslCoreInstallation` · `WslCommandLine` 을 로컬 묶음 `v0.1.0` 으로 돌림, 창 없음): 코어가 없는 `Ubuntu-24.04` 에 첫 설치 — `pwd` 116 ms · `rm` 100 · `mkdir` 109 · `tar`(묶음 34 MB stdin) 312 · `install.sh --with-core` 671 · 지우기 108, 하네스 시작부터 Ready 까지 1.8 s. 깔린 `VERSION` · 링크 · `kyu` 가 놓이고 깔린 코어가 `v0.1.0` 으로 인사. 두 번째 실행은 설치 없이 0.38 s 에 Ready. `VERSION` 을 `v0.0.9` 로 바꾸거나 지우면 다시 깐다. 묶음 안 `install.sh` 를 `exit 7` 로 바꾸면 `CoreInstallFailed(RunningInstallScript, 7, [대상: linux_amd64, 오류: …])`, 임시 자리는 남고 쓰던 코어 그대로. 묶음 없음 + 코어 있음 → 판을 읽지 않고 Ready, 묶음 없음 + 코어 없음 → `CoreNotInstalled`. **남은 것(사용자 손 확인)**: 윈도우에 msi 를 깔아 배포판 고르기 → 설치 진행 줄 → 본 창, 두 번째 실행은 바로, 네트워크를 끊고 첫 실행, 판이 다른 msi 덮어 깔기 |
 | **5** | **코어 수명·재접속.** `serve`(데몬)와 `attach`(중계), `core.sock`·`core.lock`, 새 화면이 옛 연결을 밀어냄, 화면 없음 + 세션 없음 10 분에 끝남, `shutdown_core`, 판 갈아 끼우기(6.14), 창 닫기 = 떼기 | **실측**: ① 턴이 도는 중에 윈도우 창을 닫고 → 다시 열면 같은 대화에 그 턴의 끝이 서 있다 ② 화면 JVM 을 작업 관리자로 죽이고 다시 열면 붙는다 — WSL 에 남은 `attach` 없음(`pgrep`) ③ 승인 카드가 뜬 채로 화면을 죽이고 다시 열면 카드가 그대로 있고 답이 간다 ④ 화면 없이 세션 없이 10 분 뒤 코어가 사라진다 ⑤ **모든 `wsl.exe` 가 끝난 뒤 배포판이 멈추는가**를 사용자 머신에서 잰다(3.8 첫 줄) ⑥ 맥에서 떼어 낸 코어가 화면 종료 뒤에 사는가 |
 
 **1 단계가 가장 크다.** 리뷰가 어려우면 둘로 나눈다 — 1a: 챗 홀더의 대상 명시화와 대화 맵 공개(직렬화 없음, 동작 그대로), 1b: 타입·게시자·거울·메모리 파이프.

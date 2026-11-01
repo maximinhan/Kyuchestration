@@ -34,7 +34,12 @@ done
 printf '%s\n' "$url" >> "$(dirname "$0")/curl-calls.log"
 case "$url" in
     */releases/latest)
-        printf '%s' '{"tag_name":"v9.9.9","assets":[{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/1","name":"kyu_linux_amd64"},{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/2","name":"kyuchestration-core_9.9.9_linux_amd64.tar.gz"}]}' > "$output" ;;
+        {
+            printf '%s' '{"tag_name":"v9.9.9","assets":[{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/1","name":"kyu_linux_amd64"},{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/2","name":"kyuchestration-core_9.9.9_linux_amd64.tar.gz"}]'
+            printf '%s' ',"body":"'
+            head -c "${FAKE_RELEASE_BODY_BYTES:-0}" /dev/zero | tr '\0' 'x'
+            printf '%s' '"}'
+        } > "$output" ;;
     */releases/assets/1)
         printf '#!/bin/sh\necho "kyu v9.9.9 from-release"\n' > "$output" ;;
     */releases/assets/2)
@@ -334,6 +339,25 @@ func TestWithCoreAndNoLocalFilesTakesBothFromTheSameRelease(t *testing.T) {
 	}
 	if !strings.Contains(output, "kyu v9.9.9 from-release") {
 		t.Fatalf("릴리스의 kyu 를 놓지 않았다\n%s", output)
+	}
+	if marker := environment.installedMarker(t); marker != "release" {
+		t.Fatalf("릴리스의 코어 대신 %q 가 자리에 있다", marker)
+	}
+}
+
+// 릴리스 정보 뒤쪽(릴리스 노트 body 등)이 파이프 버퍼보다 길어도 태그 이름과 자산 주소를 읽는다. 읽는 쪽이 찾자마자 끝나면 아직
+// 쓰던 앞 단계가 SIGPIPE(141)로 죽고, pipefail 과 set -e 가 그것을 설치 실패로 만든다. 어떤 tr 은 작은 응답도 여러 번에 나눠 써서
+// 같은 일이 그때그때 난다(CI 실측).
+func TestReleaseInformationLongerThanAPipeBufferIsStillRead(t *testing.T) {
+	environment := newInstallEnvironment(t)
+
+	output, err := environment.runInstall(t,
+		"FAKE_RELEASE_CORE_ARCHIVE="+coreArchive(t, "release", 0),
+		"FAKE_RELEASE_BODY_BYTES=1048576",
+	)
+
+	if err != nil {
+		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
 	}
 	if marker := environment.installedMarker(t); marker != "release" {
 		t.Fatalf("릴리스의 코어 대신 %q 가 자리에 있다", marker)

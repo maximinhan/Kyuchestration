@@ -36,6 +36,17 @@ class BuildVersionTest {
     }
 
     /**
+     * 윈도우 화면이 실은 WSL 코어 묶음의 판과 견주는 값이다(core-ui-split-design.md 6.17 의 4b 정정). 개발 빌드에는 견줄 판이 없다 —
+     * "개발 빌드" 라는 라벨을 판처럼 견주면 어떤 VERSION 과도 다르다.
+     */
+    @Test
+    fun `릴리스 판 라벨은 매니페스트가 있을 때만 있다`() {
+        assertEquals("v0.16.0", BuildVersion.releaseLabelOf("0.16.0"))
+        assertNull(BuildVersion.releaseLabelOf(null))
+        assertNull(BuildVersion.releaseLabelOf("  "))
+    }
+
+    /**
      * 판은 이 클래스가 실린 jar 의 매니페스트에서 읽는다. 패키지(java.lang.Package)로 읽으면 같은 패키지를 다른 모듈의 jar 가
      * 먼저 정의하는 날 그 jar 의 매니페스트가 답한다 — 판이 없는 jar 라면 정식 릴리스가 "개발 빌드" 로 뜬다.
      */

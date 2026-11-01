@@ -214,6 +214,42 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 윈도우 화면이 msi 에 실린 WSL 코어 묶음을 쓰지 않는다 — 그래서 코어가 없으면 설치 명령 안내로 간다. msi 로 깐 사람이 그 안내를
+     * 보았다면 까닭이 여기 있다.
+     *
+     * @param reason 리소스 자리를 모름 · 그 자리에 묶음 파일이 없음(찾은 경로) · 화면이 개발 빌드.
+     */
+    data class WslCoreBundleNotUsed(val reason: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "WSL 코어 묶음을 쓰지 않음 — $reason"
+    }
+
+    /**
+     * 윈도우 화면이 묶음으로 WSL 에 코어를 까는 걸음 하나(`wsl.exe` 너머의 리눅스 명령)가 끝났다. 성공도 남긴다 — 설치가 느리다는 말을
+     * 들었을 때 어느 걸음이 시간을 먹었는지가 여기 있어야 한다.
+     *
+     * @param linuxCommand 셸 없이 넘긴 낱말들. 묶음 안의 파일 자리와 홈 경로뿐이다 — 묶음으로 깔 때는 네트워크도 토큰도 없다.
+     * @param exitCode 받지 못했으면(`wsl.exe` 를 못 띄움 · stdio 가 끊김) null.
+     * @param screenSideFailure 화면 쪽에서 난 까닭(예외 문구) — `wsl.exe` 를 못 띄움 · 묶음을 다 넘기지 못함.
+     * @param output 그 명령이 쓴 전체 출력. 화면은 꼬리 몇 줄만 보이므로 앞쪽에 있던 진짜 까닭은 여기서만 읽힌다. 상한은 부르는 쪽이 정한다.
+     */
+    data class WslCoreInstallCommandFinished(
+        val distributionName: String,
+        val linuxCommand: List<String>,
+        val exitCode: Int?,
+        val elapsedMillis: Long,
+        val screenSideFailure: String?,
+        val output: String,
+    ) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "WSL 코어 설치 걸음 — $distributionName: ${linuxCommand.joinToString(" ")} " +
+                "(종료 코드 ${exitCode ?: "없음"} · ${elapsedMillis} ms)" + (screenSideFailure?.let { " · 화면 쪽: $it" } ?: "")
+
+        override val detail: String?
+            get() = output.ifBlank { null }
+    }
+
+    /**
      * 화면이 코어에 인사했다. 코어의 기록에 남는다 — 윈도우 화면과 WSLg 화면이 같은 코어에 붙는 날, 받은 기록만으로 어느 화면이었는지
      * 가른다.
      *

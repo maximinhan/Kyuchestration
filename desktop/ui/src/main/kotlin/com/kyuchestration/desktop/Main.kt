@@ -5,7 +5,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -28,13 +27,18 @@ import com.kyuchestration.desktop.platform.runningOnWindows
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.wsl.APP_RESOURCES_DIRECTORY_PROPERTY
+import com.kyuchestration.desktop.wsl.BundledWslCore
 import com.kyuchestration.desktop.wsl.ChosenWslDistributionFile
 import com.kyuchestration.desktop.wsl.CoreWorkDirPath
 import com.kyuchestration.desktop.wsl.WslCommandLine
+import com.kyuchestration.desktop.wsl.WslCoreBundleLookup
+import com.kyuchestration.desktop.wsl.WslCoreInstallation
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparation
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparationState
 import com.kyuchestration.desktop.wsl.chosenWslDistributionFilePath
 import com.kyuchestration.desktop.wsl.coreWorkDirPathOf
+import com.kyuchestration.desktop.wsl.lookUpWslCoreBundle
 import com.kyuchestration.desktop.wsl.screenPathOfCorePath
 import com.kyuchestration.desktop.wsl.wslExecutablePath
 import java.nio.file.Path
@@ -44,6 +48,9 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -125,7 +132,8 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
 }
 
 /**
- * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null.
+ * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null. 앱에 WSL 코어 묶음이 실려 있으면
+ * 코어가 없거나 판이 다른 배포판에 그 묶음으로 코어를 놓는다(6.17 의 4b 정정).
  *
  * 준비 창을 먼저 띄우고 그 안에서 목록을 묻고 코어를 본다. 지난번에 고른 배포판이 멈춰 있으면 `wsl.exe -d … -e test` 가 VM 을
  * 깨우느라 몇 초에서 이십 초까지 걸린다 — 창 없이 그것을 기다리면 사람은 앱이 뜨지 않은 줄 안다. 정해지면 준비 창을 닫고 본 창으로
@@ -143,24 +151,40 @@ private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathL
     }
     val wslCommandLine = WslCommandLine(wslExecutable)
     val chosenDistribution = ChosenWslDistributionFile(chosenWslDistributionFilePath(), diagnosticLog)
+    val bundledCore = when (
+        val lookup = lookUpWslCoreBundle(System.getProperty(APP_RESOURCES_DIRECTORY_PROPERTY), DesktopBuildVersion.releaseLabel)
+    ) {
+        is WslCoreBundleLookup.Found -> BundledWslCore(
+            versionLabel = lookup.bundle.versionLabel,
+            install = WslCoreInstallation(wslCommandLine, lookup.bundle.archive, diagnosticLog)::install,
+        )
+        is WslCoreBundleLookup.Absent -> {
+            diagnosticLog.record(DiagnosticLogEntry.WslCoreBundleNotUsed(lookup.absence.reason))
+            null
+        }
+    }
     val preparation = WslCorePlacePreparation(
         listDistributions = wslCommandLine::listDistributions,
         checkCore = wslCommandLine::checkCore,
+        readInstalledCoreVersion = wslCommandLine::readInstalledCoreVersion,
+        bundledCore = bundledCore,
         rememberedDistribution = chosenDistribution::read,
         rememberDistribution = chosenDistribution::write,
     )
+    // 창의 합성이 아니라 이 함수가 쥔다. 설치 중에 창을 닫으면 돌던 wsl.exe 를 끝내고 끝나기를 기다린 뒤에 떠나야 한다(WslCommandLine 의
+    // runWslProcess) — 합성의 스코프는 창이 사라질 때 취소만 하고 기다리지 않으며, 그 사이 JVM 이 끝나면 자식이 남는다.
+    // wsl.exe 를 기다리는 일은 WslCommandLine 이 IO 스레드에서 한다 — 창을 그리는 스레드는 막히지 않는다.
+    val preparationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("wsl-core-place"))
+    preparationScope.launch { preparation.lookAround() }
     // 본 창을 이어서 띄워야 하므로 이 창이 닫혀도 프로세스를 끝내지 않는다.
     application(exitProcessOnExit = false) {
         val state by preparation.state.collectAsState()
-        val preparationScope = rememberCoroutineScope()
-        // wsl.exe 를 기다리는 일은 WslCommandLine 이 IO 스레드에서 한다 — 창을 그리는 스레드는 막히지 않는다.
-        LaunchedEffect(Unit) { preparation.lookAround() }
         LaunchedEffect(state) {
             if (state is WslCorePlacePreparationState.Ready) {
                 exitApplication()
             }
         }
-        Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 480.dp))) {
+        Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(760.dp, 600.dp))) {
             WslCorePlaceScreen(
                 state = state,
                 diagnosticLogPathLabel = diagnosticLogPathLabel,
@@ -169,6 +193,7 @@ private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathL
             )
         }
     }
+    runBlocking { preparationScope.coroutineContext.job.cancelAndJoin() }
     val ready = preparation.state.value as? WslCorePlacePreparationState.Ready ?: return null
     return CorePlace.WslDistribution(wslExecutable, ready.distributionName)
 }

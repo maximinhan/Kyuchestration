@@ -15,16 +15,34 @@ class WslCorePlacePreparationTest {
 
     private val checkedDistributions = mutableListOf<String>()
 
+    private val versionReadDistributions = mutableListOf<String>()
+
+    private val installedDistributions = mutableListOf<String>()
+
     private fun preparation(
         listing: WslDistributionListing = WslDistributionListing.Listed(ubuntuAndDebian),
         rememberedDistribution: String? = null,
         coreCheck: (String) -> WslCoreCheck = { WslCoreCheck.Installed },
+        installedVersion: InstalledWslCoreVersion = InstalledWslCoreVersion.Known("v0.16.0"),
+        bundledCore: BundledWslCore? = null,
     ) = WslCorePlacePreparation(
         listDistributions = { listing },
         checkCore = { distributionName -> checkedDistributions += distributionName; coreCheck(distributionName) },
+        readInstalledCoreVersion = { distributionName -> versionReadDistributions += distributionName; installedVersion },
+        bundledCore = bundledCore,
         rememberedDistribution = { rememberedDistribution },
         rememberDistribution = { remembered += it },
     )
+
+    private fun bundle(
+        versionLabel: String = "v0.16.0",
+        install: (distributionName: String, onProgress: (WslCoreInstallationProgress) -> Unit) -> WslCoreInstallationOutcome = { _, _ ->
+            WslCoreInstallationOutcome.Installed
+        },
+    ) = BundledWslCore(versionLabel) { distributionName, onProgress ->
+        installedDistributions += distributionName
+        install(distributionName, onProgress)
+    }
 
     @Test
     fun `지난번에 고른 배포판에 코어가 있으면 묻지 않고 그 배포판으로 간다`() = runTest {
@@ -143,5 +161,210 @@ class WslCorePlacePreparationTest {
             WslCorePlacePreparationState.Choosing(withoutDefault, preselectedName = "Debian", problem = null),
             preparation.state.value,
         )
+    }
+
+    /** 소스에서 띄운 화면 — 깔린 코어의 판을 견줄 묶음이 없으니 읽지도 않는다. 판은 붙은 뒤 welcome 이 견준다(6.14). */
+    @Test
+    fun `묶음이 없으면 코어가 있을 때 판을 읽지 않고 그 배포판으로 간다`() = runTest {
+        val preparation = preparation(rememberedDistribution = "Debian", installedVersion = InstalledWslCoreVersion.Unknown)
+
+        preparation.lookAround()
+
+        assertEquals(WslCorePlacePreparationState.Ready("Debian"), preparation.state.value)
+        assertEquals(emptyList(), versionReadDistributions)
+    }
+
+    @Test
+    fun `묶음이 있고 깔린 코어의 판이 같으면 깔지 않고 그 배포판으로 간다`() = runTest {
+        val preparation = preparation(rememberedDistribution = "Debian", bundledCore = bundle(versionLabel = "v0.16.0"))
+
+        preparation.lookAround()
+
+        assertEquals(WslCorePlacePreparationState.Ready("Debian"), preparation.state.value)
+        assertEquals(listOf("Debian"), versionReadDistributions)
+        assertEquals(emptyList(), installedDistributions)
+    }
+
+    /** 판이 다른 코어는 규약이 같아도 다른 판의 기능으로 돈다 — 같은 빌드의 묶음이 손에 있으니 갈아 끼운다(6.17 의 4a 정정). */
+    @Test
+    fun `묶음이 있고 깔린 코어의 판이 다르면 다시 깔고 그 배포판으로 간다`() = runTest {
+        val preparation = preparation(
+            rememberedDistribution = "Debian",
+            installedVersion = InstalledWslCoreVersion.Known("v0.15.0"),
+            bundledCore = bundle(versionLabel = "v0.16.0"),
+        )
+
+        preparation.lookAround()
+
+        assertEquals(WslCorePlacePreparationState.Ready("Debian"), preparation.state.value)
+        assertEquals(listOf("Debian"), installedDistributions)
+    }
+
+    /** 4a 이전에 손으로 깐 코어에는 VERSION 이 없다 — 다른 판으로 본다. */
+    @Test
+    fun `묶음이 있고 깔린 코어의 판을 모르면 다시 깐다`() = runTest {
+        val preparation = preparation(
+            rememberedDistribution = "Debian",
+            installedVersion = InstalledWslCoreVersion.Unknown,
+            bundledCore = bundle(),
+        )
+
+        preparation.lookAround()
+
+        assertEquals(WslCorePlacePreparationState.Ready("Debian"), preparation.state.value)
+        assertEquals(listOf("Debian"), installedDistributions)
+    }
+
+    @Test
+    fun `묶음이 있고 코어가 없으면 고른 배포판에 깔고 기억한 뒤 그 배포판으로 간다`() = runTest {
+        val preparation = preparation(coreCheck = { WslCoreCheck.NotInstalled }, bundledCore = bundle())
+        preparation.lookAround()
+
+        preparation.choose("Debian")
+
+        assertEquals(WslCorePlacePreparationState.Ready("Debian"), preparation.state.value)
+        assertEquals(listOf("Debian"), installedDistributions)
+        assertEquals(emptyList(), versionReadDistributions)
+        assertEquals(listOf("Debian"), remembered)
+    }
+
+    @Test
+    fun `까는 동안 걸음과 설치 스크립트의 줄을 상태로 보인다`() = runTest {
+        lateinit var preparation: WslCorePlacePreparation
+        val statesDuringInstall = mutableListOf<WslCorePlacePreparationState>()
+        preparation = preparation(
+            coreCheck = { WslCoreCheck.NotInstalled },
+            bundledCore = bundle { _, onProgress ->
+                statesDuringInstall += preparation.state.value
+                onProgress(WslCoreInstallationProgress(WslCoreInstallationStep.RunningInstallScript, listOf("대상: linux_amd64")))
+                statesDuringInstall += preparation.state.value
+                WslCoreInstallationOutcome.Installed
+            },
+        )
+        preparation.lookAround()
+
+        preparation.choose("Debian")
+
+        assertEquals(
+            listOf<WslCorePlacePreparationState>(
+                WslCorePlacePreparationState.InstallingCore("Debian", WslCoreInstallationStep.FindingLinuxHome, emptyList()),
+                WslCorePlacePreparationState.InstallingCore("Debian", WslCoreInstallationStep.RunningInstallScript, listOf("대상: linux_amd64")),
+            ),
+            statesDuringInstall,
+        )
+    }
+
+    /** 실패한 배포판은 기억하지 않는다 — 다음에 뜰 때 같은 자리에서 또 멈춘다. 손으로 까는 길과 다시 시도가 함께 보인다. */
+    @Test
+    fun `깔다 실패하면 그 걸음과 종료 코드와 마지막 줄들을 보이고 기억하지 않는다`() = runTest {
+        val failure = WslCoreInstallationOutcome.Failed(
+            WslCoreInstallationStep.RunningInstallScript,
+            exitCode = 7,
+            screenSideFailure = null,
+            lastOutputLines = listOf("오류: 코어가 뜨지 않았습니다"),
+        )
+        val preparation = preparation(coreCheck = { WslCoreCheck.NotInstalled }, bundledCore = bundle { _, _ -> failure })
+        preparation.lookAround()
+
+        preparation.choose("Debian")
+
+        assertEquals(
+            WslCorePlacePreparationState.Choosing(
+                ubuntuAndDebian,
+                preselectedName = "Debian",
+                problem = ChosenDistributionProblem.CoreInstallFailed("Debian", failure),
+            ),
+            preparation.state.value,
+        )
+        assertEquals(emptyList(), remembered)
+    }
+
+    @Test
+    fun `실패한 뒤 같은 배포판을 다시 고르면 다시 깐다`() = runTest {
+        var attempts = 0
+        val preparation = preparation(
+            coreCheck = { WslCoreCheck.NotInstalled },
+            bundledCore = bundle { _, _ ->
+                if (++attempts == 1) {
+                    WslCoreInstallationOutcome.Failed(WslCoreInstallationStep.ExtractingBundle, 2, null, emptyList())
+                } else {
+                    WslCoreInstallationOutcome.Installed
+                }
+            },
+        )
+        preparation.lookAround()
+        preparation.choose("Debian")
+
+        preparation.choose("Debian")
+
+        assertEquals(WslCorePlacePreparationState.Ready("Debian"), preparation.state.value)
+        assertEquals(listOf("Debian", "Debian"), installedDistributions)
+    }
+
+    @Test
+    fun `리눅스 홈에 빈칸이 있어 깔지 않았으면 그 홈을 이유로 보인다`() = runTest {
+        val preparation = preparation(
+            coreCheck = { WslCoreCheck.NotInstalled },
+            bundledCore = bundle { _, _ -> WslCoreInstallationOutcome.LinuxHomeUnusable("/home/yawn han") },
+        )
+        preparation.lookAround()
+
+        preparation.choose("Debian")
+
+        assertEquals(
+            ChosenDistributionProblem.CoreInstallRefusedForLinuxHome("Debian", "/home/yawn han"),
+            (preparation.state.value as WslCorePlacePreparationState.Choosing).problem,
+        )
+    }
+
+    @Test
+    fun `판을 읽다 배포판을 띄우지 못하면 wsl 의 말을 보인다`() = runTest {
+        val preparation = preparation(
+            rememberedDistribution = "Debian",
+            installedVersion = InstalledWslCoreVersion.DistributionFailed("Catastrophic failure"),
+            bundledCore = bundle(),
+        )
+
+        preparation.lookAround()
+
+        assertEquals(
+            ChosenDistributionProblem.DistributionFailed("Debian", "Catastrophic failure"),
+            (preparation.state.value as WslCorePlacePreparationState.Choosing).problem,
+        )
+        assertEquals(emptyList(), installedDistributions)
+    }
+
+    /**
+     * 실제 [WslCoreInstallation] 을 잇는다. 걸음이 던지면(묶음 파일을 못 읽음 · `wsl.exe` 를 못 띄움) 상태가 단추 없는 InstallingCore 에
+     * 머물지 않고 다시 고르기로 돌아와야 한다.
+     */
+    @Test
+    fun `설치 걸음이 던져도 상태는 설치 실패로 돌아온다`() = runTest {
+        val throwingCommands = object : WslDistributionCommands {
+            override suspend fun run(distributionName: String, linuxCommand: List<String>): WslCommandResult =
+                throw java.io.IOException("Cannot run program \"wsl.exe\"")
+
+            override suspend fun runFeedingStandardInput(distributionName: String, linuxCommand: List<String>, standardInput: java.nio.file.Path) =
+                throw java.io.IOException("Cannot run program \"wsl.exe\"")
+
+            override suspend fun runReportingEachLine(distributionName: String, linuxCommand: List<String>, onOutputLine: (String) -> Unit): Int =
+                throw java.io.IOException("Cannot run program \"wsl.exe\"")
+        }
+        val installation = WslCoreInstallation(
+            throwingCommands,
+            java.nio.file.Path.of("kyuchestration-wsl-core.tar.gz"),
+            com.kyuchestration.desktop.diagnostics.DiagnosticLog.Discarding,
+        )
+        val preparation = preparation(
+            coreCheck = { WslCoreCheck.NotInstalled },
+            bundledCore = BundledWslCore("v0.16.0", installation::install),
+        )
+        preparation.lookAround()
+
+        preparation.choose("Debian")
+
+        val problem = (preparation.state.value as WslCorePlacePreparationState.Choosing).problem as ChosenDistributionProblem.CoreInstallFailed
+        assertEquals(WslCoreInstallationStep.FindingLinuxHome, problem.failure.step)
+        assertEquals("java.io.IOException: Cannot run program \"wsl.exe\"", problem.failure.screenSideFailure)
     }
 }

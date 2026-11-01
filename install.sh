@@ -36,6 +36,11 @@
 #
 # sh 가 아니라 bash 를 쓴다. 다만 macOS 에 기본으로 깔린 bash 3.2 에서도 도는 범위로만 썼다 —
 # 배열을 쓰지 않은 것이 그 때문이다(3.2 는 set -u 아래에서 빈 배열 전개를 오류로 본다).
+#
+# 파이프의 뒤쪽에 입력을 다 읽기 전에 끝나는 소비자(head · grep -m1 · grep -q · awk 의 exit)를 두지 않는다.
+# pipefail 아래에서는 아직 쓰던 앞 단계가 SIGPIPE(141)로 죽은 것이 파이프 전체의 실패가 되고, set -e 가
+# 설치를 거기서 끝낸다 — 입력 크기와 스케줄링에 따라 났다 안 났다 한다. 찾은 뒤에도 끝까지 읽는다.
+# SIGPIPE 를 무시하거나 141 을 허용해 막지 않는다 — 진짜 실패까지 가린다.
 
 set -euo pipefail
 
@@ -259,12 +264,12 @@ release_tag_name() {
     tr -d ' \t' < "$1" \
         | tr ',' '\n' \
         | awk '
-            match($0, /"tag_name":"[^"]*"/) {
+            !found && match($0, /"tag_name":"[^"]*"/) {
                 value = substr($0, RSTART, RLENGTH)
                 sub(/^"tag_name":"/, "", value)
                 sub(/"$/, "", value)
                 print value
-                exit
+                found = 1
             }
         '
 }
@@ -277,6 +282,10 @@ release_tag_name() {
 #
 # GitHub 응답에서 자산 객체는 url 이 name 보다 먼저 온다. 그래서 자산 주소를 볼 때마다 기억해
 # 두었다가, 찾는 이름을 만나면 직전에 본 것을 답한다.
+#
+# 이 함수와 release_tag_name 의 awk 는 찾은 뒤에도 exit 하지 않고 입력을 끝까지 읽는다. 먼저 끝나면
+# 아직 쓰던 tr 이 SIGPIPE(141)로 죽고, pipefail 과 set -e 가 그것을 설치 실패로 만든다 — 릴리스 노트가
+# 파이프 버퍼보다 길거나, tr 이 작은 응답도 나눠 쓰면 난다.
 asset_api_url_for() {
     local release_json_path="$1"
     local asset_name="$2"
@@ -289,9 +298,9 @@ asset_api_url_for() {
                 sub(/^"url":"/, "", candidate)
                 sub(/"$/, "", candidate)
             }
-            index($0, wanted) > 0 && candidate != "" {
+            !found && index($0, wanted) > 0 && candidate != "" {
                 print candidate
-                exit
+                found = 1
             }
         '
 }

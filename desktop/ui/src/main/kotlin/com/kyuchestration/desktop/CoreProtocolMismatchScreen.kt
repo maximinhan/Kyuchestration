@@ -22,9 +22,10 @@ import com.kyuchestration.desktop.theme.resolveDarkTheme
  * 코어가 다른 틀 규약을 말할 때 서는 화면(core-ui-split-design.md 6.14). 이 화면에서는 아무것도 할 수 없다 — 할 일은 화면과 코어를
  * 같은 판으로 맞추는 것 하나이고, 그 판단의 재료가 두 판이다.
  *
- * 코어가 WSL 안에 따로 깔려 있으면(윈도우) 판이 갈리는 일이 실제로 생긴다 — 둘을 따로 설치하기 때문이다. 그때는 낡은 쪽의 할 일을
- * 하나로 적는다: 코어가 낡았으면 WSL 에서 돌릴 설치 한 줄, 화면이 낡았으면 새 설치 패키지. 맥 · 리눅스의 코어는 화면과 한 패키지라
- * 다시 설치하라는 말로 충분하다.
+ * 코어가 WSL 안에 따로 깔려 있으면(윈도우) 판이 갈리는 일이 생길 수 있다. msi 로 깐 화면은 실린 묶음으로 같은 판의 코어를 놓고
+ * 나서야 띄우므로(6.17 의 4b 정정) 거기서는 나지 않고, 묶음 없이 소스에서 띄운 화면이 손으로 깐 코어에 붙을 때 난다. 그때는 낡은 쪽의
+ * 할 일을 하나로 적는다: 코어가 낡았으면 WSL 에서 돌릴 설치 한 줄, 화면이 낡았으면 새 설치 패키지. 맥 · 리눅스의 코어는 화면과 한
+ * 패키지라 다시 설치하라는 말로 충분하다.
  *
  * @param coreInstalledSeparatelyInWsl 코어를 WSL 너머에 띄웠는가.
  */
@@ -51,7 +52,9 @@ internal fun CoreProtocolMismatchScreen(
                 Text(
                     text = when (remedy) {
                         MismatchRemedy.ReinstallTogether -> "화면과 코어를 같은 판으로 다시 설치한 뒤 띄우세요."
-                        MismatchRemedy.UpdateWslCore -> "WSL 의 코어가 낡았습니다. 코어를 새로 설치한 뒤 다시 띄우세요."
+                        MismatchRemedy.UpdateWslCore ->
+                            "WSL 의 코어가 낡았습니다. 이 화면에는 코어 묶음이 실려 있지 않아 스스로 갈아 끼우지 못합니다 — " +
+                                "WSL 터미널에서 코어를 새로 설치한 뒤 다시 띄우세요."
                         MismatchRemedy.UpdateScreen -> "이 화면이 낡았습니다. 릴리스 페이지에서 새 설치 패키지(msi)를 받아 설치한 뒤 다시 띄우세요."
                     } + " 세션은 열지 않았습니다.",
                     style = MaterialTheme.typography.bodySmall,

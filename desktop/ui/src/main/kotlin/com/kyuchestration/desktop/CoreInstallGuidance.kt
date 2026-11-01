@@ -14,7 +14,8 @@ import com.kyuchestration.desktop.mirror.CoreConnection
 /**
  * WSL 터미널에서 돌릴 코어 설치 한 줄(core-ui-split-design.md 6.17). kyu 와 코어를 함께 놓고, 다시 돌리면 최신 릴리스로 갈아 끼운다.
  *
- * 화면이 대신 돌리지 않는다 — 설치는 사람이 WSL 터미널에서 한다(6.17 의 판단, 8 절 5).
+ * msi 로 깐 화면은 실린 묶음으로 스스로 깐다(6.17 의 4b 정정). 이 한 줄은 묶음이 없는 화면(소스 실행)과, 묶음으로 깔다 실패했거나 깔 수
+ * 없는 배포판(리눅스 홈에 빈칸)에서 사람이 손으로 까는 길이다 — 릴리스에서 받는다.
  */
 internal const val WSL_CORE_INSTALL_COMMAND =
     "curl -fsSL https://raw.githubusercontent.com/maximinhan/Kyuchestration/main/install.sh | bash -s -- --with-core"
@@ -24,7 +25,10 @@ internal enum class MismatchRemedy {
     /** 맥 · 리눅스 — 코어가 화면과 한 패키지다. */
     ReinstallTogether,
 
-    /** 윈도우 — WSL 의 코어가 낡았다. 설치 한 줄을 보인다. */
+    /**
+     * 윈도우 — WSL 의 코어가 낡았다. 설치 한 줄을 보인다. 묶음이 실린 화면은 판이 같은 코어만 띄우므로(6.17 의 4b 정정) 이 갈래는
+     * 묶음 없이 소스에서 띄운 화면에서만 난다.
+     */
     UpdateWslCore,
 
     /** 윈도우 — 화면이 낡았다. 새 msi 다. */

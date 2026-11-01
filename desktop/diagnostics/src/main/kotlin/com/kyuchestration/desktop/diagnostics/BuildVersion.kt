@@ -23,11 +23,22 @@ object BuildVersion {
      * 자리가 사라져 어떤 빌드를 보고 있는지 알 수 없으므로, 개발 빌드임을 드러내는 쪽을 택한다.
      * (kyu CLI 가 Go 빌드 정보의 "(devel)" 을 다루는 규칙과 같다)
      */
-    fun labelOf(anchor: Class<*>): String =
-        formatVersionLabel(implementationVersionOf(Path.of(anchor.protectionDomain.codeSource.location.toURI())))
+    fun labelOf(anchor: Class<*>): String = formatVersionLabel(implementationVersionOf(anchor))
+
+    /**
+     * [anchor] 가 실린 jar 의 릴리스 판 라벨("v0.15.0"). 매니페스트가 없는 개발 빌드면 null — [labelOf] 의 "개발 빌드" 는 사람에게
+     * 보이는 말이라 판과 견줄 수 없다. 윈도우 화면이 자기에게 실린 WSL 코어 묶음의 판을 이 값으로 정한다(설계 6.17 의 4b 정정).
+     */
+    fun releaseLabelOf(anchor: Class<*>): String? = releaseLabelOf(implementationVersionOf(anchor))
 
     internal fun formatVersionLabel(implementationVersion: String?): String =
-        if (implementationVersion.isNullOrBlank()) DEVELOPMENT_BUILD_LABEL else "v$implementationVersion"
+        releaseLabelOf(implementationVersion) ?: DEVELOPMENT_BUILD_LABEL
+
+    internal fun releaseLabelOf(implementationVersion: String?): String? =
+        if (implementationVersion.isNullOrBlank()) null else "v$implementationVersion"
+
+    private fun implementationVersionOf(anchor: Class<*>): String? =
+        implementationVersionOf(Path.of(anchor.protectionDomain.codeSource.location.toURI()))
 
     /** [codeSourceLocation] 이 jar 면 그 매니페스트의 Implementation-Version. 클래스 디렉토리이거나 적혀 있지 않으면 null. */
     internal fun implementationVersionOf(codeSourceLocation: Path): String? {
