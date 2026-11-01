@@ -28,13 +28,18 @@ import com.kyuchestration.desktop.platform.runningOnWindows
 import com.kyuchestration.desktop.protocol.ScreenFacingCore
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.theme.ThemePreference
+import com.kyuchestration.desktop.wsl.APP_RESOURCES_DIRECTORY_PROPERTY
+import com.kyuchestration.desktop.wsl.BundledWslCore
 import com.kyuchestration.desktop.wsl.ChosenWslDistributionFile
 import com.kyuchestration.desktop.wsl.CoreWorkDirPath
 import com.kyuchestration.desktop.wsl.WslCommandLine
+import com.kyuchestration.desktop.wsl.WslCoreBundleLookup
+import com.kyuchestration.desktop.wsl.WslCoreInstallation
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparation
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparationState
 import com.kyuchestration.desktop.wsl.chosenWslDistributionFilePath
 import com.kyuchestration.desktop.wsl.coreWorkDirPathOf
+import com.kyuchestration.desktop.wsl.lookUpWslCoreBundle
 import com.kyuchestration.desktop.wsl.screenPathOfCorePath
 import com.kyuchestration.desktop.wsl.wslExecutablePath
 import java.nio.file.Path
@@ -125,7 +130,8 @@ fun runScreen(sameMachineCoreLaunchCommand: () -> List<String>) {
 }
 
 /**
- * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null.
+ * 윈도우 화면이 코어를 띄울 WSL 배포판을 정한다(6.17). 사람이 창을 닫아 정하지 않고 떠나면 null. 앱에 WSL 코어 묶음이 실려 있으면
+ * 코어가 없거나 판이 다른 배포판에 그 묶음으로 코어를 놓는다(6.17 의 4b 정정).
  *
  * 준비 창을 먼저 띄우고 그 안에서 목록을 묻고 코어를 본다. 지난번에 고른 배포판이 멈춰 있으면 `wsl.exe -d … -e test` 가 VM 을
  * 깨우느라 몇 초에서 이십 초까지 걸린다 — 창 없이 그것을 기다리면 사람은 앱이 뜨지 않은 줄 안다. 정해지면 준비 창을 닫고 본 창으로
@@ -143,9 +149,23 @@ private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathL
     }
     val wslCommandLine = WslCommandLine(wslExecutable)
     val chosenDistribution = ChosenWslDistributionFile(chosenWslDistributionFilePath(), diagnosticLog)
+    val bundledCore = when (
+        val lookup = lookUpWslCoreBundle(System.getProperty(APP_RESOURCES_DIRECTORY_PROPERTY), DesktopBuildVersion.releaseLabel)
+    ) {
+        is WslCoreBundleLookup.Found -> BundledWslCore(
+            versionLabel = lookup.bundle.versionLabel,
+            install = WslCoreInstallation(wslCommandLine, lookup.bundle.archive, diagnosticLog)::install,
+        )
+        is WslCoreBundleLookup.Absent -> {
+            diagnosticLog.record(DiagnosticLogEntry.WslCoreBundleNotUsed(lookup.absence.reason))
+            null
+        }
+    }
     val preparation = WslCorePlacePreparation(
         listDistributions = wslCommandLine::listDistributions,
         checkCore = wslCommandLine::checkCore,
+        readInstalledCoreVersion = wslCommandLine::readInstalledCoreVersion,
+        bundledCore = bundledCore,
         rememberedDistribution = chosenDistribution::read,
         rememberDistribution = chosenDistribution::write,
     )
@@ -160,7 +180,7 @@ private fun prepareWslCorePlace(diagnosticLog: DiagnosticLog, diagnosticLogPathL
                 exitApplication()
             }
         }
-        Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(720.dp, 480.dp))) {
+        Window(onCloseRequest = ::exitApplication, title = "뀨케스트레이션", state = rememberWindowState(size = DpSize(760.dp, 600.dp))) {
             WslCorePlaceScreen(
                 state = state,
                 diagnosticLogPathLabel = diagnosticLogPathLabel,

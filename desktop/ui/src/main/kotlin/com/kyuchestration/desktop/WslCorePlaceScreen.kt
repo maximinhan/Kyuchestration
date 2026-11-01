@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +31,7 @@ import com.kyuchestration.desktop.theme.KyuTheme
 import com.kyuchestration.desktop.theme.ThemePreference
 import com.kyuchestration.desktop.theme.resolveDarkTheme
 import com.kyuchestration.desktop.wsl.ChosenDistributionProblem
+import com.kyuchestration.desktop.wsl.WslCoreInstallationStep
 import com.kyuchestration.desktop.wsl.WslCorePlacePreparationState
 
 /**
@@ -48,6 +50,7 @@ internal fun WslCorePlaceScreen(
             WslCorePlacePreparationState.LookingAround -> Progress("WSL 배포판을 살피는 중입니다")
             is WslCorePlacePreparationState.CheckingCore -> Progress("${state.distributionName} 에 코어가 있는지 보는 중입니다")
             is WslCorePlacePreparationState.Ready -> Progress("${state.distributionName} 의 코어를 띄웁니다")
+            is WslCorePlacePreparationState.InstallingCore -> CoreInstallationProgress(state)
             WslCorePlacePreparationState.NoDistributions -> {
                 Headline("WSL 배포판이 없습니다")
                 Guidance(
@@ -63,7 +66,8 @@ internal fun WslCorePlaceScreen(
                 DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
                 Button(onClick = onLookAroundAgainRequested) { Text("다시 보기") }
             }
-            is WslCorePlacePreparationState.Choosing -> DistributionChoice(state, onLookAroundAgainRequested, onDistributionChosen)
+            is WslCorePlacePreparationState.Choosing ->
+                DistributionChoice(state, diagnosticLogPathLabel, onLookAroundAgainRequested, onDistributionChosen)
         }
     }
 }
@@ -80,9 +84,18 @@ internal fun WslMissingScreen(wslExecutableLabel: String) {
     }
 }
 
+/** 앱이 실은 묶음으로 코어를 놓는 동안. 사람이 할 일이 없어 단추가 없다 — 중간에 다른 배포판을 고르면 반쯤 놓인 자리가 둘이 된다. */
+@Composable
+private fun CoreInstallationProgress(state: WslCorePlacePreparationState.InstallingCore) {
+    Progress("${state.distributionName} 에 코어와 kyu 를 놓는 중입니다 — ${state.step.label()}")
+    Guidance("앱에 실린 코어를 그 배포판에 풉니다. 네트워크는 쓰지 않습니다.")
+    OutputLines(state.reportLines)
+}
+
 @Composable
 private fun DistributionChoice(
     state: WslCorePlacePreparationState.Choosing,
+    diagnosticLogPathLabel: String,
     onLookAroundAgainRequested: () -> Unit,
     onDistributionChosen: (distributionName: String) -> Unit,
 ) {
@@ -101,7 +114,7 @@ private fun DistributionChoice(
             }
         }
     }
-    state.problem?.let { problem -> ProblemWithChosenDistribution(problem) }
+    state.problem?.let { problem -> ProblemWithChosenDistribution(problem, diagnosticLogPathLabel, onDistributionChosen) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { onDistributionChosen(chosenName) }) { Text("이 배포판으로") }
         TextButton(onClick = onLookAroundAgainRequested) { Text("목록 다시 보기") }
@@ -109,28 +122,59 @@ private fun DistributionChoice(
 }
 
 @Composable
-private fun ProblemWithChosenDistribution(problem: ChosenDistributionProblem) {
+private fun ProblemWithChosenDistribution(
+    problem: ChosenDistributionProblem,
+    diagnosticLogPathLabel: String,
+    onDistributionChosen: (distributionName: String) -> Unit,
+) {
     when (problem) {
         is ChosenDistributionProblem.CoreNotInstalled -> {
-            Text(
-                "${problem.distributionName} 에 코어가 없습니다 — ~/$WSL_CORE_EXECUTABLE_FROM_HOME",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-            )
+            ProblemHeadline("${problem.distributionName} 에 코어가 없습니다 — ~/$WSL_CORE_EXECUTABLE_FROM_HOME")
             WslCoreInstallCommand()
             Guidance("그 배포판의 터미널에서 설치한 뒤 '이 배포판으로' 를 다시 누르세요.")
         }
         is ChosenDistributionProblem.DistributionFailed -> {
-            Text(
-                "${problem.distributionName} 을 띄우지 못했습니다",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-            )
+            ProblemHeadline("${problem.distributionName} 을 띄우지 못했습니다")
             WslMessage(problem.wslMessage)
         }
+        is ChosenDistributionProblem.CoreInstallFailed -> {
+            ProblemHeadline("${problem.distributionName} 에 코어를 놓지 못했습니다 — ${problem.step.label()}, 종료 코드 ${problem.exitCode}")
+            OutputLines(problem.lastOutputLines)
+            DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
+            Button(onClick = { onDistributionChosen(problem.distributionName) }) { Text("다시 시도") }
+            Guidance("다시 시도해도 같으면 그 배포판의 터미널에서 손으로 깔 수 있습니다(릴리스에서 받습니다).")
+            WslCoreInstallCommand()
+        }
+        is ChosenDistributionProblem.CoreInstallRefusedForLinuxHome -> {
+            ProblemHeadline("${problem.distributionName} 의 리눅스 홈(${problem.linuxHome})에 빈칸이 있어 코어를 놓지 않았습니다")
+            Guidance("앱이 wsl.exe 로 넘기는 경로에서는 빈칸을 지킬 수 없습니다. 그 배포판의 터미널에서 손으로 까세요.")
+            WslCoreInstallCommand()
+        }
     }
+}
+
+@Composable
+private fun ProblemHeadline(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+}
+
+/** 설치 스크립트 · tar 가 쓴 마지막 줄들. 리눅스 쪽 글이라 고정폭으로 그대로 보인다 — 사람이 그 줄로 무엇이 멈췄는지 안다. */
+@Composable
+private fun OutputLines(lines: List<String>) {
+    if (lines.isEmpty()) {
+        return
+    }
+    SelectionContainer {
+        Text(lines.joinToString("\n"), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    }
+}
+
+private fun WslCoreInstallationStep.label(): String = when (this) {
+    WslCoreInstallationStep.FindingLinuxHome -> "리눅스 홈 찾기"
+    WslCoreInstallationStep.PreparingScratchDirectory -> "풀 자리 마련하기"
+    WslCoreInstallationStep.ExtractingBundle -> "코어 묶음 풀기"
+    WslCoreInstallationStep.RunningInstallScript -> "install.sh --with-core"
+    WslCoreInstallationStep.RemovingScratchDirectory -> "풀었던 자리 치우기"
 }
 
 @Composable

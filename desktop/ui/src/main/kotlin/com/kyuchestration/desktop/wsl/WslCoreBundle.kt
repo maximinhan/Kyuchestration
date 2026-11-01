@@ -19,16 +19,28 @@ sealed interface WslCoreBundleLookup {
 
 sealed interface WslCoreBundleAbsence {
 
-    /** Compose 가 앱 리소스 자리를 알리지 않았다 — 소스에서 띄운 화면이다. */
-    data object ResourcesDirectoryUnknown : WslCoreBundleAbsence
+    /** 진단 기록에 남길 까닭. */
+    val reason: String
 
-    data class ArchiveMissing(val expectedArchive: String) : WslCoreBundleAbsence
+    /** Compose 가 앱 리소스 자리를 알리지 않았다 — 소스에서 띄운 화면이다. */
+    data object ResourcesDirectoryUnknown : WslCoreBundleAbsence {
+        override val reason: String
+            get() = "앱 리소스 자리($APP_RESOURCES_DIRECTORY_PROPERTY)를 모른다 — 소스에서 띄운 화면"
+    }
+
+    data class ArchiveMissing(val expectedArchive: String) : WslCoreBundleAbsence {
+        override val reason: String
+            get() = "묶음 파일이 없다: $expectedArchive"
+    }
 
     /**
      * 화면이 개발 빌드라 견줄 판이 없다. 묶음과 화면은 같은 빌드에서 나와 생기지 않는 짝이지만, 생기면 깔린 코어의 `VERSION` 과 무엇을
      * 견줄지 정할 수 없다 — 묶음이 없는 것과 같이 다룬다.
      */
-    data object ScreenIsDevelopmentBuild : WslCoreBundleAbsence
+    data object ScreenIsDevelopmentBuild : WslCoreBundleAbsence {
+        override val reason: String
+            get() = "화면이 개발 빌드라 묶음의 판을 정할 수 없다"
+    }
 }
 
 /**
