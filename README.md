@@ -6,10 +6,11 @@
 
 명령 이름 `kyu` 는 프로젝트 이름에서 땄다 — 뀨케스트레이션의 앞 글자다.
 
-- 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md)
-- 다음 설계(승인 대기): [session-tree-design.md](session-tree-design.md) — 메인이 하위 세션을 낳고 대화한다
+- 설계: [workdir-orchestrator-design.md](workdir-orchestrator-design.md) — 워크디렉토리 오케스트레이터
+- 세션 트리 설계(구현됨): [session-tree-design.md](session-tree-design.md) — 메인이 하위 세션을 낳고 양방향으로 대화한다
+- 코어 · 화면 분리 설계: [core-ui-split-design.md](core-ui-split-design.md) — 1~4 단계 구현됨(윈도우 창 + WSL 코어), 5 단계(코어 데몬 · 재접속)는 예정
 - 핵심 원칙: **프로세스는 격리, 지식은 공유**
-- 스택: Go — `kyu` 는 엔진이고, 세션을 열고 화면을 그리는 것은 데스크톱 앱이다
+- 스택: Go 엔진 + Kotlin 코어(세션 소유) + Compose 화면 — `kyu` 는 엔진이고, 세션을 쥐는 것은 데스크톱 앱의 코어, 그리는 것은 화면이다
 - 터미널 대신 창으로 쓰려면: [데스크톱 앱](#데스크톱-앱)
 
 ## 이 도구가 하는 일
@@ -34,7 +35,7 @@ WorkDir-featureX/
 | 프로그램 | 쓰이는 곳 | 없으면 |
 |---|---|---|
 | git | 레포 발견 · 상태 판정 · `kyu clone` 의 클론 | 상태를 판정하지 못하고 클론도 못 함 |
-| claude CLI | 세션 안에서 실행되는 명령 (엔진이 아니라 [앱](#데스크톱-앱)이 띄운다). **로그인돼 있어야 한다** — 앱이 그 자리를 안내한다([Claude 로그인](#앱이-claude-로그인을-안내한다)) | 앱이 세션을 열지 못함. 엔진의 명령은 전부 그대로 동작 |
+| claude CLI | 세션 안에서 실행되는 명령 (엔진이 아니라 [앱](#데스크톱-앱)의 코어가 띄운다). **로그인돼 있어야 한다** — 앱이 그 자리를 안내한다([Claude 로그인](#앱이-claude-로그인을-안내한다)) | 앱이 세션을 열지 못함. 엔진의 명령은 전부 그대로 동작 |
 | Go | 소스에서 설치할 때만 (버전은 `go.mod` 의 `go` 지시자를 따른다) | 릴리스 바이너리를 받는다 (설치 방식 A) |
 
 macOS 와 Windows(WSL) 에서 쓴다.
@@ -43,10 +44,16 @@ macOS 와 Windows(WSL) 에서 쓴다.
 `tmux` 의존이 함께 사라졌다 — 엔진 코드에서 그것을 부르는 자리가 하나도 남지 않았다
 ([app-owned-sessions-design.md](app-owned-sessions-design.md) 6 절).
 
-**`claude` 를 부르는 자리가 하나 있다.** `kyu mcp serve` 가 여는 `run_in_repo` 는 레포 디렉토리에서
-`claude` 를 헤드리스로 실행한다 — 그 레포의 설정을 전부 로드한 채로 일을 시키는 것이 그 도구의
-존재 이유다([orchestration-tools-design.md](orchestration-tools-design.md) 5.4). 나머지 명령은
-`claude` 없이 동작한다.
+**세션의 `claude` 는 엔진이 아니라 앱의 코어가 띄운다.** 메인 · 레포 세션도, 메인이 낳는
+[하위 세션](#하위-세션--메인이-낳고-대화한다)도 마찬가지다. 엔진은 무엇을 띄울지 명령만 답한다 —
+`kyu session-command --chat`, 하위 세션이면 `--child` 를 더한다. 띄울 줄 아는 지식(플래그 · 대화 ID ·
+MCP 등록)은 엔진에 두고, 프로세스를 쥐는 것은 코어다.
+
+**엔진이 직접 `claude` 를 부르는 자리는 하나 남아 있다.** `kyu mcp serve` 가 여는 `run_in_repo` 는 레포
+디렉토리에서 `claude` 를 헤드리스로 실행한다 — 그 레포의 설정을 전부 로드한 채로 일을 시키는 것이 그
+도구의 존재 이유다([orchestration-tools-design.md](orchestration-tools-design.md) 5.4). 같은 일을 이제
+하위 세션이 사람에게 보이는 채로 하므로 이 도구는 은퇴 예정이다([session-tree-design.md](session-tree-design.md)
+6.16). 나머지 명령은 `claude` 없이 동작한다.
 
 `git` 조차 필요 없는 명령이 있다. `kyu init` 은 파일을 만들고, `kyu version` 은 자기 자신에 대해
 답하고, `kyu auth` 는 저장해둔 토큰을 다루고, `kyu session-command` 는 앱이 무엇을 띄울지 답한다 —
