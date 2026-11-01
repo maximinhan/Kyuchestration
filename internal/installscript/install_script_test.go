@@ -15,8 +15,8 @@ import (
 	"testing"
 )
 
-// fakeCurl 은 install.sh 가 부르는 두 가지만 흉내 낸다 — 최신 릴리스 정보와 kyu 자산. --output 자리에 쓰고 --write-out 으로
-// 상태 코드 200 을 낸다. 받는 kyu 는 version 에 답하는 셸 스크립트다.
+// fakeCurl 은 install.sh 가 부르는 세 가지만 흉내 낸다 — 최신 릴리스 정보, kyu 자산, 코어 자산. --output 자리에 쓰고 --write-out
+// 으로 상태 코드 200 을 낸다. 받는 kyu 는 version 에 답하는 셸 스크립트이고, 코어 자산은 FAKE_RELEASE_CORE_ARCHIVE 가 가리키는 묶음이다.
 //
 // 불릴 때마다 자기 옆의 curl-calls.log 에 주소를 적는다. 로컬 파일만으로 설치할 때 네트워크에 한 번도 닿지 않았는지를 그 기록이
 // 없다는 것으로 본다.
@@ -34,9 +34,11 @@ done
 printf '%s\n' "$url" >> "$(dirname "$0")/curl-calls.log"
 case "$url" in
     */releases/latest)
-        printf '%s' '{"tag_name":"v9.9.9","assets":[{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/1","name":"kyu_linux_amd64"}]}' > "$output" ;;
+        printf '%s' '{"tag_name":"v9.9.9","assets":[{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/1","name":"kyu_linux_amd64"},{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/2","name":"kyuchestration-core_9.9.9_linux_amd64.tar.gz"}]}' > "$output" ;;
     */releases/assets/1)
-        printf '#!/bin/sh\necho "kyu v9.9.9"\n' > "$output" ;;
+        printf '#!/bin/sh\necho "kyu v9.9.9 from-release"\n' > "$output" ;;
+    */releases/assets/2)
+        cat "$FAKE_RELEASE_CORE_ARCHIVE" > "$output" ;;
     *) printf '404'; exit 0 ;;
 esac
 printf '200'
@@ -101,16 +103,21 @@ func coreArchive(t *testing.T, marker string, serveExitCode int) string {
 	return archivePath
 }
 
-func (environment installEnvironment) runInstall(t *testing.T, archivePath string, extraEnvironment ...string) (string, error) {
+func (environment installEnvironment) runInstall(t *testing.T, extraEnvironment ...string) (string, error) {
 	t.Helper()
 	command := exec.Command("bash", "../../install.sh", "--with-core")
 	command.Env = append([]string{
 		"HOME=" + environment.home,
 		"PATH=" + environment.fakeBin + ":/usr/bin:/bin",
-		"KYU_CORE_ARCHIVE=" + archivePath,
 	}, extraEnvironment...)
 	output, err := command.CombinedOutput()
 	return string(output), err
+}
+
+// localFiles 는 코어 묶음과 kyu 를 둘 다 손에서 놓게 하는 환경이다. --with-core 는 둘 다 주거나 둘 다 주지 않아야 한다.
+func localFiles(t *testing.T, archivePath string) []string {
+	t.Helper()
+	return []string{"KYU_CORE_ARCHIVE=" + archivePath, "KYU_BINARY_FILE=" + localKyuBinary(t, "kyu v9.9.9")}
 }
 
 func (environment installEnvironment) installedMarker(t *testing.T) string {
@@ -128,7 +135,7 @@ func TestCoreLinkStaysAtTheScreensPlaceEvenWhenKyuGoesElsewhere(t *testing.T) {
 	environment := newInstallEnvironment(t)
 	otherBin := filepath.Join(environment.home, "tools/bin")
 
-	output, err := environment.runInstall(t, coreArchive(t, "v1", 0), "KYU_INSTALL_DIR="+otherBin)
+	output, err := environment.runInstall(t, append(localFiles(t, coreArchive(t, "v1", 0)), "KYU_INSTALL_DIR="+otherBin)...)
 	if err != nil {
 		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
 	}
@@ -149,11 +156,11 @@ func TestCoreLinkStaysAtTheScreensPlaceEvenWhenKyuGoesElsewhere(t *testing.T) {
 // 새 코어가 뜨지 않으면 쓰던 코어가 그대로 남아야 한다 — 받다가 · 풀다가 · 띄워 보다가 어디서 끊겨도 같다.
 func TestCoreThatDoesNotStartLeavesThePreviousCoreInPlace(t *testing.T) {
 	environment := newInstallEnvironment(t)
-	if output, err := environment.runInstall(t, coreArchive(t, "v1", 0)); err != nil {
+	if output, err := environment.runInstall(t, localFiles(t, coreArchive(t, "v1", 0))...); err != nil {
 		t.Fatalf("첫 설치가 실패했다: %v\n%s", err, output)
 	}
 
-	output, err := environment.runInstall(t, coreArchive(t, "v2-broken", 1))
+	output, err := environment.runInstall(t, localFiles(t, coreArchive(t, "v2-broken", 1))...)
 
 	if err == nil {
 		t.Fatalf("뜨지 않는 코어를 받아들였다\n%s", output)
@@ -195,8 +202,7 @@ func (environment installEnvironment) curlCalls() []string {
 func TestInstallWithBothLocalFilesNeverReachesTheNetwork(t *testing.T) {
 	environment := newInstallEnvironment(t)
 
-	output, err := environment.runInstall(t, coreArchive(t, "local", 0),
-		"KYU_BINARY_FILE="+localKyuBinary(t, "kyu v0.16.0"))
+	output, err := environment.runInstall(t, localFiles(t, coreArchive(t, "local", 0))...)
 
 	if err != nil {
 		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
@@ -215,7 +221,7 @@ func TestKyuBinaryFileIsPlacedAsTheEngineAndAnswersVersion(t *testing.T) {
 	environment := newInstallEnvironment(t)
 	suppliedBinary := localKyuBinary(t, "kyu from-local-file")
 
-	output, err := environment.runInstall(t, coreArchive(t, "local", 0), "KYU_BINARY_FILE="+suppliedBinary)
+	output, err := environment.runInstall(t, "KYU_CORE_ARCHIVE="+coreArchive(t, "local", 0), "KYU_BINARY_FILE="+suppliedBinary)
 
 	if err != nil {
 		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
@@ -248,7 +254,7 @@ func TestKyuBinaryFileIsPlacedAsTheEngineAndAnswersVersion(t *testing.T) {
 func TestInstalledCoreKeepsItsVersionFile(t *testing.T) {
 	environment := newInstallEnvironment(t)
 
-	output, err := environment.runInstall(t, coreArchive(t, "v1", 0), "KYU_BINARY_FILE="+localKyuBinary(t, "kyu v9.9.9"))
+	output, err := environment.runInstall(t, localFiles(t, coreArchive(t, "v1", 0))...)
 	if err != nil {
 		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
 	}
@@ -266,7 +272,7 @@ func TestInstalledCoreKeepsItsVersionFile(t *testing.T) {
 func TestMissingKyuBinaryFileStopsWithoutFallingBackToTheRelease(t *testing.T) {
 	environment := newInstallEnvironment(t)
 
-	output, err := environment.runInstall(t, coreArchive(t, "v1", 0),
+	output, err := environment.runInstall(t, "KYU_CORE_ARCHIVE="+coreArchive(t, "v1", 0),
 		"KYU_BINARY_FILE="+filepath.Join(t.TempDir(), "no-such-kyu"))
 
 	if err == nil {
@@ -277,5 +283,59 @@ func TestMissingKyuBinaryFileStopsWithoutFallingBackToTheRelease(t *testing.T) {
 	}
 	if calls := environment.curlCalls(); len(calls) != 0 {
 		t.Fatalf("릴리스로 떨어졌다: %s", strings.Join(calls, ", "))
+	}
+}
+
+// --with-core 는 kyu 와 코어를 같은 판으로 놓아야 한다. 하나만 손에 있으면 나머지를 최신 릴리스에서 받게 되고, 그 판은 손에 있는
+// 것과 다를 수 있다 — 어느 쪽이 빠졌는지 말하며 멈추고, 아무것도 받지 않는다.
+func TestWithCoreRefusesOnlyOneOfTheLocalFiles(t *testing.T) {
+	cases := []struct {
+		name            string
+		missingVariable string
+		environment     func(t *testing.T) []string
+	}{
+		{"코어 묶음만", "KYU_BINARY_FILE", func(t *testing.T) []string {
+			return []string{"KYU_CORE_ARCHIVE=" + coreArchive(t, "local", 0)}
+		}},
+		{"kyu 만", "KYU_CORE_ARCHIVE", func(t *testing.T) []string {
+			return []string{"KYU_BINARY_FILE=" + localKyuBinary(t, "kyu v9.9.9")}
+		}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			environment := newInstallEnvironment(t)
+
+			output, err := environment.runInstall(t, testCase.environment(t)...)
+
+			if err == nil {
+				t.Fatalf("하나만 준 설치를 받아들였다\n%s", output)
+			}
+			if !strings.Contains(output, testCase.missingVariable) {
+				t.Fatalf("빠진 %s 를 말하지 않았다\n%s", testCase.missingVariable, output)
+			}
+			if calls := environment.curlCalls(); len(calls) != 0 {
+				t.Fatalf("빠진 것을 릴리스에서 받으려 했다: %s", strings.Join(calls, ", "))
+			}
+			if _, err := os.Stat(filepath.Join(environment.home, ".local/bin/kyu")); err == nil {
+				t.Fatalf("멈추기 전에 kyu 를 놓았다\n%s", output)
+			}
+		})
+	}
+}
+
+// 둘 다 주지 않으면 둘 다 같은 최신 릴리스에서 받는다 — 사람이 WSL 터미널에서 돌리는 설치 명령의 길이다.
+func TestWithCoreAndNoLocalFilesTakesBothFromTheSameRelease(t *testing.T) {
+	environment := newInstallEnvironment(t)
+
+	output, err := environment.runInstall(t, "FAKE_RELEASE_CORE_ARCHIVE="+coreArchive(t, "release", 0))
+
+	if err != nil {
+		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "kyu v9.9.9 from-release") {
+		t.Fatalf("릴리스의 kyu 를 놓지 않았다\n%s", output)
+	}
+	if marker := environment.installedMarker(t); marker != "release" {
+		t.Fatalf("릴리스의 코어 대신 %q 가 자리에 있다", marker)
 	}
 }

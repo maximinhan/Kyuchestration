@@ -23,6 +23,8 @@
 #
 #   env KYU_CORE_ARCHIVE=core.tar.gz KYU_BINARY_FILE=kyu bash install.sh --with-core
 #
+# --with-core 에서는 둘을 함께 주거나 함께 뺀다. 하나만 주면 나머지를 최신 릴리스에서 받아 판이 갈릴 수 있어 멈춘다.
+#
 # 놓을 것이 모두 손에 있으면 GitHub 에 한 번도 닿지 않는다(릴리스 정보도 묻지 않는다) — curl 도 필요 없다. 윈도우 화면이 msi 에
 # 실린 WSL 코어 묶음(kyu · 코어 이미지 · 이 스크립트)을 WSL 에 풀어 이렇게 부른다(core-ui-split-design.md 6.17 의 4a 정정).
 # 소스에서 만든 코어(./gradlew :core:packageCoreArchive)를 윈도우 화면에 붙여 볼 때도 같다.
@@ -456,11 +458,21 @@ main() {
 
     # 릴리스에 물을 일이 있는가. 놓을 것이 모두 손에 있으면 GitHub 에 한 번도 닿지 않는다 — 릴리스 정보도 받지 않는다. 그 정보는
     # 받을 자산의 주소(kyu)와 코어 자산의 이름에 들어갈 판(코어)을 얻으려고 묻는 것이라, 둘 다 손에 있으면 쓰일 데가 없다.
+    #
+    # --with-core 는 kyu 와 코어를 같은 판으로 놓는다. 둘 다 손에 있거나(화면이 msi 의 묶음을 푼 것) 둘 다 릴리스에서 받는다. 하나만
+    # 손에 있으면 나머지를 최신 릴리스에서 받게 되는데 그 판은 손에 있는 것과 다를 수 있다 — 어느 쪽이 빠졌는지 말하며 멈춘다.
+    if [ "$with_core" = "yes" ]; then
+        if [ -n "${KYU_CORE_ARCHIVE:-}" ] && [ -z "${KYU_BINARY_FILE:-}" ]; then
+            fail "KYU_CORE_ARCHIVE 만 주고 KYU_BINARY_FILE 을 주지 않았습니다." \
+                 "--with-core 는 kyu 와 코어를 같은 판으로 놓습니다 — 둘 다 주거나 둘 다 빼세요(빼면 최신 릴리스에서 함께 받습니다)."
+        fi
+        if [ -n "${KYU_BINARY_FILE:-}" ] && [ -z "${KYU_CORE_ARCHIVE:-}" ]; then
+            fail "KYU_BINARY_FILE 만 주고 KYU_CORE_ARCHIVE 를 주지 않았습니다." \
+                 "--with-core 는 kyu 와 코어를 같은 판으로 놓습니다 — 둘 다 주거나 둘 다 빼세요(빼면 최신 릴리스에서 함께 받습니다)."
+        fi
+    fi
     needs_release="no"
     if [ -z "${KYU_BINARY_FILE:-}" ]; then
-        needs_release="yes"
-    fi
-    if [ "$with_core" = "yes" ] && [ -z "${KYU_CORE_ARCHIVE:-}" ]; then
         needs_release="yes"
     fi
 
