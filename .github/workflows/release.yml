@@ -371,10 +371,12 @@ jobs:
           path: desktop/core/build/wsl-core-bundle/kyuchestration-wsl-core.tar.gz
           if-no-files-found: error
 
-  # 윈도우 설치 패키지 — 화면과 WSL 코어 묶음(리눅스 코어 이미지 · kyu · install.sh)을 담는다. 묶음은 리눅스에서만 만들 수 있어 core-archive
-  # 의 산출물을 받는다. 서명은 아직 없다 — 받은 사람의 윈도우가 "알 수 없는 게시자" 경고를 띄운다. WiX 는 Compose 플러그인이 받는다.
-  desktop-msi:
-    needs: [resolve-version, core-archive]
+  # 윈도우에서의 빌드와 시험. msi 를 만드는 잡과 나눈 까닭: msi 는 core-archive(→ kyu-binaries) 의 묶음을 기다려야 하는데, 시험까지
+  # 그 뒤에 두면 윈도우 시험이 묶음을 기다리며 릴리스가 직렬로 늘어진다. 시험은 여기서 곧바로 돌고, 릴리스 잡이 이 잡과 desktop-msi 를
+  # 둘 다 needs 하므로 시험이 깨지면 릴리스가 생기지 않는 것은 같다. resolve-version 만 기다린다 — 쓰지 못할 태그면 15 초 만에 끝나는
+  # 그 잡에서 멈추고, 윈도우 러너를 태우지 않는다(다른 패키지 잡과 같은 선).
+  desktop-windows-build:
+    needs: resolve-version
     runs-on: windows-latest
     defaults:
       run:
@@ -394,6 +396,28 @@ jobs:
 
       - name: 빌드와 테스트
         run: ./gradlew --no-daemon build
+
+  # 윈도우 설치 패키지 — 화면과 WSL 코어 묶음(리눅스 코어 이미지 · kyu · install.sh)을 담는다. 묶음은 리눅스에서만 만들 수 있어 core-archive
+  # 의 산출물을 받는다. 시험은 위 desktop-windows-build 가 본다 — 여기서는 묶음을 놓고 패키징해 열어 보기만 한다. 서명은 아직 없다 —
+  # 받은 사람의 윈도우가 "알 수 없는 게시자" 경고를 띄운다. WiX 는 Compose 플러그인이 받는다.
+  desktop-msi:
+    needs: [resolve-version, core-archive]
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            desktop/gradle/libs.versions.toml
+            desktop/gradle/wrapper/gradle-wrapper.properties
 
       - uses: actions/download-artifact@v4
         with:
@@ -444,7 +468,7 @@ jobs:
   # 앞의 잡이 전부 끝난 뒤에야 릴리스가 생긴다. 하나라도 실패하면 이 잡에 닿지 못하므로,
   # "자산이 반쯤 붙은 릴리스" 는 만들어질 수 없다.
   release:
-    needs: [kyu-binaries, desktop-deb, desktop-dmg, core-archive, desktop-msi]
+    needs: [kyu-binaries, desktop-deb, desktop-dmg, core-archive, desktop-windows-build, desktop-msi]
     runs-on: ubuntu-latest
     permissions:
       # 릴리스를 만들고 자산을 붙이는 데 필요하다. 이 워크플로에서 쓰기를 쥔 잡은 여기 하나뿐이다.
