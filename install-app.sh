@@ -34,6 +34,9 @@
 #
 # sh 가 아니라 bash 를 쓰되 macOS 에 기본으로 깔린 bash 3.2 에서 도는 범위로만 썼다 —
 # install.sh 와 같은 이유로 배열을 쓰지 않는다(3.2 는 set -u 아래에서 빈 배열 전개를 오류로 본다).
+#
+# 파이프의 뒤쪽에 입력을 다 읽기 전에 끝나는 소비자(head · grep -m1 · grep -q · awk 의 exit)를 두지 않는다 —
+# 까닭은 install.sh 머리에 적었다(pipefail 아래에서 앞 단계의 SIGPIPE 가 설치 실패가 된다).
 
 set -euo pipefail
 
