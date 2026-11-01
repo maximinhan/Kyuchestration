@@ -50,7 +50,7 @@ data class WslCommandResult(val exitCode: Int, val output: String)
  * 모두 셸 없이 부르고 `WSL_UTF8` 을 켠다 — 코어를 띄우는 것과 같은 길이다(wslProcessBuilder). 리눅스 쪽 명령은 `--cd ~` 의 홈에서
  * 돌고, 인자는 따옴표가 필요 없는 낱말만 넘긴다(3.7). `wsl.exe` 의 오류는 stdout 과 stderr 중 어디로 올지 판마다 달라 둘을 합쳐 읽는다.
  */
-class WslCommandLine(private val wslExecutable: Path) {
+class WslCommandLine(private val wslExecutable: Path) : WslDistributionCommands {
 
     suspend fun listDistributions(): WslDistributionListing {
         val (exitCode, output) = runWsl(listOf("-l", "-v"))
@@ -92,7 +92,7 @@ class WslCommandLine(private val wslExecutable: Path) {
         }
     }
 
-    suspend fun run(distributionName: String, linuxCommand: List<String>): WslCommandResult {
+    override suspend fun run(distributionName: String, linuxCommand: List<String>): WslCommandResult {
         val (exitCode, output) = runWsl(inDistribution(distributionName, linuxCommand))
         return WslCommandResult(exitCode, wslMessageOf(output))
     }
@@ -103,7 +103,7 @@ class WslCommandLine(private val wslExecutable: Path) {
      * 쓰기와 읽기를 다른 스레드에서 한다. 리눅스 쪽이 stdin 을 읽기 전에 파이프 버퍼보다 많이 쓰면, 같은 스레드가 stdin 을 다 쓴 뒤에
      * 출력을 읽는 길에서는 둘이 서로를 기다린다.
      */
-    suspend fun runFeedingStandardInput(distributionName: String, linuxCommand: List<String>, standardInput: Path): WslCommandResult =
+    override suspend fun runFeedingStandardInput(distributionName: String, linuxCommand: List<String>, standardInput: Path): WslCommandResult =
         withContext(Dispatchers.IO) {
             val process = wslProcessBuilder(wslExecutable, inDistribution(distributionName, linuxCommand)).redirectErrorStream(true).start()
             val feeding = async { feedStandardInput(process, standardInput) }
@@ -125,7 +125,7 @@ class WslCommandLine(private val wslExecutable: Path) {
      * 판마다 어느 쪽인지 다르다 — 어느 것도 버리지 않는다. 문자셋을 UTF-8 로 정해 읽는다. 윈도우 JVM 의 기본 문자셋은 MS949 라(3.10)
      * 기대면 한국어가 깨진다. 리눅스 쪽 글은 바이트 그대로 오고(3.1) `wsl.exe` 의 글은 `WSL_UTF8` 로 UTF-8 이다.
      */
-    suspend fun runReportingEachLine(
+    override suspend fun runReportingEachLine(
         distributionName: String,
         linuxCommand: List<String>,
         onOutputLine: (String) -> Unit,
