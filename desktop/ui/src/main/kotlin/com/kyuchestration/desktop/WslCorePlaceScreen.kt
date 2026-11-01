@@ -61,7 +61,7 @@ internal fun WslCorePlaceScreen(
             }
             is WslCorePlacePreparationState.ListingFailed -> {
                 Headline("WSL 이 배포판 목록을 주지 않았습니다")
-                WslMessage(state.wslMessage)
+                VerbatimOutput(state.wslMessage)
                 Guidance("배포판이 없다면 PowerShell 에서 `wsl --install` 로 설치한 뒤 다시 보기를 누르세요.")
                 DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
                 Button(onClick = onLookAroundAgainRequested) { Text("다시 보기") }
@@ -89,7 +89,7 @@ internal fun WslMissingScreen(wslExecutableLabel: String) {
 private fun CoreInstallationProgress(state: WslCorePlacePreparationState.InstallingCore) {
     Progress("${state.distributionName} 에 코어와 kyu 를 놓는 중입니다 — ${state.step.label()}")
     Guidance("앱에 실린 코어를 그 배포판에 풉니다. 네트워크는 쓰지 않습니다.")
-    OutputLines(state.reportLines)
+    VerbatimOutput(state.reportLines.joinToString("\n"))
 }
 
 @Composable
@@ -114,19 +114,17 @@ private fun DistributionChoice(
             }
         }
     }
-    state.problem?.let { problem -> ProblemWithChosenDistribution(problem, diagnosticLogPathLabel, onDistributionChosen) }
+    state.problem?.let { problem -> ProblemWithChosenDistribution(problem, diagnosticLogPathLabel) }
+    // 묶음으로 깔다 실패한 배포판을 다시 고르면 다시 깐다 — 단추가 하는 일이 그것임을 글로 말한다. 따로 "다시 시도" 를 두면 두 단추가 같은 일을 한다.
+    val reinstalling = (state.problem as? ChosenDistributionProblem.CoreInstallFailed)?.distributionName == chosenName
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { onDistributionChosen(chosenName) }) { Text("이 배포판으로") }
+        Button(onClick = { onDistributionChosen(chosenName) }) { Text(if (reinstalling) "다시 설치" else "이 배포판으로") }
         TextButton(onClick = onLookAroundAgainRequested) { Text("목록 다시 보기") }
     }
 }
 
 @Composable
-private fun ProblemWithChosenDistribution(
-    problem: ChosenDistributionProblem,
-    diagnosticLogPathLabel: String,
-    onDistributionChosen: (distributionName: String) -> Unit,
-) {
+private fun ProblemWithChosenDistribution(problem: ChosenDistributionProblem, diagnosticLogPathLabel: String) {
     when (problem) {
         is ChosenDistributionProblem.CoreNotInstalled -> {
             ProblemHeadline("${problem.distributionName} 에 코어가 없습니다 — ~/$WSL_CORE_EXECUTABLE_FROM_HOME")
@@ -135,7 +133,8 @@ private fun ProblemWithChosenDistribution(
         }
         is ChosenDistributionProblem.DistributionFailed -> {
             ProblemHeadline("${problem.distributionName} 을 띄우지 못했습니다")
-            WslMessage(problem.wslMessage)
+            VerbatimOutput(problem.wslMessage)
+            DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
         }
         is ChosenDistributionProblem.CoreInstallFailed -> {
             val failure = problem.failure
@@ -143,10 +142,9 @@ private fun ProblemWithChosenDistribution(
                 "${problem.distributionName} 에 코어를 놓지 못했습니다 — ${failure.step.label()}" +
                     (failure.exitCode?.let { ", 종료 코드 $it" } ?: ""),
             )
-            OutputLines(listOfNotNull(failure.screenSideFailure) + failure.lastOutputLines)
+            VerbatimOutput((listOfNotNull(failure.screenSideFailure) + failure.lastOutputLines).joinToString("\n"))
             DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
-            Button(onClick = { onDistributionChosen(problem.distributionName) }) { Text("다시 시도") }
-            Guidance("다시 시도해도 같으면 그 배포판의 터미널에서 손으로 깔 수 있습니다(릴리스에서 받습니다).")
+            Guidance("'다시 설치' 로 다시 깔 수 있습니다. 같은 자리에서 또 멈추면 그 배포판의 터미널에서 손으로 깔 수 있습니다(릴리스에서 받습니다).")
             WslCoreInstallCommand()
         }
         is ChosenDistributionProblem.CoreInstallRefusedForLinuxHome -> {
@@ -162,16 +160,6 @@ private fun ProblemHeadline(text: String) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
 }
 
-/** 설치 스크립트 · tar 가 쓴 마지막 줄들. 리눅스 쪽 글이라 고정폭으로 그대로 보인다 — 사람이 그 줄로 무엇이 멈췄는지 안다. */
-@Composable
-private fun OutputLines(lines: List<String>) {
-    if (lines.isEmpty()) {
-        return
-    }
-    SelectionContainer {
-        Text(lines.joinToString("\n"), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-    }
-}
 
 private fun WslCoreInstallationStep.label(): String = when (this) {
     WslCoreInstallationStep.FindingLinuxHome -> "리눅스 홈 찾기"
@@ -217,13 +205,16 @@ private fun Guidance(text: String) {
     )
 }
 
-/** `wsl.exe` 의 말은 윈도우의 언어로 온다. 고치지 않고 그대로 보인다 — 사람이 그 문구로 검색한다. */
+/**
+ * `wsl.exe` 의 말(윈도우의 언어로 온다)과 리눅스 쪽 명령이 쓴 줄들. 고치지 않고 고정폭으로 그대로 보이고 고를 수 있게 둔다 — 사람이 그
+ * 문구로 검색하고, 그 줄로 무엇이 멈췄는지 안다.
+ */
 @Composable
-private fun WslMessage(wslMessage: String) {
-    Text(
-        text = wslMessage,
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = FontFamily.Monospace,
-        textAlign = TextAlign.Center,
-    )
+private fun VerbatimOutput(text: String) {
+    if (text.isBlank()) {
+        return
+    }
+    SelectionContainer {
+        Text(text = text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    }
 }
