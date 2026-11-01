@@ -17,6 +17,9 @@ import (
 
 // fakeCurl 은 install.sh 가 부르는 두 가지만 흉내 낸다 — 최신 릴리스 정보와 kyu 자산. --output 자리에 쓰고 --write-out 으로
 // 상태 코드 200 을 낸다. 받는 kyu 는 version 에 답하는 셸 스크립트다.
+//
+// 불릴 때마다 자기 옆의 curl-calls.log 에 주소를 적는다. 로컬 파일만으로 설치할 때 네트워크에 한 번도 닿지 않았는지를 그 기록이
+// 없다는 것으로 본다.
 const fakeCurl = `#!/bin/sh
 output=""
 url=""
@@ -28,6 +31,7 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+printf '%s\n' "$url" >> "$(dirname "$0")/curl-calls.log"
 case "$url" in
     */releases/latest)
         printf '%s' '{"tag_name":"v9.9.9","assets":[{"url":"https://api.github.com/repos/maximinhan/Kyuchestration/releases/assets/1","name":"kyu_linux_amd64"}]}' > "$output" ;;
@@ -83,6 +87,7 @@ func coreArchive(t *testing.T, marker string, serveExitCode int) string {
 	}{
 		{"kyuchestration-core/bin/kyuchestration-core", 0o755, "#!/bin/sh\nexit " + string(rune('0'+serveExitCode)) + "\n"},
 		{"kyuchestration-core/marker", 0o644, marker},
+		{"kyuchestration-core/VERSION", 0o644, "v9.9.9\n"},
 	}
 	for _, entry := range entries {
 		header := &tar.Header{Name: entry.name, Mode: entry.mode, Size: int64(len(entry.body)), Typeflag: tar.TypeReg}
@@ -163,5 +168,114 @@ func TestCoreThatDoesNotStartLeavesThePreviousCoreInPlace(t *testing.T) {
 	leftovers, _ := filepath.Glob(filepath.Join(environment.home, ".local/share/kyuchestration/.core.staging.*"))
 	if len(leftovers) != 0 {
 		t.Fatalf("임시 자리가 남았다: %s", strings.Join(leftovers, ", "))
+	}
+}
+
+// localKyuBinary 는 version 에 answer 로 답하는 kyu 하나를 둔다. 실행 비트를 일부러 뺀다 — CI 의 아티팩트처럼 권한을 잃고 건너온
+// 파일도 설치가 실행 파일로 놓아야 한다.
+func localKyuBinary(t *testing.T, answer string) string {
+	t.Helper()
+	binaryPath := filepath.Join(t.TempDir(), "kyu_linux_amd64")
+	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\necho \""+answer+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return binaryPath
+}
+
+func (environment installEnvironment) curlCalls() []string {
+	calls, err := os.ReadFile(filepath.Join(environment.fakeBin, "curl-calls.log"))
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(calls))
+}
+
+// 윈도우 화면은 msi 에 실린 묶음(kyu · 코어 이미지 · 이 스크립트)을 WSL 에 풀어 이 스크립트를 돌린다(core-ui-split-design.md 6.17
+// 의 4a 정정). 두 파일이 다 손에 있으면 릴리스 정보도 물을 일이 없다 — 오프라인 첫 실행이 되고, 받은 판이 화면과 갈리지 않는다.
+func TestInstallWithBothLocalFilesNeverReachesTheNetwork(t *testing.T) {
+	environment := newInstallEnvironment(t)
+
+	output, err := environment.runInstall(t, coreArchive(t, "local", 0),
+		"KYU_BINARY_FILE="+localKyuBinary(t, "kyu v0.16.0"))
+
+	if err != nil {
+		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
+	}
+	if calls := environment.curlCalls(); len(calls) != 0 {
+		t.Fatalf("로컬 파일만으로 설치하는데 curl 을 불렀다: %s\n%s", strings.Join(calls, ", "), output)
+	}
+	if marker := environment.installedMarker(t); marker != "local" {
+		t.Fatalf("KYU_CORE_ARCHIVE 의 코어 대신 %q 가 자리에 있다", marker)
+	}
+}
+
+// 놓인 kyu 가 준 파일 그대로이고, 실행 파일이며, 설치가 그것을 version 으로 불러 본다. 준 파일은 그대로 남는다 — 화면이 묶음을
+// 푼 자리를 스스로 치운다.
+func TestKyuBinaryFileIsPlacedAsTheEngineAndAnswersVersion(t *testing.T) {
+	environment := newInstallEnvironment(t)
+	suppliedBinary := localKyuBinary(t, "kyu from-local-file")
+
+	output, err := environment.runInstall(t, coreArchive(t, "local", 0), "KYU_BINARY_FILE="+suppliedBinary)
+
+	if err != nil {
+		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "kyu from-local-file") {
+		t.Fatalf("놓인 kyu 를 version 으로 불러 보지 않았다\n%s", output)
+	}
+	installedEngine := filepath.Join(environment.home, ".local/bin/kyu")
+	installed, err := os.ReadFile(installedEngine)
+	if err != nil {
+		t.Fatalf("~/.local/bin/kyu 가 없다: %v\n%s", err, output)
+	}
+	supplied, err := os.ReadFile(suppliedBinary)
+	if err != nil {
+		t.Fatalf("준 kyu 파일이 사라졌다: %v", err)
+	}
+	if string(installed) != string(supplied) {
+		t.Fatalf("놓인 kyu 가 준 파일과 다르다: %q", installed)
+	}
+	if info, err := os.Stat(installedEngine); err != nil || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("놓인 kyu 가 실행 파일이 아니다: %v %v", info.Mode(), err)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(environment.home, ".local/bin/.kyu.download.*"))
+	if len(leftovers) != 0 {
+		t.Fatalf("받는 자리가 남았다: %s", strings.Join(leftovers, ", "))
+	}
+}
+
+// 화면은 깔린 코어의 판을 core/VERSION 한 자리에서 읽는다(4b). 손으로 깔든 화면이 깔든 그 파일이 코어 디렉토리에 남아야 한다.
+func TestInstalledCoreKeepsItsVersionFile(t *testing.T) {
+	environment := newInstallEnvironment(t)
+
+	output, err := environment.runInstall(t, coreArchive(t, "v1", 0), "KYU_BINARY_FILE="+localKyuBinary(t, "kyu v9.9.9"))
+	if err != nil {
+		t.Fatalf("설치가 실패했다: %v\n%s", err, output)
+	}
+
+	version, err := os.ReadFile(filepath.Join(environment.home, ".local/share/kyuchestration/core/VERSION"))
+	if err != nil {
+		t.Fatalf("코어 디렉토리에 VERSION 이 없다: %v\n%s", err, output)
+	}
+	if string(version) != "v9.9.9\n" {
+		t.Fatalf("VERSION 이 %q 다", version)
+	}
+}
+
+// 준 파일이 없으면 릴리스로 떨어지지 않고 멈춘다 — 조용히 다른 판을 받아 오면 화면과 엔진의 판이 갈린다.
+func TestMissingKyuBinaryFileStopsWithoutFallingBackToTheRelease(t *testing.T) {
+	environment := newInstallEnvironment(t)
+
+	output, err := environment.runInstall(t, coreArchive(t, "v1", 0),
+		"KYU_BINARY_FILE="+filepath.Join(t.TempDir(), "no-such-kyu"))
+
+	if err == nil {
+		t.Fatalf("없는 KYU_BINARY_FILE 을 받아들였다\n%s", output)
+	}
+	if !strings.Contains(output, "KYU_BINARY_FILE") {
+		t.Fatalf("무엇이 없는지 말하지 않았다\n%s", output)
+	}
+	if calls := environment.curlCalls(); len(calls) != 0 {
+		t.Fatalf("릴리스로 떨어졌다: %s", strings.Join(calls, ", "))
 	}
 }

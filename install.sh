@@ -14,8 +14,18 @@
 #
 # 코어 이미지는 ${XDG_DATA_HOME:-~/.local/share}/kyuchestration/core 에 풀고, ~/.local/bin/kyuchestration-core 링크를 둔다
 # (KYU_INSTALL_DIR 과 무관하다 — 윈도우 화면이 부르는 자리다).
-# 다시 돌리면 최신 릴리스의 것으로 갈아 끼운다. KYU_CORE_ARCHIVE 에 tar.gz 경로를 주면 릴리스 대신 그 파일을 푼다 —
-# 소스에서 만든 코어(./gradlew :core:packageCoreArchive)를 윈도우 화면에 붙여 볼 때 쓴다.
+# 다시 돌리면 최신 릴리스의 것으로 갈아 끼운다.
+#
+# 릴리스 대신 손에 있는 파일을 놓을 수 있다.
+#
+#   KYU_BINARY_FILE=<경로>    그 파일을 kyu 로 놓는다(리눅스 amd64 · 맥 바이너리 그대로).
+#   KYU_CORE_ARCHIVE=<경로>   그 tar.gz(kyuchestration-core_<판>_linux_amd64.tar.gz 꼴)를 코어로 푼다.
+#
+#   env KYU_CORE_ARCHIVE=core.tar.gz KYU_BINARY_FILE=kyu bash install.sh --with-core
+#
+# 놓을 것이 모두 손에 있으면 GitHub 에 한 번도 닿지 않는다(릴리스 정보도 묻지 않는다) — curl 도 필요 없다. 윈도우 화면이 msi 에
+# 실린 WSL 코어 묶음(kyu · 코어 이미지 · 이 스크립트)을 WSL 에 풀어 이렇게 부른다(core-ui-split-design.md 6.17 의 4a 정정).
+# 소스에서 만든 코어(./gradlew :core:packageCoreArchive)를 윈도우 화면에 붙여 볼 때도 같다.
 #
 # 인증은 "없으면 없는 대로 먼저 해 본다" 순서다 — 무인증으로 먼저 부르고, 거절당했을 때에만
 # GITHUB_TOKEN 을 쓴다. 이 저장소는 지금 프라이빗이지만 공개로 바꿀 예정이라, 그 순간
@@ -294,10 +304,27 @@ download_asset() {
     local destination_path="$2"
 
     fetch_asset "$asset_url" "$DOWNLOAD_PATH"
-    chmod +x "$DOWNLOAD_PATH"
+    move_staged_engine_into_place "$destination_path"
+}
 
-    # 옆에 받아 두고 마지막에 자리를 바꾼다. 돌고 있는 바이너리를 직접 덮어쓰면 리눅스에서
-    # Text file busy 로 실패하는데, 같은 파일 시스템 안의 mv 는 이름만 바꾸므로 그 일이 없다.
+# copy_local_engine 은 손에 있는 kyu 파일을 받은 자산과 같은 길로 놓는다. 옮기지 않고 복사한다 — 준 쪽(화면이 푼 묶음)이 그 파일을
+# 스스로 치운다. 실행 비트는 준 파일에 기대지 않는다(아티팩트 · 리소스를 건너온 파일은 그것을 잃는다).
+copy_local_engine() {
+    local engine_file="$1"
+    local destination_path="$2"
+
+    cp "$engine_file" "$DOWNLOAD_PATH" || fail "KYU_BINARY_FILE 을 설치 자리로 복사하지 못했습니다: ${engine_file}"
+    move_staged_engine_into_place "$destination_path"
+}
+
+# move_staged_engine_into_place 는 설치 디렉토리 안의 받는 자리(DOWNLOAD_PATH)에 놓인 kyu 를 실행 파일로 만들어 자리를 바꾼다.
+#
+# 옆에 받아 두고 마지막에 자리를 바꾼다. 돌고 있는 바이너리를 직접 덮어쓰면 리눅스에서
+# Text file busy 로 실패하는데, 같은 파일 시스템 안의 mv 는 이름만 바꾸므로 그 일이 없다.
+move_staged_engine_into_place() {
+    local destination_path="$1"
+
+    chmod +x "$DOWNLOAD_PATH"
     mv "$DOWNLOAD_PATH" "$destination_path"
     DOWNLOAD_PATH=""
 }
@@ -410,11 +437,13 @@ warn_if_not_on_path() {
 
 usage() {
     fail "쓰는 법: install.sh [--with-core]" \
-         "  --with-core  데스크톱 앱의 코어도 함께 놓는다(윈도우 화면이 WSL 안에서 띄우는 것)."
+         "  --with-core  데스크톱 앱의 코어도 함께 놓는다(윈도우 화면이 WSL 안에서 띄우는 것)." \
+         "  KYU_BINARY_FILE · KYU_CORE_ARCHIVE 에 파일 경로를 주면 릴리스 대신 그 파일을 놓는다."
 }
 
 main() {
-    local target_platform asset_name install_dir destination_path asset_url required_command with_core
+    local target_platform asset_name install_dir destination_path asset_url required_command with_core needs_release
+    local required_commands
 
     with_core="no"
     while [ "$#" -gt 0 ]; do
@@ -425,7 +454,22 @@ main() {
         shift
     done
 
-    for required_command in curl uname awk tr mktemp; do
+    # 릴리스에 물을 일이 있는가. 놓을 것이 모두 손에 있으면 GitHub 에 한 번도 닿지 않는다 — 릴리스 정보도 받지 않는다. 그 정보는
+    # 받을 자산의 주소(kyu)와 코어 자산의 이름에 들어갈 판(코어)을 얻으려고 묻는 것이라, 둘 다 손에 있으면 쓰일 데가 없다.
+    needs_release="no"
+    if [ -z "${KYU_BINARY_FILE:-}" ]; then
+        needs_release="yes"
+    fi
+    if [ "$with_core" = "yes" ] && [ -z "${KYU_CORE_ARCHIVE:-}" ]; then
+        needs_release="yes"
+    fi
+
+    # curl 은 받을 때만 묻는다. 화면이 묶음을 풀어 이 스크립트를 부르는 배포판에 curl 이 없어도 설치는 되어야 한다.
+    required_commands="uname awk tr mktemp"
+    if [ "$needs_release" = "yes" ]; then
+        required_commands="curl ${required_commands}"
+    fi
+    for required_command in $required_commands; do
         command -v "$required_command" > /dev/null 2>&1 \
             || fail "${required_command} 가 필요합니다."
     done
@@ -437,22 +481,31 @@ main() {
     mkdir -p "$install_dir"
     destination_path="${install_dir}/kyu"
 
-    RELEASE_JSON_PATH=$(mktemp)
     # 받는 자리를 설치할 디렉토리 안에 둔다. /tmp 에 받아 두면 파일 시스템이 달라 mv 가
     # 이름 바꾸기가 아닌 복사가 되고, 그러면 돌고 있는 바이너리를 덮어쓰는 문제가 되살아난다.
     DOWNLOAD_PATH="${install_dir}/.kyu.download.$$"
 
     report "대상: ${target_platform}"
-    resolve_release_access
-
-    asset_url=$(asset_api_url_for "$RELEASE_JSON_PATH" "$asset_name")
-    if [ -z "$asset_url" ]; then
-        fail "최신 릴리스에 ${asset_name} 자산이 없습니다." \
-             "릴리스가 이 플랫폼 바이너리를 함께 올렸는지 확인하세요."
+    if [ "$needs_release" = "yes" ]; then
+        RELEASE_JSON_PATH=$(mktemp)
+        resolve_release_access
     fi
 
-    report "받는 중: ${asset_name}"
-    download_asset "$asset_url" "$destination_path"
+    if [ -n "${KYU_BINARY_FILE:-}" ]; then
+        # 없는 파일을 릴리스로 메우지 않는다. 조용히 최신 릴리스를 받아 오면 준 쪽(화면)과 다른 판의 엔진이 놓인다.
+        [ -f "$KYU_BINARY_FILE" ] || fail "KYU_BINARY_FILE 이 가리키는 파일이 없습니다: ${KYU_BINARY_FILE}"
+        report "엔진: 릴리스 대신 ${KYU_BINARY_FILE} 를 놓습니다"
+        copy_local_engine "$KYU_BINARY_FILE" "$destination_path"
+    else
+        asset_url=$(asset_api_url_for "$RELEASE_JSON_PATH" "$asset_name")
+        if [ -z "$asset_url" ]; then
+            fail "최신 릴리스에 ${asset_name} 자산이 없습니다." \
+                 "릴리스가 이 플랫폼 바이너리를 함께 올렸는지 확인하세요."
+        fi
+
+        report "받는 중: ${asset_name}"
+        download_asset "$asset_url" "$destination_path"
+    fi
 
     report "설치 완료: ${destination_path}"
     warn_if_not_on_path "$install_dir"
