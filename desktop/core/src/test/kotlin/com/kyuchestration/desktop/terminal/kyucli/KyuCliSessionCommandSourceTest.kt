@@ -144,6 +144,24 @@ class KyuCliSessionCommandSourceTest {
     }
 
     @Test
+    fun `바깥 대화를 고르면 그 id 를 채택하라는 옵션이 붙는다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
+
+        KyuCliSessionCommandSource(runner).sessionCommandFor(
+            WORK_DIR_PATH,
+            SessionTarget.Repo("proj-a"),
+            SessionConversationChoice.AdoptConversation("654ce605-b030-40e8-8448-2e9003ad32b1"),
+            appSocketPath = null,
+        )
+
+        // id 는 kyu conversations list 가 답한 값을 그대로 되돌려 준다. 적는 것도 이어가는 것도 엔진이 한다(원칙 11).
+        assertEquals(
+            listOf(listOf("session-command", "proj-a", "--adopt-conversation", "654ce605-b030-40e8-8448-2e9003ad32b1", "--chat", "--json")),
+            runner.receivedArguments,
+        )
+    }
+
+    @Test
     fun `앱이 연 소켓의 자리는 --app-socket 으로 넘어간다`() {
         val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
 

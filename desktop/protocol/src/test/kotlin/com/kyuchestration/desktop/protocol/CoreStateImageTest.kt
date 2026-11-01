@@ -7,9 +7,11 @@ import com.kyuchestration.desktop.initialization.WorkDirInitializationState
 import com.kyuchestration.desktop.repoclone.CloneStep
 import com.kyuchestration.desktop.repoclone.RepositoryCloneState
 import com.kyuchestration.desktop.terminal.ChildSessionGate
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.ChildSessionNode
+import com.kyuchestration.desktop.terminal.chat.ExistingConversation
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import com.kyuchestration.desktop.terminal.chat.SessionTree
 import java.time.Instant
@@ -32,7 +34,14 @@ class CoreStateImageTest {
             workDirDashboard = WorkDirDashboardState.FirstObservationRunning("/w"),
             workDirInitialization = WorkDirInitializationState.Running,
             conversations = emptyMap(),
-            sessionEntries = mapOf(SessionTarget.Repo("proj-a") to SessionEntryState.Running),
+            sessionEntries = mapOf(
+                SessionTarget.Repo("proj-a") to SessionEntryState.Running,
+                SessionTarget.Main to SessionEntryState.ChoosingConversation(
+                    candidates = listOf(ExistingConversation("654ce605-b030-40e8-8448-2e9003ad32b1", "터미널 대화", null, "2026-11-01T09:00:56Z")),
+                    recorded = ExistingConversation("2a9d3b8f-0000-4000-8000-000000000002", "앱 대화", "2026-10-01T00:00:00Z", "2026-10-31T12:00:00Z"),
+                    defaultChoice = SessionConversationChoice.AdoptConversation("654ce605-b030-40e8-8448-2e9003ad32b1"),
+                ),
+            ),
             heldSessions = setOf(SessionTarget.Main),
             sessionTree = SessionTree(listOf(ChildSessionNode("child-1", "일", "proj-a", "/w/proj-a", "c-1", Instant.EPOCH))),
             gateQuestions = listOf(ChildSessionGateQuestion("gate-1", "띄울까요?", ChildSessionGate("proj-a", "sha256:a", emptyList()))),

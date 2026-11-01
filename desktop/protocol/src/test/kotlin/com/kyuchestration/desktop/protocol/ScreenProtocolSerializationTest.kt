@@ -26,6 +26,7 @@ import com.kyuchestration.desktop.terminal.chat.ChildSessionGateQuestion
 import com.kyuchestration.desktop.terminal.chat.ChildSessionNode
 import com.kyuchestration.desktop.terminal.chat.ChildTurnResult
 import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
+import com.kyuchestration.desktop.terminal.chat.ExistingConversation
 import com.kyuchestration.desktop.terminal.chat.OutgoingUserMessage
 import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
@@ -169,14 +170,36 @@ class ScreenProtocolSerializationTest {
     }
 
     @Test
-    fun `명령 서른셋이 모두 건너 같은 값으로 돌아온다`() {
-        assertEquals(33, ALL_COMMANDS.size)
-        assertEquals(33, ALL_COMMANDS.map { it::class }.toSet().size)
+    fun `명령 서른다섯이 모두 건너 같은 값으로 돌아온다`() {
+        assertEquals(35, ALL_COMMANDS.size)
+        assertEquals(35, ALL_COMMANDS.map { it::class }.toSet().size)
 
         ALL_COMMANDS.forEachIndexed { index, command ->
             val frame = FrameToCore.Command(id = "c-$index", command = command)
             assertEquals(frame, decodeFrameToCore(encodeFrameToCore(frame)))
         }
+    }
+
+    @Test
+    fun `대화 고르기는 갈래를 type 낱말로 싣고 채택은 엔진이 답한 id 를 그대로 싣는다`() {
+        // 판 3 의 모양이다. 판 2 까지는 갈래가 이름 문자열 하나였다 — 채택할 id 를 실을 자리가 없어 판을 올렸다.
+        assertEquals(
+            """{"frame":"command","id":"c-1","command":{"type":"enter_session","target":{"type":"main"},""" +
+                """"conversationChoice":{"type":"continue_recorded_conversation"}}}""",
+            encodeFrameToCore(
+                FrameToCore.Command("c-1", ScreenCommand.EnterSession(SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)),
+            ),
+        )
+        assertEquals(
+            """{"frame":"command","id":"c-2","command":{"type":"choose_conversation","target":{"type":"main"},""" +
+                """"choice":{"type":"adopt_conversation","conversationId":"$TERMINAL_CONVERSATION_ID"}}}""",
+            encodeFrameToCore(
+                FrameToCore.Command(
+                    "c-2",
+                    ScreenCommand.ChooseConversation(SessionTarget.Main, SessionConversationChoice.AdoptConversation(TERMINAL_CONVERSATION_ID)),
+                ),
+            ),
+        )
     }
 
     @Test
@@ -201,6 +224,11 @@ class ScreenProtocolSerializationTest {
                     listOf(
                         SessionEntryOfTarget(SessionTarget.Main, SessionEntryState.Running),
                         SessionEntryOfTarget(SessionTarget.Repo("proj-a"), SessionEntryState.Failed(FAILURE)),
+                        SessionEntryOfTarget(SessionTarget.Repo("proj-b"), CHOOSING_CONVERSATION),
+                        SessionEntryOfTarget(
+                            SessionTarget.Repo("proj-c"),
+                            CHOOSING_CONVERSATION.copy(recorded = null, defaultChoice = SessionConversationChoice.ContinueRecordedConversation),
+                        ),
                     ),
                 ),
                 ScreenChange.HeldSessionsChanged(listOf(SessionTarget.Main, SessionTarget.Repo("proj-a"), SessionTarget.Child("child-1"))),
@@ -302,6 +330,17 @@ class ScreenProtocolSerializationTest {
     }
 
     private companion object {
+        const val TERMINAL_CONVERSATION_ID = "654ce605-b030-40e8-8448-2e9003ad32b1"
+
+        val CHOOSING_CONVERSATION = SessionEntryState.ChoosingConversation(
+            candidates = listOf(
+                ExistingConversation(TERMINAL_CONVERSATION_ID, "터미널에서 하던 설계 검토", "2026-08-27T06:05:50Z", "2026-11-01T09:00:56Z"),
+                ExistingConversation("1f0c2a7e-0000-4000-8000-000000000001", "", null, "2026-10-30T01:00:00Z"),
+            ),
+            recorded = ExistingConversation("2a9d3b8f-0000-4000-8000-000000000002", "앱에서 하던 대화", null, "2026-10-31T12:00:00Z"),
+            defaultChoice = SessionConversationChoice.AdoptConversation(TERMINAL_CONVERSATION_ID),
+        )
+
         val FAILURE = FailureView(kind = "KyuExecutableNotFound", message = "kyu 실행 파일을 찾지 못했습니다.", guidance = "앱을 다시 띄우세요.")
 
         val AT: Instant = Instant.parse("2026-10-22T09:30:15.123456Z")
@@ -320,6 +359,8 @@ class ScreenProtocolSerializationTest {
             ScreenCommand.CloseWorkDir,
             ScreenCommand.EnterSession(SessionTarget.Repo("proj-a"), SessionConversationChoice.StartNewConversation),
             ScreenCommand.DismissSessionEntryFailure(SessionTarget.Main),
+            ScreenCommand.ChooseConversation(SessionTarget.Main, SessionConversationChoice.AdoptConversation(TERMINAL_CONVERSATION_ID)),
+            ScreenCommand.CancelConversationChoice(SessionTarget.Repo("proj-a")),
             ScreenCommand.SendUserMessage(SessionTarget.Child("child-1"), "줄\n바꿈과 \"따옴표\""),
             ScreenCommand.InterruptTurn(SessionTarget.Main),
             ScreenCommand.AnswerPermission(
