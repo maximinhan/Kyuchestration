@@ -31,7 +31,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -95,8 +95,7 @@ private fun ExistingConversation.timeDetails(zone: ZoneId): List<String> =
     listOf("마지막 활동 ${localTimeLabel(lastActiveAt, zone)}") +
         listOfNotNull(startedAt?.let { "시작 ${localTimeLabel(it, zone)}" })
 
-private fun localTimeLabel(rfc3339: String, zone: ZoneId): String =
-    LOCAL_TIME_FORMAT.format(Instant.parse(rfc3339).atZone(zone))
+private fun localTimeLabel(instant: Instant, zone: ZoneId): String = LOCAL_TIME_FORMAT.format(instant.atZone(zone))
 
 private val LOCAL_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
@@ -127,7 +126,9 @@ internal fun ConversationChooser(
                 .padding(32.dp)
                 .focusRequester(chooserFocus)
                 .focusable()
-                .onKeyEvent { event ->
+                // 미리 보기로 받는다. 줄마다 고를 수 있는 자리라 포커스가 줄에 가면 그 줄이 Enter 를 먼저 먹고, 뒤에서 받는
+                // 처리로는 그 Enter 가 여기 닿지 않는다 — Enter 는 포커스가 어디 있든 "이어가기" 다.
+                .onPreviewKeyEvent { event ->
                     if (event.key == Key.Enter && event.type == KeyEventType.KeyDown) {
                         onConversationChosen(target, selectedChoice)
                         true

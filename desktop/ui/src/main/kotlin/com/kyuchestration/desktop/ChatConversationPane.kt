@@ -94,7 +94,12 @@ internal fun ChatConversationPane(
             }
 
         is ChatScreenState.ChatSessionEntryFailed ->
-            ChatSessionEntryFailureNotice(chatScreenState.failure, diagnosticLogPathLabel, modifier)
+            ChatSessionEntryFailureNotice(
+                failure = chatScreenState.failure,
+                conversationListingWarning = chatScreenState.conversationListingWarning,
+                diagnosticLogPathLabel = diagnosticLogPathLabel,
+                modifier = modifier,
+            )
 
         is ChatScreenState.ConversationChoiceOnScreen ->
             ConversationChooser(
@@ -375,6 +380,7 @@ private fun NoChatOpenNotice(modifier: Modifier = Modifier) {
 @Composable
 private fun ChatSessionEntryFailureNotice(
     failure: FailureView,
+    conversationListingWarning: String?,
     diagnosticLogPathLabel: String,
     modifier: Modifier = Modifier,
 ) {
@@ -390,6 +396,14 @@ private fun ChatSessionEntryFailureNotice(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        conversationListingWarning?.let { warning ->
+            Text(
+                text = warning,
+                style = MaterialTheme.typography.bodySmall,
+                color = KyuTheme.statusColors.caution,
+                textAlign = TextAlign.Center,
+            )
+        }
         DiagnosticLogPathNotice(diagnosticLogPathLabel, textAlign = TextAlign.Center)
     }
 }

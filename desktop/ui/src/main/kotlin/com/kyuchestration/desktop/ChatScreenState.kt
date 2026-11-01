@@ -37,9 +37,11 @@ sealed interface ChatScreenState {
         val conversation: ChatConversation,
     ) : ChatScreenState
 
+    /** @param conversationListingWarning 이어가기 전에 대화 목록을 읽지 못했다는 말. 실패와 함께 보인다. */
     data class ChatSessionEntryFailed(
         override val target: SessionTarget,
         val failure: FailureView,
+        val conversationListingWarning: String? = null,
     ) : ChatScreenState
 
     /**
@@ -118,7 +120,8 @@ fun chatScreenStateFor(
     }
     return when (entry) {
         SessionEntryState.Running -> ChatScreenState.ChatSessionEntryRunning(personOpenedTarget)
-        is SessionEntryState.Failed -> ChatScreenState.ChatSessionEntryFailed(personOpenedTarget, entry.failure)
+        is SessionEntryState.Failed ->
+            ChatScreenState.ChatSessionEntryFailed(personOpenedTarget, entry.failure, entry.conversationListingWarning)
         is SessionEntryState.ChoosingConversation -> ChatScreenState.ConversationChoiceOnScreen(personOpenedTarget, entry)
     }
 }
