@@ -77,6 +77,12 @@ class RecordingScreenFacingCore(
     override fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget) =
         record(ScreenCommand.DismissSessionEntryFailure(target))
 
+    override fun chooseConversation(target: PersonOpenedSessionTarget, choice: SessionConversationChoice) =
+        record(ScreenCommand.ChooseConversation(target, choice))
+
+    override fun cancelConversationChoice(target: PersonOpenedSessionTarget) =
+        record(ScreenCommand.CancelConversationChoice(target))
+
     override fun sendUserMessage(target: SessionTarget, text: String) = record(ScreenCommand.SendUserMessage(target, text))
 
     override fun interruptTurn(target: SessionTarget) = record(ScreenCommand.InterruptTurn(target))

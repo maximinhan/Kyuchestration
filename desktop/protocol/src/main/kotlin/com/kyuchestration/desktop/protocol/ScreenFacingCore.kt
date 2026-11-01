@@ -93,7 +93,17 @@ interface ScreenFacingCore {
     /** 열린 워크디렉토리를 닫는다 — 그 안의 세션을 끝내고, 그 워크디렉토리에 걸린 걸음을 함께 놓는다. */
     fun closeWorkDir()
 
+    /**
+     * 그 세션에 들어간다. 이어가기([SessionConversationChoice.ContinueRecordedConversation])이면 코어가 먼저 그 자리의 바깥
+     * 대화를 보고, 고를 것이 있으면 진입 상태를 [SessionEntryState.ChoosingConversation] 으로 두고 멈춘다.
+     */
     fun enterSession(target: PersonOpenedSessionTarget, conversationChoice: SessionConversationChoice)
+
+    /** 고르는 중인 진입을 사람이 고른 것으로 잇는다. 고르는 중이 아니면 아무것도 하지 않는다. */
+    fun chooseConversation(target: PersonOpenedSessionTarget, choice: SessionConversationChoice)
+
+    /** 고르는 중인 진입을 거둔다. 고르는 중이 아니면 아무것도 하지 않는다. */
+    fun cancelConversationChoice(target: PersonOpenedSessionTarget)
 
     /** 띄우지 못한 진입의 실패를 닫는다. 화면이 그 세션을 떠날 때 부른다 — 사람이 어디를 보는지는 화면만 안다. */
     fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget)

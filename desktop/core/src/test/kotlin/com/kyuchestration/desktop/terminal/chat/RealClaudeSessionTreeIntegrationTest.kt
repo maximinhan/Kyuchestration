@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.terminal.APP_SESSION_MARKER_ENV_NAME
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliChildSessionCommandSource
+import com.kyuchestration.desktop.terminal.kyucli.KyuCliClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import java.nio.file.Files
 import java.nio.file.Path
@@ -465,6 +466,7 @@ class RealClaudeSessionTreeIntegrationTest {
         val kyuCommandRunner = realKyuCommandRunnerOrSkip()
         return ChatSessionStateHolder(
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
+            claudeCodeConversationSource = KyuCliClaudeCodeConversationSource(kyuCommandRunner),
             chatSessionOpener = ProcessChatSessionOpener(),
             childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),
             claudeAuthToken = { null },

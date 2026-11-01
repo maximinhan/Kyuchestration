@@ -126,6 +126,8 @@ class RealClaudeToolWaitInterruptIntegrationTest {
 
         return ChatSessionStateHolder(
             sessionCommandSource = ProbeSessionCommandSource(probeServer),
+            // 엔진 없이 띄우는 시험이라 물을 엔진도 없다. 고르기는 이 시험의 관심 밖이다.
+            claudeCodeConversationSource = { _, _ -> emptyList() },
             chatSessionOpener = ProcessChatSessionOpener(),
             // 이 시험의 메인은 프로브 서버만 달고 떠 세션 트리 도구가 없다 — 하위를 띄우는 길에 들면 그것이 결함이다.
             childSessionCommandSource = { _, request, _ -> error("이 시험은 하위를 띄우지 않습니다: ${request.requestedCwd}") },

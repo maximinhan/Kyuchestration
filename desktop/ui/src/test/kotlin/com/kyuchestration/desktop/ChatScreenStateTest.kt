@@ -2,11 +2,14 @@ package com.kyuchestration.desktop
 
 import com.kyuchestration.desktop.protocol.toFailureView
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
+import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
+import com.kyuchestration.desktop.terminal.chat.ExistingConversation
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -35,12 +38,37 @@ class ChatScreenStateTest {
     }
 
     @Test
+    fun `대화를 고르는 중인 세션을 보면 고르기가 선다`() {
+        val choosing = SessionEntryState.ChoosingConversation(
+            candidates = listOf(ExistingConversation("654ce605-b030-40e8-8448-2e9003ad32b1", "터미널 대화", null, Instant.parse("2026-11-01T09:00:56Z"))),
+            recorded = null,
+            defaultChoice = SessionConversationChoice.AdoptConversation("654ce605-b030-40e8-8448-2e9003ad32b1"),
+        )
+
+        assertEquals(
+            ChatScreenState.ConversationChoiceOnScreen(REPO, choosing),
+            chatScreenStateFor(REPO, conversations = emptyMap(), sessionEntries = mapOf(REPO to choosing)),
+        )
+    }
+
+    @Test
     fun `띄우지 못한 세션을 보면 그 이유가 선다`() {
         val failure = TerminalSessionFailure.KyuExecutableNotFound().toFailureView()
 
         assertEquals(
             ChatScreenState.ChatSessionEntryFailed(REPO, failure),
             chatScreenStateFor(REPO, conversations = emptyMap(), sessionEntries = mapOf(REPO to SessionEntryState.Failed(failure))),
+        )
+    }
+
+    @Test
+    fun `목록을 읽지 못한 채 띄우지 못한 세션은 그 경고도 함께 선다`() {
+        val failure = TerminalSessionFailure.KyuExecutableNotFound().toFailureView()
+        val entry = SessionEntryState.Failed(failure, conversationListingWarning = "대화 목록을 읽지 못했습니다")
+
+        assertEquals(
+            ChatScreenState.ChatSessionEntryFailed(REPO, failure, conversationListingWarning = "대화 목록을 읽지 못했습니다"),
+            chatScreenStateFor(REPO, conversations = emptyMap(), sessionEntries = mapOf(REPO to entry)),
         )
     }
 

@@ -75,6 +75,23 @@ sealed interface ScreenCommand {
         val conversationChoice: SessionConversationChoice,
     ) : ScreenCommand
 
+    /**
+     * 고르기 화면에서 사람이 고른 것으로 그 세션의 진입을 잇는다(app-owned-sessions-design.md 5.5.7).
+     *
+     * 고르는 중이 아닌 세션이면 코어가 버린다 — 그 사이 워크디렉토리를 닫았거나 세션을 끝낸 자리에서 늦게 온 선택이다.
+     */
+    @Serializable
+    @SerialName("choose_conversation")
+    data class ChooseConversation(
+        val target: PersonOpenedSessionTarget,
+        val choice: SessionConversationChoice,
+    ) : ScreenCommand
+
+    /** 고르기를 그만둔다. 진입이 사라지고, 엔진에게는 아무것도 묻지 않았으므로 기록도 그대로다. */
+    @Serializable
+    @SerialName("cancel_conversation_choice")
+    data class CancelConversationChoice(val target: PersonOpenedSessionTarget) : ScreenCommand
+
     @Serializable
     @SerialName("dismiss_session_entry_failure")
     data class DismissSessionEntryFailure(val target: PersonOpenedSessionTarget) : ScreenCommand

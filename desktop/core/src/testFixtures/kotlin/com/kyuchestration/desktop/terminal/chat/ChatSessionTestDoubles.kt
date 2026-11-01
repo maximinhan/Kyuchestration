@@ -5,6 +5,7 @@ import com.kyuchestration.desktop.terminal.AssignedChildSession
 import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
 import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionCommandSource
@@ -52,8 +53,11 @@ fun TestScope.stateHolder(
     diagnosticLog: DiagnosticLog = DiagnosticLog.Discarding,
     permissionChannels: MutableList<FakeAppSocketChannel> = mutableListOf(),
     childSessionCommandSource: ChildSessionCommandSource = RecordingChildSessionCommandSource(),
+    // 바깥 대화가 없는 폴더 — 이어가기가 묻지 않고 오늘처럼 이어 가는 자리다. 묻는 갈래는 ConversationChoiceStateHolderTest 가 본다.
+    claudeCodeConversationSource: ClaudeCodeConversationSource = ClaudeCodeConversationSource { _, _ -> emptyList() },
 ) = ChatSessionStateHolder(
     sessionCommandSource = sessionCommandSource,
+    claudeCodeConversationSource = claudeCodeConversationSource,
     childSessionCommandSource = childSessionCommandSource,
     chatSessionOpener = opener,
     // 이 시험의 관심 밖이다. 자격 증명이 실리는지는 SessionEntryPlanTest 가 본다.
@@ -81,6 +85,9 @@ val TEST_CLOCK: Clock = Clock.fixed(Instant.parse("2026-10-20T10:01:12Z"), ZoneO
 class RecordingSessionCommandSource : SessionCommandSource {
 
     val askedTargets = mutableListOf<PersonOpenedSessionTarget>()
+
+    /** 엔진이 물음과 함께 받은 대화 갈래. 채택할 id 가 엔진까지 닿는지가 이 목록으로 보인다. */
+    val askedConversationChoices = mutableListOf<SessionConversationChoice>()
 
     /** 다음에 열 세션이 이어갈 대화. 진짜 어댑터에서는 엔진의 답이 이 값을 정한다. */
     var resumedConversationId: String? = null
@@ -112,6 +119,7 @@ class RecordingSessionCommandSource : SessionCommandSource {
         appSocketPath: Path?,
     ): SessionCommandAnswer {
         askedTargets.add(target)
+        askedConversationChoices.add(conversationChoice)
         askedApprovalSocketPaths.add(appSocketPath)
         return respond()
     }

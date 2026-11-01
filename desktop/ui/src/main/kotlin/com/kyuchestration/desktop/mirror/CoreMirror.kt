@@ -252,6 +252,12 @@ class CoreMirror private constructor(
     override fun dismissSessionEntryFailure(target: PersonOpenedSessionTarget) =
         send(ScreenCommand.DismissSessionEntryFailure(target))
 
+    override fun chooseConversation(target: PersonOpenedSessionTarget, choice: SessionConversationChoice) =
+        send(ScreenCommand.ChooseConversation(target, choice))
+
+    override fun cancelConversationChoice(target: PersonOpenedSessionTarget) =
+        send(ScreenCommand.CancelConversationChoice(target))
+
     override fun sendUserMessage(target: SessionTarget, text: String) = send(ScreenCommand.SendUserMessage(target, text))
 
     override fun interruptTurn(target: SessionTarget) = send(ScreenCommand.InterruptTurn(target))

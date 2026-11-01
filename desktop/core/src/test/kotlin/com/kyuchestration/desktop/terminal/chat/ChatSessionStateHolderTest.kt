@@ -518,9 +518,12 @@ class ChatSessionStateHolderTest {
     @Test
     fun `띄우는 중에 그 세션을 끝내면 뜨는 순간 끝낸다`() = runTest {
         // 끝낸 세션의 claude 가 뒤늦게 떠서 아무도 읽지 않은 채 사는 것을 막는다.
+        //
+        // 새 대화로 연다. 이어가기는 띄우기 전에 대화 목록을 먼저 읽어, 그 사이 끝낸 진입은 띄우지도 않는다
+        // (ConversationChoiceStateHolderTest) — 여기서 보려는 것은 이미 띄우는 중에 끝낸 자리다.
         val opener = RecordingChatSessionOpener()
         val holder = stateHolder(opener)
-        holder.enterSessionContinuingConversation(SessionTarget.Main)
+        holder.enterSession(WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.StartNewConversation)
 
         holder.endSession(SessionTarget.Main)
         runCurrent()

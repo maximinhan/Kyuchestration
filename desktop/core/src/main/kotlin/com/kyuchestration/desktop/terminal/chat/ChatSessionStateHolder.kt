@@ -9,6 +9,9 @@ import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
 import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.ChildSessionGate
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversation
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationListingFailure
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -66,6 +69,8 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatSessionStateHolder(
     private val sessionCommandSource: SessionCommandSource,
+    /** 이어가기 전에 그 자리의 바깥(터미널) 대화를 보는 자리(app-owned-sessions-design.md 5.5.7). */
+    private val claudeCodeConversationSource: ClaudeCodeConversationSource,
     private val chatSessionOpener: ChatSessionOpener,
     /** 하위 세션이 무엇을 띄울지 답하는 자리(`--child`). 하위의 이름과 관문의 물음도 여기서 온다(6.2 · 6.9). */
     private val childSessionCommandSource: ChildSessionCommandSource,
@@ -169,13 +174,16 @@ class ChatSessionStateHolder(
     private val toolsAllowedForSession = mutableMapOf<SessionTarget, MutableSet<String>>()
 
     /**
-     * 세션마다 지금 기다리고 있는 진입이 몇 번째인가. 기다리는 진입이 없으면 그 세션의 열쇠가 없다.
+     * 세션마다 아직 끝나지 않은 진입. 기다리는 진입이 없으면 그 세션의 열쇠가 없다.
      *
-     * 진행 중인 코루틴을 취소하지 않고 이 번호로 가른다 — 취소해도 이미 시작된 프로세스는 멈추지
+     * 진행 중인 코루틴을 취소하지 않고 진입 번호로 가른다 — 취소해도 이미 시작된 프로세스는 멈추지
      * 않으므로, 취소는 "아무도 읽지 않는 `claude` 가 하나 남는" 상태를 만든다. 진입이 끝났을 때 번호가
      * 다르면(그 사이 그 세션을 끝냈거나 워크디렉토리를 닫았다) 막 뜬 프로세스를 끝낸다.
+     *
+     * 사람이 대화를 고르는 중인 것도 따로 들지 않고 이 기록의 단계([PendingEntryPhase.ChoosingConversation])로 둔다. 두 맵으로
+     * 나누면 진입을 버리는 자리마다 둘을 함께 비워야 하고, 하나를 빠뜨린 자리에서 버려진 고르기가 살아남는다.
      */
-    private val pendingEntryRequestIds = mutableMapOf<PersonOpenedSessionTarget, Long>()
+    private val pendingEntries = mutableMapOf<PersonOpenedSessionTarget, PendingEntry>()
 
     private var lastEntryRequestId = 0L
 
@@ -260,12 +268,150 @@ class ChatSessionStateHolder(
      *   엔진이 그 뜻대로 명령을 조립한다(설계 원칙 11).
      */
     fun enterSession(workDirPath: Path, target: PersonOpenedSessionTarget, conversationChoice: SessionConversationChoice) {
-        if (mutableHeldSessions.value.any { it.target == target } || target in pendingEntryRequestIds) {
+        if (mutableHeldSessions.value.any { it.target == target }) {
+            return
+        }
+        val pending = pendingEntries[target]
+        if (pending != null) {
+            // 고르는 중에 온 새 대화 · 채택은 그 물음의 답이다 — 카드의 "새 대화" 버튼이 이 길로 온다. 버리면 버튼이 먹지 않는다.
+            // 이어가기는 이미 떠 있는 그 물음이라 다시 묻지 않는다.
+            if (pending.phase is PendingEntryPhase.ChoosingConversation &&
+                conversationChoice != SessionConversationChoice.ContinueRecordedConversation
+            ) {
+                chooseConversation(target, conversationChoice)
+            }
             return
         }
 
-        // 앞서 스스로 끝난 세션의 전사가 남아 있는 자리다. 새로 띄우는 것이므로 그 전사도 함께
-        // 놓는다 — 남겨 두면 새 대화의 위에 지난 대화가 이어 붙는다.
+        lastEntryRequestId++
+        val requestId = lastEntryRequestId
+        pendingEntries[target] = PendingEntry(requestId, workDirPath, PendingEntryPhase.Opening)
+        mutableSessionEntries.value += target to SessionEntryState.Running
+        val endingBeforeEntry = sessionsEnding
+
+        coroutineScope.launch {
+            endingBeforeEntry?.join()
+
+            // 묻는 것은 이어가기뿐이다. 새 대화와 채택은 사람이 이미 고른 것이다.
+            val listingWarning = if (conversationChoice == SessionConversationChoice.ContinueRecordedConversation) {
+                val question = withContext(sessionEntryDispatcher) { conversationQuestionFor(workDirPath, target) }
+
+                // 목록을 읽는 사이 사람이 그 세션을 끝냈거나 워크디렉토리를 닫았다.
+                if (pendingEntries[target]?.requestId != requestId) {
+                    return@launch
+                }
+                when (question) {
+                    is ConversationQuestion.Ask -> {
+                        pendingEntries[target] =
+                            PendingEntry(requestId, workDirPath, PendingEntryPhase.ChoosingConversation(question.choosing))
+                        mutableSessionEntries.value += target to question.choosing
+                        return@launch
+                    }
+                    ConversationQuestion.NothingToAsk -> null
+                    is ConversationQuestion.ListingFailed -> question.warning
+                }
+            } else {
+                null
+            }
+
+            openAndHoldEnteredSession(workDirPath, target, conversationChoice, requestId, listingWarning)
+        }
+    }
+
+    /**
+     * 고르는 중인 진입을 사람이 고른 것으로 잇는다. 고르는 중이 아니면(이미 골랐거나, 취소했거나, 그 사이 워크디렉토리를
+     * 닫았다) 아무것도 하지 않는다 — 늦게 온 선택이 닫힌 폴더의 대화 기록을 바꾸지 않게.
+     *
+     * 고른 것이 이어가기여도 다시 묻지 않는다. 사람이 방금 본 목록에서 "앱에서 하던 대화" 를 고른 것이다.
+     *
+     * **제시한 것만 받는다.** 화면은 코어가 제시한 갈래만 보이지만, 명령은 선을 건너 오는 값이다. 제시하지 않은 id — 특히
+     * 다른 라벨에 적힌 대화 — 를 엔진에 넘기면 두 세션이 한 대화를 연다. 그런 선택은 버리고 고르기를 그대로 둔다.
+     */
+    fun chooseConversation(target: PersonOpenedSessionTarget, choice: SessionConversationChoice) {
+        val pending = pendingEntries[target] ?: return
+        val choosing = pending.phase as? PendingEntryPhase.ChoosingConversation ?: return
+        if (!choosing.offered.offers(choice)) {
+            diagnosticLog.record(DiagnosticLogEntry.UnofferedConversationChoiceRefused(targetLabel = target.label))
+            return
+        }
+
+        pendingEntries[target] = pending.copy(phase = PendingEntryPhase.Opening)
+        mutableSessionEntries.value += target to SessionEntryState.Running
+        // 고르는 사이 시작된 끝내기도 지난다 — 모든 진입이 앞선 끝내기 뒤에 띄운다는 [sessionsEnding] 의 약속이다.
+        val endingBeforeOpening = sessionsEnding
+        coroutineScope.launch {
+            endingBeforeOpening?.join()
+            openAndHoldEnteredSession(pending.workDirPath, target, choice, pending.requestId, listingWarning = null)
+        }
+    }
+
+    /** 고르는 중인 진입을 거둔다. 엔진에게는 아직 아무것도 묻지 않았으므로 대화 기록도, 남아 있던 전사도 그대로다. */
+    fun cancelConversationChoice(target: PersonOpenedSessionTarget) {
+        if (pendingEntries[target]?.phase !is PendingEntryPhase.ChoosingConversation) {
+            return
+        }
+        pendingEntries.remove(target)
+        mutableSessionEntries.value -= target
+    }
+
+    /**
+     * 이어가기를 누른 자리에서 사람에게 물을지 정한다(app-owned-sessions-design.md 5.5.7).
+     *
+     * 묻는 것은 앱에 적힌 것보다 최근인 바깥 대화가 있을 때뿐이다. 사람이 앱 밖에서 터미널로 이어간 대화는 반드시 적힌 것보다
+     * 최근이라 잡히고, 한 번 고른 대화로 말을 주고받으면 적힌 대화가 가장 최근이 되어 다음부터 묻지 않는다 — 매번 묻는 성가심과
+     * 놓치는 것 사이의 균형을 "물었는가" 같은 상태 없이 얻는다.
+     */
+    private fun conversationQuestionFor(workDirPath: Path, target: PersonOpenedSessionTarget): ConversationQuestion {
+        val conversations = try {
+            claudeCodeConversationSource.conversationsAt(workDirPath, target)
+        } catch (failure: ClaudeCodeConversationListingFailure) {
+            // 묻지 못했다고 세션을 못 여는 것은 과하다. 놓친 것은 고를 기회 하나라, 기록과 대화에 그 사실만 남긴다.
+            diagnosticLog.record(
+                DiagnosticLogEntry.ClaudeCodeConversationListingFailed(
+                    targetLabel = target.label,
+                    failureMessage = failure.message.orEmpty(),
+                ),
+            )
+            return ConversationQuestion.ListingFailed(
+                "이 자리의 Claude Code 대화 목록을 읽지 못해 고르지 않고 이어갑니다 — ${failure.message.orEmpty()}",
+            )
+        }
+
+        // 다른 라벨에 적힌 대화는 그 세션의 것이다. 후보에 섞으면 두 세션이 한 대화를 연다.
+        val candidates = conversations.filter { it.recordedForLabel == null }.sortedByDescending { it.lastActiveAt }
+        val recorded = conversations.firstOrNull { it.recordedForLabel == target.label }
+        val newestCandidate = candidates.firstOrNull() ?: return ConversationQuestion.NothingToAsk
+        if (recorded != null && !newestCandidate.lastActiveAt.isAfter(recorded.lastActiveAt)) {
+            return ConversationQuestion.NothingToAsk
+        }
+
+        return ConversationQuestion.Ask(
+            SessionEntryState.ChoosingConversation(
+                candidates = candidates.map { it.asExistingConversation() },
+                recorded = recorded?.asExistingConversation(),
+                // 묻는 조건이 "가장 최근 후보가 적힌 것보다 뒤" 라, 물을 때 가장 최근인 것은 언제나 그 후보다.
+                defaultChoice = SessionConversationChoice.AdoptConversation(newestCandidate.id),
+            ),
+        )
+    }
+
+    /**
+     * 엔진에게 세션 명령을 묻고 띄워 보유한다. 진입 번호가 그 사이 바뀌었으면(세션을 끝냈거나 워크디렉토리를 닫았다) 막 뜬
+     * 프로세스를 끝낸다.
+     *
+     * @param listingWarning 대화 목록을 읽지 못했다는 말. 열리면 엔진의 경고와 함께 그 세션의 챗 맨 앞에 서고, 열지 못하면 진입
+     *   실패와 함께 보인다.
+     */
+    private suspend fun openAndHoldEnteredSession(
+        workDirPath: Path,
+        target: PersonOpenedSessionTarget,
+        conversationChoice: SessionConversationChoice,
+        requestId: Long,
+        listingWarning: String?,
+    ) {
+        // 앞서 스스로 끝난 세션의 전사가 남아 있는 자리다. 새로 띄우는 것이므로 그 전사도 함께 놓는다 — 남겨 두면 새 대화의
+        // 위에 지난 대화가 이어 붙는다. 진입을 받은 순간이 아니라 여기서 놓는 것은 고르기 때문이다: 고르다 취소하면 아무것도
+        // 바뀌지 않아야 한다.
         mutableConversations.value -= target
 
         // 메인을 새로 띄우면 앞 메인의 하위들도 함께 놓는다. 트리는 그 메인 프로세스의 것이고, 새 메인은 그
@@ -274,34 +420,25 @@ class ChatSessionStateHolder(
             forgetChildren()
         }
 
-        lastEntryRequestId++
-        val requestId = lastEntryRequestId
-        pendingEntryRequestIds[target] = requestId
-        mutableSessionEntries.value += target to SessionEntryState.Running
-        val endingBeforeEntry = sessionsEnding
-
-        coroutineScope.launch {
-            endingBeforeEntry?.join()
-            val opened = withContext(sessionEntryDispatcher) {
-                runCatching { openChatSession(workDirPath, target, conversationChoice) }
-            }
-
-            // 기다리는 동안 사람이 그 세션을 끝냈거나 워크디렉토리를 닫았다.
-            if (pendingEntryRequestIds[target] != requestId) {
-                opened.getOrNull()?.let { endSessionProcess(it) }
-                return@launch
-            }
-            pendingEntryRequestIds.remove(target)
-
-            opened.fold(
-                onSuccess = { held ->
-                    // 대화를 먼저 세우고 진입 줄을 뺀다. 거꾸로면 그 사이 화면은 둘 다 없는 세션을 본다.
-                    hold(held)
-                    mutableSessionEntries.value -= target
-                },
-                onFailure = { failure -> recordEntryFailure(target, failure.asTerminalSessionFailure()) },
-            )
+        val opened = withContext(sessionEntryDispatcher) {
+            runCatching { openChatSession(workDirPath, target, conversationChoice) }
         }
+
+        // 기다리는 동안 사람이 그 세션을 끝냈거나 워크디렉토리를 닫았다.
+        if (pendingEntries[target]?.requestId != requestId) {
+            opened.getOrNull()?.let { endSessionProcess(it) }
+            return
+        }
+        pendingEntries.remove(target)
+
+        opened.fold(
+            onSuccess = { held ->
+                // 대화를 먼저 세우고 진입 줄을 뺀다. 거꾸로면 그 사이 화면은 둘 다 없는 세션을 본다.
+                hold(held.copy(engineWarnings = listOfNotNull(listingWarning) + held.engineWarnings))
+                mutableSessionEntries.value -= target
+            },
+            onFailure = { failure -> recordEntryFailure(target, failure.asTerminalSessionFailure(), listingWarning) },
+        )
     }
 
     /**
@@ -435,8 +572,8 @@ class ChatSessionStateHolder(
     }
 
     private suspend fun endPersonOpenedSession(target: PersonOpenedSessionTarget) {
-        // 띄우는 중이었으면 그 진입을 버린다 — 뜨는 순간 끝낸다.
-        pendingEntryRequestIds.remove(target)
+        // 띄우는 중이었으면 그 진입을 버린다 — 뜨는 순간 끝낸다. 고르는 중이었어도 같다.
+        pendingEntries.remove(target)
         mutableSessionEntries.value -= target
         mutableConversations.value -= target
 
@@ -526,8 +663,8 @@ class ChatSessionStateHolder(
      * 한꺼번에 끝낸다. 하나씩 기다리면 세션 수만큼의 종료 대기가 줄줄이 붙어 창이 늦게 닫힌다.
      */
     suspend fun endAllSessions() {
-        // 띄우는 중인 진입도 전부 버린다 — 뜨는 순간 끝낸다.
-        pendingEntryRequestIds.clear()
+        // 띄우는 중인 진입도 전부 버린다 — 뜨는 순간 끝낸다. 고르는 중인 진입도 함께 버린다.
+        pendingEntries.clear()
         mutableSessionEntries.value = emptyMap()
 
         // 사람이 연 세션과 전사는 기다리기 전에 놓는다. 하위를 끝내는 사이 메인이 보유 목록에 남아 있으면, 그 사이 새
@@ -1382,7 +1519,11 @@ class ChatSessionStateHolder(
         }
     }
 
-    private fun recordEntryFailure(target: PersonOpenedSessionTarget, failure: TerminalSessionFailure) {
+    private fun recordEntryFailure(
+        target: PersonOpenedSessionTarget,
+        failure: TerminalSessionFailure,
+        conversationListingWarning: String?,
+    ) {
         diagnosticLog.record(
             DiagnosticLogEntry.SessionEntryFailed(
                 targetLabel = target.label,
@@ -1390,7 +1531,7 @@ class ChatSessionStateHolder(
                 guidance = failure.guidance,
             ),
         )
-        mutableSessionEntries.value += target to SessionEntryState.Failed(failure.toFailureView())
+        mutableSessionEntries.value += target to SessionEntryState.Failed(failure.toFailureView(), conversationListingWarning)
     }
 
     /** 그 세션의 대화를 고친다. 대화가 없는 세션(이미 놓았다)이면 아무 일도 하지 않는다. */
@@ -1506,3 +1647,40 @@ private data class AskedPermissionKey(val target: SessionTarget, val toolUseId: 
  */
 private fun Throwable.asTerminalSessionFailure(): TerminalSessionFailure =
     this as? TerminalSessionFailure ?: throw this
+
+/** 사람이 연 세션 하나의 아직 끝나지 않은 진입. 고르기에서 이어 갈 때 이 자리와 번호를 그대로 쓴다. */
+private data class PendingEntry(val requestId: Long, val workDirPath: Path, val phase: PendingEntryPhase)
+
+private sealed interface PendingEntryPhase {
+
+    /** 엔진에게 묻거나 목록을 읽거나 프로세스를 띄우는 중이다. */
+    data object Opening : PendingEntryPhase
+
+    /** 사람이 대화를 고르는 중이다. 고른 것이 [offered] 에 있었는지 이것으로 본다. */
+    data class ChoosingConversation(val offered: SessionEntryState.ChoosingConversation) : PendingEntryPhase
+}
+
+/** 고르기 화면이 보인 갈래인가. 이어가기는 앱에서 하던 대화를 보였을 때만, 새 대화는 언제나 보인다. */
+private fun SessionEntryState.ChoosingConversation.offers(choice: SessionConversationChoice): Boolean = when (choice) {
+    SessionConversationChoice.ContinueRecordedConversation -> recorded != null
+    SessionConversationChoice.StartNewConversation -> true
+    is SessionConversationChoice.AdoptConversation -> candidates.any { it.id == choice.conversationId }
+}
+
+/** 이어가기를 누른 자리에서 대화 목록을 본 결과. */
+private sealed interface ConversationQuestion {
+
+    data class Ask(val choosing: SessionEntryState.ChoosingConversation) : ConversationQuestion
+
+    data object NothingToAsk : ConversationQuestion
+
+    /** 목록을 받지 못했다. 묻지 않고 이어가되 [warning] 을 그 세션의 챗 맨 앞에 남긴다. */
+    data class ListingFailed(val warning: String) : ConversationQuestion
+}
+
+private fun ClaudeCodeConversation.asExistingConversation() = ExistingConversation(
+    id = id,
+    title = title,
+    startedAt = startedAt,
+    lastActiveAt = lastActiveAt,
+)

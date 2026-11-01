@@ -112,6 +112,29 @@ sealed interface DiagnosticLogEntry {
             }
     }
 
+    /**
+     * 이어가기 전에 그 자리의 Claude Code 대화 목록을 받지 못했다. 고르기 없이 적힌 대화를 이어갔다.
+     *
+     * 진입 실패와 갈라 둔다. 세션은 열렸다 — 놓친 것은 "바깥 대화를 고를 기회" 하나다.
+     */
+    data class ClaudeCodeConversationListingFailed(
+        val targetLabel: String,
+        val failureMessage: String,
+    ) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "대화 목록 읽기 실패 — $targetLabel: $failureMessage"
+    }
+
+    /**
+     * 고르기 화면이 제시하지 않은 대화를 채택하라는 선택이 와서 버렸다. 고르기는 그대로 남는다.
+     *
+     * 대화 id 는 적지 않는다 — 진단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다(SessionStarted 와 같은 선).
+     */
+    data class UnofferedConversationChoiceRefused(val targetLabel: String) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "제시하지 않은 대화의 채택을 버림 — $targetLabel"
+    }
+
     /** 세션에 들어가지 못했다. */
     data class SessionEntryFailed(
         val targetLabel: String,
