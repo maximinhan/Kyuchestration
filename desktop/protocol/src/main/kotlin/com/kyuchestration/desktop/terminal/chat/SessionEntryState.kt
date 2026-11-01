@@ -1,7 +1,9 @@
 package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.protocol.FailureView
+import com.kyuchestration.desktop.protocol.InstantAsIsoStringSerializer
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
+import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -36,16 +38,23 @@ sealed interface SessionEntryState {
         val defaultChoice: SessionConversationChoice,
     ) : SessionEntryState
 
+    /**
+     * @param conversationListingWarning 이어가기 전에 대화 목록을 읽지 못했다는 말. 세션이 열렸으면 챗 맨 앞 줄에 서는 말인데, 열지
+     *   못했으면 그 줄이 설 대화가 없어 이 실패와 함께 보인다 — 그렇지 않으면 "왜 고르기가 안 떴는가" 가 진단 기록에만 남는다.
+     */
     @Serializable
     @SerialName("failed")
-    data class Failed(val failure: FailureView) : SessionEntryState
+    data class Failed(
+        val failure: FailureView,
+        val conversationListingWarning: String? = null,
+    ) : SessionEntryState
 }
 
 /**
  * 고르기 화면에 보일 대화 하나. 엔진의 `kyu conversations list` 가 답한 것을 화면에 필요한 만큼만 옮긴 값이다.
  *
- * 시각은 엔진이 낸 RFC 3339 UTC 문자열 그대로다. 현지 시간으로 보이는 것은 화면의 일이고, 코어와 화면의 시간대가 다를 수
- * 있다(윈도우 화면 + WSL 코어).
+ * 시각은 [Instant] 로 들고 선 위에서는 ISO-8601 문자열로 건넌다(InstantAsIsoStringSerializer). 현지 시간으로 보이는 것은 화면의
+ * 일이고, 코어와 화면의 시간대가 다를 수 있다(윈도우 화면 + WSL 코어).
  *
  * @param title 엔진이 답한 제목. 비어 있을 수 있다 — 화면이 id 앞자리로 대신 보인다.
  * @param startedAt 첫 메시지 시각. 엔진이 알 수 없으면 null 이다.
@@ -54,6 +63,8 @@ sealed interface SessionEntryState {
 data class ExistingConversation(
     val id: String,
     val title: String,
-    val startedAt: String?,
-    val lastActiveAt: String,
+    @Serializable(with = InstantAsIsoStringSerializer::class)
+    val startedAt: Instant?,
+    @Serializable(with = InstantAsIsoStringSerializer::class)
+    val lastActiveAt: Instant,
 )
