@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -250,40 +251,45 @@ private fun ChatTranscript(
     // 경계에서 한 번쯤 어긋날 수 있는데, 그 대가로 스크롤을 빼앗기지 않는다. 수는 목록 항목 단위다(transcriptListItemCount).
     var lastKnownListItemCount by remember { mutableStateOf(0) }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // 이 목록이 세우는 항목의 수는 transcriptListItemCount 가 같은 조건으로 센다. 여기에 항목을 더하면 거기도 더한다.
-        resumedConversationHeadline(conversation)?.let { headline ->
-            item { ResumedConversationHeadline(headline) }
-        }
+    // 이 전사의 답들을 한 번씩만 파싱한다(ParsedMarkdownCache). 세션마다 따로 — 다른 세션의 글을 들고 있을 까닭이 없다.
+    val parsedMarkdownCache = remember(conversation.target) { ParsedMarkdownCache() }
 
-        // 지난 항목과 이번 세션의 항목 사이에 선 하나를 둔다. 둘을 같은 목록 하나에 두는 것은 스크롤 하나로 이어 읽게 하려는
-        // 것이고(LazyColumn 이라 지난 항목 200개도 보이는 몫만 그린다), 그 대가로 어디서 갈리는지를 이 선이 말한다.
-        val dividerIndex = thisSessionDividerIndex(conversation.entries)
-        val pastEntries = conversation.entries.subList(0, dividerIndex ?: 0)
-        val thisSessionEntries = conversation.entries.subList(dividerIndex ?: 0, conversation.entries.size)
+    CompositionLocalProvider(LocalParsedMarkdownCache provides parsedMarkdownCache) {
+        LazyColumn(
+            state = listState,
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // 이 목록이 세우는 항목의 수는 transcriptListItemCount 가 같은 조건으로 센다. 여기에 항목을 더하면 거기도 더한다.
+            resumedConversationHeadline(conversation)?.let { headline ->
+                item { ResumedConversationHeadline(headline) }
+            }
 
-        items(pastEntries) { entry ->
-            ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
-        }
-        if (dividerIndex != null) {
-            item { ThisSessionDivider() }
-        }
-        items(thisSessionEntries) { entry ->
-            ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
-        }
+            // 지난 항목과 이번 세션의 항목 사이에 선 하나를 둔다. 둘을 같은 목록 하나에 두는 것은 스크롤 하나로 이어 읽게 하려는
+            // 것이고(LazyColumn 이라 지난 항목 200개도 보이는 몫만 그린다), 그 대가로 어디서 갈리는지를 이 선이 말한다.
+            val dividerIndex = thisSessionDividerIndex(conversation.entries)
+            val pastEntries = conversation.entries.subList(0, dividerIndex ?: 0)
+            val thisSessionEntries = conversation.entries.subList(dividerIndex ?: 0, conversation.entries.size)
 
-        // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
-        conversation.streamingText?.let { streamingText ->
-            item { StreamingAssistantMarkdown(streamingText, conversation.streamingBlockOrdinal) }
-        }
+            items(pastEntries) { entry ->
+                ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
+            }
+            if (dividerIndex != null) {
+                item { ThisSessionDivider() }
+            }
+            items(thisSessionEntries) { entry ->
+                ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
+            }
 
-        if (!conversation.alive) {
-            item { SessionEndedNotice(conversation) }
+            // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
+            conversation.streamingText?.let { streamingText ->
+                item { StreamingAssistantMarkdown(streamingText, conversation.streamingBlockOrdinal) }
+            }
+
+            if (!conversation.alive) {
+                item { SessionEndedNotice(conversation) }
+            }
         }
     }
 
