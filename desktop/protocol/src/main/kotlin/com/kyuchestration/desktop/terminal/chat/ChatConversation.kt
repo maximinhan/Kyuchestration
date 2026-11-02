@@ -11,9 +11,9 @@ import kotlinx.serialization.Serializable
  * 위젯을 살려 둬야 상태를 잃지 않았지만, 챗에서는 화면이 없어도 아무것도 잃지 않는다 — 살려
  * 둬야 하는 것은 stdout 을 읽는 코루틴 하나뿐이다(ProcessChatSession).
  *
- * **메모리에만 있다.** 앱을 닫으면 사라지고, 다시 열면 `--resume` 으로 대화는 이어지지만 화면의
- * 전사는 비어 있다. 그 어긋남을 화면이 먼저 말한다([resumedConversationId] 가 그 근거다).
- * 파일로 남기는 것은 v1 밖이다(10 절 열린 질문 3).
+ * **메모리에만 있다.** 앱을 닫으면 사라진다. 다시 열어 `--resume` 으로 이어가면 코어가 엔진에게 그 대화의 지난 내용을
+ * 물어 [entries] 앞에 [ChatEntry.PastTurn] 으로 깐다(app-owned-sessions-design.md 5.5.8) — 앱이 전사를 파일로 남기지 않아도
+ * 지난 대화가 보이는 것은 `claude` 자신의 전사를 엔진이 읽어 주기 때문이다.
  *
  * @param workingDirectory 이 세션의 `claude` 가 도는 자리 — 엔진이 답한 cwd 그대로다. 승인 카드가
  *   "어느 레포의 물음인가" 를 말하는 근거이고(6.4), 챗이 여럿 열려 있으면 그것이 판단의 절반이다.
@@ -37,6 +37,9 @@ import kotlinx.serialization.Serializable
  *   보면 "짧아졌다" 와 "새 블록이 시작됐다" 를 가를 수 없다. 두 사건이 한 프레임에 겹쳐 오면
  *   앞 블록의 글자가 새 블록에 이어 붙는다.
  * @param endedExitCode 프로세스가 끝났으면 그 종료 코드. 살아 있으면 null.
+ * @param pastTurnsOmittedBefore 지난 항목 앞에서 싣지 않은 항목 수. 엔진은 마지막 몇 개만 답하고, 화면의 "앞선 N개는 보이지
+ *   않습니다" 가 이 값에서 나온다. 코어가 엔진의 전체 수에서 답한 수를 빼 정한다 — 화면이 지난 항목을 세어 짐작하면, 화면이
+ *   모르는 갈래를 코어가 건너뛴 날 그 수가 틀린다.
  */
 @Serializable
 data class ChatConversation(
@@ -53,6 +56,7 @@ data class ChatConversation(
     val totalCostUsd: Double = 0.0,
     val usageWindows: List<RateLimitWindow> = emptyList(),
     val endedExitCode: Int? = null,
+    val pastTurnsOmittedBefore: Int = 0,
 ) {
 
     /** 이 세션의 프로세스가 아직 살아 있는가. */

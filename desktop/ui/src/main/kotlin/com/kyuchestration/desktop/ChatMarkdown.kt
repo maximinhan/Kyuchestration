@@ -25,8 +25,11 @@ import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCode
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.MarkdownColors
 import com.mikepenz.markdown.model.MarkdownTypography
+import com.mikepenz.markdown.model.rememberMarkdownState
 import com.mikepenz.markdown.model.rememberStreamingMarkdownState
 import dev.snipme.highlights.Highlights
 import dev.snipme.highlights.model.SyntaxLanguage
@@ -40,11 +43,18 @@ import dev.snipme.highlights.model.SyntaxThemes
  *
  * @param modifier 폭만 채운다. 이 컴포저블의 기본값이 `fillMaxSize` 라 그대로 두면 전사 목록
  *   안에서 항목 하나가 화면 전체를 차지한다.
+ * @param colors 이어온 대화의 지난 답은 옅은 글자색으로 그린다(PastTurnView). 이번 세션의 답과 갈리는 것이 그 색 하나다.
  */
 @Composable
-internal fun AssistantMarkdown(text: String, modifier: Modifier = Modifier) {
+internal fun AssistantMarkdown(text: String, modifier: Modifier = Modifier, colors: MarkdownColors = markdownColor()) {
+    // 그 자리에서 곧바로 파싱한다. 라이브러리의 기본은 파싱을 뒤로 미루어 첫 배치에서 이 항목의 높이가 0 이다 — 전사를 맨
+    // 아래로 내리는 결정(ChatTranscript)이 그 0 을 보고 내린 뒤 높이가 늘어, 마지막 답이 화면 아래로 밀려난 채 선다. 이어온
+    // 대화가 깔린 창을 처음 열 때 이 어긋남이 가장 크다(지난 답 수십 개가 한꺼번에 자란다). LazyColumn 은 보이는 항목만
+    // 그리므로 미루지 않아도 한 번에 파싱하는 것은 화면에 드는 몇 개뿐이다.
+    val markdownState = rememberMarkdownState(text, immediate = true)
     Markdown(
-        content = text,
+        markdownState = markdownState,
+        colors = colors,
         typography = chatMarkdownTypography(),
         components = highlightedCodeComponents(),
         modifier = modifier.fillMaxWidth(),

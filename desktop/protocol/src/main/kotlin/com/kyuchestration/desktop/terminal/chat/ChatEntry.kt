@@ -115,6 +115,63 @@ sealed interface ChatEntry {
     @Serializable
     @SerialName("engine_notice")
     data class EngineNotice(val line: String) : ChatEntry
+
+    /**
+     * 이어간 대화의 지난 항목 하나 — 이번 세션이 뜨기 전에(터미널에서, 또는 앱의 앞선 실행에서) 나눈 것을 엔진이 전사에서
+     * 읽어 준 것이다(app-owned-sessions-design.md 5.5.8).
+     *
+     * **지금 항목([UserSaid] · [AssistantSaid] · [ToolCall])으로 흉내 내지 않는다.** 지난 항목에는 승인 · 결과 · 비용이 없다 —
+     * 같은 갈래로 세우면 결과 없는 도구 카드가 아직 도는 것처럼 서고, 화면은 지난 말과 이번 말을 가르지 못한다. 전사 앞부분에
+     * 놓이고(순서가 곧 시간), 화면이 옅게 그린다.
+     *
+     * @param at 그 줄이 전사에 적힌 시각. 엔진이 알 수 없으면 null 이다 — [PastTurnContent.LinesOmitted] 는 늘 null 이다.
+     */
+    @Serializable
+    @SerialName("past_turn")
+    data class PastTurn(
+        val content: PastTurnContent,
+        @Serializable(with = InstantAsIsoStringSerializer::class)
+        val at: Instant? = null,
+    ) : ChatEntry
+}
+
+/**
+ * 지난 항목이 무엇이었는가. 엔진의 `kind` 다섯과 일대일이다(internal/cli/conversations_json.go).
+ *
+ * 갈래마다 그 자리만 갖는다. 한 모양에 모든 자리를 두면 사람의 말에 빈 도구 이름이 따라다니고, 그리는 쪽이 빈 값과 없는 값을
+ * 가려야 한다 — 엔진이 문서를 세 모양으로 가른 까닭과 같다.
+ */
+@Serializable
+sealed interface PastTurnContent {
+
+    /** 사람이 쓴 글. */
+    @Serializable
+    @SerialName("user_said")
+    data class UserSaid(val text: String) : PastTurnContent
+
+    /** claude 의 글. 사고 블록은 엔진이 싣지 않는다. */
+    @Serializable
+    @SerialName("assistant_said")
+    data class AssistantSaid(val text: String) : PastTurnContent
+
+    /**
+     * 도구를 불렀다. 결과는 없다 — 엔진이 tool_result 를 싣지 않는다.
+     *
+     * @param summary 엔진이 정한 한 줄 요약(Bash 의 명령 같은 것). 없으면 빈 문자열이다.
+     */
+    @Serializable
+    @SerialName("tool_used")
+    data class ToolUsed(val toolName: String, val summary: String) : PastTurnContent
+
+    /** 사람이 아닌 쪽이 사람 자리에 적은 줄 — 중단 표지, 세션 트리의 중계. 사람의 말풍선으로 그리면 사람은 자기가 하지 않은 말을 읽는다. */
+    @Serializable
+    @SerialName("system_noted")
+    data class SystemNoted(val text: String) : PastTurnContent
+
+    /** 연달아 건너뛴 전사 줄(하위 에이전트) [count] 개. */
+    @Serializable
+    @SerialName("lines_omitted")
+    data class LinesOmitted(val count: Int) : PastTurnContent
 }
 
 /**

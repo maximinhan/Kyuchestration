@@ -133,4 +133,5 @@ private fun ChatConversation.withHeader(header: ConversationHeader): ChatConvers
     totalCostUsd = header.totalCostUsd,
     usageWindows = header.usageWindows,
     endedExitCode = header.endedExitCode,
+    pastTurnsOmittedBefore = header.pastTurnsOmittedBefore,
 )

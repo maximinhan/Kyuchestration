@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistory
 import com.kyuchestration.desktop.terminal.SessionTarget
 import java.nio.file.Path
 
@@ -35,6 +36,12 @@ data class HeldChatSession(
     /** 이 세션을 연 워크디렉토리. 메인이 하위를 띄울 때 엔진에게 묻는 자리이자 기록이 있는 자리다. */
     val workDirPath: Path,
 
-    /** 엔진이 이 세션을 열며 남긴 경고(SessionCommandAnswer.engineWarnings). 보유하는 순간 그 챗 맨 앞에 선다. */
+    /**
+     * 이 세션이 이어가는 대화의 지난 내용(app-owned-sessions-design.md 5.5.8). 보유하는 순간 그 챗의 맨 앞에 깔린다.
+     * 새 대화 · 하위 세션이거나 받지 못했으면 null 이다 — 받지 못한 까닭은 [engineWarnings] 에 있다.
+     */
+    val pastConversation: ClaudeCodeConversationHistory?,
+
+    /** 엔진이 이 세션을 열며 남긴 경고(SessionCommandAnswer.engineWarnings). 보유하는 순간 그 챗의 지난 대화 바로 뒤에 선다. */
     val engineWarnings: List<String>,
 )

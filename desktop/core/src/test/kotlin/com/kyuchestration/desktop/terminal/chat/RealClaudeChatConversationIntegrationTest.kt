@@ -162,6 +162,7 @@ class RealClaudeChatConversationIntegrationTest {
         return ChatSessionStateHolder(
             sessionCommandSource = KyuCliSessionCommandSource(realKyuCommandRunnerOrSkip()),
             claudeCodeConversationSource = KyuCliClaudeCodeConversationSource(realKyuCommandRunnerOrSkip()),
+            claudeCodeConversationHistorySource = KyuCliClaudeCodeConversationSource(realKyuCommandRunnerOrSkip()),
             chatSessionOpener = ProcessChatSessionOpener(),
             childSessionCommandSource = KyuCliChildSessionCommandSource(realKyuCommandRunnerOrSkip()),
             // 이 시험을 돌리는 사람의 claude 는 이미 로그인돼 있다. 앱이 맡아 둔 토큰을 싣는

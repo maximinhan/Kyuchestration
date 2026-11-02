@@ -26,8 +26,12 @@ import kotlinx.serialization.json.contentOrNull
  * 3: 대화 갈래(`conversationChoice`)가 이름 문자열에서 `type` 낱말을 단 객체로 바뀌었다 — 바깥 대화를 채택하는 갈래가
  * 엔진이 답한 id 를 실어야 해서다(app-owned-sessions-design.md 5.5.7). 같은 필드의 모양이 바뀌었으므로 올린다. 진입 상태의
  * `choosing_conversation` 과 명령 `choose_conversation` · `cancel_conversation_choice` 도 이 판에서 더해졌다.
+ *
+ * 4: 대화의 줄에 갈래 `past_turn`(이어간 대화의 지난 항목)이 더해지고 대화 머리에 `pastTurnsOmittedBefore` 가 붙었다
+ * (app-owned-sessions-design.md 5.5.8). 필드는 건너뛰어지지만 **모르는 갈래는 건너뛰지 못한다** — 판 3 의 화면은 `past_turn`
+ * 을 실은 틀 하나에서 읽기를 멈추고 코어와의 연결이 끊긴 것으로 선다(CoreMirror). 그래서 올린다.
  */
-const val SCREEN_PROTOCOL_VERSION: Int = 3
+const val SCREEN_PROTOCOL_VERSION: Int = 4
 
 /**
  * 판을 싣기 전의 상대가 말하는 규약 판. 1 단계(PR #76)의 화면 · 코어는 인사와 인사 답에 판을 싣지 않았다.

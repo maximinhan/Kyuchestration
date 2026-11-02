@@ -5,6 +5,8 @@ import com.kyuchestration.desktop.terminal.AssignedChildSession
 import com.kyuchestration.desktop.terminal.ChildSessionCommandAnswer
 import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistory
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistorySource
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
@@ -55,9 +57,14 @@ fun TestScope.stateHolder(
     childSessionCommandSource: ChildSessionCommandSource = RecordingChildSessionCommandSource(),
     // 바깥 대화가 없는 폴더 — 이어가기가 묻지 않고 오늘처럼 이어 가는 자리다. 묻는 갈래는 ConversationChoiceStateHolderTest 가 본다.
     claudeCodeConversationSource: ClaudeCodeConversationSource = ClaudeCodeConversationSource { _, _ -> emptyList() },
+    // 이어가는 대화의 전사가 비어 있는 자리 — 지난 대화를 까는 갈래는 PastConversationStateHolderTest 가 본다.
+    claudeCodeConversationHistorySource: ClaudeCodeConversationHistorySource = ClaudeCodeConversationHistorySource { _, _, _ ->
+        ClaudeCodeConversationHistory(pastTurns = emptyList(), omittedBeforeCount = 0)
+    },
 ) = ChatSessionStateHolder(
     sessionCommandSource = sessionCommandSource,
     claudeCodeConversationSource = claudeCodeConversationSource,
+    claudeCodeConversationHistorySource = claudeCodeConversationHistorySource,
     childSessionCommandSource = childSessionCommandSource,
     chatSessionOpener = opener,
     // 이 시험의 관심 밖이다. 자격 증명이 실리는지는 SessionEntryPlanTest 가 본다.
