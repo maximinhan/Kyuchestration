@@ -375,6 +375,7 @@ class ProcessKyuCommandRunnerTest {
             """
             #!/bin/sh
             echo ${'$'}${'$'} > $pidFile
+            echo "엔진의 경고" >&2
             exec 1>&-
             exec sleep 30
             """.trimIndent(),
@@ -420,6 +421,7 @@ class ProcessKyuCommandRunnerTest {
         val executable = executableScript(
             """
             #!/bin/sh
+            echo "첫 줄"
             exec sleep 30
             """.trimIndent(),
         )
@@ -465,24 +467,20 @@ class ProcessKyuCommandRunnerTest {
 private enum class BrokenStream { STANDARD_OUTPUT, STANDARD_ERROR }
 
 /**
- * 진짜 자식을 그대로 두고 파이프 하나만 읽자마자 끊기게 한다.
+ * 진짜 자식을 그대로 두고 파이프 하나만 첫 읽기 뒤에 끊기게 한다.
  *
  * 시작 뒤 파이프가 깨지는 일은 스크립트만으로는 일으킬 수 없다 — 자식이 죽으면 이쪽은 끝을 볼 뿐이다. 그래서 읽는 쪽만 바꿔
  * 끼우고, 끝내기는 진짜 프로세스에 그대로 건네 실행기가 자식을 거두는지를 진짜로 잰다.
  */
 private class ProcessWithBrokenStream(private val realProcess: Process, private val brokenStream: BrokenStream) : Process() {
 
-    private val throwingStream = object : InputStream() {
-        override fun read(): Int = throw IOException("파이프가 끊겼습니다")
-    }
-
     override fun getOutputStream(): OutputStream = realProcess.outputStream
 
     override fun getInputStream(): InputStream =
-        if (brokenStream == BrokenStream.STANDARD_OUTPUT) throwingStream else realProcess.inputStream
+        if (brokenStream == BrokenStream.STANDARD_OUTPUT) StreamBrokenAfterFirstRead(realProcess.inputStream) else realProcess.inputStream
 
     override fun getErrorStream(): InputStream =
-        if (brokenStream == BrokenStream.STANDARD_ERROR) throwingStream else realProcess.errorStream
+        if (brokenStream == BrokenStream.STANDARD_ERROR) StreamBrokenAfterFirstRead(realProcess.errorStream) else realProcess.errorStream
 
     override fun waitFor(): Int = realProcess.waitFor()
 
@@ -499,4 +497,30 @@ private class ProcessWithBrokenStream(private val realProcess: Process, private 
     override fun toHandle(): ProcessHandle = realProcess.toHandle()
 
     override fun descendants(): Stream<ProcessHandle> = realProcess.descendants()
+}
+
+/**
+ * 첫 읽기는 진짜 파이프에서 받고, 그다음부터 끊긴다.
+ *
+ * 첫 읽기를 진짜로 받는 것은 시험의 순서 때문이다. 곧바로 끊기면 실행기가 자식을 거두는 것이 스크립트가 pid 를 적기보다 먼저일 수
+ * 있다(macOS CI 에서 실제로 그랬다). 스크립트는 pid 를 적은 뒤에 그 파이프에 쓴다.
+ */
+private class StreamBrokenAfterFirstRead(private val realStream: InputStream) : InputStream() {
+
+    private var firstReadDone = false
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (firstReadDone) {
+            throw IOException("파이프가 끊겼습니다")
+        }
+        firstReadDone = true
+        return realStream.read(buffer, offset, length)
+    }
+
+    override fun read(): Int {
+        val oneByte = ByteArray(1)
+        return if (read(oneByte, 0, 1) < 0) -1 else oneByte[0].toInt() and 0xFF
+    }
+
+    override fun close() = realStream.close()
 }
