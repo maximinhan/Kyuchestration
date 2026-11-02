@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.chat
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionCommandAnswer
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
@@ -172,8 +173,7 @@ class ChildSessionStateHolderTest {
                 exitCode = 1,
                 arguments = emptyList(),
                 standardError = "워크디렉토리 밖입니다: ../elsewhere",
-                argumentsForDiagnostics = emptyList(),
-                standardErrorForDiagnostics = "워크디렉토리 밖입니다: ../elsewhere",
+                diagnosticHiding = DiagnosticHiding(emptySet()),
             )
         }
 

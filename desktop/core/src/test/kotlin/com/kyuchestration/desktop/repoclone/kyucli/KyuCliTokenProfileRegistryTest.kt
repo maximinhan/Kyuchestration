@@ -236,6 +236,17 @@ class KyuCliTokenProfileRegistryTest {
         assertTrue("Broken pipe" in failure.guidance, failure.guidance)
     }
 
+    @Test
+    fun `메시지 없는 원인(인터럽트)도 안내 문구에 그 이름으로 선다`() {
+        val runner = RecordingKyuCommandRunner { throw KyuCommandFailure.FailedWhileRunning(InterruptedException()) }
+
+        val failure = assertFailsWith<CloneStepFailure.KyuFailedWhileRunning> {
+            KyuCliTokenProfileRegistry(runner).listProfiles()
+        }
+
+        assertTrue("null" !in failure.guidance && "InterruptedException" in failure.guidance, failure.guidance)
+    }
+
     private companion object {
         val TWO_PROFILES_OUTPUT = """
             {

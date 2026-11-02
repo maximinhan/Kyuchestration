@@ -139,6 +139,17 @@ class KyuCliSessionCommandSourceTest {
     }
 
     @Test
+    fun `메시지 없는 원인(인터럽트)도 안내 문구에 그 이름으로 선다`() {
+        val runner = RecordingKyuCommandRunner { throw KyuCommandFailure.FailedWhileRunning(InterruptedException()) }
+
+        val failure = assertFailsWith<TerminalSessionFailure.KyuFailedWhileRunning> {
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
+        }
+
+        assertTrue("null" !in failure.guidance && "InterruptedException" in failure.guidance, failure.guidance)
+    }
+
+    @Test
     fun `채택할 대화를 거절한 문구는 진단용 문구에서 그 id 를 가린다`() {
         val runner = RecordingKyuCommandRunner {
             KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "이 자리의 대화 중에 $ADOPTED_ID 가 없습니다\n")

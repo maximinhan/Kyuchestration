@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.protocol
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.repoclone.CloneStepFailure
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
@@ -36,8 +37,7 @@ class FailureViewTest {
             exitCode = 2,
             arguments = listOf("session-command"),
             standardError = "모르는 옵션",
-            argumentsForDiagnostics = listOf("session-command"),
-            standardErrorForDiagnostics = "모르는 옵션",
+            diagnosticHiding = DiagnosticHiding(emptySet()),
         )
 
         val view = TerminalSessionFailure.EngineTooOld("v0.13.0", "v0.14.0", refusal).toFailureView()
