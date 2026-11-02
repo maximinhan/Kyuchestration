@@ -29,6 +29,8 @@ class KyuCliWorkDirObserver(private val kyuCommandRunner: KyuCommandRunner) : Wo
                 is KyuCommandFailure.ExecutableNotFound -> WorkDirObservationFailure.KyuExecutableNotFound()
                 is KyuCommandFailure.FailedToStart ->
                     WorkDirObservationFailure.KyuFailedToStart(failure.processStartFailure)
+                is KyuCommandFailure.FailedWhileRunning ->
+                    WorkDirObservationFailure.KyuFailedWhileRunning(failure.runFailure)
             }
         }
 

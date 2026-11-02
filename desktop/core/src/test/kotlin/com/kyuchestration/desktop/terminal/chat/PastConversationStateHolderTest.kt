@@ -177,8 +177,8 @@ class PastConversationStateHolderTest {
         assertEquals(listOf<SessionTarget>(SessionTarget.Main), holder.heldSessions.value.map { it.target })
         assertEquals(emptyList(), opener.endedSessions)
         val notice = assertIs<ChatEntry.EngineNotice>(holder.conversations.value.getValue(SessionTarget.Main).entries.single())
-        assertTrue(notice.text.startsWith("지난 대화를 불러오지 못했습니다: "), notice.text)
-        assertTrue("Stream closed" in notice.text, notice.text)
+        assertTrue(notice.line.startsWith("지난 대화를 불러오지 못했습니다: "), notice.line)
+        assertTrue("Stream closed" in notice.line, notice.line)
         val recorded = diagnosticLog.recordedEntries.filterIsInstance<DiagnosticLogEntry.ClaudeCodeConversationHistoryReadFailed>().single()
         assertTrue("Stream closed" in recorded.summary, recorded.summary)
     }

@@ -45,5 +45,8 @@ class KyuCliWorkDirInitializer(private val kyuCommandRunner: KyuCommandRunner) :
         is KyuCommandFailure.FailedToStart ->
             "${failure.message} 실행 권한이 있는지, 파일이 온전한지 확인하세요. " +
                 "원인: ${failure.processStartFailure.message}"
+
+        is KyuCommandFailure.FailedWhileRunning ->
+            "${failure.message} 초기화가 반쯤 됐을 수 있으니 워크디렉토리를 확인한 뒤 다시 시도하세요."
     }
 }

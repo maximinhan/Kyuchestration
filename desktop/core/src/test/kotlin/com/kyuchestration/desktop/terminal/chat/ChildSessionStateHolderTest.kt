@@ -172,6 +172,8 @@ class ChildSessionStateHolderTest {
                 exitCode = 1,
                 arguments = emptyList(),
                 standardError = "워크디렉토리 밖입니다: ../elsewhere",
+                argumentsForDiagnostics = emptyList(),
+                standardErrorForDiagnostics = "워크디렉토리 밖입니다: ../elsewhere",
             )
         }
 

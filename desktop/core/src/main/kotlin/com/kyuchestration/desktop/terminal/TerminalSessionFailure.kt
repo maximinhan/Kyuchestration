@@ -24,6 +24,15 @@ sealed class TerminalSessionFailure(
 
     final override val failureFamily: String get() = "TerminalSessionFailure"
 
+    /**
+     * 진단 기록에 남길 안내 문구. 사용자의 대화를 가리키는 값(채택할 대화 id)을 가린 것이다.
+     *
+     * 화면의 [guidance] 와 따로 두는 것은 엔진의 거절 문구가 받은 id 를 되읊기 때문이다 — 화면은 사람이 고른 대화를 그대로 말해야
+     * 하지만, 기록은 진단에 쓰이지 않으면서 그 대화를 가리키는 값을 들지 않는다(SessionStarted 와 같은 선). 엔진의 말을 싣지 않는
+     * 갈래는 앱이 지은 문구라 가릴 것이 없다.
+     */
+    open val guidanceForDiagnostics: String get() = guidance
+
     class KyuExecutableNotFound : TerminalSessionFailure(
         message = "kyu 실행 파일을 찾지 못했습니다.",
         guidance = "세션이 무엇을 띄우는지는 kyu 가 답합니다 — 앱은 그 답을 실행할 뿐입니다. " +
@@ -33,6 +42,12 @@ sealed class TerminalSessionFailure(
     class KyuFailedToStart(cause: Throwable) : TerminalSessionFailure(
         message = "kyu 를 실행하지 못했습니다.",
         guidance = "실행 권한이 있는지, 파일이 온전한지 확인하세요. 원인: ${cause.message}",
+        cause = cause,
+    )
+
+    class KyuFailedWhileRunning(cause: Throwable) : TerminalSessionFailure(
+        message = "세션이 무엇을 띄울지 kyu 에게 묻다 끊겼습니다.",
+        guidance = "세션에 다시 들어가 보세요. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: ${cause.message}",
         cause = cause,
     )
 
@@ -46,20 +61,23 @@ sealed class TerminalSessionFailure(
      * @param arguments 실제로 부른 인자. 사람이 같은 것을 손으로 다시 부를 수 있게 그대로 싣는다 —
      *   메인 세션은 레포 이름 자리가 비어 있어서, 라벨(main)로 안내 문구를 지어내면 실제로는
      *   부를 수 없는 명령을 알려 주게 된다.
+     * @param argumentsForDiagnostics · standardErrorForDiagnostics 위의 둘에서 실행기의 실패 기록과 같은 값을 가린 것
+     *   ([guidanceForDiagnostics]). 무엇을 가릴지는 부른 쪽만 알아, 거절을 만드는 그 자리가 넘긴다.
      */
     class SessionCommandRefused(
         val targetLabel: String,
         val exitCode: Int,
         val arguments: List<String>,
         standardError: String,
+        argumentsForDiagnostics: List<String>,
+        standardErrorForDiagnostics: String,
     ) : TerminalSessionFailure(
         message = "$targetLabel 세션이 무엇을 띄울지 kyu 가 답하지 못했습니다 (종료 코드 $exitCode).",
-        // kyu 는 거절 이유를 stderr 에 사람 말로 적는다. 그것을 그대로 올리는 편이 이쪽에서
-        // 다시 지어낸 문구보다 정확하다.
-        guidance = standardError.ifBlank {
-            "워크디렉토리에서 kyu ${arguments.joinToString(" ")} 를 직접 실행해 이유를 확인하세요."
-        },
-    )
+        guidance = sessionCommandRefusalGuidance(arguments, standardError),
+    ) {
+        override val guidanceForDiagnostics: String =
+            sessionCommandRefusalGuidance(argumentsForDiagnostics, standardErrorForDiagnostics)
+    }
 
     /**
      * kyu 가 거절했는데, 그 kyu 가 이 앱이 요구하는 판보다 낮은 릴리스다.
@@ -74,10 +92,11 @@ sealed class TerminalSessionFailure(
         refusal: SessionCommandRefused,
     ) : TerminalSessionFailure(
         message = "엔진 갱신 필요(최소 $minimumVersion) — 이 kyu 는 $actualVersion 이라 하위 세션을 띄우지 못합니다.",
-        guidance = "앱과 함께 온 엔진이나 최신 릴리스의 kyu 로 바꾸세요. PATH 의 kyu 가 먼저 잡혔다면 그것을 갱신하세요. " +
-            "엔진의 거절: ${refusal.guidance}",
+        guidance = engineTooOldGuidance(refusal.guidance),
         cause = refusal,
-    )
+    ) {
+        override val guidanceForDiagnostics: String = engineTooOldGuidance(refusal.guidanceForDiagnostics)
+    }
 
     /**
      * 답은 받았는데 이 앱이 읽을 줄 아는 판이 아니다.
@@ -146,3 +165,10 @@ sealed class TerminalSessionFailure(
             "워크디렉토리 경로는 이 자리에 섞이지 않으므로 그쪽을 줄일 일은 아닙니다.",
     )
 }
+
+/** kyu 는 거절 이유를 stderr 에 사람 말로 적는다. 그것을 그대로 올리는 편이 이쪽에서 다시 지어낸 문구보다 정확하다. */
+private fun sessionCommandRefusalGuidance(arguments: List<String>, standardError: String): String =
+    standardError.ifBlank { "워크디렉토리에서 kyu ${arguments.joinToString(" ")} 를 직접 실행해 이유를 확인하세요." }
+
+private fun engineTooOldGuidance(refusalGuidance: String): String =
+    "앱과 함께 온 엔진이나 최신 릴리스의 kyu 로 바꾸세요. PATH 의 kyu 가 먼저 잡혔다면 그것을 갱신하세요. 엔진의 거절: $refusalGuidance"

@@ -39,7 +39,7 @@ class KyuCliClaudeCodeConversationSource(
         val result = try {
             kyuCommandRunner.run(arguments, workingDirectory = workDirPath)
         } catch (failure: KyuCommandFailure) {
-            throw ClaudeCodeConversationListingFailure("kyu 를 부르지 못했습니다: ${failure.message}", failure)
+            throw ClaudeCodeConversationListingFailure("kyu 에게 묻지 못했습니다: ${failure.message}", failure)
         }
         if (result.exitCode != 0) {
             throw ClaudeCodeConversationListingFailure(
@@ -66,7 +66,7 @@ class KyuCliClaudeCodeConversationSource(
         val result = try {
             kyuCommandRunner.run(arguments, workingDirectory = workDirPath, valuesHiddenFromDiagnostics = setOf(conversationId))
         } catch (failure: KyuCommandFailure) {
-            throw ClaudeCodeConversationHistoryFailure("kyu 를 부르지 못했습니다: ${failure.message}", failure)
+            throw ClaudeCodeConversationHistoryFailure("kyu 에게 묻지 못했습니다: ${failure.message}", failure)
         }
         if (result.exitCode != 0) {
             throw ClaudeCodeConversationHistoryFailure(

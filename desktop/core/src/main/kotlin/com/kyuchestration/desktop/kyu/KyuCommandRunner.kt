@@ -27,7 +27,8 @@ interface KyuCommandRunner {
      * @param valuesHiddenFromDiagnostics 실패 기록에 남기지 않을 값들 — 인자에서도, 그 값을 되읊는 stderr 에서도 가린다.
      *   사용자의 대화를 가리키는 대화 id 가 여기로 온다. 실패를 기록하는 것은 실행기라(ProcessKyuCommandRunner) 부르는
      *   자리에서는 지울 수 없고, 어느 인자가 그런 값인지는 부르는 쪽만 안다 — 그래서 부르는 쪽이 표시하고 실행기가 가린다.
-     * @throws KyuCommandFailure 부를 kyu 가 없거나 프로세스를 띄우지 못했을 때.
+     * @throws KyuCommandFailure 부를 kyu 가 없거나, 프로세스를 띄우지 못했거나, 띄운 kyu 와 끝까지 주고받지 못했을 때. 이 밖의
+     *   예외는 던지지 않는다 — 부르는 쪽은 이 타입 하나만 옮기면 된다.
      */
     fun run(
         arguments: List<String>,
