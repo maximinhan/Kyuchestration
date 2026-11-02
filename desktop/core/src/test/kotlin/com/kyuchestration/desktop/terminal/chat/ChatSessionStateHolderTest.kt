@@ -2,10 +2,13 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
+import com.kyuchestration.desktop.kyu.KyuCommandResult
+import com.kyuchestration.desktop.kyu.RecordingKyuCommandRunner
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
+import com.kyuchestration.desktop.terminal.kyucli.KyuCliSessionCommandSource
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -466,6 +469,26 @@ class ChatSessionStateHolderTest {
         assertEquals("TerminalSessionFailure.KyuExecutableNotFound", failed.failure.kind)
         assertEquals(emptyList(), holder.heldSessions.value.map { it.target })
         assertIs<DiagnosticLogEntry.SessionEntryFailed>(diagnosticLog.recordedEntries.single())
+    }
+
+    @Test
+    fun `채택하려던 대화를 엔진이 거절하면 화면은 엔진의 문구 그대로 보이고 진단 기록에는 그 id 가 없다`() = runTest {
+        // 엔진의 거절 문구는 받은 id 를 되읊는다. 화면은 사람이 고른 대화를 말해야 하지만, 진단 기록은 그 대화를 가리키지 않는다.
+        val adoptedId = "654ce605-b030-40e8-8448-2e9003ad32b1"
+        val refusingRunner = RecordingKyuCommandRunner {
+            KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "이 자리의 대화 중에 $adoptedId 가 없습니다\n")
+        }
+        val diagnosticLog = RecordingDiagnosticLog()
+        val holder = stateHolder(RecordingChatSessionOpener(), KyuCliSessionCommandSource(refusingRunner), diagnosticLog)
+
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.AdoptConversation(adoptedId))
+        runCurrent()
+
+        val failed = assertIs<SessionEntryState.Failed>(holder.sessionEntries.value[SessionTarget.Main])
+        assertEquals("이 자리의 대화 중에 $adoptedId 가 없습니다", failed.failure.guidance)
+        val recorded = assertIs<DiagnosticLogEntry.SessionEntryFailed>(diagnosticLog.recordedEntries.single())
+        assertFalse(adoptedId in recorded.summary + recorded.detail.orEmpty(), recorded.toString())
+        assertEquals("이 자리의 대화 중에 (가린 값) 가 없습니다", recorded.guidance)
     }
 
     @Test

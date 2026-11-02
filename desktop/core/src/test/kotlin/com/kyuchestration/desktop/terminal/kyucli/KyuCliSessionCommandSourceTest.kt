@@ -12,6 +12,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class KyuCliSessionCommandSourceTest {
 
@@ -125,6 +126,50 @@ class KyuCliSessionCommandSourceTest {
     }
 
     @Test
+    fun `kyu 와 주고받다 끊기면 세션 진입 실패로 옮긴다`() {
+        val runner = RecordingKyuCommandRunner {
+            throw KyuCommandFailure.FailedWhileRunning(IOException("Broken pipe"))
+        }
+
+        val failure = assertFailsWith<TerminalSessionFailure.KyuFailedWhileRunning> {
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
+        }
+
+        assertTrue("Broken pipe" in failure.guidance, failure.guidance)
+    }
+
+    @Test
+    fun `채택할 대화를 거절한 문구는 진단용 문구에서 그 id 를 가린다`() {
+        val runner = RecordingKyuCommandRunner {
+            KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "이 자리의 대화 중에 $ADOPTED_ID 가 없습니다\n")
+        }
+
+        val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, ADOPT, appSocketPath = null)
+        }
+
+        assertEquals("이 자리의 대화 중에 $ADOPTED_ID 가 없습니다", failure.guidance)
+        assertEquals("이 자리의 대화 중에 (가린 값) 가 없습니다", failure.guidanceForDiagnostics)
+    }
+
+    @Test
+    fun `거절 이유가 비어 손으로 부를 명령을 알려줄 때도 진단용 문구에서는 채택할 id 를 가린다`() {
+        val runner = RecordingKyuCommandRunner {
+            KyuCommandResult(exitCode = 1, standardOutput = "", standardError = "")
+        }
+
+        val failure = assertFailsWith<TerminalSessionFailure.SessionCommandRefused> {
+            KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, ADOPT, appSocketPath = null)
+        }
+
+        assertTrue(ADOPTED_ID in failure.guidance, failure.guidance)
+        assertEquals(
+            "워크디렉토리에서 kyu session-command --adopt-conversation (가린 값) --chat --json 를 직접 실행해 이유를 확인하세요.",
+            failure.guidanceForDiagnostics,
+        )
+    }
+
+    @Test
     fun `새로 시작을 고르면 기록을 버리라는 옵션이 붙는다`() {
         val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
 
@@ -196,6 +241,9 @@ class KyuCliSessionCommandSourceTest {
 
         /** 카드를 그냥 누른 자리. 옵션이 붙지 않는 쪽이 이 표면의 기본이다. */
         val CONTINUE = SessionConversationChoice.ContinueRecordedConversation
+
+        const val ADOPTED_ID = "654ce605-b030-40e8-8448-2e9003ad32b1"
+        val ADOPT = SessionConversationChoice.AdoptConversation(ADOPTED_ID)
 
         val REPO_SESSION_DOCUMENT = """
             {

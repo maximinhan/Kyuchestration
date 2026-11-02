@@ -2,9 +2,15 @@ package com.kyuchestration.desktop.kyu
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
+import java.util.stream.Stream
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.readText
 import kotlin.io.path.setPosixFilePermissions
 import kotlin.io.path.writeText
 import kotlin.test.AfterTest
@@ -297,6 +303,152 @@ class ProcessKyuCommandRunnerTest {
         assertEquals(listOf("session-command", "--adopt-conversation", "(가린 값)", "--chat", "--json"), recorded.arguments)
     }
 
+    @Test
+    fun `자식이 stdout 을 쓰다 죽으면 실패가 아니라 그 종료 코드로 답한다`() {
+        // 자식이 죽어도 이쪽 파이프는 끝을 볼 뿐 예외를 내지 않는다. 그 실행은 끝난 실행이라 종료 코드가 사실을 말한다 —
+        // 도는 중 실패(FailedWhileRunning)는 이쪽이 주고받기를 잃은 경우의 몫이다.
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo "반쯤 쓴 문서"
+            kill -9 ${'$'}${'$'}
+            """.trimIndent(),
+        )
+
+        val result = ProcessKyuCommandRunner(executable).run(emptyList())
+
+        assertEquals(137, result.exitCode)
+        assertEquals("반쯤 쓴 문서\n", result.standardOutput)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `자식이 표준 입력을 닫아 쓰기가 끊기면 도는 중 실패로 옮기고 자식을 남기지 않는다`() {
+        // 파이프 버퍼(리눅스 64KB)보다 큰 입력이라 쓰기가 자식의 읽기를 기다리다 닫힌 파이프를 만난다.
+        val pidFile = temporaryDirectory.resolve("pid")
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo ${'$'}${'$'} > $pidFile
+            exec 0<&-
+            exec sleep 30
+            """.trimIndent(),
+        )
+
+        val failure = assertFailsWith<KyuCommandFailure.FailedWhileRunning> {
+            ProcessKyuCommandRunner(executable).run(emptyList(), standardInput = "가".repeat(1_000_000))
+        }
+
+        assertIs<IOException>(failure.runFailure)
+        assertProcessEnded(pidFile)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `stdout 을 읽다 파이프가 끊기면 도는 중 실패로 옮기고 자식을 남기지 않는다`() {
+        val pidFile = temporaryDirectory.resolve("pid")
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo ${'$'}${'$'} > $pidFile
+            echo "첫 줄"
+            exec sleep 30
+            """.trimIndent(),
+        )
+        val runner = ProcessKyuCommandRunner(
+            executable,
+            startProcess = { builder -> ProcessWithBrokenStream(builder.start(), brokenStream = BrokenStream.STANDARD_OUTPUT) },
+        )
+
+        val failure = assertFailsWith<KyuCommandFailure.FailedWhileRunning> { runner.run(emptyList()) }
+
+        assertEquals(PIPE_BROKEN_MESSAGE, failure.runFailure.message)
+        assertProcessEnded(pidFile)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `stderr 를 읽는 스레드가 예외를 받으면 그 원인으로 도는 중 실패를 내고 자식을 남기지 않는다`() {
+        // stdout 을 닫아 두어야 이쪽이 stderr 읽기의 결과를 기다리는 자리까지 간다. 자식은 그 뒤로도 살아 있다.
+        val pidFile = temporaryDirectory.resolve("pid")
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo ${'$'}${'$'} > $pidFile
+            exec 1>&-
+            exec sleep 30
+            """.trimIndent(),
+        )
+        val runner = ProcessKyuCommandRunner(
+            executable,
+            startProcess = { builder -> ProcessWithBrokenStream(builder.start(), brokenStream = BrokenStream.STANDARD_ERROR) },
+        )
+
+        val failure = assertFailsWith<KyuCommandFailure.FailedWhileRunning> { runner.run(emptyList()) }
+
+        // ExecutionException 껍데기가 아니라 읽던 스레드가 받은 그 예외가 이유다.
+        assertIs<IOException>(failure.runFailure)
+        assertEquals(PIPE_BROKEN_MESSAGE, failure.runFailure.message)
+        assertProcessEnded(pidFile)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `기다리는 스레드가 인터럽트되면 도는 중 실패를 내고 인터럽트 표시를 되살린다`() {
+        val pidFile = temporaryDirectory.resolve("pid")
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo ${'$'}${'$'} > $pidFile
+            exec 1>&- 2>&-
+            exec sleep 30
+            """.trimIndent(),
+        )
+
+        Thread.currentThread().interrupt()
+        val failure = assertFailsWith<KyuCommandFailure.FailedWhileRunning> { ProcessKyuCommandRunner(executable).run(emptyList()) }
+        val interruptRestored = Thread.interrupted()
+
+        assertIs<InterruptedException>(failure.runFailure)
+        assertTrue(interruptRestored, "멈추라는 요청을 실행기가 삼키면 부른 쪽은 그 요청을 영영 보지 못한다")
+        assertProcessEnded(pidFile)
+    }
+
+    @Test
+    @Timeout(30)
+    fun `도는 중 끊긴 호출은 가리라고 한 값을 가린 채 그 이유를 남긴다`() {
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            exec sleep 30
+            """.trimIndent(),
+        )
+        val diagnosticLog = RecordingDiagnosticLog()
+        val runner = ProcessKyuCommandRunner(
+            executable,
+            diagnosticLog = diagnosticLog,
+            startProcess = { builder -> ProcessWithBrokenStream(builder.start(), brokenStream = BrokenStream.STANDARD_OUTPUT) },
+        )
+
+        assertFailsWith<KyuCommandFailure.FailedWhileRunning> {
+            runner.run(
+                arguments = listOf("conversations", "show", "/w", CONVERSATION_ID, "--json"),
+                valuesHiddenFromDiagnostics = setOf(CONVERSATION_ID),
+            )
+        }
+
+        val recorded = assertIs<DiagnosticLogEntry.EngineCallFailedWhileRunning>(diagnosticLog.recordedEntries.single())
+        assertEquals(listOf("conversations", "show", "/w", "(가린 값)", "--json"), recorded.arguments)
+        assertTrue(PIPE_BROKEN_MESSAGE in recorded.reason, recorded.reason)
+        assertFalse(CONVERSATION_ID in diagnosticLog.recordedText(), diagnosticLog.recordedText())
+    }
+
+    /** 스크립트가 적어 둔 pid 의 프로세스가 끝났는가. 실행기가 실패를 던지기 전에 거두었어야 한다. */
+    private fun assertProcessEnded(pidFile: Path) {
+        val pid = pidFile.readText().trim().toLong()
+        assertFalse(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false), "실패한 실행의 자식 $pid 가 살아 남았다")
+    }
+
     private fun executableScript(source: String): Path =
         temporaryDirectory.resolve("kyu").apply {
             writeText(source + "\n")
@@ -306,5 +458,45 @@ class ProcessKyuCommandRunnerTest {
     private companion object {
         const val SECRET_LOOKING_TOKEN = "ghp_이것이기록에나타나면안된다1234567890"
         const val CONVERSATION_ID = "654ce605-b030-40e8-8448-2e9003ad32b1"
+        const val PIPE_BROKEN_MESSAGE = "파이프가 끊겼습니다"
     }
+}
+
+private enum class BrokenStream { STANDARD_OUTPUT, STANDARD_ERROR }
+
+/**
+ * 진짜 자식을 그대로 두고 파이프 하나만 읽자마자 끊기게 한다.
+ *
+ * 시작 뒤 파이프가 깨지는 일은 스크립트만으로는 일으킬 수 없다 — 자식이 죽으면 이쪽은 끝을 볼 뿐이다. 그래서 읽는 쪽만 바꿔
+ * 끼우고, 끝내기는 진짜 프로세스에 그대로 건네 실행기가 자식을 거두는지를 진짜로 잰다.
+ */
+private class ProcessWithBrokenStream(private val realProcess: Process, private val brokenStream: BrokenStream) : Process() {
+
+    private val throwingStream = object : InputStream() {
+        override fun read(): Int = throw IOException("파이프가 끊겼습니다")
+    }
+
+    override fun getOutputStream(): OutputStream = realProcess.outputStream
+
+    override fun getInputStream(): InputStream =
+        if (brokenStream == BrokenStream.STANDARD_OUTPUT) throwingStream else realProcess.inputStream
+
+    override fun getErrorStream(): InputStream =
+        if (brokenStream == BrokenStream.STANDARD_ERROR) throwingStream else realProcess.errorStream
+
+    override fun waitFor(): Int = realProcess.waitFor()
+
+    override fun waitFor(timeout: Long, unit: TimeUnit): Boolean = realProcess.waitFor(timeout, unit)
+
+    override fun exitValue(): Int = realProcess.exitValue()
+
+    override fun destroy() = realProcess.destroy()
+
+    override fun destroyForcibly(): Process = realProcess.destroyForcibly()
+
+    override fun isAlive(): Boolean = realProcess.isAlive
+
+    override fun toHandle(): ProcessHandle = realProcess.toHandle()
+
+    override fun descendants(): Stream<ProcessHandle> = realProcess.descendants()
 }

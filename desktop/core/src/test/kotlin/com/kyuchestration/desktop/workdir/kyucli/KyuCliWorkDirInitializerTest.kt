@@ -88,6 +88,18 @@ class KyuCliWorkDirInitializerTest {
         assertTrue("Permission denied" in notInitialized.reason, notInitialized.reason)
     }
 
+    @Test
+    fun `kyu 와 주고받다 끊긴 원인은 이유에 그대로 실린다`() {
+        val runner = RecordingKyuCommandRunner {
+            throw KyuCommandFailure.FailedWhileRunning(IOException("Broken pipe"))
+        }
+
+        val result = KyuCliWorkDirInitializer(runner).initializeInPlace(WORK_DIR_PATH)
+
+        val notInitialized = assertIs<WorkDirInitializationResult.NotInitialized>(result)
+        assertTrue("Broken pipe" in notInitialized.reason, notInitialized.reason)
+    }
+
     private fun succeeded() =
         succeedingKyuCommandResult("워크디렉토리를 초기화했습니다: /home/me/work/WorkDir-featureX\n")
 
