@@ -7,6 +7,7 @@ import com.kyuchestration.desktop.terminal.ClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.TerminalSessionFailure
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import kotlin.test.AfterTest
@@ -45,7 +46,8 @@ class PastConversationReadingLifecycleTest {
     @Test
     fun `세션을 띄우지 못하면 지난 대화 읽기를 기다리지 않고 곧바로 실패를 보인다`(): Unit = runBlocking {
         val failingOpener = object : ChatSessionOpener {
-            override suspend fun openChatSession(plan: SessionEntryPlan): OpenedChatSession = throw IOException("claude 를 찾지 못했습니다")
+            override suspend fun openChatSession(plan: SessionEntryPlan): OpenedChatSession =
+                throw TerminalSessionFailure.ChatProcessFailedToStart(IOException("claude 를 찾지 못했습니다"))
         }
         val holder = holderWith(failingOpener)
 
