@@ -64,7 +64,7 @@ class KyuCliClaudeCodeConversationSource(
         val arguments = listOf("conversations", "show", workDirPath.toString()) + repoArgumentFor(target) + conversationId + "--json"
 
         val result = try {
-            kyuCommandRunner.run(arguments, workingDirectory = workDirPath)
+            kyuCommandRunner.run(arguments, workingDirectory = workDirPath, valuesHiddenFromDiagnostics = setOf(conversationId))
         } catch (failure: KyuCommandFailure) {
             throw ClaudeCodeConversationHistoryFailure("kyu 를 부르지 못했습니다: ${failure.message}", failure)
         }
