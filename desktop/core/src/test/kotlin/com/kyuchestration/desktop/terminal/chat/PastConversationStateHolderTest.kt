@@ -2,6 +2,8 @@ package com.kyuchestration.desktop.terminal.chat
 
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.diagnostics.RecordingDiagnosticLog
+import com.kyuchestration.desktop.kyu.KyuCommandFailure
+import com.kyuchestration.desktop.kyu.RecordingKyuCommandRunner
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistory
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistoryFailure
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistorySource
@@ -9,11 +11,14 @@ import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionEntryPlan
 import com.kyuchestration.desktop.terminal.SessionTarget
+import com.kyuchestration.desktop.terminal.kyucli.KyuCliClaudeCodeConversationSource
+import java.io.IOException
 import java.nio.file.Path
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -150,19 +155,20 @@ class PastConversationStateHolderTest {
     }
 
     @Test
-    fun `지난 대화 읽기가 뜻밖의 예외를 던져도 세션은 보유되고 그 까닭이 전사 맨 앞에 선다`() = runTest {
-        // 실행기가 파이프를 읽다 받은 IOException 같은 것 — 포트의 실패 타입으로 옮겨지지 않은 예외다. 지난 대화는 세션에
-        // 덧붙이는 것이라, 무엇으로 실패하든 떠 있는 claude 를 잃게 하지 않는다.
+    fun `지난 대화 읽기 중 kyu 와의 주고받기가 끊겨도 세션은 보유되고 그 까닭이 전사 맨 앞과 진단 기록에 남는다`() = runTest {
+        // 실행기가 시작 뒤에 받은 예외(파이프가 끊김 · 인터럽트)는 실행기가 FailedWhileRunning 으로 옮기고, 어댑터가 그것을 포트의
+        // 실패로 옮긴다 — 홀더가 받는 것은 늘 포트의 실패다. 진짜 어댑터를 써서 그 사슬 전체를 잰다.
         val opener = RecordingChatSessionOpener()
         val diagnosticLog = RecordingDiagnosticLog()
         val commandSource = RecordingSessionCommandSource().apply { resumedConversationId = RESUMED_ID }
+        val runnerLosingThePipe = RecordingKyuCommandRunner {
+            throw KyuCommandFailure.FailedWhileRunning(IOException("Stream closed"))
+        }
         val holder = stateHolder(
             opener,
             commandSource,
             diagnosticLog,
-            claudeCodeConversationHistorySource = RecordingConversationHistorySource { _, _, _ ->
-                throw IllegalStateException("파이프가 닫혔습니다 ($RESUMED_ID)")
-            },
+            claudeCodeConversationHistorySource = KyuCliClaudeCodeConversationSource(runnerLosingThePipe),
         )
 
         holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
@@ -170,14 +176,11 @@ class PastConversationStateHolderTest {
 
         assertEquals(listOf<SessionTarget>(SessionTarget.Main), holder.heldSessions.value.map { it.target })
         assertEquals(emptyList(), opener.endedSessions)
-        assertEquals(
-            listOf<ChatEntry>(
-                ChatEntry.EngineNotice("지난 대화를 불러오지 못했습니다: IllegalStateException: 파이프가 닫혔습니다 ($RESUMED_ID)"),
-            ),
-            holder.conversations.value.getValue(SessionTarget.Main).entries,
-        )
+        val notice = assertIs<ChatEntry.EngineNotice>(holder.conversations.value.getValue(SessionTarget.Main).entries.single())
+        assertTrue(notice.line.startsWith("지난 대화를 불러오지 못했습니다: "), notice.line)
+        assertTrue("Stream closed" in notice.line, notice.line)
         val recorded = diagnosticLog.recordedEntries.filterIsInstance<DiagnosticLogEntry.ClaudeCodeConversationHistoryReadFailed>().single()
-        assertFalse(RESUMED_ID in recorded.summary, recorded.summary)
+        assertTrue("Stream closed" in recorded.summary, recorded.summary)
     }
 
     @Test

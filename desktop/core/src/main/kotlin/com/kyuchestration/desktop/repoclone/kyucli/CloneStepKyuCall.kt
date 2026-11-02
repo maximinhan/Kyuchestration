@@ -29,6 +29,7 @@ internal fun KyuCommandRunner.runCloneStep(
     throw when (failure) {
         is KyuCommandFailure.ExecutableNotFound -> CloneStepFailure.KyuExecutableNotFound()
         is KyuCommandFailure.FailedToStart -> CloneStepFailure.KyuFailedToStart(failure.processStartFailure)
+        is KyuCommandFailure.FailedWhileRunning -> CloneStepFailure.KyuFailedWhileRunning(failure.runFailureDescription, failure.runFailure)
     }
 }
 

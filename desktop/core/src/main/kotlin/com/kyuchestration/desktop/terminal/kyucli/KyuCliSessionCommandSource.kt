@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal.kyucli
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.kyu.KyuCommandFailure
 import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
@@ -50,7 +51,7 @@ class KyuCliSessionCommandSource(
  * 말로 옮기는 일이 같다 — 다른 것은 묻는 옵션과 답을 읽는 모양뿐이다.
  *
  * @param targetLabel 거절 문구가 어느 세션의 것인지 말할 이름.
- * @param valuesHiddenFromDiagnostics 실행기의 실패 기록에서 가릴 값(채택할 대화 id).
+ * @param valuesHiddenFromDiagnostics 실패 기록에서 가릴 값(채택할 대화 id) — 실행기의 기록에서도, 거절의 진단용 문구에서도.
  */
 internal fun runSessionCommand(
     kyuCommandRunner: KyuCommandRunner,
@@ -70,15 +71,20 @@ internal fun runSessionCommand(
             is KyuCommandFailure.ExecutableNotFound -> TerminalSessionFailure.KyuExecutableNotFound()
             is KyuCommandFailure.FailedToStart ->
                 TerminalSessionFailure.KyuFailedToStart(failure.processStartFailure)
+            is KyuCommandFailure.FailedWhileRunning ->
+                TerminalSessionFailure.KyuFailedWhileRunning(failure.runFailureDescription, failure.runFailure)
         }
     }
 
     if (result.exitCode != 0) {
+        // 거절은 실행기의 기록 밖으로도 간다 — 세션 진입 실패의 기록이 그 안내 문구를 싣는다. 실행기가 자기 기록에서 가린 것과
+        // 같은 값을 거절이 알아야 그 길로 대화 id 가 새지 않는다.
         throw TerminalSessionFailure.SessionCommandRefused(
             targetLabel = targetLabel,
             exitCode = result.exitCode,
             arguments = arguments,
             standardError = result.standardError.trim(),
+            diagnosticHiding = DiagnosticHiding(valuesHiddenFromDiagnostics),
         )
     }
 

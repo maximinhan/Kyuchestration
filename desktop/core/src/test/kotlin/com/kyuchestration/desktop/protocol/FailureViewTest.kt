@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.protocol
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.engine.EngineInstallationFailure
 import com.kyuchestration.desktop.repoclone.CloneStepFailure
 import com.kyuchestration.desktop.terminal.TerminalSessionFailure
@@ -31,7 +32,13 @@ class FailureViewTest {
 
     @Test
     fun `원인이 사슬로 걸린 실패도 바깥 갈래 하나로 건넌다`() {
-        val refusal = TerminalSessionFailure.SessionCommandRefused("main", 2, listOf("session-command"), "모르는 옵션")
+        val refusal = TerminalSessionFailure.SessionCommandRefused(
+            targetLabel = "main",
+            exitCode = 2,
+            arguments = listOf("session-command"),
+            standardError = "모르는 옵션",
+            diagnosticHiding = DiagnosticHiding(emptySet()),
+        )
 
         val view = TerminalSessionFailure.EngineTooOld("v0.13.0", "v0.14.0", refusal).toFailureView()
 

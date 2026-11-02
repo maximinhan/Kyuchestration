@@ -78,6 +78,20 @@ sealed interface DiagnosticLogEntry {
             get() = "엔진을 부르지 못함 — kyu ${arguments.joinToString(" ")}: $reason"
     }
 
+    /**
+     * 엔진을 띄웠는데 끝까지 주고받지 못했다 — 파이프가 끊겼거나 기다리던 스레드가 인터럽트됐다. 앱은 그 프로세스를 끝냈다.
+     *
+     * [EngineCallCouldNotStart] 와 갈라 둔다. 이쪽은 엔진이 실제로 돌았다 — 같은 인자로 다시 부르면 될지, 엔진이 무언가를 반쯤
+     * 했을지를 읽는 사람이 다르게 따진다. 종료 코드는 앱이 끝낸 것이라 엔진의 사실이 아니어서 싣지 않는다.
+     */
+    data class EngineCallFailedWhileRunning(
+        val arguments: List<String>,
+        val reason: String,
+    ) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "엔진과 주고받다 끊김 — kyu ${arguments.joinToString(" ")}: $reason"
+    }
+
     /** 앱이 세션 하나를 보유하기 시작했다. */
     data class SessionStarted(
         val targetLabel: String,

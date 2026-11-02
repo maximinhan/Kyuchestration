@@ -749,7 +749,7 @@ class ChatSessionStateHolder(
             }
 
             // 여기부터 claude 가 떠 있다. 보유하지 않은 채 이 함수를 떠나면 아무도 듣지 않는 파이프에 매달린 고아가 된다(8.1).
-            // 읽기는 어떤 실패도 결과로 접어 돌려주므로(readPastConversation) 떠나는 길은 기다리는 사이의 취소뿐이다.
+            // 읽기는 받지 못한 것을 결과로 접어 돌려주므로(readPastConversation) 떠나는 길은 기다리는 사이의 취소뿐이다.
             val pastConversation = try {
                 pastConversationReading?.await()
             } catch (cancelled: CancellationException) {
@@ -778,14 +778,14 @@ class ChatSessionStateHolder(
     }
 
     /**
-     * 이어가는 대화의 지난 내용을 엔진에게 묻는다. **던지지 않는다** — 어떤 실패도 [PastConversationReading.Unread] 로 접는다.
+     * 이어가는 대화의 지난 내용을 엔진에게 묻는다. 받지 못한 것은 [PastConversationReading.Unread] 로 접는다.
      *
      * 받지 못해도 세션은 연다. 놓친 것은 화면의 지난 대화뿐이고 `claude` 는 `--resume` 으로 그 맥락을 그대로 갖는다 — 그래서
      * 진입 실패가 아니라 전사 맨 앞의 한 줄과 진단 기록으로 남긴다.
      *
-     * 포트의 실패([ClaudeCodeConversationHistoryFailure]) 밖의 예외도 같은 길로 접는다. 실행기가 파이프를 읽다 받는
-     * IOException 처럼 포트가 옮기지 않은 것이 있고, 이 읽기는 홀더의 스코프에 따로 떠 있어 여기서 새는 예외는 그 스코프 —
-     * 코어 전체 — 를 취소한다. 접되 묻지 않는다: 예외의 종류와 문구가 화면의 한 줄과 진단 기록에 그대로 선다.
+     * 접는 것은 포트의 실패([ClaudeCodeConversationHistoryFailure]) 하나다. 실행기가 시작 뒤에 받는 예외(파이프가 끊김 ·
+     * 인터럽트)까지 실행기가 실패 타입으로 옮기고 어댑터가 그것을 포트의 실패로 옮기므로, 이 밖의 예외는 코드의 결함이다 — 이 읽기는
+     * 홀더의 스코프에 따로 떠 있어 그런 예외는 코어 전체를 끝내고 진단 기록에 남는다(CoreStart).
      */
     private fun readPastConversation(
         workDirPath: Path,
@@ -794,23 +794,14 @@ class ChatSessionStateHolder(
     ): PastConversationReading = try {
         PastConversationReading.Read(claudeCodeConversationHistorySource.conversationHistoryOf(workDirPath, target, conversationId))
     } catch (failure: ClaudeCodeConversationHistoryFailure) {
-        unreadPastConversation(target, conversationId, failure.message.orEmpty())
-    } catch (unexpected: Exception) {
-        unreadPastConversation(target, conversationId, "${unexpected::class.simpleName}: ${unexpected.message.orEmpty()}")
-    }
-
-    private fun unreadPastConversation(
-        target: PersonOpenedSessionTarget,
-        conversationId: String,
-        failureMessage: String,
-    ): PastConversationReading {
+        val failureMessage = failure.message.orEmpty()
         diagnosticLog.record(
             DiagnosticLogEntry.ClaudeCodeConversationHistoryReadFailed(
                 targetLabel = target.label,
                 failureMessage = failureMessage.replace(conversationId, CONVERSATION_ID_LEFT_OUT_OF_DIAGNOSTICS),
             ),
         )
-        return PastConversationReading.Unread("지난 대화를 불러오지 못했습니다: $failureMessage")
+        PastConversationReading.Unread("지난 대화를 불러오지 못했습니다: $failureMessage")
     }
 
     /**
@@ -1609,7 +1600,7 @@ class ChatSessionStateHolder(
             DiagnosticLogEntry.SessionEntryFailed(
                 targetLabel = target.label,
                 failureMessage = failure.message.orEmpty(),
-                guidance = failure.guidance,
+                guidance = failure.guidanceForDiagnostics,
             ),
         )
         mutableSessionEntries.value += target to SessionEntryState.Failed(failure.toFailureView(), conversationListingWarning)

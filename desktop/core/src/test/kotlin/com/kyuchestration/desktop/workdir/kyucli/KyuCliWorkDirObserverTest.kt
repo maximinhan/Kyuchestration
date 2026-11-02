@@ -102,6 +102,30 @@ class KyuCliWorkDirObserverTest {
         assertTrue("Permission denied" in failure.guidance)
     }
 
+    @Test
+    fun `kyu 와 주고받다 끊긴 원인은 관찰 실패의 안내 문구에 남는다`() {
+        val runner = RecordingKyuCommandRunner {
+            throw KyuCommandFailure.FailedWhileRunning(java.io.IOException("Broken pipe"))
+        }
+
+        val failure = assertFailsWith<WorkDirObservationFailure.KyuFailedWhileRunning> {
+            KyuCliWorkDirObserver(runner).observe(Path.of("/w"))
+        }
+
+        assertTrue("Broken pipe" in failure.guidance, failure.guidance)
+    }
+
+    @Test
+    fun `메시지 없는 원인(인터럽트)도 안내 문구에 그 이름으로 선다`() {
+        val runner = RecordingKyuCommandRunner { throw KyuCommandFailure.FailedWhileRunning(InterruptedException()) }
+
+        val failure = assertFailsWith<WorkDirObservationFailure.KyuFailedWhileRunning> {
+            KyuCliWorkDirObserver(runner).observe(Path.of("/w"))
+        }
+
+        assertTrue("null" !in failure.guidance && "InterruptedException" in failure.guidance, failure.guidance)
+    }
+
     private companion object {
         val EMPTY_WORK_DIR_OUTPUT = """
             {
