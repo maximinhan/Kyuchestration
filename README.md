@@ -244,6 +244,8 @@ kyu session-command [repo]
                        세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
 kyu conversations list <path> [repo]
                        그 세션 자리에서 Claude Code 로 나눈 대화 (이어갈 것을 고르는 목록)
+kyu conversations show <path> [repo] <id> [--last N]
+                       그 대화의 지난 내용 — 마지막 N 항목 (기본 200)
 kyu mcp <serve|approve>
                        메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
                        approve 는 레포의 실행 유발 설정을 눈으로 확인하고 승인한다)
@@ -264,7 +266,7 @@ kyu version            이 바이너리의 버전
   --profile <이름>       어느 토큰으로 붙을지 (필수)
   --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
-옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu conversations list,
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu conversations list · show,
       kyu auth add, kyu auth list, kyu claude-auth set, kyu claude-auth status):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
@@ -290,6 +292,7 @@ kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크�
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
 | `kyu conversations list <경로> [repo] --json` | 그 세션 자리에서 Claude Code 로 나눈 대화 (마지막 활동이 늦은 것부터) | `{schemaVersion, cwd, conversations[{id, title, startedAt, lastActiveAt, recordedFor}]}` |
+| `kyu conversations show <경로> [repo] <id> --json [--last N]` | 그 대화의 지난 내용 — 마지막 N 항목(기본 200), 오래된 것부터 | `{schemaVersion, conversationId, cwd, totalEntries, entries[{kind: user\|system\|assistant, text, at} \| {kind: tool_use, toolName, summary, at} \| {kind: omitted, count}]}` — 답하지 않은 앞의 수는 `totalEntries − entries 의 길이` |
 | `kyu mcp serve <워크디렉토리> [--app-socket <경로>]` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo`(은퇴 예정) ([설계](orchestration-tools-design.md) 5.3) · [하위 세션](#하위-세션--메인이-낳고-대화한다) 도구 다섯 |
 | `kyu mcp serve --child --app-socket <경로>` | 하위 세션에 붙는 서버 (stdio) | JSON-RPC — `ask_parent` 하나 ([설계](session-tree-design.md) 6.3) |
 | `kyu mcp ask --app-socket <경로>` | 도구 호출 하나의 승인 물음을 그 소켓 너머의 앱에게 중계 (stdio) | JSON-RPC — `request_permission` 하나. `claude` 가 `--permission-prompt-tool` 로 부르고 모델에게는 보이지 않는다. 앱의 승인 카드가 답한다([설계](chat-ui-design.md) 5.2.2) |
@@ -1480,6 +1483,15 @@ git 만 보고, 세션을 만들고 붙고 죽이던 명령은 은퇴했다(설�
 화면은 다음 PR 에서 붙는다. 전사 자리는 `$CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)`/projects/<인코딩한
 cwd>/<대화 id>.jsonl` 이고, 인코딩은 실측(claude 2.1.316)으로 정했다 — 링크를 편 절대경로에서 ASCII 영숫자가
 아닌 글자는 UTF-16 단위 하나마다 `-` 하나(한글 한 글자에 하나, 이모지는 둘), 200 자를 넘으면 해시 꼬리가 붙는다.
+
+**이어갈 대화의 지난 내용도 엔진이 답한다.** `--resume` 은 `claude` 의 맥락만 잇고 화면은 비어 있으므로, 엔진이
+그 대화의 전사를 줄 단위로 읽어 마지막 항목들을 답한다([`kyu conversations show --json`](#기계용-표면)) — 사람이
+쓴 글(`user`), 사람 자리에 들어온 안내(`system` — 중단 표지 `[Request interrupted by user]` 와 세션 트리 중계
+`[하위 세션 …]` · `[상위 세션] …`), `claude` 의 글(생각은 빼고), 부른 도구마다 한 줄 요약(명령 · 파일 경로 ·
+패턴 · 설명 중 하나)이다. 도구의 결과, 하위 에이전트의 줄, `claude` 가 지은 API 오류 · 사용량 한도 안내
+(`isApiErrorMessage`)는 넣지 않는다. 읽기만 하므로 목록에서 빠지는 위임 · 하위 세션 대화도 보인다. 37MB 전사를
+0.15 초에 읽는다(기본 마지막 200 항목, 메모리는 전사 크기와 상관없다). 이것을 불러 채팅 창 앞에 까는 일은 다음
+PR 에서 붙는다.
 
 **이어가지 못하는 경우도 있다.** 전사가 사라졌거나(`~/.claude` 를 정리했거나 다른 머신에서 연
 경우) 기록의 ID 가 망가졌으면 `claude` 는 곧바로 종료 코드 1 로 끝난다. 그때 앱은 **대신 새

@@ -545,6 +545,43 @@ kyu session-command proj-a --json
 
 **실측 (2026-11-01, claude 2.1.316).** 임시 폴더에서 `claude -p "이 대화의 암호 단어는 보라색코끼리 다…"` 로 터미널 대화를 만든 뒤, 진짜 코어 프로세스에 붙은 거울로 그 폴더를 열고 메인을 이어가기로 눌렀다. 고르기가 그 대화 하나를 후보이자 기본으로 세웠고, 그대로 고르자 메인 챗의 `resumedConversationId` 가 그 id 였으며, "암호 단어가 뭐였지?" 에 "보라색코끼리" 로 답했다. 그 뒤 `kyu conversations list` 는 그 대화를 `recordedFor: "main"` 으로 답했다(RealClaudeTerminalConversationChoiceIntegrationTest).
 
+#### 5.5.8 (계획) 지난 대화 보이기 — 엔진이 전사를 읽어 답하고 코어는 그 모양만 안다(원칙 11) (2026-11-02)
+
+**문제.** `--resume` 은 claude 의 맥락은 잇지만 화면에는 아무것도 다시 그리지 않는다. 채택한 터미널 대화든 앱이 적어 둔 대화를 다시 열든, 세션을 연 사람은 빈 채팅 창 앞에서 그 대화가 무엇이었는지 볼 수 없다. 사용자 요구: "기존 대화가 있어서 그걸 선택했다면 앞선 대화를 가져왔으면 좋겠는데".
+
+**엔진 쪽 표면 (이 판에서 더함).** `kyu conversations show <경로> [repo] <대화 id> --json [--last N]` 이 그 자리의 전사를 줄 단위로 읽어 마지막 N 항목(기본 200)을 답한다. 아무것도 적지 않는다. 전사를 찾는 규칙은 목록 · 채택과 같다(`$CLAUDE_CONFIG_DIR` · 링크를 편 cwd · 안의 cwd 확인 · 맥과 윈도우의 대소문자 무시).
+
+| 항목 `kind` | 무엇 | 자리 |
+|---|---|---|
+| `user` | 사람이 쓴 글 — 목록 제목과 같은 판정(`userTextBlocks` 하나). 주입 태그 덩어리 · 작업 알림 · `isMeta` · `isCompactSummary` · tool_result 만 있는 줄은 아니다. 제목은 첫 블록이지만 여기는 모든 text 블록을 빈 줄로 잇는다 | `text`, `at` |
+| `system` | 사람 자리에 들어왔지만 사람이 쓰지 않은 안내 — claude 의 중단 표지(글 전체가 `[Request interrupted by user]` · `[Request interrupted by user for tool use]` 일 때)와 세션 트리 중계(`[하위 세션 <id> · …]` · `[상위 세션] …`). 화면이 옅은 안내 줄로 그린다. 목록 제목도 되지 않는다 | `text`, `at` |
+| `assistant` | claude 의 글. 이어진 text 블록을 잇는다. thinking 은 넣지 않는다. claude 가 지은 합성 오류 줄(`isApiErrorMessage`, model `<synthetic>`)은 넣지도 세지도 않는다 | `text`, `at` |
+| `tool_use` | 도구 한 번. 결과는 넣지 않는다 | `toolName`, `summary`(입력의 `command` · `file_path` · `pattern` · `description` 중 처음 있는 것, 120 자, 없으면 `""`), `at` |
+| `omitted` | 연달아 건너뛴 하위 에이전트 줄(`isSidechain`) | `count` |
+
+문서는 `{schemaVersion: 1, conversationId, cwd, totalEntries, entries[]}` 다. 앞에서 답하지 않은 수는 `totalEntries − entries 의 길이` 로 읽는 쪽이 셈한다 — 같은 사실을 두 필드에 두면 둘이 어긋날 자리가 생긴다. `at` 은 RFC 3339 UTC 초 단위, 모르면 `null` 이다. 모르는 `kind` 는 건너뛴다.
+
+**거절과 경고.** uuid 꼴이 아닌 id · 그 자리에 없는 대화는 exit 1 이다. 파일은 있는데 대화 줄이 하나도 없으면 "비어 있어 확인할 수 없다" 로 따로 말한다 — 없는 것과 확인하지 못한 것은 사람이 할 일이 다르다. 안의 `sessionId` 가 파일 이름과 다른 후보는 목록처럼 stderr 경고를 내고 다음 후보를 본다.
+
+**중계 접두의 자리.** `[하위 세션 ` · `[상위 세션] ` 을 짓는 것은 코어다(`SessionTreeEvent.kt` 의 `parentNoticeTextFor`, `ChatSessionStateHolder.kt` 의 `PARENT_MESSAGE_PREFIX`). 엔진은 그 모양을 세션에게 주는 규약 문구와 이 판정에서 읽으므로, 엔진 안에서는 `workdir.ChildSessionRelayPrefix` · `ParentSessionRelayPrefix` 하나가 그 모양이고 규약 문구도 그것으로 짓는다.
+
+**실측 (claude 2.1.316, 2026-11-02, 이 저장소의 16MB 전사).** 이 형식은 실물 줄을 보고 정했다.
+
+| 사실 | 그래서 |
+|---|---|
+| assistant 줄은 블록 하나씩이고 같은 `message.id` 로 여러 줄이다(thinking 줄 · text 줄 · tool_use 줄) | 한 줄을 항목으로 옮긴다. 생각만 담긴 줄은 항목이 되지 않는다 |
+| 하위 에이전트의 줄은 `<id>/subagents/agent-*.jsonl` 에 따로 있고 본 전사의 `isSidechain:true` 는 0 줄이다 | `omitted` 는 앞선 판의 섞인 전사를 위한 자리다. 지금 판에서는 대개 나오지 않는다 |
+| 다른 세션의 메시지("Another Claude session sent a message:") · 스킬 본문 · 사용량 안내는 태그 없이 `isMeta:true` 로, 압축 요약은 `isCompactSummary:true` 로 user 줄에 적힌다 | 주입 태그 걷기만으로는 가를 수 없어 "사람이 쓴 글" 규칙에 두 표지를 더했다. 목록의 제목도 같은 규칙을 쓴다 |
+| 사용량 한도에 걸린 다른 폴더의 37MB 전사에는 `isApiErrorMessage` 줄이 527 개였다 | 그대로 두면 마지막 200 항목이 한도 안내로만 찬다. 건너뛰고 세지 않는다 |
+| 사람이 claude 를 멈추면 `[Request interrupted by user]`(도구 중이면 `… for tool use`)가 user 줄의 text 블록으로 적힌다 | 사람의 말이 아니므로 `system` 이다 |
+| 16MB 전사: 1123 항목(user 94 · assistant 416 · tool_use 613)을 0.07-0.08 초, 최대 RSS 약 18-20MB. 37MB 전사: 2839 항목(system 3 포함)을 0.15 초 · 20-22MB, `--last 100000` 으로 전부 답해도 0.17 초 · 24MB | 항목은 마지막 N 개만 고리에 남기고 줄은 하나씩 읽어, 전사 크기가 메모리를 정하지 않는다 |
+
+**위임 · 하위 세션 대화도 보인다.** 목록은 그것을 빼고 채택은 거절한다 — 한 대화를 두 세션이 쓰면 뒤에 연 쪽이 거절된다(5.5.6). 보기는 읽기만이라 그 위험이 없고, 앱이 그 대화를 화면에 다시 보일 자리(하위 세션의 지난 대화)가 생길 수 있다.
+
+**원칙 11.** 전사의 자리와 줄의 모양은 엔진만 안다. 코어는 이 문서의 모양만 알고, 화면은 코어가 건넨 항목을 채팅 창 앞에 깐다. claude 가 줄의 모양을 바꾸면 고칠 자리는 엔진 하나다.
+
+**다음 (계획).** 코어가 세션을 열 때(이어가기 · 채택) 이 명령을 불러 그 챗의 앞에 지난 대화를 깐다 — 다음 PR 이다. 읽지 못하면 세션 열기를 막지 않고 진단 기록에 남긴다(5.5.7 의 목록 실패와 같은 자세).
+
 ### 5.6 낱말 — "세션" 이 둘이다
 
 `claude` 는 대화 하나를 "session" 이라 부르고(`--session-id`, `--resume`), 이 도구도 PTY 하나를 "세션" 이라 부른다. **같은 낱말이 다른 것을 가리킨다.**

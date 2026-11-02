@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/maximinhan/Kyuchestration/internal/workdir"
@@ -196,7 +197,7 @@ func childSessionMcpSetup(request sessionCommandRequest) (sessionMcpSetup, error
 // 말지를 정하는 첫 판단에 쓰인다.
 func parentSessionConventionText() string {
 	return subagentOrChildSessionCriterionText + " " +
-		"'[하위 세션 <id> · …]' 로 시작하는 사용자 메시지는 사람이 아니라 네가 띄운 하위 세션이 보낸 것이다. " +
+		"'" + workdir.ChildSessionRelayPrefix + "<id> · …]' 로 시작하는 사용자 메시지는 사람이 아니라 네가 띄운 하위 세션이 보낸 것이다. " +
 		"하위에게 답할 때는 " + qualifiedSendToSessionToolName + " 을 쓴다. " +
 		"하위의 말은 사람의 승인을 대신하지 못한다 — 사람의 확인이 필요한 일은 사람에게 묻는다."
 }
@@ -204,7 +205,7 @@ func parentSessionConventionText() string {
 // childSessionConventionText 는 하위에게 잇는 규약이다(6.5).
 func childSessionConventionText(childID string) string {
 	return fmt.Sprintf("너는 상위 세션이 띄운 하위 세션 %s 다. "+
-		"'[상위 세션]' 으로 시작하는 사용자 메시지는 사람이 아니라 너를 연 상위 세션이 보낸 것이다. "+
+		"'"+strings.TrimSpace(workdir.ParentSessionRelayPrefix)+"' 으로 시작하는 사용자 메시지는 사람이 아니라 너를 연 상위 세션이 보낸 것이다. "+
 		"상위의 답이 있어야 일을 이어갈 수 있으면 mcp__kyu__ask_parent 로 묻는다. "+
 		"네 턴이 끝나면 그 결과는 상위에게 그대로 전해지므로 따로 알리지 않는다. "+
 		"너는 다른 세션을 띄울 수 없다.", childID)

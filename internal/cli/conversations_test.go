@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,30 +46,47 @@ func isolateClaudeCodeHomeForTest(t *testing.T) string {
 func writeTerminalConversationForTest(t *testing.T, claudeConfigDirectory, sessionCwd, conversationID, text string, lastActiveAt time.Time) {
 	t.Helper()
 
-	resolvedCwd, err := filepath.EvalSymlinks(sessionCwd)
-	if err != nil {
-		t.Fatalf("세션 자리의 링크를 펴지 못했습니다: %v", err)
-	}
+	resolvedCwd := resolvedCwdForConversationsTest(t, sessionCwd)
+	writeTerminalTranscriptForTest(t, claudeConfigDirectory, sessionCwd, conversationID, lastActiveAt,
+		`{"type":"user","message":{"role":"user","content":"`+text+`"},"timestamp":"2026-11-01T09:00:51.046Z","cwd":"`+
+			resolvedCwd+`","sessionId":"`+conversationID+`"}`)
+}
+
+// writeTerminalTranscriptForTest 는 sessionCwd 자리의 전사 하나를 주어진 줄로 적는다.
+//
+// 디렉토리 이름은 실측한 규칙(영숫자가 아닌 것은 -)을 시험이 따로 적은 것이다.
+func writeTerminalTranscriptForTest(t *testing.T, claudeConfigDirectory, sessionCwd, conversationID string, lastActiveAt time.Time, lines ...string) {
+	t.Helper()
+
 	directoryName := strings.Map(func(character rune) rune {
 		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') {
 			return character
 		}
 		return '-'
-	}, resolvedCwd)
+	}, resolvedCwdForConversationsTest(t, sessionCwd))
 
 	projectDirectory := filepath.Join(claudeConfigDirectory, "projects", directoryName)
 	if err := os.MkdirAll(projectDirectory, 0o755); err != nil {
 		t.Fatalf("전사 디렉토리 생성 실패: %v", err)
 	}
 	transcriptPath := filepath.Join(projectDirectory, conversationID+".jsonl")
-	transcript := `{"type":"user","message":{"role":"user","content":"` + text + `"},"timestamp":"2026-11-01T09:00:51.046Z","cwd":"` +
-		resolvedCwd + `","sessionId":"` + conversationID + `"}` + "\n"
-	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatalf("전사 생성 실패: %v", err)
 	}
 	if err := os.Chtimes(transcriptPath, lastActiveAt, lastActiveAt); err != nil {
 		t.Fatalf("전사 시각 설정 실패: %v", err)
 	}
+}
+
+// resolvedCwdForConversationsTest 는 claude 처럼 링크를 편 cwd 다 — 전사 안의 cwd 는 그 값이다.
+func resolvedCwdForConversationsTest(t *testing.T, sessionCwd string) string {
+	t.Helper()
+
+	resolvedCwd, err := filepath.EvalSymlinks(sessionCwd)
+	if err != nil {
+		t.Fatalf("세션 자리의 링크를 펴지 못했습니다: %v", err)
+	}
+	return resolvedCwd
 }
 
 func runConversationsListForTest(t *testing.T, args ...string) (conversationsListJSONDocumentForTest, string) {
@@ -299,5 +317,200 @@ func TestConversationsTableKeepsItsColumnsWhenTheTitleHasATab(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "\t") || !strings.Contains(out.String(), "-  앞 뒤") {
 		t.Errorf("stdout = %q, 탭을 공백으로 접고 열 간격이 그대로인 표를 기대", out.String())
+	}
+}
+
+// conversationsShowJSONDocumentForTest 는 kyu conversations show --json 의 문서를 시험이 다시 적어둔 모양이다.
+//
+// 앱(다음 PR)이 이 모양을 파싱한다. 항목은 종류마다 자리가 달라 map 으로 받아 있는 자리와 없는 자리를 함께 본다.
+type conversationsShowJSONDocumentForTest struct {
+	SchemaVersion  int              `json:"schemaVersion"`
+	ConversationID string           `json:"conversationId"`
+	Cwd            string           `json:"cwd"`
+	TotalEntries   int              `json:"totalEntries"`
+	Entries        []map[string]any `json:"entries"`
+}
+
+// conversationShowLineForTest 는 전사의 user · assistant 한 줄이다.
+func conversationShowLineForTest(t *testing.T, lineType, sessionCwd, conversationID, timestamp, contentJSON, extraFields string) string {
+	t.Helper()
+
+	return `{"isSidechain":false,` + extraFields + `"type":"` + lineType + `","message":{"role":"` + lineType + `","content":` + contentJSON +
+		`},"timestamp":"` + timestamp + `","cwd":"` + resolvedCwdForConversationsTest(t, sessionCwd) + `","sessionId":"` + conversationID + `"}`
+}
+
+func runConversationsShowForTest(t *testing.T, args ...string) conversationsShowJSONDocumentForTest {
+	t.Helper()
+
+	var out, errOut bytes.Buffer
+	if err := ManageClaudeCodeConversations(&out, &errOut, append(append([]string{"show"}, args...), machineJSONOptionName)); err != nil {
+		t.Fatalf("ManageClaudeCodeConversations(show) 실패: %v", err)
+	}
+	var document conversationsShowJSONDocumentForTest
+	decodeMachineJSONForTest(t, out.String(), &document)
+	if document.SchemaVersion != 1 {
+		t.Errorf("schemaVersion = %d, want 1", document.SchemaVersion)
+	}
+	// 답하지 않은 앞의 수는 totalEntries 와 entries 의 길이로 정해진다 — 같은 사실을 두 자리에 두지 않는다.
+	if strings.Contains(out.String(), "omittedBefore") {
+		t.Errorf("stdout = %q, omittedBefore 자리가 없기를 기대", out.String())
+	}
+	return document
+}
+
+func TestConversationsShowAnswersThePastConversationInTheShapeTheAppReads(t *testing.T) {
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalTranscriptForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, time.Now(),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:18.5Z", `"목록 보여줘"`, ""),
+		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:20Z",
+			`[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls -la","description":"목록"}}]`, ""),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:21Z",
+			`[{"type":"tool_result","tool_use_id":"t1","content":"total 0"}]`, ""),
+		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:22Z",
+			`[{"type":"text","text":"비어 있습니다"}]`, ""),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:22.9Z",
+			`[{"type":"text","text":"[Request interrupted by user]"}]`, ""),
+		strings.Replace(conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:23Z",
+			`[{"type":"text","text":"하위"}]`, ""), `"isSidechain":false`, `"isSidechain":true`, 1))
+
+	document := runConversationsShowForTest(t, workDirPath, terminalConversationIDForTest, "--last", "4")
+
+	if document.ConversationID != terminalConversationIDForTest || document.Cwd != workDirPath {
+		t.Errorf("conversationId · cwd = %q · %q, %q · %q 를 기대", document.ConversationID, document.Cwd, terminalConversationIDForTest, workDirPath)
+	}
+	if document.TotalEntries != 5 {
+		t.Errorf("totalEntries = %d, 5 를 기대", document.TotalEntries)
+	}
+	want := []map[string]any{
+		{"kind": "tool_use", "toolName": "Bash", "summary": "ls -la", "at": "2026-11-01T09:06:20Z"},
+		{"kind": "assistant", "text": "비어 있습니다", "at": "2026-11-01T09:06:22Z"},
+		{"kind": "system", "text": "[Request interrupted by user]", "at": "2026-11-01T09:06:22Z"},
+		{"kind": "omitted", "count": float64(1)},
+	}
+	if len(document.Entries) != len(want) {
+		t.Fatalf("entries = %+v, %d 개를 기대", document.Entries, len(want))
+	}
+	for index := range want {
+		if fmt.Sprint(document.Entries[index]) != fmt.Sprint(want[index]) {
+			t.Errorf("entries[%d] = %v, %v 를 기대 (종류마다 그 자리만 있어야 한다)", index, document.Entries[index], want[index])
+		}
+	}
+}
+
+func TestConversationsShowAnswersAUserEntryAndAnUnknownTimeAsNull(t *testing.T) {
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalTranscriptForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, time.Now(),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "시각 아님", `"질문"`, ""))
+
+	document := runConversationsShowForTest(t, workDirPath, terminalConversationIDForTest)
+
+	if len(document.Entries) != 1 || fmt.Sprint(document.Entries[0]) != fmt.Sprint(map[string]any{"kind": "user", "text": "질문", "at": nil}) {
+		t.Errorf("entries = %v, 시각을 모르는 user 항목은 at null 을 기대", document.Entries)
+	}
+	if document.Entries == nil {
+		t.Error("entries 는 null 이 아니라 배열이어야 한다")
+	}
+}
+
+func TestConversationsShowReadsADelegationConversationToo(t *testing.T) {
+	// 목록은 위임 · 하위 세션 대화를 뺀다 — 채택하면 한 대화를 둘이 쓴다. 보기는 읽기만이라 그 위험이 없다.
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalConversationForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, "위임 대화", time.Now())
+	writeFileForConversationsTest(t, filepath.Join(workDirPath, ".coord", "conversations.json"),
+		`{"schemaVersion":1,"delegations":{"main/review":"`+terminalConversationIDForTest+`"}}`)
+
+	document := runConversationsShowForTest(t, workDirPath, terminalConversationIDForTest)
+
+	if len(document.Entries) != 1 || document.Entries[0]["text"] != "위임 대화" {
+		t.Errorf("entries = %v, 위임 대화도 보이기를 기대", document.Entries)
+	}
+}
+
+func TestConversationsShowForARepoReadsFromTheRepoSessionCwd(t *testing.T) {
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	makeCleanRepo(t, workDirPath, "proj-a")
+	writeTerminalConversationForTest(t, claudeConfigDirectory, filepath.Join(workDirPath, "proj-a"), terminalConversationIDForTest, "레포 대화", time.Now())
+
+	document := runConversationsShowForTest(t, workDirPath, "proj-a", terminalConversationIDForTest)
+
+	if document.Cwd != filepath.Join(workDirPath, "proj-a") || len(document.Entries) != 1 {
+		t.Errorf("document = %+v, 레포 자리의 대화를 기대", document)
+	}
+}
+
+func TestConversationsShowRefusesWhatItCannotAnswer(t *testing.T) {
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalConversationForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, "대화", time.Now())
+
+	refusals := map[string][]string{
+		"id 없음":        {workDirPath},
+		"인자가 너무 많음":    {workDirPath, "proj-a", terminalConversationIDForTest, "extra"},
+		"uuid 가 아닌 값":  {workDirPath, "not-a-conversation"},
+		"전사가 없는 id":    {workDirPath, otherConversationIDForTest},
+		"없는 레포":        {workDirPath, "proj-typo", terminalConversationIDForTest},
+		"--last 값 없음":  {workDirPath, terminalConversationIDForTest, "--last"},
+		"--last 0":     {workDirPath, terminalConversationIDForTest, "--last", "0"},
+		"--last 숫자 아님": {workDirPath, terminalConversationIDForTest, "--last", "many"},
+		"모르는 옵션":       {workDirPath, terminalConversationIDForTest, "--typo"},
+	}
+	for name, args := range refusals {
+		var out, errOut bytes.Buffer
+		if err := ManageClaudeCodeConversations(&out, &errOut, append(append([]string{"show"}, args...), machineJSONOptionName)); err == nil {
+			t.Errorf("%s: show %q = nil, 거절을 기대", name, args)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: stdout = %q, 거절은 문서를 내지 않기를 기대", name, out.String())
+		}
+	}
+}
+
+func TestConversationsShowGivesAPersonOneLinePerEntry(t *testing.T) {
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalTranscriptForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, time.Now(),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:18Z", `"첫 줄\n둘째 줄"`, ""),
+		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:20Z",
+			`[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a/b.go"}}]`, ""),
+		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:22Z",
+			`[{"type":"text","text":"답\t입니다"}]`, ""),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:23Z",
+			`[{"type":"text","text":"[Request interrupted by user]"}]`, ""))
+
+	var out, errOut bytes.Buffer
+	if err := ManageClaudeCodeConversations(&out, &errOut, []string{"show", workDirPath, terminalConversationIDForTest}); err != nil {
+		t.Fatalf("ManageClaudeCodeConversations(show) 실패: %v", err)
+	}
+	rendered := out.String()
+	localTime := time.Date(2026, 11, 1, 9, 6, 18, 0, time.UTC).Local().Format(time.DateTime)
+	for _, expected := range []string{localTime, "사람", "첫 줄 둘째 줄", "도구", "Read /a/b.go", "Claude", "답 입니다", "안내", "[Request interrupted by user]"} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("stdout = %q, %q 를 기대", rendered, expected)
+		}
+	}
+	if strings.Contains(rendered, "\t") {
+		t.Errorf("stdout = %q, 탭 없는 줄을 기대", rendered)
+	}
+}
+
+func TestConversationsShowWarnsOnStderrAboutATranscriptNamingAnotherConversation(t *testing.T) {
+	// 목록과 같다 — 이름과 안이 다른 전사는 경고로 알린다. 다른 후보가 없으면 그 id 의 대화는 없는 것이다.
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalTranscriptForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, time.Now(),
+		conversationShowLineForTest(t, "user", workDirPath, otherConversationIDForTest, "2026-11-01T09:06:18Z", `"엇갈린 전사"`, ""))
+
+	var out, errOut bytes.Buffer
+	err := ManageClaudeCodeConversations(&out, &errOut, []string{"show", workDirPath, terminalConversationIDForTest, machineJSONOptionName})
+
+	if err == nil || out.Len() != 0 {
+		t.Errorf("err = %v, stdout = %q, 문서 없는 거절을 기대", err, out.String())
+	}
+	if !strings.Contains(errOut.String(), otherConversationIDForTest) {
+		t.Errorf("stderr = %q, 엇갈린 sessionId 를 말하는 경고를 기대", errOut.String())
 	}
 }

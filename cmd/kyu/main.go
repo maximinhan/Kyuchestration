@@ -33,6 +33,8 @@ const usageText = `사용법: kyu <명령> [인자]
                          세션이 실행할 명령·cwd·환경 — 기계용 (--json 전용)
   kyu conversations list <path> [repo]
                          그 세션 자리에서 Claude Code 로 나눈 대화 (이어갈 것을 고르는 목록)
+  kyu conversations show <path> [repo] <id> [--last N]
+                         그 대화의 지난 내용 — 마지막 N 항목 (기본 200)
   kyu mcp <serve|approve>
                          메인 세션이 레포에 위임하는 도구 (serve 는 기계용,
                          approve 는 레포의 실행 유발 설정을 눈으로 확인하고 승인한다)
@@ -53,7 +55,7 @@ const usageText = `사용법: kyu <명령> [인자]
   --profile <이름>       어느 토큰으로 붙을지 (필수)
   --repo <owner/name>    클론할 레포. 여러 번 적을 수 있다 (필수)
 
-옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu conversations list,
+옵션 (kyu list, kyu clone, kyu repos, kyu session-command, kyu conversations list · show,
       kyu auth add, kyu auth list, kyu claude-auth set, kyu claude-auth status):
   --json                 사람용 출력 대신 기계용 JSON 을 낸다 (GUI·스크립트 연동용)
 
