@@ -30,6 +30,8 @@ class KyuCliClaudeCodeConversationHistoryTest {
             runner.receivedArguments,
         )
         assertEquals(listOf<Path?>(WORK_DIR_PATH), runner.receivedWorkingDirectories)
+        // 대화 id 는 실행기의 실패 기록에서 가린다 — 사용자의 대화를 가리키는 값이다.
+        assertEquals(listOf(setOf(CONVERSATION_ID)), runner.receivedValuesHiddenFromDiagnostics)
     }
 
     @Test

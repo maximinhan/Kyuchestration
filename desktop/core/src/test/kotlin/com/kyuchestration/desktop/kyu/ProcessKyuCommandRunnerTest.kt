@@ -246,6 +246,57 @@ class ProcessKyuCommandRunnerTest {
         )
     }
 
+    /**
+     * 사용자의 대화를 가리키는 값(대화 id)은 기록에 남지 않는다 — 인자에서도, 그 값을 되읊는 stderr 에서도.
+     *
+     * 부르는 자리에서 지울 수 없는 기록이라(이 실행기가 남긴다) 실행기가 가린다. 무엇을 가릴지는 부르는 쪽만 안다.
+     */
+    @Test
+    fun `가리라고 한 값은 실패 기록의 인자와 stderr 에서 가린다`() {
+        val executable = executableScript(
+            """
+            #!/bin/sh
+            echo "/w 에서 Claude Code 로 나눈 대화 중에 $CONVERSATION_ID 가 없습니다" >&2
+            exit 1
+            """.trimIndent(),
+        )
+        val diagnosticLog = RecordingDiagnosticLog()
+
+        ProcessKyuCommandRunner(executable, diagnosticLog = diagnosticLog).run(
+            arguments = listOf("conversations", "show", "/w", CONVERSATION_ID, "--json"),
+            valuesHiddenFromDiagnostics = setOf(CONVERSATION_ID),
+        )
+
+        assertEquals(
+            DiagnosticLogEntry.EngineCallFailed(
+                arguments = listOf("conversations", "show", "/w", "(가린 값)", "--json"),
+                exitCode = 1,
+                standardError = "/w 에서 Claude Code 로 나눈 대화 중에 (가린 값) 가 없습니다\n",
+            ),
+            diagnosticLog.recordedEntries.single(),
+        )
+    }
+
+    @Test
+    fun `띄우지 못한 호출의 기록에서도 가리라고 한 값을 가린다`() {
+        val notExecutable = temporaryDirectory.resolve("kyu").apply {
+            writeText("#!/bin/sh\nexit 0\n")
+            setPosixFilePermissions(PosixFilePermissions.fromString("rw-r--r--"))
+        }
+        val diagnosticLog = RecordingDiagnosticLog()
+
+        assertFailsWith<KyuCommandFailure.FailedToStart> {
+            ProcessKyuCommandRunner(notExecutable, diagnosticLog = diagnosticLog).run(
+                arguments = listOf("session-command", "--adopt-conversation", CONVERSATION_ID, "--chat", "--json"),
+                valuesHiddenFromDiagnostics = setOf(CONVERSATION_ID),
+            )
+        }
+
+        assertFalse(CONVERSATION_ID in diagnosticLog.recordedText(), diagnosticLog.recordedText())
+        val recorded = assertIs<DiagnosticLogEntry.EngineCallCouldNotStart>(diagnosticLog.recordedEntries.single())
+        assertEquals(listOf("session-command", "--adopt-conversation", "(가린 값)", "--chat", "--json"), recorded.arguments)
+    }
+
     private fun executableScript(source: String): Path =
         temporaryDirectory.resolve("kyu").apply {
             writeText(source + "\n")
@@ -254,5 +305,6 @@ class ProcessKyuCommandRunnerTest {
 
     private companion object {
         const val SECRET_LOOKING_TOKEN = "ghp_이것이기록에나타나면안된다1234567890"
+        const val CONVERSATION_ID = "654ce605-b030-40e8-8448-2e9003ad32b1"
     }
 }
