@@ -150,6 +150,37 @@ class PastConversationStateHolderTest {
     }
 
     @Test
+    fun `지난 대화 읽기가 뜻밖의 예외를 던져도 세션은 보유되고 그 까닭이 전사 맨 앞에 선다`() = runTest {
+        // 실행기가 파이프를 읽다 받은 IOException 같은 것 — 포트의 실패 타입으로 옮겨지지 않은 예외다. 지난 대화는 세션에
+        // 덧붙이는 것이라, 무엇으로 실패하든 떠 있는 claude 를 잃게 하지 않는다.
+        val opener = RecordingChatSessionOpener()
+        val diagnosticLog = RecordingDiagnosticLog()
+        val commandSource = RecordingSessionCommandSource().apply { resumedConversationId = RESUMED_ID }
+        val holder = stateHolder(
+            opener,
+            commandSource,
+            diagnosticLog,
+            claudeCodeConversationHistorySource = RecordingConversationHistorySource { _, _, _ ->
+                throw IllegalStateException("파이프가 닫혔습니다 ($RESUMED_ID)")
+            },
+        )
+
+        holder.enterSession(TEST_WORK_DIR_PATH, SessionTarget.Main, SessionConversationChoice.ContinueRecordedConversation)
+        runCurrent()
+
+        assertEquals(listOf<SessionTarget>(SessionTarget.Main), holder.heldSessions.value.map { it.target })
+        assertEquals(emptyList(), opener.endedSessions)
+        assertEquals(
+            listOf<ChatEntry>(
+                ChatEntry.EngineNotice("지난 대화를 불러오지 못했습니다: IllegalStateException: 파이프가 닫혔습니다 ($RESUMED_ID)"),
+            ),
+            holder.conversations.value.getValue(SessionTarget.Main).entries,
+        )
+        val recorded = diagnosticLog.recordedEntries.filterIsInstance<DiagnosticLogEntry.ClaudeCodeConversationHistoryReadFailed>().single()
+        assertFalse(RESUMED_ID in recorded.summary, recorded.summary)
+    }
+
+    @Test
     fun `레포 세션은 그 레포의 자리로 묻는다`() = runTest {
         val historySource = RecordingConversationHistorySource { _, _, _ -> HISTORY }
         val commandSource = RecordingSessionCommandSource().apply { resumedConversationId = RESUMED_ID }
