@@ -247,8 +247,8 @@ private fun ChatTranscript(
     val listState = rememberLazyListState()
 
     // 사용자가 위로 올려 읽는 중이면 끌어내리지 않는다. 판단은 한 프레임 늦은 배치 정보로 하므로
-    // 경계에서 한 번쯤 어긋날 수 있는데, 그 대가로 스크롤을 빼앗기지 않는다.
-    var lastKnownItemCount by remember { mutableStateOf(0) }
+    // 경계에서 한 번쯤 어긋날 수 있는데, 그 대가로 스크롤을 빼앗기지 않는다. 수는 목록 항목 단위다(transcriptListItemCount).
+    var lastKnownListItemCount by remember { mutableStateOf(0) }
 
     LazyColumn(
         state = listState,
@@ -256,6 +256,7 @@ private fun ChatTranscript(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // 이 목록이 세우는 항목의 수는 transcriptListItemCount 가 같은 조건으로 센다. 여기에 항목을 더하면 거기도 더한다.
         resumedConversationHeadline(conversation)?.let { headline ->
             item { ResumedConversationHeadline(headline) }
         }
@@ -286,19 +287,20 @@ private fun ChatTranscript(
         }
     }
 
-    val itemCount = conversation.entries.size
-    LaunchedEffect(itemCount, conversation.streamingText, conversation.alive) {
-        val wasAtBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-            ?.let { it.index >= lastKnownItemCount - 1 }
-            ?: true
-        lastKnownItemCount = itemCount
+    val listItemCount = transcriptListItemCount(conversation)
+    LaunchedEffect(listItemCount, conversation.streamingText) {
+        val wasAtBottom = wasShowingLastListItem(
+            lastVisibleItemIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index,
+            previousListItemCount = lastKnownListItemCount,
+        )
+        lastKnownListItemCount = listItemCount
         if (wasAtBottom) {
-            // 창이 막 열린 자리에서는 이 효과가 첫 배치보다 먼저 돈다 — 그때 항목 수는 0 이라, 기다리지 않으면 내리지 못한 채
-            // 맨 위에 선다. 이어온 대화가 깔린 창이 바로 그 자리다(지난 항목 수백 개의 맨 앞이 보인다). 배치가 선 뒤에 내린다.
-            val totalItemCount = snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
+            // 이 효과는 배치보다 먼저 돈다 — 창이 막 열린 자리에서는 항목 수가 0 이고, 항목이 는 자리에서는 아직 앞 배치의
+            // 수다. 그 수로 내리면 맨 위에 서거나 새 항목 바로 위에서 멈춘다. 이번 항목이 다 배치된 뒤에 내린다.
+            snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it == listItemCount }
             // 항목의 시작이 아니라 끝으로 내린다. 글자가 흐르는 동안 마지막 항목이 계속 자라는데,
             // 시작에 맞추면 새 글자가 화면 아래로 밀려 나간다. 목록은 내용 끝에서 멈춘다.
-            listState.scrollToItem(totalItemCount - 1, SCROLL_PAST_LAST_ITEM)
+            listState.scrollToItem(listItemCount - 1, SCROLL_PAST_LAST_ITEM)
         }
     }
 }

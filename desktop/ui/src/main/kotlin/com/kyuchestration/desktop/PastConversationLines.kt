@@ -2,6 +2,7 @@ package com.kyuchestration.desktop
 
 import com.kyuchestration.desktop.terminal.chat.ChatConversation
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
+import com.kyuchestration.desktop.terminal.chat.PastTurnContent
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -23,7 +24,8 @@ internal fun resumedConversationHeadline(conversation: ChatConversation): String
     if (conversation.resumedConversationId == null) {
         return null
     }
-    val pastTurnCount = conversation.entries.count { it is ChatEntry.PastTurn }
+    // 건너뛴 줄의 자리표시(LinesOmitted)는 대화의 한 턴이 아니다. 세면 머리줄의 수가 보이는 말보다 커진다.
+    val pastTurnCount = conversation.entries.count { it is ChatEntry.PastTurn && it.content !is PastTurnContent.LinesOmitted }
     if (pastTurnCount == 0 && conversation.pastTurnsOmittedBefore == 0) {
         return "이 대화에는 앞선 내용이 있습니다 — 화면에는 이번 실행부터 보입니다."
     }
