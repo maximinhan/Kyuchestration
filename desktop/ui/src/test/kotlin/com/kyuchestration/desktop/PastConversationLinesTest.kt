@@ -21,7 +21,8 @@ class PastConversationLinesTest {
     fun `이어온 대화의 머리줄은 지난 항목 수를 말한다`() {
         val conversation = ChatConversation(SessionTarget.Main, resumedConversationId = RESUMED_ID, entries = PAST_TURNS + LIVE_ENTRY)
 
-        assertEquals("이어온 대화 · 3개", resumedConversationHeadline(conversation))
+        // 건너뛴 줄 자리표시는 대화의 한 턴이 아니다 — 세면 보이는 말보다 수가 크다.
+        assertEquals("이어온 대화 · 2개", resumedConversationHeadline(conversation))
     }
 
     @Test
@@ -33,7 +34,7 @@ class PastConversationLinesTest {
             pastTurnsOmittedBefore = 933,
         )
 
-        assertEquals("이어온 대화 · 3개 · 앞선 933개는 보이지 않습니다", resumedConversationHeadline(conversation))
+        assertEquals("이어온 대화 · 2개 · 앞선 933개는 보이지 않습니다", resumedConversationHeadline(conversation))
     }
 
     @Test
