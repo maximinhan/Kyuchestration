@@ -28,6 +28,7 @@ import com.kyuchestration.desktop.terminal.chat.ChildTurnResult
 import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
 import com.kyuchestration.desktop.terminal.chat.ExistingConversation
 import com.kyuchestration.desktop.terminal.chat.OutgoingUserMessage
+import com.kyuchestration.desktop.terminal.chat.PastTurnContent
 import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.PermissionDenial
@@ -77,7 +78,7 @@ class ScreenProtocolSerializationTest {
     @Test
     fun `인사 틀은 규약의 판 · 화면의 판 · 화면의 OS 를 싣는다`() {
         assertEquals(
-            """{"frame":"hello","protocol":3,"screenVersion":"v0.15.0","screenOs":"windows"}""",
+            """{"frame":"hello","protocol":4,"screenVersion":"v0.15.0","screenOs":"windows"}""",
             encodeFrameToCore(FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v0.15.0", screenOs = "windows")),
         )
     }
@@ -85,7 +86,7 @@ class ScreenProtocolSerializationTest {
     @Test
     fun `인사 답은 규약의 판 · 코어의 판 · 코어의 OS 와 WSL 배포판 · 코어의 진단 기록 · 엔진 자리를 싣는다`() {
         assertEquals(
-            """{"frame":"welcome","protocol":3,"coreVersion":"v0.15.0","coreOs":"linux","wslDistro":"Ubuntu-24.04",""" +
+            """{"frame":"welcome","protocol":4,"coreVersion":"v0.15.0","coreOs":"linux","wslDistro":"Ubuntu-24.04",""" +
                 """"coreDiagnosticLog":"/home/yawn/.local/state/kyuchestration/core.log",""" +
                 """"engineDirectory":"/home/yawn/.local/share/kyuchestration/engine"}""",
             encodeFrameToScreen(
@@ -125,7 +126,7 @@ class ScreenProtocolSerializationTest {
     fun `모르는 OS 낱말을 실은 인사도 읽는다`() {
         assertEquals(
             FrameToCore.Hello(protocol = SCREEN_PROTOCOL_VERSION, screenVersion = "v9.0.0", screenOs = "freebsd"),
-            decodeFrameToCore("""{"frame":"hello","protocol":3,"screenVersion":"v9.0.0","screenOs":"freebsd"}"""),
+            decodeFrameToCore("""{"frame":"hello","protocol":4,"screenVersion":"v9.0.0","screenOs":"freebsd"}"""),
         )
     }
 
@@ -258,6 +259,7 @@ class ScreenProtocolSerializationTest {
                     totalCostUsd = 0.42,
                     usageWindows = listOf(RateLimitWindow("five_hour", 0.3, 1_760_000_000)),
                     endedExitCode = 143,
+                    pastTurnsOmittedBefore = 933,
                 ),
             ),
             ScreenChange.ConversationTailChanged(SessionTarget.Main, fromIndex = 3, entries = ALL_ENTRIES),
@@ -318,6 +320,25 @@ class ScreenProtocolSerializationTest {
         val decoded = decodeFrameToScreen(line) as FrameToScreen.Change
         val decodedState = (decoded.change as ScreenChange.RepositoryCloneChanged).state as RepositoryCloneState.ChoosingRepositories
         assertEquals(choosing.matchedRepositories, decodedState.matchedRepositories)
+    }
+
+    @Test
+    fun `지난 항목은 past_turn 갈래로 무엇이었는지와 시각을 싣는다`() {
+        val change = ScreenChange.ConversationTailChanged(
+            SessionTarget.Main,
+            fromIndex = 0,
+            entries = listOf(
+                ChatEntry.PastTurn(PastTurnContent.ToolUsed("Bash", "ls -la"), at = Instant.parse("2026-11-01T09:06:18Z")),
+                ChatEntry.PastTurn(PastTurnContent.LinesOmitted(3)),
+            ),
+        )
+
+        assertEquals(
+            """{"frame":"change","seq":7,"change":{"type":"conversation_tail","target":{"type":"main"},"fromIndex":0,"entries":[""" +
+                """{"type":"past_turn","content":{"type":"tool_used","toolName":"Bash","summary":"ls -la"},"at":"2026-11-01T09:06:18Z"},""" +
+                """{"type":"past_turn","content":{"type":"lines_omitted","count":3}}]}}""",
+            encodeFrameToScreen(FrameToScreen.Change(seq = 7, change = change)),
+        )
     }
 
     @Test
@@ -564,6 +585,11 @@ class ScreenProtocolSerializationTest {
                 permissionDenials = listOf(PermissionDenial("Write", "toolu_09", TOOL_INPUT)),
             ),
             ChatEntry.EngineNotice("No conversation found with session ID: x"),
+            ChatEntry.PastTurn(PastTurnContent.UserSaid("터미널에서 한 말"), at = AT),
+            ChatEntry.PastTurn(PastTurnContent.AssistantSaid("지난 답"), at = AT),
+            ChatEntry.PastTurn(PastTurnContent.ToolUsed("Bash", "ls -la"), at = null),
+            ChatEntry.PastTurn(PastTurnContent.SystemNoted("[Request interrupted by user]"), at = AT),
+            ChatEntry.PastTurn(PastTurnContent.LinesOmitted(3)),
         )
     }
 }
