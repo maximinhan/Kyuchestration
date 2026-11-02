@@ -21,8 +21,13 @@ import (
 type ConversationEntryKind string
 
 const (
-	// ConversationEntryKindUser 는 사람이 쓴 글이다 — 목록의 제목과 같은 규칙으로 가른다.
+	// ConversationEntryKindUser 는 사람이 쓴 글이다 — 목록의 제목과 같은 규칙으로 가른다(userTextBlocks).
 	ConversationEntryKindUser ConversationEntryKind = "user"
+
+	// ConversationEntryKindSystem 은 사람 자리에 들어왔지만 사람이 쓰지 않은 안내다 — claude 의 중단 표지
+	// ("[Request interrupted by user]")와 이 도구의 세션 트리 중계("[하위 세션 <id> · …]", "[상위 세션] …").
+	// 화면이 사람의 말과 다른 옅은 줄로 그릴 수 있게 따로 둔다.
+	ConversationEntryKindSystem ConversationEntryKind = "system"
 
 	// ConversationEntryKindAssistant 는 claude 가 쓴 글이다. 생각(thinking)은 넣지 않는다 — 터미널도 접어 보인다.
 	ConversationEntryKindAssistant ConversationEntryKind = "assistant"
@@ -49,7 +54,7 @@ var toolUseSummaryInputKeys = []string{"command", "file_path", "pattern", "descr
 type ClaudeCodeConversationEntry struct {
 	Kind ConversationEntryKind
 
-	// Text 는 user · assistant 의 글이다.
+	// Text 는 user · system · assistant 의 글이다.
 	Text string
 
 	// ToolName 과 ToolSummary 는 tool_use 의 도구 이름과 한 줄 요약이다. 요약할 자리가 없으면 빈 문자열이다.
@@ -70,45 +75,76 @@ type ClaudeCodeConversationHistory struct {
 	// TotalEntries 는 전사 전체의 항목 수다 — omitted 항목도 하나로 센다.
 	TotalEntries int
 
-	// Entries 는 마지막 항목들이고 오래된 것부터다. 없으면 nil 이 아니라 빈 조각이다.
+	// Entries 는 마지막 항목들이고 오래된 것부터다. 없으면 nil 이 아니라 빈 조각이다. 그 앞에서 답하지 않은 수는
+	// TotalEntries 에서 이 길이를 뺀 것이다.
 	Entries []ClaudeCodeConversationEntry
 }
 
-// OmittedBefore 는 Entries 앞에서 답하지 않은 항목 수다.
-func (history ClaudeCodeConversationHistory) OmittedBefore() int {
-	return history.TotalEntries - len(history.Entries)
+// 이름으로 찾은 후보를 읽고 나서 그것이 답할 전사가 아닐 때의 까닭들이다. 셋 다 다음 후보를 본다.
+var (
+	// errTranscriptOfAnotherPlace 는 안에 적힌 cwd 가 이 자리가 아니라는 뜻이다 — 이름이 겹친 다른 자리의 정상 전사다.
+	errTranscriptOfAnotherPlace = errors.New("다른 자리의 전사")
+
+	// errTranscriptWithoutConversationLines 는 cwd 가 적힌 대화 줄이 하나도 없어 자리를 확인할 수 없다는 뜻이다.
+	errTranscriptWithoutConversationLines = errors.New("대화 줄이 없는 전사")
+)
+
+// transcriptNamingAnotherConversationError 는 줄의 sessionId 가 파일 이름과 다른 전사다. --resume <파일 이름> 이 무엇을
+// 여는지 알 수 없는 이상이라 사용자에게 경고로 알리고 다음 후보를 본다 — 목록과 같은 자세다(readClaudeCodeTranscript).
+type transcriptNamingAnotherConversationError struct {
+	transcriptPath    string
+	recordedSessionID string
 }
 
-// errTranscriptOfAnotherPlace 는 이름으로 찾은 전사가 이 자리의 대화가 아니라는 뜻이다. 다음 후보를 본다.
-var errTranscriptOfAnotherPlace = errors.New("다른 자리의 전사")
+func (err transcriptNamingAnotherConversationError) Error() string {
+	return fmt.Sprintf("Claude Code 전사의 이름과 안의 sessionId(%s)가 달라 읽지 않습니다 (%s)", err.recordedSessionID, err.transcriptPath)
+}
 
 // ReadClaudeCodeConversationHistory 는 sessionCwd 에서 나눈 대화 conversationID 의 마지막 lastEntryLimit 개 항목을 읽는다.
 //
 // 아무것도 적지 않는 조회다. 위임 · 하위 세션의 대화도 답한다 — 목록이 그것을 빼는 이유는 채택하면 한 대화를
 // 둘이 쓰기 때문인데(ListClaudeCodeConversations), 읽기에는 그 위험이 없다.
 //
-// 전사를 찾는 규칙은 목록 · 채택과 같다(claudeCodeTranscriptPathsOf). 안의 cwd 가 이 자리가 아니거나 줄의
-// sessionId 가 파일 이름과 다르면 거절한다 — 앱은 이 답을 그 자리에서 이어가는 대화의 앞에 깐다.
-func ReadClaudeCodeConversationHistory(sessionCwd, conversationID string, lastEntryLimit int) (ClaudeCodeConversationHistory, error) {
+// 전사를 찾는 규칙은 목록 · 채택과 같다(claudeCodeTranscriptPathsOf). 이름으로 찾은 후보마다 안의 cwd 로 이 자리의
+// 것인지 확인한다 — 앱은 이 답을 그 자리에서 이어가는 대화의 앞에 깐다. 줄의 sessionId 가 파일 이름과 다른 후보는
+// 경고로 알리고 넘어간다. warnings 는 실패해도 함께 돌려준다 — 실패의 까닭이 그 경고일 수 있다.
+func ReadClaudeCodeConversationHistory(sessionCwd, conversationID string, lastEntryLimit int) (history ClaudeCodeConversationHistory, warnings []string, err error) {
 	if !IsConversationID(conversationID) {
-		return ClaudeCodeConversationHistory{}, fmt.Errorf("%q 는 Claude Code 대화 ID 모양(uuid)이 아닙니다", conversationID)
+		return ClaudeCodeConversationHistory{}, nil, fmt.Errorf("%q 는 Claude Code 대화 ID 모양(uuid)이 아닙니다", conversationID)
 	}
 	if lastEntryLimit < 1 {
-		return ClaudeCodeConversationHistory{}, fmt.Errorf("마지막 항목 수는 1 이상이어야 합니다 (%d 를 받음)", lastEntryLimit)
+		return ClaudeCodeConversationHistory{}, nil, fmt.Errorf("마지막 항목 수는 1 이상이어야 합니다 (%d 를 받음)", lastEntryLimit)
 	}
 
 	resolvedSessionCwd, transcriptPaths, err := claudeCodeTranscriptPathsOf(sessionCwd, conversationID)
 	if err != nil {
-		return ClaudeCodeConversationHistory{}, err
+		return ClaudeCodeConversationHistory{}, nil, err
 	}
+	var transcriptsWithoutConversationLines []string
 	for _, transcriptPath := range transcriptPaths {
 		history, err := readClaudeCodeConversationHistory(transcriptPath, conversationID, resolvedSessionCwd, lastEntryLimit)
-		if errors.Is(err, errTranscriptOfAnotherPlace) {
+		var namingAnotherConversation transcriptNamingAnotherConversationError
+		switch {
+		case err == nil:
+			return history, warnings, nil
+		case errors.Is(err, errTranscriptOfAnotherPlace):
 			continue
+		case errors.Is(err, errTranscriptWithoutConversationLines):
+			transcriptsWithoutConversationLines = append(transcriptsWithoutConversationLines, transcriptPath)
+		case errors.As(err, &namingAnotherConversation):
+			warnings = append(warnings, namingAnotherConversation.Error())
+		default:
+			return ClaudeCodeConversationHistory{}, warnings, err
 		}
-		return history, err
 	}
-	return ClaudeCodeConversationHistory{}, fmt.Errorf(
+
+	// 파일은 있는데 자리를 확인하지 못한 것과, 그 자리에 그 대화가 없는 것은 사람이 할 일이 다르다.
+	if len(transcriptsWithoutConversationLines) > 0 {
+		return ClaudeCodeConversationHistory{}, warnings, fmt.Errorf(
+			"%s 의 전사가 비어 있어 이 자리(%s)의 대화인지 확인할 수 없습니다 (%s)",
+			conversationID, sessionCwd, strings.Join(transcriptsWithoutConversationLines, ", "))
+	}
+	return ClaudeCodeConversationHistory{}, warnings, fmt.Errorf(
 		"%s 에서 Claude Code 로 나눈 대화 중에 %s 가 없습니다 — kyu conversations list 로 그 자리의 대화를 확인하세요",
 		sessionCwd, conversationID)
 }
@@ -143,8 +179,8 @@ func readClaudeCodeConversationHistory(transcriptPath, conversationID, resolvedS
 			var line claudeCodeTranscriptLine
 			if json.Unmarshal(lineBytes, &line) == nil && (line.Type == "user" || line.Type == "assistant") {
 				if line.SessionID != "" && line.SessionID != conversationID {
-					return ClaudeCodeConversationHistory{}, fmt.Errorf(
-						"Claude Code 전사의 이름과 안의 sessionId(%s)가 달라 읽지 않습니다 (%s)", line.SessionID, transcriptPath)
+					return ClaudeCodeConversationHistory{}, transcriptNamingAnotherConversationError{
+						transcriptPath: transcriptPath, recordedSessionID: line.SessionID}
 				}
 				if recordedCwd == "" && line.Cwd != "" {
 					recordedCwd = line.Cwd
@@ -153,9 +189,12 @@ func readClaudeCodeConversationHistory(transcriptPath, conversationID, resolvedS
 					}
 				}
 
-				if line.IsSidechain {
+				switch {
+				case line.IsAPIErrorMessage:
+					// omitted 로도 세지 않는다 — 대화에서 빠진 것이 아니라 대화가 아니다.
+				case line.IsSidechain:
 					omittedLineCount++
-				} else {
+				default:
 					for _, entry := range conversationEntriesOf(line) {
 						pushEntry(entry)
 					}
@@ -172,7 +211,7 @@ func readClaudeCodeConversationHistory(transcriptPath, conversationID, resolvedS
 
 	// cwd 가 끝내 적히지 않은 전사는 이 자리의 것인지 확인할 수 없다 — 목록도 같은 전사를 뺀다.
 	if recordedCwd == "" {
-		return ClaudeCodeConversationHistory{}, errTranscriptOfAnotherPlace
+		return ClaudeCodeConversationHistory{}, errTranscriptWithoutConversationLines
 	}
 	if omittedLineCount > 0 {
 		ring.push(ClaudeCodeConversationEntry{Kind: ConversationEntryKindOmitted, OmittedCount: omittedLineCount})
@@ -191,10 +230,15 @@ func conversationEntriesOf(line claudeCodeTranscriptLine) []ClaudeCodeConversati
 	}
 
 	if line.Type == "user" {
-		if text := line.textAPersonWrote(); text != "" {
-			return []ClaudeCodeConversationEntry{{Kind: ConversationEntryKindUser, Text: text, At: at}}
+		// 제목과 달리 전문이다 — 붙여 넣은 글은 text 블록 여럿으로 온다.
+		switch author, texts := line.userTextBlocks(); author {
+		case userLineByPerson:
+			return []ClaudeCodeConversationEntry{{Kind: ConversationEntryKindUser, Text: strings.Join(texts, "\n\n"), At: at}}
+		case userLineBySystem:
+			return []ClaudeCodeConversationEntry{{Kind: ConversationEntryKindSystem, Text: strings.Join(texts, "\n\n"), At: at}}
+		default:
+			return nil
 		}
-		return nil
 	}
 	if line.Message == nil {
 		return nil
@@ -248,8 +292,8 @@ func toolUseSummaryOf(input map[string]json.RawMessage) string {
 		if json.Unmarshal(input[key], &value) != nil {
 			continue
 		}
-		if summary := layoutWhitespaceAsSpaces(value); summary != "" {
-			return firstRunes(summary, toolUseSummaryRuneLimit)
+		if summary := FirstRunesOnOneLine(value, toolUseSummaryRuneLimit); summary != "" {
+			return summary
 		}
 	}
 	return ""

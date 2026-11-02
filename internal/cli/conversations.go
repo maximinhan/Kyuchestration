@@ -53,7 +53,7 @@ func ManageClaudeCodeConversations(out, errOut io.Writer, args []string) error {
 	case "list":
 		return listClaudeCodeConversations(out, errOut, args[1:])
 	case "show":
-		return showClaudeCodeConversation(out, args[1:])
+		return showClaudeCodeConversation(out, errOut, args[1:])
 	default:
 		return fmt.Errorf("conversations 의 하위 명령은 list 와 show 입니다 (%s 를 받음)\n\n%s", args[0], conversationsUsageText)
 	}
@@ -86,8 +86,9 @@ func listClaudeCodeConversations(out, errOut io.Writer, args []string) error {
 // showClaudeCodeConversation 은 대화 하나의 지난 내용을 낸다. 아무것도 적지 않는다.
 //
 // 워크디렉토리의 대화 기록(conversations.json)을 보지 않는다. 위임 · 하위 세션 대화도 답하므로 가를 것이 없고,
-// 전사가 그 자리의 것인지는 전사 안의 cwd 가 정한다.
-func showClaudeCodeConversation(out io.Writer, args []string) error {
+// 전사가 그 자리의 것인지는 전사 안의 cwd 가 정한다. 경고는 list 와 같이 errOut 으로 가고, 실패해도 먼저 낸다 —
+// 실패의 까닭이 그 경고일 수 있다.
+func showClaudeCodeConversation(out, errOut io.Writer, args []string) error {
 	request, err := parseConversationsShowArgs(args)
 	if err != nil {
 		return err
@@ -97,7 +98,10 @@ func showClaudeCodeConversation(out io.Writer, args []string) error {
 		return err
 	}
 
-	history, err := workdir.ReadClaudeCodeConversationHistory(sessionCwd, request.conversationID, request.lastEntryCount)
+	history, warnings, err := workdir.ReadClaudeCodeConversationHistory(sessionCwd, request.conversationID, request.lastEntryCount)
+	if warningErr := writeConversationWarnings(errOut, warnings); warningErr != nil {
+		return warningErr
+	}
 	if err != nil {
 		return err
 	}
@@ -269,6 +273,8 @@ func writeClaudeCodeConversationHistoryLines(out io.Writer, cwd string, history 
 		switch entry.Kind {
 		case workdir.ConversationEntryKindUser:
 			speaker, line = "사람", entry.Text
+		case workdir.ConversationEntryKindSystem:
+			speaker, line = "안내", entry.Text
 		case workdir.ConversationEntryKindAssistant:
 			speaker, line = "Claude", entry.Text
 		case workdir.ConversationEntryKindToolUse:
@@ -276,8 +282,8 @@ func writeClaudeCodeConversationHistoryLines(out io.Writer, cwd string, history 
 		case workdir.ConversationEntryKindOmitted:
 			speaker, line = "생략", fmt.Sprintf("하위 에이전트의 줄 %d 개", entry.OmittedCount)
 		}
-		// 글 안의 줄바꿈 · 탭을 한 칸으로 접는다 — 탭은 tabwriter 가 열 경계로 읽는다.
-		fmt.Fprintf(table, "%s%s\t%s\t%s\n", rowIndent, at, speaker, firstRunesWithEllipsis(strings.Join(strings.Fields(line), " "), historyLineRuneLimit))
+		// 목록의 제목과 같은 규칙으로 한 줄을 만든다 — 탭이 남으면 tabwriter 가 열 경계로 읽는다.
+		fmt.Fprintf(table, "%s%s\t%s\t%s\n", rowIndent, at, speaker, workdir.FirstRunesOnOneLine(line, historyLineRuneLimit))
 	}
 	if err := table.Flush(); err != nil {
 		return fmt.Errorf("지난 대화 정렬 실패: %w", err)
@@ -287,13 +293,4 @@ func writeClaudeCodeConversationHistoryLines(out io.Writer, cwd string, history 
 		return fmt.Errorf("지난 대화 출력 실패: %w", err)
 	}
 	return nil
-}
-
-// firstRunesWithEllipsis 는 앞 limit 글자만 남기고, 자른 것이면 … 를 붙인다. 바이트로 자르면 한글이 갈린다.
-func firstRunesWithEllipsis(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit]) + "…"
 }

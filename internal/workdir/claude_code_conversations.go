@@ -368,20 +368,75 @@ type claudeCodeTranscriptLine struct {
 	// IsCompactSummary 는 대화를 압축하고 남긴 요약 줄이다 — user 줄이지만 claude 가 쓴 것이다(실측).
 	IsCompactSummary bool `json:"isCompactSummary"`
 
+	// IsAPIErrorMessage 는 claude 가 API 오류 · 사용량 한도를 알리려고 지은 assistant 줄이다(model "<synthetic>", 실측).
+	// 모델이 쓴 글이 아니고, 한도에 걸린 전사에는 수백 줄이 쌓여 마지막 항목들을 그것으로 채운다.
+	IsAPIErrorMessage bool `json:"isApiErrorMessage"`
+
 	Message *struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 }
 
-// textAPersonWrote 는 이 user 줄에서 사람이 쓴 글이다. 사람이 쓴 줄이 아니면 빈 문자열이다.
+// userLineAuthor 는 user 줄을 누가 썼는지다.
+type userLineAuthor int
+
+const (
+	// userLineNotShown 은 보일 글이 없는 줄이다 — tool_result 만 있거나, 주입 덩어리만 있거나, claude 가 사람 자리에
+	// 적은 내부 줄(isMeta · isCompactSummary)이거나, 하위 에이전트의 줄이다.
+	userLineNotShown userLineAuthor = iota
+
+	// userLineByPerson 은 사람이 쓴 글이다.
+	userLineByPerson
+
+	// userLineBySystem 은 사람 자리에 들어왔지만 사람이 쓰지 않은 안내다 — claude 의 중단 표지와 세션 트리 중계.
+	// 보이기는 하되 사람의 말로 보이면 안 된다.
+	userLineBySystem
+)
+
+// ChildSessionRelayPrefix 는 하위 세션의 사건을 상위에게 사용자 메시지로 옮길 때의 접두다 — "[하위 세션 <id> · 턴 끝] …".
 //
-// 목록의 제목과 지난 대화 보기가 같은 규칙을 쓴다 — 둘이 갈리면 제목으로 본 글이 지난 대화에 없거나 그 반대가 된다.
-// 주입 태그만으로는 isMeta 줄을 가를 수 없다. "Another Claude session sent a message:" 처럼 태그 없이 시작한다(실측).
-func (line claudeCodeTranscriptLine) textAPersonWrote() string {
+// 그 글을 짓는 것은 코어다(desktop SessionTreeEvent.kt 의 parentNoticeTextFor). 엔진은 상위에게 주는 규약 문구
+// (cli 의 parentSessionConventionText)와 지난 대화의 판정에서 이 모양을 읽으므로, 엔진 안에서는 이 상수 하나가 그 모양이다.
+const ChildSessionRelayPrefix = "[하위 세션 "
+
+// ParentSessionRelayPrefix 는 상위의 말을 하위에게 사용자 메시지로 옮길 때의 접두다(desktop ChatSessionStateHolder.kt 의
+// PARENT_MESSAGE_PREFIX). 쓰는 자리는 ChildSessionRelayPrefix 와 같다.
+const ParentSessionRelayPrefix = "[상위 세션] "
+
+// claudeCodeInterruptionMarkers 는 사람이 claude 를 멈췄을 때 claude 가 user 줄에 적는 글이다(실측, claude 2.1.316).
+//
+// 글 전체가 이것일 때만 표지다. 사람이 이 문구를 인용해 물을 수 있다.
+var claudeCodeInterruptionMarkers = map[string]bool{
+	"[Request interrupted by user]":              true,
+	"[Request interrupted by user for tool use]": true,
+}
+
+// userTextBlocks 는 user 줄을 누가 썼는지와, 주입 덩어리를 걷은 text 블록들이다.
+//
+// "사람이 쓴 글인가" 를 가르는 자리는 여기 하나다. 목록의 제목(첫 글의 앞부분)과 지난 대화(전문)가 같은 판정을 써야
+// 제목으로 본 글이 지난 대화에 사람의 말로 있다. 주입 태그 걷기만으로는 가를 수 없는 줄이 있다 — isMeta 줄은
+// "Another Claude session sent a message:" 처럼 태그 없이 시작하고(실측), 중단 표지와 세션 중계는 대괄호로 시작한다.
+func (line claudeCodeTranscriptLine) userTextBlocks() (userLineAuthor, []string) {
 	if line.Type != "user" || line.Message == nil || line.IsSidechain || line.IsMeta || line.IsCompactSummary {
-		return ""
+		return userLineNotShown, nil
 	}
-	return textAPersonWrote(line.Message.Content)
+	texts := textBlocksOf(line.Message.Content)
+	if len(texts) == 0 {
+		return userLineNotShown, nil
+	}
+	if claudeCodeInterruptionMarkers[strings.Join(texts, "\n\n")] ||
+		strings.HasPrefix(texts[0], ChildSessionRelayPrefix) || strings.HasPrefix(texts[0], ParentSessionRelayPrefix) {
+		return userLineBySystem, texts
+	}
+	return userLineByPerson, texts
+}
+
+// firstTextAPersonWrote 는 이 줄에서 사람이 쓴 첫 글이다. 사람이 쓴 줄이 아니면 빈 문자열이다 — 제목을 짓는 자리다.
+func (line claudeCodeTranscriptLine) firstTextAPersonWrote() string {
+	if author, texts := line.userTextBlocks(); author == userLineByPerson {
+		return texts[0]
+	}
+	return ""
 }
 
 // readClaudeCodeTranscript 는 전사 하나를 줄 단위로 읽어 대화 하나로 옮긴다.
@@ -448,7 +503,7 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 						}
 					}
 					if firstTextOfAPerson == "" {
-						firstTextOfAPerson = line.textAPersonWrote()
+						firstTextOfAPerson = line.firstTextAPersonWrote()
 					}
 				}
 			}
@@ -470,7 +525,7 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 	conversation.Title = cmp.Or(
 		layoutWhitespaceAsSpaces(titleFromClaude),
 		layoutWhitespaceAsSpaces(titleFromSummary),
-		firstRunes(layoutWhitespaceAsSpaces(firstTextOfAPerson), conversationTitleRuneLimit))
+		FirstRunesOnOneLine(firstTextOfAPerson, conversationTitleRuneLimit))
 	return conversation, true, ""
 }
 
@@ -496,13 +551,17 @@ func isRelevantTranscriptLine(lineBytes []byte) bool {
 	return false
 }
 
-// textAPersonWrote 는 사용자 줄의 content 에서 사람이 쓴 첫 글을 꺼낸다. 없으면 빈 문자열이다.
+// textBlocksOf 는 user 줄의 content 에서 주입 덩어리를 걷은 글들이다. 걷고 남은 것이 없는 블록은 뺀다.
 //
-// content 는 문자열이거나 블록 배열이다. 배열에서는 text 블록만 본다 — tool_result 블록은 도구가 돌려준 것이다.
-func textAPersonWrote(content json.RawMessage) string {
+// content 는 문자열이거나 블록 배열이다. 배열에서는 text 블록만 본다 — tool_result 블록은 도구가 돌려준 것이고,
+// image 블록은 글이 아니다.
+func textBlocksOf(content json.RawMessage) []string {
 	var plainText string
 	if json.Unmarshal(content, &plainText) == nil {
-		return withoutInjectedTags(plainText)
+		if text := withoutInjectedTags(plainText); text != "" {
+			return []string{text}
+		}
+		return nil
 	}
 
 	var blocks []struct {
@@ -510,17 +569,18 @@ func textAPersonWrote(content json.RawMessage) string {
 		Text string `json:"text"`
 	}
 	if json.Unmarshal(content, &blocks) != nil {
-		return ""
+		return nil
 	}
+	var texts []string
 	for _, block := range blocks {
 		if block.Type != "text" {
 			continue
 		}
 		if text := withoutInjectedTags(block.Text); text != "" {
-			return text
+			texts = append(texts, text)
 		}
 	}
-	return ""
+	return texts
 }
 
 // injectedTagOpening 은 claude 가 사용자 줄 앞에 주입하는 덩어리의 여는 태그다
@@ -553,6 +613,12 @@ func withoutInjectedTags(text string) string {
 // 탭도 함께인 이유는 사람용 표가 tabwriter 라서다 — 제목 안의 탭을 열 경계로 읽어 표가 깨진다.
 func layoutWhitespaceAsSpaces(text string) string {
 	return strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(text))
+}
+
+// FirstRunesOnOneLine 은 글을 한 줄로 펴고 앞 runeLimit 글자만 남긴다 — 목록의 제목 · 도구 요약 · 사람용 지난 대화가
+// 같은 규칙으로 한 줄을 만든다.
+func FirstRunesOnOneLine(text string, runeLimit int) string {
+	return firstRunes(layoutWhitespaceAsSpaces(text), runeLimit)
 }
 
 // firstRunes 는 앞 limit 글자만 남긴다. 바이트로 자르면 한글 한 글자가 반으로 갈린다.

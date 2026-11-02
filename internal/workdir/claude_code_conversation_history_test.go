@@ -349,7 +349,7 @@ func TestConversationHistorySaysWhenTheTranscriptIsThereButEmpty(t *testing.T) {
 
 	_, _, err := ReadClaudeCodeConversationHistory(sessionCwd, firstConversationIDForTest, 200)
 
-	if err == nil || !strings.Contains(err.Error(), "비어") || strings.Contains(err.Error(), "없습니다") {
+	if err == nil || !strings.Contains(err.Error(), "비어") || strings.Contains(err.Error(), "대화 중에") {
 		t.Errorf("err = %v, 전사가 비어 자리를 확인할 수 없다는 거절을 기대", err)
 	}
 }
