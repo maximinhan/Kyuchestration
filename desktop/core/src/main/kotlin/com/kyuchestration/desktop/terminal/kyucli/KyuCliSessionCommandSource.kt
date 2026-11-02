@@ -1,6 +1,6 @@
 package com.kyuchestration.desktop.terminal.kyucli
 
-import com.kyuchestration.desktop.kyu.DiagnosticHiding
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.kyu.KyuCommandFailure
 import com.kyuchestration.desktop.kyu.KyuCommandRunner
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
@@ -72,22 +72,19 @@ internal fun runSessionCommand(
             is KyuCommandFailure.FailedToStart ->
                 TerminalSessionFailure.KyuFailedToStart(failure.processStartFailure)
             is KyuCommandFailure.FailedWhileRunning ->
-                TerminalSessionFailure.KyuFailedWhileRunning(failure.runFailure)
+                TerminalSessionFailure.KyuFailedWhileRunning(failure.runFailureDescription, failure.runFailure)
         }
     }
 
     if (result.exitCode != 0) {
         // 거절은 실행기의 기록 밖으로도 간다 — 세션 진입 실패의 기록이 그 안내 문구를 싣는다. 실행기가 자기 기록에서 가린 것과
-        // 같은 값을 여기서도 가려 건네야 그 길로 대화 id 가 새지 않는다.
-        val hiding = DiagnosticHiding(valuesHiddenFromDiagnostics)
-        val standardError = result.standardError.trim()
+        // 같은 값을 거절이 알아야 그 길로 대화 id 가 새지 않는다.
         throw TerminalSessionFailure.SessionCommandRefused(
             targetLabel = targetLabel,
             exitCode = result.exitCode,
             arguments = arguments,
-            standardError = standardError,
-            argumentsForDiagnostics = arguments.map(hiding::hide),
-            standardErrorForDiagnostics = hiding.hide(standardError),
+            standardError = result.standardError.trim(),
+            diagnosticHiding = DiagnosticHiding(valuesHiddenFromDiagnostics),
         )
     }
 

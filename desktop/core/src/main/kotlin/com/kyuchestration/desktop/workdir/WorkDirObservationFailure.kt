@@ -43,9 +43,9 @@ sealed class WorkDirObservationFailure(
     /**
      * kyu 는 떴는데 끝까지 주고받지 못했다. 설치도 권한도 아닌, 그 한 번의 실행이 끊긴 것이다 — 다음 관찰이 다시 묻는다.
      */
-    class KyuFailedWhileRunning(cause: Throwable) : WorkDirObservationFailure(
+    class KyuFailedWhileRunning(runFailureDescription: String, cause: Throwable) : WorkDirObservationFailure(
         message = "kyu 와 주고받던 중에 끊겼습니다.",
-        guidance = "다음 관찰에서 다시 묻습니다. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: ${cause.message}",
+        guidance = "다음 관찰에서 다시 묻습니다. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: $runFailureDescription",
         cause = cause,
     )
 

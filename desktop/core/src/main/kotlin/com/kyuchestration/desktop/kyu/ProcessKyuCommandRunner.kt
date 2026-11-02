@@ -1,14 +1,17 @@
 package com.kyuchestration.desktop.kyu
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.diagnostics.DiagnosticLog
 import com.kyuchestration.desktop.diagnostics.DiagnosticLogEntry
 import com.kyuchestration.desktop.platform.childProcessEnvironment
 import com.kyuchestration.desktop.platform.withEnvironment
 import java.io.IOException
+import java.io.StringWriter
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * kyu 를 진짜 자식 프로세스로 띄우는 실행기.
@@ -67,34 +70,48 @@ class ProcessKyuCommandRunner(
 
         // 여기부터 kyu 가 떠 있다. 주고받다 끊긴 예외를 그대로 내보내면 부르는 쪽 어디에서도 옮기지 않은 예외가 되어, 그것을
         // 부른 코루틴과 그 스코프(코어 전체)를 취소한다. 끊긴 자리가 여기라 여기서 실패 타입으로 옮기고, 그 프로세스를 거둔다.
-        val result = try {
-            exchangeWithStartedProcess(process, standardInput)
-        } catch (pipeFailure: IOException) {
-            throw failedWhileRunning(process, pipeFailure, arguments, hiding)
-        } catch (readingFailure: ExecutionException) {
-            // stderr 를 읽던 스레드가 받은 예외의 껍데기다. 사람이 볼 이유는 그 안의 원인이다.
-            throw failedWhileRunning(process, readingFailure.cause ?: readingFailure, arguments, hiding)
-        } catch (interrupted: InterruptedException) {
-            val failure = failedWhileRunning(process, interrupted, arguments, hiding)
-            // 멈추라는 요청은 이 실행 하나로 끝나지 않는다. 예외가 지운 표시를 되살려야 부른 쪽이 그 요청을 본다 — 거두는 일을
-            // 마친 뒤에 되살리는 것은, 표시가 선 채로는 거두며 기다리는 자리가 곧바로 다시 인터럽트되기 때문이다.
-            Thread.currentThread().interrupt()
-            throw failure
+        try {
+            val result = try {
+                exchangeWithStartedProcess(process, standardInput)
+            } catch (lost: ExchangeWithKyuLost) {
+                throw failedWhileRunning(process, lost.cause, arguments, hiding)
+            } catch (interrupted: InterruptedException) {
+                val failure = failedWhileRunning(process, interrupted, arguments, hiding)
+                // 멈추라는 요청은 이 실행 하나로 끝나지 않는다. 예외가 지운 표시를 되살려야 부른 쪽이 그 요청을 본다 — 거두는 일을
+                // 마친 뒤에 되살리는 것은, 표시가 선 채로는 거두며 기다리는 자리가 곧바로 다시 인터럽트되기 때문이다.
+                Thread.currentThread().interrupt()
+                throw failure
+            }
+            recordIfKyuFailed(arguments, result, hiding)
+            return result
+        } finally {
+            // 옮기지 않는 예외(코드의 결함 · 메모리 부족)는 그대로 올라간다. 그래도 어느 길로 떠나든 떠 있는 kyu 를 남기지 않는다.
+            if (process.isAlive) {
+                endAbandonedProcess(process)
+            }
         }
-        recordIfKyuFailed(arguments, result, hiding)
-        return result
     }
 
+    /**
+     * kyu 와 주고받고 그 답을 돌려준다.
+     *
+     * **kyu 가 종료 코드를 남기고 스스로 끝났으면 그것이 답이다.** 주고받다 무언가 끊겨도 그렇다 — 실패([ExchangeWithKyuLost])는
+     * 종료 코드를 얻을 수 없을 때, 곧 kyu 가 살아 있는데 파이프가 깨져 이쪽이 끝내야 했을 때와, kyu 의 문서(stdout)를 잃었을 때뿐이다.
+     */
     private fun exchangeWithStartedProcess(process: Process, standardInput: String?): KyuCommandResult {
         // 두 파이프를 순서대로 읽으면, 안 읽는 쪽의 버퍼가 먼저 차는 순간 kyu 가 쓰기에서 멈추고
         // 이쪽은 읽기에서 멈춘다. stderr 를 다른 스레드에 맡겨 두 파이프가 동시에 비워지게 한다.
-        val standardErrorReading = CompletableFuture.supplyAsync {
-            process.errorStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        //
+        // 읽은 만큼을 쌓아 둔다. 읽기가 중간에 끊겨도 스스로 끝난 kyu 의 답에는 그때까지 받은 말이 실린다.
+        val standardErrorSoFar = StringWriter()
+        val runnerEndedProcess = AtomicBoolean(false)
+        val standardErrorReading = CompletableFuture.runAsync {
+            process.errorStream.bufferedReader(Charsets.UTF_8).use { it.copyTo(standardErrorSoFar) }
         }.whenComplete { _, readingFailure ->
             // stderr 를 더 읽지 못하면 kyu 는 그 파이프가 차는 순간 쓰기에서 멈추고, 이쪽은 stdout 이나 종료를 기다리며 함께
-            // 멈춘다. 끊긴 쪽이 kyu 를 끝내 그 기다림을 풀고, 실패를 옮기는 자리(failedWhileRunning)가 마저 거둔다.
-            if (readingFailure != null) {
-                process.destroy()
+            // 멈춘다. 끊긴 쪽이 kyu 를 끝까지 거둬(강제 종료까지) 그 기다림을 푼다. 이미 스스로 끝났으면 그 종료 코드가 답이라 손대지 않는다.
+            if (readingFailure != null && endAbandonedProcess(process)) {
+                runnerEndedProcess.set(true)
             }
         }
 
@@ -104,18 +121,40 @@ class ProcessKyuCommandRunner(
         //
         // 줄 것이 없어도 닫는 것이 이 블록의 요점이다. 열어 둔 채로 두면 stdin 을 읽는 kyu
         // (auth add)가 영영 끝나지 않고, 화면은 스피너를 돌린 채로 멎는다.
-        process.outputStream.use { childStandardInput ->
-            standardInput?.let { childStandardInput.write(it.toByteArray(Charsets.UTF_8)) }
+        try {
+            process.outputStream.use { childStandardInput ->
+                standardInput?.let { childStandardInput.write(it.toByteArray(Charsets.UTF_8)) }
+            }
+        } catch (inputRefused: IOException) {
+            // kyu 가 stdin 을 읽기 전에 닫았다 — 인자를 거절한 auth add 처럼 입력 없이 끝을 고른 것이다. 그 끝이 답이라 이 끊김은
+            // 실패가 아니다. 아래에서 끝까지 읽고 기다리면 종료 코드와 stderr 가 이유를 말한다.
         }
 
-        val standardOutput = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val standardOutput = try {
+            process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (outputLost: IOException) {
+            // 문서를 잃었다. kyu 가 0 으로 끝났어도 반쯤 받은 문서를 답으로 내면 부르는 쪽은 "읽을 수 없는 출력" 이라는 엉뚱한
+            // 이유를 보인다 — 실제로 일어난 것은 주고받기가 끊긴 것이다.
+            throw ExchangeWithKyuLost(outputLost)
+        }
         // 종료보다 stderr 를 먼저 받는다. stderr 읽기가 끊겼으면 그 사실을 kyu 가 끝나기를 기다리기 전에 안다.
-        val standardError = standardErrorReading.get()
+        val standardErrorFailure = try {
+            standardErrorReading.get()
+            null
+        } catch (readingFailure: ExecutionException) {
+            // 읽던 스레드가 받은 예외의 껍데기다. 사람이 볼 이유는 그 안의 원인이다.
+            readingFailure.cause ?: readingFailure
+        }
+        val exitCode = process.waitFor()
 
+        if (standardErrorFailure != null && runnerEndedProcess.get()) {
+            // 종료 코드는 이쪽이 끝내서 생긴 것이라 kyu 의 답이 아니다.
+            throw ExchangeWithKyuLost(standardErrorFailure)
+        }
         return KyuCommandResult(
-            exitCode = process.waitFor(),
+            exitCode = exitCode,
             standardOutput = standardOutput,
-            standardError = standardError,
+            standardError = standardErrorSoFar.toString(),
         )
     }
 
@@ -137,12 +176,16 @@ class ProcessKyuCommandRunner(
     }
 
     /**
-     * 주고받기를 잃은 kyu 를 끝낸다. 남겨 두면 아무도 읽지 않는 파이프에 매달린 고아가 된다.
+     * 주고받기를 잃은 kyu 를 끝낸다. 남겨 두면 아무도 읽지 않는 파이프에 매달린 고아가 된다. 이미 끝나 있었으면 false.
      *
-     * kyu 가 부른 git 같은 자식까지 함께 끝낸다 — kyu 만 끝내면 그 자식은 부모를 잃은 채 남는다. 목록은 먼저 떠 둔다. kyu 가
-     * 끝나면 그 자식들은 kyu 의 자손으로 보이지 않게 된다.
+     * kyu 가 부른 git 같은 자식까지 함께 끝낸다 — kyu 만 끝내면 그 자식은 부모를 잃은 채 남는다. 목록은 무엇이든 끝내기 전에
+     * 떠 둔다. kyu 가 끝나면 그 자식들은 kyu 의 자손으로 보이지 않게 된다. 여러 자리(stderr 를 읽던 스레드 · 본 스레드)가 불러도
+     * 된다 — 두 번째 부름은 끝난 kyu 를 보고 돌아간다.
      */
-    private fun endAbandonedProcess(process: Process) {
+    private fun endAbandonedProcess(process: Process): Boolean {
+        if (!process.isAlive) {
+            return false
+        }
         val descendants = process.descendants().toList()
         process.destroy()
         descendants.forEach(ProcessHandle::destroy)
@@ -156,8 +199,10 @@ class ProcessKyuCommandRunner(
         }
         if (!endedWithinGrace) {
             process.destroyForcibly()
-            descendants.forEach(ProcessHandle::destroyForcibly)
         }
+        // kyu 가 SIGTERM 에 끝났어도 TERM 을 무시하는 자식이 남을 수 있다. 자손은 기다림 없이 강제로 마저 끝낸다.
+        descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
+        return true
     }
 
     /**
@@ -196,22 +241,17 @@ class ProcessKyuCommandRunner(
 
 /**
  * 실패 타입의 message 만 남기면 "kyu 를 실행하지 못했습니다" 한 줄로 끝나는데, 실제로 알아야 하는 것은 그 아래의 이유다 — 권한이
- * 없는 것과 파일이 사라진 것, 파이프가 닫힌 것과 인터럽트된 것은 사람이 할 일이 다르다.
+ * 없는 것과 파일이 사라진 것, 파이프가 닫힌 것과 인터럽트된 것은 사람이 할 일이 다르다. 원인은 한 번만 싣는다.
  */
-private fun failureReason(failure: KyuCommandFailure): String =
-    listOfNotNull(failure.message, failure.cause?.toString()).joinToString(" — ")
+private fun failureReason(failure: KyuCommandFailure): String = when (failure) {
+    is KyuCommandFailure.ExecutableNotFound -> failure.message.orEmpty()
+    is KyuCommandFailure.FailedToStart -> "${failure.message} — ${failure.processStartFailure}"
+    // 문구가 이미 원인을 싣는다(runFailureDescription).
+    is KyuCommandFailure.FailedWhileRunning -> failure.message.orEmpty()
+}
+
+/** 주고받기가 끊겨 kyu 의 답을 얻을 수 없다. run 이 [KyuCommandFailure.FailedWhileRunning] 으로 옮긴다. */
+private class ExchangeWithKyuLost(override val cause: Throwable) : Exception(cause)
 
 /** kyu 는 SIGTERM 에 곧바로 끝난다(Go 의 기본 동작). 이 안에 끝나지 않으면 굳은 것으로 보고 강제로 끝낸다. */
 private const val ABANDONED_PROCESS_END_GRACE_SECONDS = 2L
-
-/**
- * 실패 기록에 남기지 않을 값을 가린다(KyuCommandRunner.run 의 valuesHiddenFromDiagnostics).
- *
- * 인자 하나가 그 값과 같을 때만이 아니라 글 안에 들어 있어도 가린다 — kyu 의 거절 문구가 받은 id 를 되읊는다.
- */
-internal class DiagnosticHiding(private val hiddenValues: Set<String>) {
-    fun hide(text: String): String =
-        hiddenValues.filter { it.isNotEmpty() }.fold(text) { hidden, value -> hidden.replace(value, HIDDEN_VALUE_MARK) }
-}
-
-private const val HIDDEN_VALUE_MARK = "(가린 값)"

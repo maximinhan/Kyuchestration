@@ -1,5 +1,6 @@
 package com.kyuchestration.desktop.terminal
 
+import com.kyuchestration.desktop.diagnostics.DiagnosticHiding
 import com.kyuchestration.desktop.protocol.GuidedFailure
 import java.nio.file.Path
 
@@ -45,9 +46,9 @@ sealed class TerminalSessionFailure(
         cause = cause,
     )
 
-    class KyuFailedWhileRunning(cause: Throwable) : TerminalSessionFailure(
+    class KyuFailedWhileRunning(runFailureDescription: String, cause: Throwable) : TerminalSessionFailure(
         message = "세션이 무엇을 띄울지 kyu 에게 묻다 끊겼습니다.",
-        guidance = "세션에 다시 들어가 보세요. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: ${cause.message}",
+        guidance = "세션에 다시 들어가 보세요. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: $runFailureDescription",
         cause = cause,
     )
 
@@ -61,22 +62,22 @@ sealed class TerminalSessionFailure(
      * @param arguments 실제로 부른 인자. 사람이 같은 것을 손으로 다시 부를 수 있게 그대로 싣는다 —
      *   메인 세션은 레포 이름 자리가 비어 있어서, 라벨(main)로 안내 문구를 지어내면 실제로는
      *   부를 수 없는 명령을 알려 주게 된다.
-     * @param argumentsForDiagnostics · standardErrorForDiagnostics 위의 둘에서 실행기의 실패 기록과 같은 값을 가린 것
-     *   ([guidanceForDiagnostics]). 무엇을 가릴지는 부른 쪽만 알아, 거절을 만드는 그 자리가 넘긴다.
+     * @param diagnosticHiding 실행기가 자기 실패 기록에서 가린 것과 같은 가리기. 진단용 문구([guidanceForDiagnostics])를 이 타입이
+     *   스스로 짓는다 — 가린 문자열을 부르는 쪽이 따로 지어 넘기게 하면, 거절을 새로 만드는 자리 하나가 안 가린 값을 넘겨도 아무것도
+     *   막지 못한다. 무엇을 가릴지는 부른 쪽만 알아 이 값은 그 자리가 넘긴다.
      */
     class SessionCommandRefused(
         val targetLabel: String,
         val exitCode: Int,
         val arguments: List<String>,
         standardError: String,
-        argumentsForDiagnostics: List<String>,
-        standardErrorForDiagnostics: String,
+        diagnosticHiding: DiagnosticHiding,
     ) : TerminalSessionFailure(
         message = "$targetLabel 세션이 무엇을 띄울지 kyu 가 답하지 못했습니다 (종료 코드 $exitCode).",
         guidance = sessionCommandRefusalGuidance(arguments, standardError),
     ) {
         override val guidanceForDiagnostics: String =
-            sessionCommandRefusalGuidance(argumentsForDiagnostics, standardErrorForDiagnostics)
+            sessionCommandRefusalGuidance(arguments.map(diagnosticHiding::hide), diagnosticHiding.hide(standardError))
     }
 
     /**

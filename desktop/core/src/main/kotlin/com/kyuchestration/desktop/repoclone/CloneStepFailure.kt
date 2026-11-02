@@ -37,9 +37,9 @@ sealed class CloneStepFailure(
         cause = cause,
     )
 
-    class KyuFailedWhileRunning(cause: Throwable) : CloneStepFailure(
+    class KyuFailedWhileRunning(runFailureDescription: String, cause: Throwable) : CloneStepFailure(
         message = "kyu 와 주고받던 중에 끊겼습니다.",
-        guidance = "이 걸음을 다시 시도하세요. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: ${cause.message}",
+        guidance = "이 걸음을 다시 시도하세요. 거듭되면 진단 기록에서 그 호출을 확인하세요. 원인: $runFailureDescription",
         cause = cause,
     )
 
