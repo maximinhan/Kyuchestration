@@ -328,7 +328,6 @@ type conversationsShowJSONDocumentForTest struct {
 	ConversationID string           `json:"conversationId"`
 	Cwd            string           `json:"cwd"`
 	TotalEntries   int              `json:"totalEntries"`
-	OmittedBefore  int              `json:"omittedBefore"`
 	Entries        []map[string]any `json:"entries"`
 }
 
@@ -352,6 +351,10 @@ func runConversationsShowForTest(t *testing.T, args ...string) conversationsShow
 	if document.SchemaVersion != 1 {
 		t.Errorf("schemaVersion = %d, want 1", document.SchemaVersion)
 	}
+	// 답하지 않은 앞의 수는 totalEntries 와 entries 의 길이로 정해진다 — 같은 사실을 두 자리에 두지 않는다.
+	if strings.Contains(out.String(), "omittedBefore") {
+		t.Errorf("stdout = %q, omittedBefore 자리가 없기를 기대", out.String())
+	}
 	return document
 }
 
@@ -366,20 +369,23 @@ func TestConversationsShowAnswersThePastConversationInTheShapeTheAppReads(t *tes
 			`[{"type":"tool_result","tool_use_id":"t1","content":"total 0"}]`, ""),
 		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:22Z",
 			`[{"type":"text","text":"비어 있습니다"}]`, ""),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:22.9Z",
+			`[{"type":"text","text":"[Request interrupted by user]"}]`, ""),
 		strings.Replace(conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:23Z",
 			`[{"type":"text","text":"하위"}]`, ""), `"isSidechain":false`, `"isSidechain":true`, 1))
 
-	document := runConversationsShowForTest(t, workDirPath, terminalConversationIDForTest, "--last", "3")
+	document := runConversationsShowForTest(t, workDirPath, terminalConversationIDForTest, "--last", "4")
 
 	if document.ConversationID != terminalConversationIDForTest || document.Cwd != workDirPath {
 		t.Errorf("conversationId · cwd = %q · %q, %q · %q 를 기대", document.ConversationID, document.Cwd, terminalConversationIDForTest, workDirPath)
 	}
-	if document.TotalEntries != 4 || document.OmittedBefore != 1 {
-		t.Errorf("totalEntries · omittedBefore = %d · %d, 4 · 1 을 기대", document.TotalEntries, document.OmittedBefore)
+	if document.TotalEntries != 5 {
+		t.Errorf("totalEntries = %d, 5 를 기대", document.TotalEntries)
 	}
 	want := []map[string]any{
 		{"kind": "tool_use", "toolName": "Bash", "summary": "ls -la", "at": "2026-11-01T09:06:20Z"},
 		{"kind": "assistant", "text": "비어 있습니다", "at": "2026-11-01T09:06:22Z"},
+		{"kind": "system", "text": "[Request interrupted by user]", "at": "2026-11-01T09:06:22Z"},
 		{"kind": "omitted", "count": float64(1)},
 	}
 	if len(document.Entries) != len(want) {
@@ -471,7 +477,9 @@ func TestConversationsShowGivesAPersonOneLinePerEntry(t *testing.T) {
 		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:20Z",
 			`[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a/b.go"}}]`, ""),
 		conversationShowLineForTest(t, "assistant", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:22Z",
-			`[{"type":"text","text":"답\t입니다"}]`, ""))
+			`[{"type":"text","text":"답\t입니다"}]`, ""),
+		conversationShowLineForTest(t, "user", workDirPath, terminalConversationIDForTest, "2026-11-01T09:06:23Z",
+			`[{"type":"text","text":"[Request interrupted by user]"}]`, ""))
 
 	var out, errOut bytes.Buffer
 	if err := ManageClaudeCodeConversations(&out, &errOut, []string{"show", workDirPath, terminalConversationIDForTest}); err != nil {
@@ -479,12 +487,30 @@ func TestConversationsShowGivesAPersonOneLinePerEntry(t *testing.T) {
 	}
 	rendered := out.String()
 	localTime := time.Date(2026, 11, 1, 9, 6, 18, 0, time.UTC).Local().Format(time.DateTime)
-	for _, expected := range []string{localTime, "사람", "첫 줄 둘째 줄", "도구", "Read /a/b.go", "Claude", "답 입니다"} {
+	for _, expected := range []string{localTime, "사람", "첫 줄 둘째 줄", "도구", "Read /a/b.go", "Claude", "답 입니다", "안내", "[Request interrupted by user]"} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("stdout = %q, %q 를 기대", rendered, expected)
 		}
 	}
 	if strings.Contains(rendered, "\t") {
 		t.Errorf("stdout = %q, 탭 없는 줄을 기대", rendered)
+	}
+}
+
+func TestConversationsShowWarnsOnStderrAboutATranscriptNamingAnotherConversation(t *testing.T) {
+	// 목록과 같다 — 이름과 안이 다른 전사는 경고로 알린다. 다른 후보가 없으면 그 id 의 대화는 없는 것이다.
+	claudeConfigDirectory := isolateClaudeCodeHomeForTest(t)
+	workDirPath := makeWorkDir(t)
+	writeTerminalTranscriptForTest(t, claudeConfigDirectory, workDirPath, terminalConversationIDForTest, time.Now(),
+		conversationShowLineForTest(t, "user", workDirPath, otherConversationIDForTest, "2026-11-01T09:06:18Z", `"엇갈린 전사"`, ""))
+
+	var out, errOut bytes.Buffer
+	err := ManageClaudeCodeConversations(&out, &errOut, []string{"show", workDirPath, terminalConversationIDForTest, machineJSONOptionName})
+
+	if err == nil || out.Len() != 0 {
+		t.Errorf("err = %v, stdout = %q, 문서 없는 거절을 기대", err, out.String())
+	}
+	if !strings.Contains(errOut.String(), otherConversationIDForTest) {
+		t.Errorf("stderr = %q, 엇갈린 sessionId 를 말하는 경고를 기대", errOut.String())
 	}
 }

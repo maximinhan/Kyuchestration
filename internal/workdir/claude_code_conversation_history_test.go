@@ -1,6 +1,8 @@
 package workdir
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +19,12 @@ func conversationLineForTest(lineType, conversationID, cwd, timestamp, contentJS
 func readConversationHistoryForTest(t *testing.T, sessionCwd, conversationID string, lastEntryLimit int) ClaudeCodeConversationHistory {
 	t.Helper()
 
-	history, err := ReadClaudeCodeConversationHistory(sessionCwd, conversationID, lastEntryLimit)
+	history, warnings, err := ReadClaudeCodeConversationHistory(sessionCwd, conversationID, lastEntryLimit)
 	if err != nil {
 		t.Fatalf("ReadClaudeCodeConversationHistory() 실패: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("경고 = %q, 없기를 기대", warnings)
 	}
 	return history
 }
@@ -44,8 +49,8 @@ func TestConversationHistoryAnswersWhatAPersonWroteWhetherContentIsAStringOrBloc
 		{Kind: ConversationEntryKindUser, Text: "블록으로 쓴 글", At: time.Date(2026, 11, 1, 9, 7, 0, 0, time.UTC)},
 	}
 	assertConversationEntriesForTest(t, history.Entries, want)
-	if history.ConversationID != firstConversationIDForTest || history.TotalEntries != 2 || history.OmittedBefore() != 0 {
-		t.Errorf("history = %+v, 전체 2 개 · 앞의 생략 0 을 기대", history)
+	if history.ConversationID != firstConversationIDForTest || history.TotalEntries != 2 {
+		t.Errorf("history = %+v, 전체 2 개를 기대", history)
 	}
 }
 
@@ -169,8 +174,8 @@ func TestConversationHistoryAnswersOnlyTheLastEntriesAndCountsTheOnesBefore(t *t
 		{Kind: ConversationEntryKindUser, Text: "넷", At: time.Date(2026, 11, 1, 9, 0, 3, 0, time.UTC)},
 		{Kind: ConversationEntryKindUser, Text: "다섯", At: time.Date(2026, 11, 1, 9, 0, 4, 0, time.UTC)},
 	})
-	if history.TotalEntries != 5 || history.OmittedBefore() != 3 {
-		t.Errorf("전체 = %d, 앞의 생략 = %d, 5 와 3 을 기대", history.TotalEntries, history.OmittedBefore())
+	if history.TotalEntries != 5 {
+		t.Errorf("전체 = %d, 5 를 기대 — 답하지 않은 앞의 3 개도 센다", history.TotalEntries)
 	}
 }
 
@@ -212,11 +217,11 @@ func TestConversationHistoryRefusesWhatIsNotAConversationHere(t *testing.T) {
 		"안의 sessionId 가 다른 전사": thirdConversationIDForTest,
 	}
 	for name, conversationID := range refusals {
-		if _, err := ReadClaudeCodeConversationHistory(sessionCwd, conversationID, 200); err == nil {
+		if _, _, err := ReadClaudeCodeConversationHistory(sessionCwd, conversationID, 200); err == nil {
 			t.Errorf("%s: ReadClaudeCodeConversationHistory(%s) = nil, 거절을 기대", name, conversationID)
 		}
 	}
-	if _, err := ReadClaudeCodeConversationHistory(sessionCwd, firstConversationIDForTest, 200); err != nil {
+	if _, _, err := ReadClaudeCodeConversationHistory(sessionCwd, firstConversationIDForTest, 200); err != nil {
 		t.Errorf("이 자리의 대화를 거절했습니다: %v", err)
 	}
 }
@@ -249,5 +254,119 @@ func assertConversationEntriesForTest(t *testing.T, got, want []ClaudeCodeConver
 			got[index].OmittedCount != want[index].OmittedCount {
 			t.Errorf("항목[%d] = %+v, %+v 를 기대", index, got[index], want[index])
 		}
+	}
+}
+
+func TestConversationHistorySkipsTheSyntheticAPIErrorLinesWithoutCountingThem(t *testing.T) {
+	// 실측(claude 2.1.316): 사용량 한도 · API 오류 안내는 model "<synthetic>" 의 isApiErrorMessage 줄이다. 한 전사에
+	// 수백 줄이 쌓이면 마지막 200 항목이 그 안내로만 채워진다.
+	sessionCwd := resolvedDirectoryForTest(t)
+	apiError := `"isApiErrorMessage":true,`
+	writeHistoryTranscriptForTest(t, sessionCwd,
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z", `"질문"`, ""),
+		conversationLineForTest("assistant", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:01Z", `[{"type":"text","text":"You've hit your session limit"}]`, apiError),
+		conversationLineForTest("assistant", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:02Z", `[{"type":"text","text":"API Error: 500"}]`, apiError))
+
+	history := readConversationHistoryForTest(t, sessionCwd, firstConversationIDForTest, 200)
+
+	assertConversationEntriesForTest(t, history.Entries, []ClaudeCodeConversationEntry{
+		{Kind: ConversationEntryKindUser, Text: "질문", At: time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)},
+	})
+	if history.TotalEntries != 1 {
+		t.Errorf("전체 = %d, 합성 오류 줄은 세지 않아 1 을 기대", history.TotalEntries)
+	}
+}
+
+func TestConversationHistoryAnswersInterruptionsAndSessionRelaysAsSystemLines(t *testing.T) {
+	// 사람 자리의 줄이지만 사람이 쓴 글이 아닌 것 — claude 가 적은 중단 표지와, 이 도구가 PTY 로 넣는 세션 트리
+	// 중계(상위에게 가는 "[하위 세션 <id> · …]", 하위에게 가는 "[상위 세션] "). 화면이 옅은 안내 줄로 그린다.
+	sessionCwd := resolvedDirectoryForTest(t)
+	at := func(second int) time.Time { return time.Date(2026, 11, 1, 9, 0, second, 0, time.UTC) }
+	writeHistoryTranscriptForTest(t, sessionCwd,
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z", `[{"type":"text","text":"[Request interrupted by user]"}]`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:01Z",
+			`[{"type":"tool_result","tool_use_id":"t1","content":"취소","is_error":true},{"type":"text","text":"[Request interrupted by user for tool use]\n"}]`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:02Z", `"[하위 세션 child-1 · 턴 끝] 다 했습니다"`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:03Z", `"[상위 세션] 포트는 5433 이다"`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:04Z", `"[Request interrupted by user] 라는 문구를 왜 보나요?"`, ""))
+
+	history := readConversationHistoryForTest(t, sessionCwd, firstConversationIDForTest, 200)
+
+	assertConversationEntriesForTest(t, history.Entries, []ClaudeCodeConversationEntry{
+		{Kind: ConversationEntryKindSystem, Text: "[Request interrupted by user]", At: at(0)},
+		{Kind: ConversationEntryKindSystem, Text: "[Request interrupted by user for tool use]", At: at(1)},
+		{Kind: ConversationEntryKindSystem, Text: "[하위 세션 child-1 · 턴 끝] 다 했습니다", At: at(2)},
+		{Kind: ConversationEntryKindSystem, Text: "[상위 세션] 포트는 5433 이다", At: at(3)},
+		// 중단 표지는 글 전체가 그것일 때만이다 — 사람이 그 문구를 인용할 수 있다.
+		{Kind: ConversationEntryKindUser, Text: "[Request interrupted by user] 라는 문구를 왜 보나요?", At: at(4)},
+	})
+}
+
+func TestConversationHistoryAnswersEveryTextBlockAPersonWrote(t *testing.T) {
+	// 제목은 첫 글의 앞부분이면 되지만, 지난 대화는 전문이다. 붙여 넣은 글은 text 블록 여럿으로 온다.
+	sessionCwd := resolvedDirectoryForTest(t)
+	writeHistoryTranscriptForTest(t, sessionCwd,
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z",
+			`[{"type":"text","text":"<system-reminder>주입</system-reminder>"},{"type":"text","text":"앞 글"},{"type":"image","source":{}},{"type":"text","text":"뒤 글"}]`, ""))
+
+	history := readConversationHistoryForTest(t, sessionCwd, firstConversationIDForTest, 200)
+
+	assertConversationEntriesForTest(t, history.Entries, []ClaudeCodeConversationEntry{
+		{Kind: ConversationEntryKindUser, Text: "앞 글\n\n뒤 글", At: time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)},
+	})
+}
+
+func TestConversationHistoryWarnsAboutATranscriptNamingAnotherConversationAndReadsTheNextCandidate(t *testing.T) {
+	// 목록과 같은 자세다 — 이름과 안이 다른 전사는 사용자가 알아야 할 이상이지만, 같은 id 의 다른 후보를 막을 까닭은 없다.
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := filepath.Join(resolvedDirectoryForTest(t), strings.Repeat("a", 210))
+	if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
+		t.Fatalf("디렉토리 생성 실패: %v", err)
+	}
+	hashedNamePrefix := projectDirectoryNameForTest(sessionCwd)[:200]
+	writeTranscriptForTest(t, claudeConfigDirectory, hashedNamePrefix+"-aaa111", firstConversationIDForTest, time.Now(),
+		conversationLineForTest("user", secondConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z", `"엇갈린 전사"`, ""))
+	writeTranscriptForTest(t, claudeConfigDirectory, hashedNamePrefix+"-bbb222", firstConversationIDForTest, time.Now(),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z", `"맞는 전사"`, ""))
+
+	history, warnings, err := ReadClaudeCodeConversationHistory(sessionCwd, firstConversationIDForTest, 200)
+
+	if err != nil {
+		t.Fatalf("ReadClaudeCodeConversationHistory() 실패: %v", err)
+	}
+	if len(history.Entries) != 1 || history.Entries[0].Text != "맞는 전사" {
+		t.Errorf("항목 = %+v, 다음 후보의 대화를 기대", history.Entries)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], secondConversationIDForTest) {
+		t.Errorf("경고 = %q, 엇갈린 sessionId 를 말하는 경고 하나를 기대", warnings)
+	}
+}
+
+func TestConversationHistorySaysWhenTheTranscriptIsThereButEmpty(t *testing.T) {
+	// 파일은 있는데 대화 줄이 없으면 자리를 확인할 수 없다. "그 자리에 없다" 로 접으면 사람이 엉뚱한 곳을 찾는다.
+	sessionCwd := resolvedDirectoryForTest(t)
+	writeHistoryTranscriptForTest(t, sessionCwd, `{"type":"file-history-snapshot","messageId":"m-1","snapshot":{}}`)
+
+	_, _, err := ReadClaudeCodeConversationHistory(sessionCwd, firstConversationIDForTest, 200)
+
+	if err == nil || !strings.Contains(err.Error(), "비어") || strings.Contains(err.Error(), "없습니다") {
+		t.Errorf("err = %v, 전사가 비어 자리를 확인할 수 없다는 거절을 기대", err)
+	}
+}
+
+func TestListClaudeCodeConversationsDoesNotTitleWithInterruptionsOrSessionRelays(t *testing.T) {
+	// 지난 대화에서 system 으로 보이는 줄은 목록의 제목도 되지 않는다 — "사람이 쓴 글" 판정이 한 곳이다.
+	claudeConfigDirectory := claudeCodeHomeForTest(t)
+	sessionCwd := resolvedDirectoryForTest(t)
+	writeTranscriptForTest(t, claudeConfigDirectory, projectDirectoryNameForTest(sessionCwd), firstConversationIDForTest, time.Now(),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:00Z", `"[상위 세션] 이 일을 해라"`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:01Z", `[{"type":"text","text":"[Request interrupted by user]"}]`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:02Z", `"[하위 세션 child-1 · 질문] 어느 포트?"`, ""),
+		conversationLineForTest("user", firstConversationIDForTest, sessionCwd, "2026-11-01T09:00:03Z", `[{"type":"text","text":"사람의 첫 글"},{"type":"text","text":"둘째 블록"}]`, ""))
+
+	listing := listClaudeCodeConversationsForTest(t, t.TempDir(), sessionCwd)
+
+	if len(listing.Conversations) != 1 || listing.Conversations[0].Title != "사람의 첫 글" {
+		t.Errorf("대화 = %+v, 제목 \"사람의 첫 글\" 을 기대", listing.Conversations)
 	}
 }
