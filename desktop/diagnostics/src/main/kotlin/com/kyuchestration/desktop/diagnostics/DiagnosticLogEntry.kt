@@ -126,6 +126,20 @@ sealed interface DiagnosticLogEntry {
     }
 
     /**
+     * 이어가는 대화의 지난 내용을 받지 못했다. 세션은 열렸고, 채팅 창에 지난 대화가 없을 뿐이다(app-owned-sessions-design.md 5.5.8).
+     *
+     * @param failureMessage 엔진의 거절 문구에는 대화 id 와 그 id 로 지은 전사 경로가 들어 있다. 적는 쪽이 id 를 지운 문구를 준다 —
+     *   진단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다(SessionStarted 와 같은 선).
+     */
+    data class ClaudeCodeConversationHistoryReadFailed(
+        val targetLabel: String,
+        val failureMessage: String,
+    ) : DiagnosticLogEntry {
+        override val summary: String
+            get() = "지난 대화 읽기 실패 — $targetLabel: $failureMessage"
+    }
+
+    /**
      * 고르기 화면이 제시하지 않은 대화를 채택하라는 선택이 와서 버렸다. 고르기는 그대로 남는다.
      *
      * 대화 id 는 적지 않는다 — 진단에 쓰이지 않으면서 사용자의 대화를 가리키는 값이다(SessionStarted 와 같은 선).

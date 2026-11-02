@@ -467,6 +467,7 @@ class RealClaudeSessionTreeIntegrationTest {
         return ChatSessionStateHolder(
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
             claudeCodeConversationSource = KyuCliClaudeCodeConversationSource(kyuCommandRunner),
+            claudeCodeConversationHistorySource = KyuCliClaudeCodeConversationSource(kyuCommandRunner),
             chatSessionOpener = ProcessChatSessionOpener(),
             childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),
             claudeAuthToken = { null },

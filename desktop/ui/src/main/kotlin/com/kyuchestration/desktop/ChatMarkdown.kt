@@ -16,6 +16,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
@@ -25,8 +26,12 @@ import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCode
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.MarkdownColors
 import com.mikepenz.markdown.model.MarkdownTypography
+import com.mikepenz.markdown.model.State
+import com.mikepenz.markdown.model.parseMarkdown
 import com.mikepenz.markdown.model.rememberStreamingMarkdownState
 import dev.snipme.highlights.Highlights
 import dev.snipme.highlights.model.SyntaxLanguage
@@ -40,16 +45,40 @@ import dev.snipme.highlights.model.SyntaxThemes
  *
  * @param modifier 폭만 채운다. 이 컴포저블의 기본값이 `fillMaxSize` 라 그대로 두면 전사 목록
  *   안에서 항목 하나가 화면 전체를 차지한다.
+ * @param colors 이어온 대화의 지난 답은 옅은 글자색으로 그린다(PastTurnView). 이번 세션의 답과 갈리는 것이 그 색 하나다.
  */
 @Composable
-internal fun AssistantMarkdown(text: String, modifier: Modifier = Modifier) {
+internal fun AssistantMarkdown(text: String, modifier: Modifier = Modifier, colors: MarkdownColors = markdownColor()) {
+    // 그 자리에서 곧바로 파싱한다. 라이브러리의 기본은 파싱을 뒤로 미루어 첫 배치에서 이 항목의 높이가 0 이다 — 전사를 맨
+    // 아래로 내리는 결정(ChatTranscript)이 그 0 을 보고 내린 뒤 높이가 늘어, 마지막 답이 화면 아래로 밀려난 채 선다. 이어온
+    // 대화가 깔린 창을 처음 열 때 이 어긋남이 가장 크다(지난 답 수십 개가 한꺼번에 자란다).
+    //
+    // 곧바로 파싱하는 대가는 화면 스레드다. 목록은 화면 밖으로 나간 항목을 버렸다가 돌아오면 다시 그리므로, 전사가 든
+    // 파싱 결과(ParsedMarkdownCache)를 써서 같은 글은 한 번만 파싱한다. 전사 밖에서 그려지면(캐시가 없으면) 이 자리에서만 든다.
+    val parsedMarkdownCache = LocalParsedMarkdownCache.current
+    val parsedMarkdown = remember(text, parsedMarkdownCache) { parsedMarkdownCache?.parsedOf(text) ?: parseMarkdown(text) }
     Markdown(
-        content = text,
+        state = parsedMarkdown,
+        colors = colors,
         typography = chatMarkdownTypography(),
         components = highlightedCodeComponents(),
         modifier = modifier.fillMaxWidth(),
     )
 }
+
+/**
+ * 전사 하나가 든 마크다운 파싱 결과 — 글 하나에 한 번만 파싱한다(AssistantMarkdown).
+ *
+ * 전사가 사는 동안 그 전사의 완성된 답들만 든다. 화면 스레드에서만 쓴다(컴포지션 안의 remember).
+ */
+internal class ParsedMarkdownCache {
+    private val parsedByText = HashMap<String, State>()
+
+    fun parsedOf(text: String): State = parsedByText.getOrPut(text) { parseMarkdown(text) }
+}
+
+/** 지금 그리는 전사의 파싱 결과. 전사(ChatTranscript)가 세운다. */
+internal val LocalParsedMarkdownCache = staticCompositionLocalOf<ParsedMarkdownCache?> { null }
 
 /**
  * 대화에 맞춘 마크다운 타이포.

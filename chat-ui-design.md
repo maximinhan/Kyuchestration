@@ -918,7 +918,8 @@ MaterialTheme(
 | `SubagentCard` | `SubagentStarted`·`SubagentProgressed`·`SubagentFinished` + `parentToolUseId` 자식들 | 안쪽 대화를 접어 담고, 접힌 줄이 "지금 무엇을 하는 중" 을 말한다 |
 | `TurnFooter` | `TurnFinished` | 비용·토큰·소요 시간 배지. 중단·실패면 그 사유 |
 | `PermissionDenialNotice` | `TurnFinished.permissionDenials` | 3.6 의 `dontAsk` 가 여기로 온다. 항목은 `tool_name`·`tool_use_id`·`tool_input` 이고(6 단계 실측), **사용자가 승인 카드에서 거부한 것은 여기 없다** — 그것은 그 카드가 이미 말한다 |
-| `EngineNotice` | `EngineSpoke` · `SessionEnded` | resume 실패가 여기로 온다(3.9) |
+| `EngineNotice` | `EngineSpoke` · `SessionEnded` | resume 실패가 여기로 온다(3.9). 지난 대화를 불러오지 못한 것도 이 한 줄이다(app-owned-sessions-design.md 5.5.8) |
+| `PastTurnView` | 이벤트가 아니다 — 이어가는 세션이 뜰 때 코어가 `kyu conversations show` 로 받아 전사 앞에 깐 `ChatEntry.PastTurn`(app-owned-sessions-design.md 5.5.8) | 지금 항목과 같은 자리에 옅은 색(`outline` 글자 · `surfaceVariant` 말풍선)과 현지 시각 `MM-dd HH:mm`. 사람의 말 · claude 의 글 · 도구 한 줄("도구 Bash · ls -la") · 사람 자리의 안내 한 줄 · "하위 에이전트 줄 N개 생략". 결과 · 승인 · 비용은 없다. 맨 위 머리줄 "이어온 대화 · N개(· 앞선 M개는 보이지 않습니다)", 마지막 지난 항목 뒤에 선 "여기부터 이번 세션" |
 
 `ToolCallCard` 의 갈래는 도구 이름으로 정한다. **모르는 도구는 일반 카드로 떨어진다** — MCP 도구가 얼마든지 새로 붙을 수 있으므로 이것이 기본값이어야 한다.
 

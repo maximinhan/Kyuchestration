@@ -709,7 +709,7 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 |---|---|---|
 | 화면과 코어의 `protocol` 이 다르다 | `hello`/`welcome` | 코어가 `bye { protocol_mismatch }` 로 닫는다. 화면은 어느 쪽이 낡았는지(`screenVersion` · `coreVersion`)를 보이고 할 일을 하나로 적는다 — 코어가 낡았으면 WSL 에서 돌릴 설치 명령(복사 버튼), 화면이 낡았으면 msi 받기 |
 | **설치된 코어는 새것인데 떠 있는 데몬은 옛것**(사용자가 코어를 갱신했다) | `attach`(새 실행 파일)가 데몬의 `welcome.coreVersion` 을 본다 | 데몬에 살아 있는 세션이 없으면 `attach` 가 데몬을 끝내고 새로 띄운다. 있으면 화면에 *"옛 코어(0.15.0)에서 세션 2 개가 돌고 있습니다 — 끝내고 갱신 / 그대로 쓰기"* 를 묻는다(그대로 쓰기는 `protocol` 이 같을 때만) |
-| `protocol` 의 판 규약 | 정수 하나. 필드를 더하는 변경은 올리지 않고(모르는 필드는 무시), 뜻이 바뀌거나 필드가 빠지면 올린다 | `internal/workdir/conversations.go` 의 `schemaVersion` 규약과 같은 선 |
+| `protocol` 의 판 규약 | 정수 하나. 필드를 더하는 변경은 올리지 않고(모르는 필드는 무시), 뜻이 바뀌거나 필드가 빠지거나 **sealed 의 갈래가 늘면** 올린다(모르는 갈래는 무시되지 않는다 — 판 4) | `internal/workdir/conversations.go` 의 `schemaVersion` 규약과 같은 선 |
 
 **화면과 코어는 같은 태그에서 같은 판으로 나간다**(6.16). 판이 다른 것은 둘 중 하나를 갱신하지 않은 경우뿐이다.
 
@@ -721,6 +721,7 @@ fun coreLaunchCommand(place: CorePlace, verb: CoreVerb): List<String> = when (pl
 | 1 | `hello` · `welcome` 에 `protocol` 을 싣는다 | 판 불일치의 길을 열기 위해 |
 | 2 | `open_workdir` 의 `hostPath`(화면 경로) → `workDirPath`(코어 경로)(6.9 의 3 단계 정정) | 필드가 빠지고 뜻이 바뀌었다 |
 | 3 | `enter_session.conversationChoice` 가 이름 문자열에서 `type` 을 단 객체로(`continue_recorded_conversation` · `start_new_conversation` · `adopt_conversation { conversationId }`). 진입 상태 `choosing_conversation` 과 명령 `choose_conversation` · `cancel_conversation_choice` 를 더한다(app-owned-sessions-design.md 5.5.7) | 같은 필드의 모양이 바뀌었다 — 판 2 의 상대는 그 필드를 읽지 못한다. 판 불일치는 위 표의 첫 줄 그대로 처리된다(고칠 것 없음) |
+| 4 | 대화의 줄에 갈래 `past_turn { content { type: user_said · assistant_said · tool_used · system_noted · lines_omitted }, at }` 을, 대화 머리에 `pastTurnsOmittedBefore` 를 더한다(app-owned-sessions-design.md 5.5.8) | 필드는 건너뛰어지지만 **모르는 갈래는 건너뛰지 못한다** — 판 3 의 화면은 `past_turn` 을 실은 틀 하나에서 읽기를 멈추고 코어와의 연결이 끊긴 것으로 선다(`CoreMirror`). 위 판 규약의 "뜻이 바뀌면 올린다" 에 갈래 추가를 넣어 읽는다 |
 
 ### 6.15 Gradle 모듈 — `protocol` · `core` · `ui`
 

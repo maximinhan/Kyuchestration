@@ -64,6 +64,7 @@ fun assembleInProcessScreenFacingCore(coroutineScope: CoroutineScope, diagnostic
         coroutineScope = coroutineScope,
         diagnosticLog = diagnosticLog,
     )
+    val claudeCodeConversations = KyuCliClaudeCodeConversationSource(kyuCommandRunner)
     return InProcessScreenFacingCore(
         engineInstallation = engineInstallation,
         claudeAuthentication = claudeAuthentication,
@@ -86,8 +87,10 @@ fun assembleInProcessScreenFacingCore(coroutineScope: CoroutineScope, diagnostic
         chatSessions = ChatSessionStateHolder(
             // 앱이 스스로 조립하지 않고 엔진에게 묻는다(설계 원칙 11).
             sessionCommandSource = KyuCliSessionCommandSource(kyuCommandRunner),
-            // 터미널에서 하던 대화도 엔진이 읽는다 — 전사의 자리와 모양을 앱이 알지 않는다(원칙 11 · 5.5.7).
-            claudeCodeConversationSource = KyuCliClaudeCodeConversationSource(kyuCommandRunner),
+            // 터미널에서 하던 대화도, 이어가는 대화의 지난 내용도 엔진이 읽는다 — 전사의 자리와 모양을 앱이 알지 않는다
+            // (원칙 11 · 5.5.7 · 5.5.8). 한 어댑터가 두 물음을 맡는다(KyuCliClaudeCodeConversationSource).
+            claudeCodeConversationSource = claudeCodeConversations,
+            claudeCodeConversationHistorySource = claudeCodeConversations,
             chatSessionOpener = ProcessChatSessionOpener(),
             // 하위 세션도 엔진이 조립한다(원칙 11) — 앱이 넘기는 것은 상위가 고른 것과 누가 살아 있는가뿐이다.
             childSessionCommandSource = KyuCliChildSessionCommandSource(kyuCommandRunner),

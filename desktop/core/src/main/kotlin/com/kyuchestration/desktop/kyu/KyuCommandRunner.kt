@@ -24,12 +24,16 @@ interface KyuCommandRunner {
      * @param standardInput 자식 프로세스의 stdin 으로 흘려보낼 것. 준 것을 그대로 보내고 닫는다 —
      *   개행 한 글자도 덧붙이지 않는다. 여기 실리는 것은 토큰이고, 값을 손대는 자리가 늘수록
      *   무엇이 저장됐는지 말하기 어려워진다. null 이면 아무것도 보내지 않고 곧바로 닫는다.
+     * @param valuesHiddenFromDiagnostics 실패 기록에 남기지 않을 값들 — 인자에서도, 그 값을 되읊는 stderr 에서도 가린다.
+     *   사용자의 대화를 가리키는 대화 id 가 여기로 온다. 실패를 기록하는 것은 실행기라(ProcessKyuCommandRunner) 부르는
+     *   자리에서는 지울 수 없고, 어느 인자가 그런 값인지는 부르는 쪽만 안다 — 그래서 부르는 쪽이 표시하고 실행기가 가린다.
      * @throws KyuCommandFailure 부를 kyu 가 없거나 프로세스를 띄우지 못했을 때.
      */
     fun run(
         arguments: List<String>,
         workingDirectory: Path? = null,
         standardInput: String? = null,
+        valuesHiddenFromDiagnostics: Set<String> = emptySet(),
     ): KyuCommandResult
 }
 

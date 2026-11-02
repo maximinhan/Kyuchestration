@@ -10,6 +10,9 @@ import com.kyuchestration.desktop.terminal.ChildSessionCommandRequest
 import com.kyuchestration.desktop.terminal.ChildSessionCommandSource
 import com.kyuchestration.desktop.terminal.ChildSessionGate
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversation
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistory
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistoryFailure
+import com.kyuchestration.desktop.terminal.ClaudeCodeConversationHistorySource
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversationListingFailure
 import com.kyuchestration.desktop.terminal.ClaudeCodeConversationSource
 import com.kyuchestration.desktop.terminal.PersonOpenedSessionTarget
@@ -25,11 +28,13 @@ import java.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -71,6 +76,8 @@ class ChatSessionStateHolder(
     private val sessionCommandSource: SessionCommandSource,
     /** 이어가기 전에 그 자리의 바깥(터미널) 대화를 보는 자리(app-owned-sessions-design.md 5.5.7). */
     private val claudeCodeConversationSource: ClaudeCodeConversationSource,
+    /** 이어가는 세션의 채팅 창 앞에 깔 지난 대화를 묻는 자리(app-owned-sessions-design.md 5.5.8). */
+    private val claudeCodeConversationHistorySource: ClaudeCodeConversationHistorySource,
     private val chatSessionOpener: ChatSessionOpener,
     /** 하위 세션이 무엇을 띄울지 답하는 자리(`--child`). 하위의 이름과 관문의 물음도 여기서 온다(6.2 · 6.9). */
     private val childSessionCommandSource: ChildSessionCommandSource,
@@ -426,15 +433,18 @@ class ChatSessionStateHolder(
 
         // 기다리는 동안 사람이 그 세션을 끝냈거나 워크디렉토리를 닫았다.
         if (pendingEntries[target]?.requestId != requestId) {
-            opened.getOrNull()?.let { endSessionProcess(it) }
+            opened.getOrNull()?.let { endSessionProcess(it.held) }
             return
         }
         pendingEntries.remove(target)
 
         opened.fold(
-            onSuccess = { held ->
+            onSuccess = { entered ->
                 // 대화를 먼저 세우고 진입 줄을 뺀다. 거꾸로면 그 사이 화면은 둘 다 없는 세션을 본다.
-                hold(held.copy(engineWarnings = listOfNotNull(listingWarning) + held.engineWarnings))
+                hold(
+                    entered.held.copy(engineWarnings = listOfNotNull(listingWarning) + entered.held.engineWarnings),
+                    entered.pastConversation,
+                )
                 mutableSessionEntries.value -= target
             },
             onFailure = { failure -> recordEntryFailure(target, failure.asTerminalSessionFailure(), listingWarning) },
@@ -694,7 +704,7 @@ class ChatSessionStateHolder(
         workDirPath: Path,
         target: PersonOpenedSessionTarget,
         conversationChoice: SessionConversationChoice,
-    ): HeldChatSession {
+    ): EnteredChatSession {
         // 소켓이 먼저다. 엔진에게 물을 때 그 자리를 함께 줘야 하고(조립은 엔진이 한다 — 원칙 11),
         // 그러려면 앱이 이미 듣고 있어야 한다. 열지 못하면 세션도 열지 않는다 — 승인이 필요한
         // 일이 나올 때까지 멀쩡해 보이다가 그때부터 아무것도 못 하는 세션이 되는 것보다,
@@ -721,14 +731,43 @@ class ChatSessionStateHolder(
                 claudeAuthToken = claudeAuthToken(),
             )
 
-            return HeldChatSession(
-                target = target,
-                session = chatSessionOpener.openChatSession(plan),
-                resumedConversationId = answer.resumedConversationId,
-                workingDirectory = plan.workingDirectory,
-                appSocketChannel = appSocketChannel,
-                workDirPath = workDirPath,
-                engineWarnings = answer.engineWarnings,
+            // 지난 대화는 세션 띄우기와 나란히 읽는다. 둘은 서로의 답이 필요 없고, 띄우는 쪽이 사람이 기다리는 일이다. 새 대화는
+            // 묻지 않는다 — 깔 것이 없다.
+            //
+            // 이 코루틴의 자식이 아니라 홀더의 스코프에 띄운다. 읽기는 kyu 가 끝날 때까지 기다리는 블로킹 호출이라 취소해도
+            // 멈추지 않는데, 자식이면 세션을 띄우지 못한 자리에서도 부모가 그 읽기가 끝날 때까지 실패를 올리지 못한다.
+            val pastConversationReading = answer.resumedConversationId?.let { resumedConversationId ->
+                coroutineScope.async(sessionEntryDispatcher) { readPastConversation(workDirPath, target, resumedConversationId) }
+            }
+
+            val session = try {
+                chatSessionOpener.openChatSession(plan)
+            } catch (failure: Throwable) {
+                // 띄우지 못했으면 깔 자리도 없다. 읽기는 버리고 실패를 곧바로 올린다.
+                pastConversationReading?.cancel()
+                throw failure
+            }
+
+            // 여기부터 claude 가 떠 있다. 보유하지 않은 채 이 함수를 떠나면 아무도 듣지 않는 파이프에 매달린 고아가 된다(8.1).
+            // 읽기는 어떤 실패도 결과로 접어 돌려주므로(readPastConversation) 떠나는 길은 기다리는 사이의 취소뿐이다.
+            val pastConversation = try {
+                pastConversationReading?.await()
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable) { session.endSession() }
+                throw cancelled
+            }
+
+            return EnteredChatSession(
+                held = HeldChatSession(
+                    target = target,
+                    session = session,
+                    resumedConversationId = answer.resumedConversationId,
+                    workingDirectory = plan.workingDirectory,
+                    appSocketChannel = appSocketChannel,
+                    workDirPath = workDirPath,
+                    engineWarnings = answer.engineWarnings,
+                ),
+                pastConversation = pastConversation,
             )
         } catch (failure: Throwable) {
             // 세션이 서지 못했으면 그 소켓에 물어올 자식도 없다. 닫지 않으면 아무도 붙지 않는
@@ -739,17 +778,58 @@ class ChatSessionStateHolder(
     }
 
     /**
+     * 이어가는 대화의 지난 내용을 엔진에게 묻는다. **던지지 않는다** — 어떤 실패도 [PastConversationReading.Unread] 로 접는다.
+     *
+     * 받지 못해도 세션은 연다. 놓친 것은 화면의 지난 대화뿐이고 `claude` 는 `--resume` 으로 그 맥락을 그대로 갖는다 — 그래서
+     * 진입 실패가 아니라 전사 맨 앞의 한 줄과 진단 기록으로 남긴다.
+     *
+     * 포트의 실패([ClaudeCodeConversationHistoryFailure]) 밖의 예외도 같은 길로 접는다. 실행기가 파이프를 읽다 받는
+     * IOException 처럼 포트가 옮기지 않은 것이 있고, 이 읽기는 홀더의 스코프에 따로 떠 있어 여기서 새는 예외는 그 스코프 —
+     * 코어 전체 — 를 취소한다. 접되 묻지 않는다: 예외의 종류와 문구가 화면의 한 줄과 진단 기록에 그대로 선다.
+     */
+    private fun readPastConversation(
+        workDirPath: Path,
+        target: PersonOpenedSessionTarget,
+        conversationId: String,
+    ): PastConversationReading = try {
+        PastConversationReading.Read(claudeCodeConversationHistorySource.conversationHistoryOf(workDirPath, target, conversationId))
+    } catch (failure: ClaudeCodeConversationHistoryFailure) {
+        unreadPastConversation(target, conversationId, failure.message.orEmpty())
+    } catch (unexpected: Exception) {
+        unreadPastConversation(target, conversationId, "${unexpected::class.simpleName}: ${unexpected.message.orEmpty()}")
+    }
+
+    private fun unreadPastConversation(
+        target: PersonOpenedSessionTarget,
+        conversationId: String,
+        failureMessage: String,
+    ): PastConversationReading {
+        diagnosticLog.record(
+            DiagnosticLogEntry.ClaudeCodeConversationHistoryReadFailed(
+                targetLabel = target.label,
+                failureMessage = failureMessage.replace(conversationId, CONVERSATION_ID_LEFT_OUT_OF_DIAGNOSTICS),
+            ),
+        )
+        return PastConversationReading.Unread("지난 대화를 불러오지 못했습니다: $failureMessage")
+    }
+
+    /**
      * 세션을 보유하고 그 세션이 말하는 것을 받기 시작한다.
      *
      * 사람이 연 세션과 하위가 같은 길로 선다. 화면을 옮기는 것은 이 자리의 일이 아니다 — 상위가 띄운 하위가
      * 사람이 보던 화면을 빼앗지 않는 것도 그래서 저절로 지켜진다.
+     *
+     * @param pastConversation 전사 앞에 깔 지난 대화. 묻지 않은 세션(새 대화 · 하위)이면 null. 보유하는 세션([HeldChatSession])에
+     *   넣지 않는 것은 여기서 한 번 쓰이고 끝나는 값이라서다 — 세션과 함께 들면 세션이 사는 내내 그 항목들이 남는다.
      */
-    private fun hold(held: HeldChatSession) {
+    private fun hold(held: HeldChatSession, pastConversation: PastConversationReading?) {
         mutableConversations.value += held.target to ChatConversation(
             target = held.target,
             workingDirectory = held.workingDirectory.toString(),
             resumedConversationId = held.resumedConversationId,
-            entries = held.engineWarnings.map(ChatEntry::EngineNotice),
+            // 순서가 곧 시간이다 — 지난 대화(또는 받지 못한 까닭), 이번 세션이 뜨며 엔진이 남긴 말, 그 뒤로 이번 세션의 것.
+            entries = pastConversation?.leadingEntries.orEmpty() + held.engineWarnings.map(ChatEntry::EngineNotice),
+            pastTurnsOmittedBefore = pastConversation?.omittedBeforeCount ?: 0,
         )
         replaceHeldSessions(mutableHeldSessions.value + held)
 
@@ -967,7 +1047,8 @@ class ChatSessionStateHolder(
         }
 
         val childTarget = SessionTarget.Child(assigned.childId)
-        hold(opened.held)
+        // 하위는 이어가지 않는다(6.15). 깔 지난 대화가 없다.
+        hold(opened.held, pastConversation = null)
         mutableSessionTree.value = mutableSessionTree.value.withChild(
             ChildSessionNode(
                 childId = assigned.childId,
@@ -1589,6 +1670,33 @@ class ChatSessionStateHolder(
 }
 
 /** 관문 물음이 어떻게 끝났는가(6.9). */
+/**
+ * 지난 대화를 물은 결과. 받았으면 그 항목들을, 받지 못했으면 그 까닭 한 줄을 전사 맨 앞에 둔다.
+ *
+ * 갈래마다 "전사 앞에 무엇이 서는가" 를 스스로 답한다. 쓰는 자리(hold)가 갈래를 풀어 고르면 갈래가 늘 때 그 자리를 함께
+ * 고쳐야 한다.
+ */
+private sealed interface PastConversationReading {
+    val leadingEntries: List<ChatEntry>
+    val omittedBeforeCount: Int
+
+    data class Read(val history: ClaudeCodeConversationHistory) : PastConversationReading {
+        override val leadingEntries: List<ChatEntry> get() = history.pastTurns
+        override val omittedBeforeCount: Int get() = history.omittedBeforeCount
+    }
+
+    data class Unread(val notice: String) : PastConversationReading {
+        override val leadingEntries: List<ChatEntry> get() = listOf(ChatEntry.EngineNotice(notice))
+        override val omittedBeforeCount: Int get() = 0
+    }
+}
+
+/** 띄운 세션과, 보유하는 순간 그 전사 앞에 깔 것. 둘이 함께 가는 것은 hold 까지다. */
+private class EnteredChatSession(val held: HeldChatSession, val pastConversation: PastConversationReading?)
+
+/** 진단 기록의 문구에서 대화 id 가 있던 자리. */
+private const val CONVERSATION_ID_LEFT_OUT_OF_DIAGNOSTICS = "(대화 id)"
+
 private enum class GateAnswer {
     Approved,
     Declined,

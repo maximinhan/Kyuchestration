@@ -26,7 +26,14 @@ class KyuCliChildSessionCommandSource(
         val arguments = childSessionCommandArguments(request, appSocketPath)
         // 거절된 하위에게는 아직 이름이 없다 — 이름은 엔진이 기록에 적을 때 짓는다.
         val output = try {
-            runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = UNNAMED_CHILD_SESSION_LABEL)
+            runSessionCommand(
+                kyuCommandRunner,
+                arguments,
+                workDirPath,
+                targetLabel = UNNAMED_CHILD_SESSION_LABEL,
+                // 하위는 늘 새 대화로 뜬다(6.15) — 가릴 대화 id 가 없다.
+                valuesHiddenFromDiagnostics = emptySet(),
+            )
         } catch (refusal: TerminalSessionFailure.SessionCommandRefused) {
             throw engineTooOldOrNull(refusal) ?: refusal
         }

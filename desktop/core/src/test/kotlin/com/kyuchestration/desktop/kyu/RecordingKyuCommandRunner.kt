@@ -23,10 +23,19 @@ internal class RecordingKyuCommandRunner(
     /** 자식 프로세스의 stdin 으로 흘러간 것. 토큰이 인자가 아니라 이 통로로 가는지를 여기서 본다. */
     val receivedStandardInputs = mutableListOf<String?>()
 
-    override fun run(arguments: List<String>, workingDirectory: Path?, standardInput: String?): KyuCommandResult {
+    /** 부르는 쪽이 실패 기록에서 가리라고 한 값들. 대화 id 가 이 통로로 가는지를 여기서 본다. */
+    val receivedValuesHiddenFromDiagnostics = mutableListOf<Set<String>>()
+
+    override fun run(
+        arguments: List<String>,
+        workingDirectory: Path?,
+        standardInput: String?,
+        valuesHiddenFromDiagnostics: Set<String>,
+    ): KyuCommandResult {
         receivedArguments += arguments
         receivedWorkingDirectories += workingDirectory
         receivedStandardInputs += standardInput
+        receivedValuesHiddenFromDiagnostics += valuesHiddenFromDiagnostics
         return respondTo(arguments)
     }
 }

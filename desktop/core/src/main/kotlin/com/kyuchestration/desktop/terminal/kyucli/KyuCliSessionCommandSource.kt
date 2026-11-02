@@ -31,8 +31,13 @@ class KyuCliSessionCommandSource(
         appSocketPath: Path?,
     ): SessionCommandAnswer {
         val arguments = sessionCommandArguments(target, conversationChoice, appSocketPath)
+        // 채택할 대화의 id 는 사용자의 대화를 가리킨다. 엔진이 거절하면 실행기가 인자와 stderr 를 기록하는데, 거기서 가린다.
+        val conversationIdsToHide = when (conversationChoice) {
+            is SessionConversationChoice.AdoptConversation -> setOf(conversationChoice.conversationId)
+            SessionConversationChoice.ContinueRecordedConversation, SessionConversationChoice.StartNewConversation -> emptySet()
+        }
 
-        val output = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = target.label)
+        val output = runSessionCommand(kyuCommandRunner, arguments, workDirPath, targetLabel = target.label, conversationIdsToHide)
 
         return parseKyuSessionCommandOutput(output.standardOutput, output.engineWarnings)
     }
@@ -45,17 +50,19 @@ class KyuCliSessionCommandSource(
  * 말로 옮기는 일이 같다 — 다른 것은 묻는 옵션과 답을 읽는 모양뿐이다.
  *
  * @param targetLabel 거절 문구가 어느 세션의 것인지 말할 이름.
+ * @param valuesHiddenFromDiagnostics 실행기의 실패 기록에서 가릴 값(채택할 대화 id).
  */
 internal fun runSessionCommand(
     kyuCommandRunner: KyuCommandRunner,
     arguments: List<String>,
     workDirPath: Path,
     targetLabel: String,
+    valuesHiddenFromDiagnostics: Set<String>,
 ): SessionCommandOutput {
     val result = try {
         // 자리를 인자가 아니라 작업 디렉토리로 준다. 이 명령은 경로 인자를 받지 않고
         // 실행된 디렉토리를 워크디렉토리로 읽는다(session_command.go 의 currentWorkDir).
-        kyuCommandRunner.run(arguments, workingDirectory = workDirPath)
+        kyuCommandRunner.run(arguments, workingDirectory = workDirPath, valuesHiddenFromDiagnostics = valuesHiddenFromDiagnostics)
     } catch (failure: KyuCommandFailure) {
         // 실행기는 "부르지 못했다" 는 사실만 던진다. 그 사실을 세션에 들어가려던 사람에게 할
         // 말로 옮기는 것이 이 어댑터의 몫이다.

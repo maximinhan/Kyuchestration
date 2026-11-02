@@ -162,6 +162,7 @@ data class ConversationHeader(
     val totalCostUsd: Double,
     val usageWindows: List<RateLimitWindow>,
     val endedExitCode: Int?,
+    val pastTurnsOmittedBefore: Int,
 )
 
 val ChatConversation.header: ConversationHeader
@@ -175,4 +176,5 @@ val ChatConversation.header: ConversationHeader
         totalCostUsd = totalCostUsd,
         usageWindows = usageWindows,
         endedExitCode = endedExitCode,
+        pastTurnsOmittedBefore = pastTurnsOmittedBefore,
     )

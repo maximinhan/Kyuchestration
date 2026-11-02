@@ -34,14 +34,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
+import com.kyuchestration.desktop.terminal.chat.PastTurnContent
 import com.kyuchestration.desktop.terminal.chat.PermissionAnswer
 import com.kyuchestration.desktop.terminal.chat.PermissionDenial
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.ToolCallAnswer
 import com.kyuchestration.desktop.terminal.chat.TurnOutcome
 import com.kyuchestration.desktop.theme.KyuTheme
+import com.mikepenz.markdown.m3.markdownColor
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -100,6 +103,71 @@ internal fun ChatEntryView(
             PermissionRequestCard(entry, sessionWorkingDirectory, onPermissionChoiceMade)
         is ChatEntry.TurnEnded -> TurnFooter(entry)
         is ChatEntry.EngineNotice -> EngineNoticeRow(entry.line)
+        is ChatEntry.PastTurn -> PastTurnView(entry)
+    }
+}
+
+/**
+ * 이어온 대화의 지난 항목 하나(app-owned-sessions-design.md 5.5.8).
+ *
+ * **지금 항목과 같은 자리, 옅은 색이다.** 사람의 말은 오른쪽 말풍선, claude 의 답은 폭 전체의 마크다운 — 자리가 같아야 지난
+ * 대화를 지금 대화처럼 읽어 내려가고, 색이 옅어야 어디까지가 이번 세션이 아닌지 스크롤 중에도 보인다. 글자는 테마의
+ * `outline`(두 테마 모두 중간 밝기)이다 — `onSurfaceVariant` 는 라이트에서 본문 글자와 거의 같은 짙기라 지난 것과 지금 것이
+ * 갈리지 않았다. 바탕은 `surfaceVariant` 다. 둘 다 테마의 토큰이라 라이트 · 다크를 따로 손대지 않는다.
+ *
+ * 도구 호출은 카드가 아니라 한 줄이다. 지난 항목에는 결과가 없어서, 카드로 세우면 결과를 기다리는 것처럼 보인다.
+ */
+@Composable
+private fun PastTurnView(entry: ChatEntry.PastTurn) {
+    val mutedColor = MaterialTheme.colorScheme.outline
+    val timeLabel = entry.at?.let { pastTurnTimeLabel(it, ZoneId.systemDefault()) }
+
+    when (val content = entry.content) {
+        is PastTurnContent.UserSaid ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(USER_BUBBLE_WIDTH_FRACTION)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.large)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    timeLabel?.let { Text(text = it, style = MaterialTheme.typography.labelSmall, color = mutedColor) }
+                    Text(text = content.text, style = MaterialTheme.typography.bodyMedium, color = mutedColor)
+                }
+            }
+
+        is PastTurnContent.AssistantSaid ->
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                timeLabel?.let { Text(text = it, style = MaterialTheme.typography.labelSmall, color = mutedColor) }
+                AssistantMarkdown(content.text, colors = markdownColor(text = mutedColor))
+            }
+
+        is PastTurnContent.ToolUsed ->
+            PastTurnLine(pastToolUseLine(content.toolName, content.summary), timeLabel, fontFamily = FontFamily.Monospace)
+
+        is PastTurnContent.SystemNoted -> PastTurnLine(content.text, timeLabel)
+
+        is PastTurnContent.LinesOmitted -> PastTurnLine(omittedPastLinesLine(content.count), timeLabel)
+    }
+}
+
+/** 지난 항목 중 한 줄로 서는 것들 — 도구 호출 · 사람 자리의 안내 · 건너뛴 줄. */
+@Composable
+private fun PastTurnLine(text: String, timeLabel: String?, fontFamily: FontFamily? = null) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = fontFamily,
+            color = MaterialTheme.colorScheme.outline,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        timeLabel?.let {
+            Text(text = it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        }
     }
 }
 

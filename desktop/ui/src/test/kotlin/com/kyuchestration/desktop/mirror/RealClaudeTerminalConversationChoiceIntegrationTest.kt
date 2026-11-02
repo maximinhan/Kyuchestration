@@ -10,6 +10,7 @@ import com.kyuchestration.desktop.engine.EngineInstallationState
 import com.kyuchestration.desktop.terminal.SessionConversationChoice
 import com.kyuchestration.desktop.terminal.SessionTarget
 import com.kyuchestration.desktop.terminal.chat.ChatEntry
+import com.kyuchestration.desktop.terminal.chat.PastTurnContent
 import com.kyuchestration.desktop.terminal.chat.SessionEntryState
 import java.nio.file.Files
 import java.nio.file.Path
@@ -99,6 +100,14 @@ class RealClaudeTerminalConversationChoiceIntegrationTest {
         mirror.chooseConversation(SessionTarget.Main, choosing.defaultChoice)
         waitUntil("메인이 서기를") { SessionTarget.Main in mirror.heldChatSessionTargets.value }
         assertEquals(terminalConversationId, mirror.chatConversations.value[SessionTarget.Main]?.resumedConversationId)
+
+        // 채택한 대화의 지난 내용이 채팅 창 앞에 깔렸다(5.5.8) — 터미널에서 한 말이 지난 항목으로, 이번 세션의 말보다 먼저 선다.
+        val pastTurns = mirror.chatConversations.value[SessionTarget.Main]?.entries.orEmpty().filterIsInstance<ChatEntry.PastTurn>()
+        println("깔린 지난 항목: $pastTurns")
+        val terminalSaid = pastTurns.map { it.content }.filterIsInstance<PastTurnContent.UserSaid>()
+        assertTrue(terminalSaid.any { PASSPHRASE in it.text }, "터미널에서 한 말이 지난 항목으로 깔리지 않았습니다: $pastTurns")
+        assertTrue(pastTurns.map { it.content }.any { it is PastTurnContent.AssistantSaid }, "터미널에서 받은 답이 없습니다: $pastTurns")
+        assertEquals(0, mirror.chatConversations.value[SessionTarget.Main]?.pastTurnsOmittedBefore)
 
         mirror.sendUserMessage(SessionTarget.Main, "이 대화의 암호 단어가 뭐였지? 그 낱말만 답해.")
         waitUntil("메인의 턴이 끝나기를", TURN_TIMEOUT) {

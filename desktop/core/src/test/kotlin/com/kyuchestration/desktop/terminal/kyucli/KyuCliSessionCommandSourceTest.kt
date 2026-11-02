@@ -159,6 +159,17 @@ class KyuCliSessionCommandSourceTest {
             listOf(listOf("session-command", "proj-a", "--adopt-conversation", "654ce605-b030-40e8-8448-2e9003ad32b1", "--chat", "--json")),
             runner.receivedArguments,
         )
+        // 채택할 id 는 실행기의 실패 기록에서 가린다 — 사용자의 대화를 가리키는 값이다.
+        assertEquals(listOf(setOf("654ce605-b030-40e8-8448-2e9003ad32b1")), runner.receivedValuesHiddenFromDiagnostics)
+    }
+
+    @Test
+    fun `대화 id 를 싣지 않는 물음은 가릴 것이 없다`() {
+        val runner = RecordingKyuCommandRunner { succeedingKyuCommandResult(REPO_SESSION_DOCUMENT) }
+
+        KyuCliSessionCommandSource(runner).sessionCommandFor(WORK_DIR_PATH, SessionTarget.Main, CONTINUE, appSocketPath = null)
+
+        assertEquals(listOf(emptySet<String>()), runner.receivedValuesHiddenFromDiagnostics)
     }
 
     @Test

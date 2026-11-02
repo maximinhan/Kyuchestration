@@ -21,11 +21,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -41,6 +43,7 @@ import com.kyuchestration.desktop.terminal.chat.ChildWaitingFor
 import com.kyuchestration.desktop.terminal.chat.PermissionCardChoice
 import com.kyuchestration.desktop.terminal.chat.SessionTree
 import com.kyuchestration.desktop.theme.KyuTheme
+import kotlinx.coroutines.flow.first
 
 /**
  * 셸의 오른쪽 자리에 서는 대화(설계 6.2 의 가운데 칸 · 6.3).
@@ -245,43 +248,65 @@ private fun ChatTranscript(
     val listState = rememberLazyListState()
 
     // 사용자가 위로 올려 읽는 중이면 끌어내리지 않는다. 판단은 한 프레임 늦은 배치 정보로 하므로
-    // 경계에서 한 번쯤 어긋날 수 있는데, 그 대가로 스크롤을 빼앗기지 않는다.
-    var lastKnownItemCount by remember { mutableStateOf(0) }
+    // 경계에서 한 번쯤 어긋날 수 있는데, 그 대가로 스크롤을 빼앗기지 않는다. 수는 목록 항목 단위다(transcriptListItemCount).
+    var lastKnownListItemCount by remember { mutableStateOf(0) }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (conversation.resumedConversationId != null) {
-            item { ResumedConversationNotice() }
-        }
+    // 이 전사의 답들을 한 번씩만 파싱한다(ParsedMarkdownCache). 세션마다 따로 — 다른 세션의 글을 들고 있을 까닭이 없다.
+    val parsedMarkdownCache = remember(conversation.target) { ParsedMarkdownCache() }
 
-        items(conversation.entries) { entry ->
-            ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
-        }
+    CompositionLocalProvider(LocalParsedMarkdownCache provides parsedMarkdownCache) {
+        LazyColumn(
+            state = listState,
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // 이 목록이 세우는 항목의 수는 transcriptListItemCount 가 같은 조건으로 센다. 여기에 항목을 더하면 거기도 더한다.
+            resumedConversationHeadline(conversation)?.let { headline ->
+                item { ResumedConversationHeadline(headline) }
+            }
 
-        // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
-        conversation.streamingText?.let { streamingText ->
-            item { StreamingAssistantMarkdown(streamingText, conversation.streamingBlockOrdinal) }
-        }
+            // 지난 항목과 이번 세션의 항목 사이에 선 하나를 둔다. 둘을 같은 목록 하나에 두는 것은 스크롤 하나로 이어 읽게 하려는
+            // 것이고(LazyColumn 이라 지난 항목 200개도 보이는 몫만 그린다), 그 대가로 어디서 갈리는지를 이 선이 말한다.
+            val dividerIndex = thisSessionDividerIndex(conversation.entries)
+            val pastEntries = conversation.entries.subList(0, dividerIndex ?: 0)
+            val thisSessionEntries = conversation.entries.subList(dividerIndex ?: 0, conversation.entries.size)
 
-        if (!conversation.alive) {
-            item { SessionEndedNotice(conversation) }
+            items(pastEntries) { entry ->
+                ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
+            }
+            if (dividerIndex != null) {
+                item { ThisSessionDivider() }
+            }
+            items(thisSessionEntries) { entry ->
+                ChatEntryView(entry, conversation.workingDirectory, onPermissionChoiceMade, onOpenChildSessionRequested)
+            }
+
+            // 아직 완성본이 오지 않은 글자들. 완성본이 오면 이 자리가 비고 위의 항목 하나가 는다.
+            conversation.streamingText?.let { streamingText ->
+                item { StreamingAssistantMarkdown(streamingText, conversation.streamingBlockOrdinal) }
+            }
+
+            if (!conversation.alive) {
+                item { SessionEndedNotice(conversation) }
+            }
         }
     }
 
-    val itemCount = conversation.entries.size
-    LaunchedEffect(itemCount, conversation.streamingText, conversation.alive) {
-        val wasAtBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-            ?.let { it.index >= lastKnownItemCount - 1 }
-            ?: true
-        lastKnownItemCount = itemCount
-        if (wasAtBottom && listState.layoutInfo.totalItemsCount > 0) {
+    val listItemCount = transcriptListItemCount(conversation)
+    LaunchedEffect(listItemCount, conversation.streamingText) {
+        val wasAtBottom = wasShowingLastListItem(
+            lastVisibleItemIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index,
+            previousListItemCount = lastKnownListItemCount,
+        )
+        lastKnownListItemCount = listItemCount
+        if (wasAtBottom) {
+            // 이 효과는 배치보다 먼저 돈다 — 창이 막 열린 자리에서는 항목 수가 0 이고, 항목이 는 자리에서는 아직 앞 배치의
+            // 수다. 그 수로 내리면 맨 위에 서거나 새 항목 바로 위에서 멈춘다. 이번 항목이 다 배치된 뒤에 내린다.
+            snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it == listItemCount }
             // 항목의 시작이 아니라 끝으로 내린다. 글자가 흐르는 동안 마지막 항목이 계속 자라는데,
             // 시작에 맞추면 새 글자가 화면 아래로 밀려 나간다. 목록은 내용 끝에서 멈춘다.
-            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1, SCROLL_PAST_LAST_ITEM)
+            listState.scrollToItem(listItemCount - 1, SCROLL_PAST_LAST_ITEM)
         }
     }
 }
@@ -319,19 +344,38 @@ private const val APPROVAL_BAND_TINT_ALPHA = 0.16f
 private const val SCROLL_PAST_LAST_ITEM = 1_000_000
 
 /**
- * 이어가기로 연 대화의 맨 위에 서는 줄(5.5).
+ * 이어가기로 연 대화의 맨 위에 서는 줄(5.5 · app-owned-sessions-design.md 5.5.8).
  *
- * **화면이 먼저 말하는 자리다**(원칙 12). `claude` 는 앞 대화를 알지만 앱은 모른다 — 전사가
- * 메모리에만 있어서다. 이 줄이 없으면 사용자는 앱이 대화를 잃어버렸다고 읽는다.
+ * **화면이 먼저 말하는 자리다**(원칙 12). 지난 대화를 깔았으면 몇 개를 보이고 몇 개를 보이지 않는지를, 깔지 못했으면 앞선
+ * 내용이 있다는 사실을 말한다 — 어느 쪽이든 이 줄이 없으면 사용자는 보이는 것이 대화의 전부라고 읽는다. 문구는
+ * [resumedConversationHeadline] 이 정한다.
  */
 @Composable
-private fun ResumedConversationNotice() {
+private fun ResumedConversationHeadline(headline: String) {
     Text(
-        text = "이 대화에는 앞선 내용이 있습니다 — 화면에는 이번 실행부터 보입니다.",
+        text = headline,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/** 지난 대화가 끝나고 이번 세션이 시작하는 자리의 가는 선. */
+@Composable
+private fun ThisSessionDivider() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+            text = "여기부터 이번 세션",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+    }
 }
 
 /**

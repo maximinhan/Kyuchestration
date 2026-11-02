@@ -457,6 +457,7 @@ class CoreMirrorTest {
                 totalCostUsd = 0.0,
                 usageWindows = emptyList(),
                 endedExitCode = null,
+                pastTurnsOmittedBefore = 0,
             ),
         )
 

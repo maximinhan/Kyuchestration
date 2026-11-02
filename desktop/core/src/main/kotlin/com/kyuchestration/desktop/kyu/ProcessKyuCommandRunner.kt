@@ -40,10 +40,12 @@ class ProcessKyuCommandRunner(
         arguments: List<String>,
         workingDirectory: Path?,
         standardInput: String?,
+        valuesHiddenFromDiagnostics: Set<String>,
     ): KyuCommandResult {
+        val hiding = DiagnosticHiding(valuesHiddenFromDiagnostics)
         val executable = fixedKyuExecutablePath
             ?: findKyuExecutable()
-            ?: throw KyuCommandFailure.ExecutableNotFound().also { recordCouldNotStart(arguments, it) }
+            ?: throw KyuCommandFailure.ExecutableNotFound().also { recordCouldNotStart(arguments, it, hiding) }
 
         val process = try {
             ProcessBuilder(listOf(executable.toString()) + arguments)
@@ -57,7 +59,7 @@ class ProcessKyuCommandRunner(
             // 파일은 있는데 띄우지 못하는 경우다 — 실행 권한이 없거나, 찾은 뒤 지워졌거나,
             // 작업 디렉토리로 준 자리가 없거나. 이것을 실패 타입으로 옮겨 두지 않으면 폴링
             // 코루틴이 IOException 째로 죽는다.
-            throw KyuCommandFailure.FailedToStart(failure).also { recordCouldNotStart(arguments, it) }
+            throw KyuCommandFailure.FailedToStart(failure).also { recordCouldNotStart(arguments, it, hiding) }
         }
 
         // 두 파이프를 순서대로 읽으면, 안 읽는 쪽의 버퍼가 먼저 차는 순간 kyu 가 쓰기에서 멈추고
@@ -82,7 +84,7 @@ class ProcessKyuCommandRunner(
             exitCode = process.waitFor(),
             standardOutput = standardOutput,
             standardError = standardErrorReading.get(),
-        ).also { result -> recordIfKyuFailed(arguments, result) }
+        ).also { result -> recordIfKyuFailed(arguments, result, hiding) }
     }
 
     /**
@@ -95,15 +97,15 @@ class ProcessKyuCommandRunner(
      * stdout 도 싣지 않는다. 성공한 문서는 진단에 쓸모가 없고, 실패한 실행에서는 애초에 비어 있다
      * (kyu 는 시작조차 못 한 실패에서 stdout 에 아무것도 내지 않는다 — json_output.go).
      */
-    private fun recordIfKyuFailed(arguments: List<String>, result: KyuCommandResult) {
+    private fun recordIfKyuFailed(arguments: List<String>, result: KyuCommandResult, hiding: DiagnosticHiding) {
         if (result.exitCode == 0) {
             return
         }
         diagnosticLog.record(
             DiagnosticLogEntry.EngineCallFailed(
-                arguments = arguments,
+                arguments = arguments.map(hiding::hide),
                 exitCode = result.exitCode,
-                standardError = result.standardError,
+                standardError = hiding.hide(result.standardError),
             ),
         )
     }
@@ -114,12 +116,24 @@ class ProcessKyuCommandRunner(
      * 실패 타입의 message 만 남기면 "kyu 를 실행하지 못했습니다" 한 줄로 끝나는데, 실제로 알아야
      * 하는 것은 그 아래의 이유다 — 권한이 없는 것과 파일이 사라진 것은 사람이 할 일이 다르다.
      */
-    private fun recordCouldNotStart(arguments: List<String>, failure: KyuCommandFailure) {
+    private fun recordCouldNotStart(arguments: List<String>, failure: KyuCommandFailure, hiding: DiagnosticHiding) {
         diagnosticLog.record(
             DiagnosticLogEntry.EngineCallCouldNotStart(
-                arguments = arguments,
+                arguments = arguments.map(hiding::hide),
                 reason = listOfNotNull(failure.message, failure.cause?.toString()).joinToString(" — "),
             ),
         )
     }
 }
+
+/**
+ * 실패 기록에 남기지 않을 값을 가린다(KyuCommandRunner.run 의 valuesHiddenFromDiagnostics).
+ *
+ * 인자 하나가 그 값과 같을 때만이 아니라 글 안에 들어 있어도 가린다 — kyu 의 거절 문구가 받은 id 를 되읊는다.
+ */
+private class DiagnosticHiding(private val hiddenValues: Set<String>) {
+    fun hide(text: String): String =
+        hiddenValues.filter { it.isNotEmpty() }.fold(text) { hidden, value -> hidden.replace(value, HIDDEN_VALUE_MARK) }
+}
+
+private const val HIDDEN_VALUE_MARK = "(가린 값)"
