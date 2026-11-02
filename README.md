@@ -292,7 +292,7 @@ kyu 는 엔진이다 — 세션을 열고 화면을 그리는 것은 데스크�
 | `kyu list --json` | 워크디렉토리의 레포와 상태 | `{schemaVersion, workDir, repos[], ...}` |
 | `kyu session-command [repo] --json` | 그 세션이 실행할 명령·cwd·더할 환경 | `{schemaVersion, command[], cwd, env, resumedConversationId}` |
 | `kyu conversations list <경로> [repo] --json` | 그 세션 자리에서 Claude Code 로 나눈 대화 (마지막 활동이 늦은 것부터) | `{schemaVersion, cwd, conversations[{id, title, startedAt, lastActiveAt, recordedFor}]}` |
-| `kyu conversations show <경로> [repo] <id> --json [--last N]` | 그 대화의 지난 내용 — 마지막 N 항목(기본 200), 오래된 것부터 | `{schemaVersion, conversationId, cwd, totalEntries, omittedBefore, entries[{kind: user\|assistant, text, at} \| {kind: tool_use, toolName, summary, at} \| {kind: omitted, count}]}` |
+| `kyu conversations show <경로> [repo] <id> --json [--last N]` | 그 대화의 지난 내용 — 마지막 N 항목(기본 200), 오래된 것부터 | `{schemaVersion, conversationId, cwd, totalEntries, entries[{kind: user\|system\|assistant, text, at} \| {kind: tool_use, toolName, summary, at} \| {kind: omitted, count}]}` — 답하지 않은 앞의 수는 `totalEntries − entries 의 길이` |
 | `kyu mcp serve <워크디렉토리> [--app-socket <경로>]` | 메인 세션에 붙는 오케스트레이션 MCP 서버 (stdio) | JSON-RPC — `list_repos` · `run_in_repo`(은퇴 예정) ([설계](orchestration-tools-design.md) 5.3) · [하위 세션](#하위-세션--메인이-낳고-대화한다) 도구 다섯 |
 | `kyu mcp serve --child --app-socket <경로>` | 하위 세션에 붙는 서버 (stdio) | JSON-RPC — `ask_parent` 하나 ([설계](session-tree-design.md) 6.3) |
 | `kyu mcp ask --app-socket <경로>` | 도구 호출 하나의 승인 물음을 그 소켓 너머의 앱에게 중계 (stdio) | JSON-RPC — `request_permission` 하나. `claude` 가 `--permission-prompt-tool` 로 부르고 모델에게는 보이지 않는다. 앱의 승인 카드가 답한다([설계](chat-ui-design.md) 5.2.2) |
@@ -1486,10 +1486,12 @@ cwd>/<대화 id>.jsonl` 이고, 인코딩은 실측(claude 2.1.316)으로 정했
 
 **이어갈 대화의 지난 내용도 엔진이 답한다.** `--resume` 은 `claude` 의 맥락만 잇고 화면은 비어 있으므로, 엔진이
 그 대화의 전사를 줄 단위로 읽어 마지막 항목들을 답한다([`kyu conversations show --json`](#기계용-표면)) — 사람이
-쓴 글, `claude` 의 글(생각은 빼고), 부른 도구마다 한 줄 요약(명령 · 파일 경로 · 패턴 · 설명 중 하나)이고, 도구의
-결과와 하위 에이전트의 줄은 넣지 않는다. 읽기만 하므로 목록에서 빠지는 위임 · 하위 세션 대화도 보인다. 16MB
-전사를 0.07 초에 읽는다(기본 마지막 200 항목, 메모리는 전사 크기와 상관없다). 이것을 불러 채팅 창 앞에 까는
-일은 다음 PR 에서 붙는다.
+쓴 글(`user`), 사람 자리에 들어온 안내(`system` — 중단 표지 `[Request interrupted by user]` 와 세션 트리 중계
+`[하위 세션 …]` · `[상위 세션] …`), `claude` 의 글(생각은 빼고), 부른 도구마다 한 줄 요약(명령 · 파일 경로 ·
+패턴 · 설명 중 하나)이다. 도구의 결과, 하위 에이전트의 줄, `claude` 가 지은 API 오류 · 사용량 한도 안내
+(`isApiErrorMessage`)는 넣지 않는다. 읽기만 하므로 목록에서 빠지는 위임 · 하위 세션 대화도 보인다. 37MB 전사를
+0.15 초에 읽는다(기본 마지막 200 항목, 메모리는 전사 크기와 상관없다). 이것을 불러 채팅 창 앞에 까는 일은 다음
+PR 에서 붙는다.
 
 **이어가지 못하는 경우도 있다.** 전사가 사라졌거나(`~/.claude` 를 정리했거나 다른 머신에서 연
 경우) 기록의 ID 가 망가졌으면 `claude` 는 곧바로 종료 코드 1 로 끝난다. 그때 앱은 **대신 새
