@@ -158,16 +158,12 @@ func AdoptClaudeCodeConversation(workDirPath, label, sessionCwd, conversationID 
 			conversationID, conversationsFilePath(workDirPath))
 	}
 
-	resolvedSessionCwd, projectDirectories, err := claudeCodeTranscriptPlacesFor(sessionCwd)
+	resolvedSessionCwd, transcriptPaths, err := claudeCodeTranscriptPathsOf(sessionCwd, conversationID)
 	if err != nil {
 		return ConversationAssignment{}, err
 	}
 	transcriptFound := false
-	for _, projectDirectory := range projectDirectories {
-		transcriptPath := filepath.Join(projectDirectory, conversationID+".jsonl")
-		if _, err := os.Stat(transcriptPath); errors.Is(err, os.ErrNotExist) {
-			continue
-		}
+	for _, transcriptPath := range transcriptPaths {
 		_, belongsHere, warning := readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd)
 		if warning != "" {
 			warnings = append(warnings, warning)
@@ -204,6 +200,25 @@ func (records conversationRecords) conversationIDsOfThisTool() map[string]bool {
 		}
 	}
 	return conversationIDs
+}
+
+// claudeCodeTranscriptPathsOf 는 그 대화의 전사일 수 있는 파일들과, 세션 cwd 의 링크를 편 값이다.
+//
+// 이름만으로 찾은 후보다. 그 자리의 것인지는 읽는 쪽이 안의 cwd 로 다시 확인한다 — 이름은 서로 다른 cwd 가
+// 겹칠 수 있다(claudeCodeProjectDirectoryName).
+func claudeCodeTranscriptPathsOf(sessionCwd, conversationID string) (resolvedSessionCwd string, transcriptPaths []string, err error) {
+	resolvedSessionCwd, projectDirectories, err := claudeCodeTranscriptPlacesFor(sessionCwd)
+	if err != nil {
+		return "", nil, err
+	}
+	for _, projectDirectory := range projectDirectories {
+		transcriptPath := filepath.Join(projectDirectory, conversationID+".jsonl")
+		if _, err := os.Stat(transcriptPath); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		transcriptPaths = append(transcriptPaths, transcriptPath)
+	}
+	return resolvedSessionCwd, transcriptPaths, nil
 }
 
 // claudeCodeTranscriptPlacesFor 는 세션 cwd 의 링크를 편 값과, 그 cwd 의 전사가 있을 수 있는 디렉토리들이다.
@@ -343,9 +358,30 @@ type claudeCodeTranscriptLine struct {
 	// Summary 는 summary 줄의 제목이다 — 앞선 판의 전사가 남기던 모양이다.
 	Summary string `json:"summary"`
 
+	// IsSidechain 은 하위 에이전트의 줄이다. claude 2.1.316 은 그것을 <id>/subagents/ 아래 따로 적어 본 전사에는
+	// 없지만(실측), 앞선 판은 본 전사에 섞어 적었다.
+	IsSidechain bool `json:"isSidechain"`
+
+	// IsMeta 는 claude 가 사람 자리에 적은 user 줄이다 — 다른 세션이 보낸 메시지 · 스킬 본문 · 사용량 안내(실측).
+	IsMeta bool `json:"isMeta"`
+
+	// IsCompactSummary 는 대화를 압축하고 남긴 요약 줄이다 — user 줄이지만 claude 가 쓴 것이다(실측).
+	IsCompactSummary bool `json:"isCompactSummary"`
+
 	Message *struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+// textAPersonWrote 는 이 user 줄에서 사람이 쓴 글이다. 사람이 쓴 줄이 아니면 빈 문자열이다.
+//
+// 목록의 제목과 지난 대화 보기가 같은 규칙을 쓴다 — 둘이 갈리면 제목으로 본 글이 지난 대화에 없거나 그 반대가 된다.
+// 주입 태그만으로는 isMeta 줄을 가를 수 없다. "Another Claude session sent a message:" 처럼 태그 없이 시작한다(실측).
+func (line claudeCodeTranscriptLine) textAPersonWrote() string {
+	if line.Type != "user" || line.Message == nil || line.IsSidechain || line.IsMeta || line.IsCompactSummary {
+		return ""
+	}
+	return textAPersonWrote(line.Message.Content)
 }
 
 // readClaudeCodeTranscript 는 전사 하나를 줄 단위로 읽어 대화 하나로 옮긴다.
@@ -411,10 +447,8 @@ func readClaudeCodeTranscript(transcriptPath, conversationID, resolvedSessionCwd
 							conversation.StartedAt = startedAt.UTC()
 						}
 					}
-					if line.Type == "user" {
-						if firstTextOfAPerson == "" && line.Message != nil {
-							firstTextOfAPerson = textAPersonWrote(line.Message.Content)
-						}
+					if firstTextOfAPerson == "" {
+						firstTextOfAPerson = line.textAPersonWrote()
 					}
 				}
 			}

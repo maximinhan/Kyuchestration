@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"time"
 
@@ -70,5 +71,89 @@ func writeClaudeCodeConversationsAsJSON(out io.Writer, cwd string, conversations
 		SchemaVersion: conversationsListJSONSchemaVersion,
 		Cwd:           cwd,
 		Conversations: conversationDocuments,
+	})
+}
+
+// kyu conversations show --json 이 내보내는 문서다. 앱이 이어가는 대화의 채팅 창 앞에 이것을 깐다.
+//
+// 스키마 (schemaVersion 1):
+//
+//	{
+//	  "schemaVersion": 1,
+//	  "conversationId": "654ce605-b030-40e8-8448-2e9003ad32b1",
+//	  "cwd": "/home/me/work/WorkDir-featureX",     // 그 세션이 뜰 자리 — list 의 cwd 와 같다
+//	  "totalEntries": 412,                         // 전사 전체의 항목 수 (omitted 항목도 하나로 센다)
+//	  "omittedBefore": 212,                        // entries 앞에서 답하지 않은 항목 수 = totalEntries - entries 의 길이
+//	  "entries": [                                 // 마지막 --last 개, 오래된 것부터. 없으면 []
+//	    {"kind": "user", "text": "…", "at": "2026-11-01T09:06:18Z"},             // 사람이 쓴 글
+//	    {"kind": "assistant", "text": "…", "at": "…"},                          // claude 의 글 (thinking 은 없다)
+//	    {"kind": "tool_use", "toolName": "Bash", "summary": "ls -la", "at": "…"}, // summary 는 없으면 ""
+//	    {"kind": "omitted", "count": 3}                                         // 연달아 건너뛴 전사 줄(하위 에이전트)
+//	  ]
+//	}
+//
+// 항목은 종류마다 그 자리만 갖는다. at 은 RFC 3339 UTC 초 단위이고, 그 줄의 시각을 알 수 없으면 null 이다.
+// tool_result 는 없다. 판 규약은 list --json 과 같다 — 필드나 kind 를 더하는 변경으로는 올리지 않는다.
+// 모르는 kind 는 건너뛰면 된다.
+const conversationsShowJSONSchemaVersion = 1
+
+type conversationsShowJSONDocument struct {
+	SchemaVersion  int    `json:"schemaVersion"`
+	ConversationID string `json:"conversationId"`
+	Cwd            string `json:"cwd"`
+	TotalEntries   int    `json:"totalEntries"`
+	OmittedBefore  int    `json:"omittedBefore"`
+
+	// Entries 의 원소는 아래 세 모양 중 하나다. 한 타입에 모든 자리를 두면 user 항목에 "toolName": "" 같은
+	// 뜻 없는 자리가 생기고, 읽는 쪽이 빈 값과 없는 값을 가려야 한다.
+	Entries []any `json:"entries"`
+}
+
+type conversationTextEntryJSON struct {
+	Kind string  `json:"kind"`
+	Text string  `json:"text"`
+	At   *string `json:"at"`
+}
+
+type conversationToolUseEntryJSON struct {
+	Kind     string  `json:"kind"`
+	ToolName string  `json:"toolName"`
+	Summary  string  `json:"summary"`
+	At       *string `json:"at"`
+}
+
+type conversationOmittedEntryJSON struct {
+	Kind  string `json:"kind"`
+	Count int    `json:"count"`
+}
+
+func writeClaudeCodeConversationHistoryAsJSON(out io.Writer, cwd string, history workdir.ClaudeCodeConversationHistory) error {
+	entryDocuments := make([]any, 0, len(history.Entries))
+	for _, entry := range history.Entries {
+		var at *string
+		if !entry.At.IsZero() {
+			formattedAt := entry.At.UTC().Format(time.RFC3339)
+			at = &formattedAt
+		}
+		switch entry.Kind {
+		case workdir.ConversationEntryKindUser, workdir.ConversationEntryKindAssistant:
+			entryDocuments = append(entryDocuments, conversationTextEntryJSON{Kind: string(entry.Kind), Text: entry.Text, At: at})
+		case workdir.ConversationEntryKindToolUse:
+			entryDocuments = append(entryDocuments, conversationToolUseEntryJSON{
+				Kind: string(entry.Kind), ToolName: entry.ToolName, Summary: entry.ToolSummary, At: at})
+		case workdir.ConversationEntryKindOmitted:
+			entryDocuments = append(entryDocuments, conversationOmittedEntryJSON{Kind: string(entry.Kind), Count: entry.OmittedCount})
+		default:
+			return fmt.Errorf("지난 대화의 항목 종류 %q 를 문서로 옮기는 자리가 없습니다", entry.Kind)
+		}
+	}
+
+	return writeJSONDocument(out, conversationsShowJSONDocument{
+		SchemaVersion:  conversationsShowJSONSchemaVersion,
+		ConversationID: history.ConversationID,
+		Cwd:            cwd,
+		TotalEntries:   history.TotalEntries,
+		OmittedBefore:  history.OmittedBefore(),
+		Entries:        entryDocuments,
 	})
 }
